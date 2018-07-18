@@ -1,13 +1,11 @@
 // Copyright (C) 2018 ScyllaDB
 
-package cmd
+package main
 
 import (
 	"fmt"
-	"os"
 
-	"github.com/gocql/gocql"
-	"github.com/google/go-cmp/cmp"
+	"github.com/scylladb/gemini"
 	"github.com/spf13/cobra"
 )
 
@@ -18,64 +16,6 @@ var (
 	verbose           bool
 )
 
-type checkSession struct {
-	testSession   *gocql.Session
-	oracleSession *gocql.Session
-}
-
-func start(testClusterHost string, oracleClusterHost string) *checkSession {
-	testCluster := gocql.NewCluster(testClusterHost)
-	testSession, err := testCluster.CreateSession()
-	if err != nil {
-		panic(err)
-	}
-
-	oracleCluster := gocql.NewCluster(oracleClusterHost)
-	oracleSession, err := oracleCluster.CreateSession()
-	if err != nil {
-		panic(err)
-	}
-
-	return &checkSession{
-		testSession:   testSession,
-		oracleSession: oracleSession,
-	}
-}
-
-func (s *checkSession) close() {
-	s.testSession.Close()
-	s.oracleSession.Close()
-}
-
-func (s *checkSession) mutate(query string) error {
-	if err := s.testSession.Query(query).Exec(); err != nil {
-		return fmt.Errorf("%v [cluster = test, query = '%s']", err, query)
-	}
-	if err := s.oracleSession.Query(query).Exec(); err != nil {
-		return fmt.Errorf("%v [cluster = oracle, query = '%s']", err, query)
-	}
-	return nil
-}
-
-func (s *checkSession) check(query string) string {
-	testIter := s.testSession.Query(query).Iter()
-	oracleIter := s.oracleSession.Query(query).Iter()
-	for {
-		testRow := make(map[string]interface{})
-		if !testIter.MapScan(testRow) {
-			break
-		}
-		oracleRow := make(map[string]interface{})
-		if !oracleIter.MapScan(oracleRow) {
-			break
-		}
-		if diff := cmp.Diff(oracleRow, testRow); diff != "" {
-			return diff
-		}
-	}
-	return ""
-}
-
 func run(cmd *cobra.Command, args []string) {
 	nrPassedTests := 0
 	createKeyspace := "CREATE KEYSPACE IF NOT EXISTS check WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}"
@@ -84,20 +24,20 @@ func run(cmd *cobra.Command, args []string) {
 	fmt.Printf("Test cluster: %s\n", testClusterHost)
 	fmt.Printf("Oracle cluster: %s\n", oracleClusterHost)
 
-	session := start(testClusterHost, oracleClusterHost)
-	defer session.close()
+	session := gemini.NewSession(testClusterHost, oracleClusterHost)
+	defer session.Close()
 
 	if verbose {
 		fmt.Printf("%s\n", createKeyspace)
 	}
-	if err := session.mutate(createKeyspace); err != nil {
+	if err := session.Mutate(createKeyspace); err != nil {
 		fmt.Printf("%v", err)
 		return
 	}
 	if verbose {
 		fmt.Printf("%s\n", createTable)
 	}
-	if err := session.mutate(createTable); err != nil {
+	if err := session.Mutate(createTable); err != nil {
 		fmt.Printf("%v", err)
 		return
 	}
@@ -107,7 +47,7 @@ func run(cmd *cobra.Command, args []string) {
 		if verbose {
 			fmt.Printf("%s\n", mutate)
 		}
-		if err := session.mutate(mutate); err != nil {
+		if err := session.Mutate(mutate); err != nil {
 			fmt.Printf("Failed! Mutation '%s' caused an error: '%v'\n", mutate, err)
 			return
 		}
@@ -116,7 +56,7 @@ func run(cmd *cobra.Command, args []string) {
 		if verbose {
 			fmt.Printf("%s\n", check)
 		}
-		if diff := session.check(check); diff != "" {
+		if diff := session.Check(check); diff != "" {
 			fmt.Printf("Failed! Check '%s' rows differ (-oracle +test)\n%s", check, diff)
 			return
 		}
@@ -132,10 +72,6 @@ var rootCmd = &cobra.Command{
 }
 
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
 }
 
 func init() {
