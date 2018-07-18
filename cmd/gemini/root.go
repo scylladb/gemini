@@ -17,33 +17,52 @@ var (
 )
 
 func run(cmd *cobra.Command, args []string) {
-	nrPassedTests := 0
-	createKeyspace := "CREATE KEYSPACE IF NOT EXISTS check WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}"
-	createTable := "CREATE TABLE IF NOT EXISTS check.data (id int PRIMARY KEY)"
-
 	fmt.Printf("Test cluster: %s\n", testClusterHost)
 	fmt.Printf("Oracle cluster: %s\n", oracleClusterHost)
 
 	session := gemini.NewSession(testClusterHost, oracleClusterHost)
 	defer session.Close()
 
-	if verbose {
-		fmt.Printf("%s\n", createKeyspace)
+	schemaBuilder := gemini.NewSchemaBuilder()
+	schemaBuilder.Keyspace(gemini.Keyspace{
+		Name: "gemini",
+	})
+	schemaBuilder.Table(gemini.Table{
+		Name: "data",
+		PrimaryKey: gemini.ColumnDef{
+			Name: "pk",
+			Type: "int",
+		},
+		Columns: []gemini.ColumnDef{
+			gemini.ColumnDef{
+				Name: "n",
+				Type: "int",
+			},
+		},
+	})
+	schema := schemaBuilder.Build()
+	for _, stmt := range schema.GetDropSchema() {
+		if verbose {
+			fmt.Println(stmt)
+		}
+		if err := session.Mutate(stmt); err != nil {
+			fmt.Printf("%v", err)
+			return
+		}
 	}
-	if err := session.Mutate(createKeyspace); err != nil {
-		fmt.Printf("%v", err)
-		return
+	for _, stmt := range schema.GetCreateSchema() {
+		if verbose {
+			fmt.Println(stmt)
+		}
+		if err := session.Mutate(stmt); err != nil {
+			fmt.Printf("%v", err)
+			return
+		}
 	}
-	if verbose {
-		fmt.Printf("%s\n", createTable)
-	}
-	if err := session.Mutate(createTable); err != nil {
-		fmt.Printf("%v", err)
-		return
-	}
+	nrPassedTests := 0
 
 	for i := 0; i < maxTests; i++ {
-		mutate := "INSERT INTO check.data (id) VALUES (1)"
+		mutate := schema.GenMutateOp()
 		if verbose {
 			fmt.Printf("%s\n", mutate)
 		}
@@ -52,7 +71,7 @@ func run(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		check := "SELECT * FROM check.data"
+		check := schema.GenCheckOp()
 		if verbose {
 			fmt.Printf("%s\n", check)
 		}
