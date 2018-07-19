@@ -1,6 +1,8 @@
 package gemini
 
 import (
+	"time"
+
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
 
@@ -14,12 +16,14 @@ type Session struct {
 
 func NewSession(testClusterHost string, oracleClusterHost string) *Session {
 	testCluster := gocql.NewCluster(testClusterHost)
+	testCluster.Timeout = 5 * time.Second
 	testSession, err := testCluster.CreateSession()
 	if err != nil {
 		panic(err)
 	}
 
 	oracleCluster := gocql.NewCluster(oracleClusterHost)
+	oracleCluster.Timeout = 5 * time.Second
 	oracleSession, err := oracleCluster.CreateSession()
 	if err != nil {
 		panic(err)
