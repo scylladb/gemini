@@ -30,9 +30,17 @@ func run(cmd *cobra.Command, args []string) {
 	})
 	schemaBuilder.Table(gemini.Table{
 		Name: "data",
-		PrimaryKey: gemini.ColumnDef{
-			Name: "pk",
-			Type: "int",
+		PartitionKeys: []gemini.ColumnDef{
+			gemini.ColumnDef{
+				Name: "pk",
+				Type: "int",
+			},
+		},
+		ClusteringKeys: []gemini.ColumnDef{
+			gemini.ColumnDef{
+				Name: "ck",
+				Type: "int",
+			},
 		},
 		Columns: []gemini.ColumnDef{
 			gemini.ColumnDef{

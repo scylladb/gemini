@@ -3,6 +3,7 @@ package gemini
 import (
 	"fmt"
 	"math/rand"
+	"strings"
 )
 
 type Keyspace struct {
@@ -15,9 +16,10 @@ type ColumnDef struct {
 }
 
 type Table struct {
-	Name       string
-	PrimaryKey ColumnDef
-	Columns    []ColumnDef
+	Name           string
+	PartitionKeys  []ColumnDef
+	ClusteringKeys []ColumnDef
+	Columns        []ColumnDef
 }
 
 type Schema interface {
@@ -40,12 +42,21 @@ func (s *schema) GetDropSchema() []string {
 
 func (s *schema) GetCreateSchema() []string {
 	createKeyspace := fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}", s.keyspace.Name)
-	createTable := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (", s.keyspace.Name, s.table.Name)
-	createTable += fmt.Sprintf("%s %s PRIMARY KEY", s.table.PrimaryKey.Name, s.table.PrimaryKey.Type)
-	for _, cdef := range s.table.Columns {
-		createTable += fmt.Sprintf(", %s %s", cdef.Name, cdef.Type)
+	partitionKeys := []string{}
+	clusteringKeys := []string{}
+	columns := []string{}
+	for _, pk := range s.table.PartitionKeys {
+		partitionKeys = append(partitionKeys, pk.Name)
+		columns = append(columns, fmt.Sprintf("%s %s", pk.Name, pk.Type))
 	}
-	createTable += ")"
+	for _, ck := range s.table.ClusteringKeys {
+		clusteringKeys = append(clusteringKeys, ck.Name)
+		columns = append(columns, fmt.Sprintf("%s %s", ck.Name, ck.Type))
+	}
+	for _, cdef := range s.table.Columns {
+		columns = append(columns, fmt.Sprintf("%s %s", cdef.Name, cdef.Type))
+	}
+	createTable := fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s), %s))", s.keyspace.Name, s.table.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","), strings.Join(clusteringKeys, ","))
 	return []string{
 		createKeyspace,
 		createTable,
@@ -53,9 +64,21 @@ func (s *schema) GetCreateSchema() []string {
 }
 
 func (s *schema) GenMutateOp() string {
-	pk := rand.Intn(100)
-	value := rand.Intn(100)
-	return fmt.Sprintf("INSERT INTO %s.%s (%s, %s) VALUES (%d, %d)", s.keyspace.Name, s.table.Name, s.table.PrimaryKey.Name, s.table.Columns[0].Name, pk, value)
+	columns := []string{}
+	values := []string{}
+	for _, pk := range s.table.PartitionKeys {
+		columns = append(columns, pk.Name)
+		values = append(values, fmt.Sprintf("%d", rand.Intn(100)))
+	}
+	for _, pk := range s.table.ClusteringKeys {
+		columns = append(columns, pk.Name)
+		values = append(values, fmt.Sprintf("%d", rand.Intn(100)))
+	}
+	for _, cdef := range s.table.Columns {
+		columns = append(columns, cdef.Name)
+		values = append(values, fmt.Sprintf("%d", rand.Intn(100)))
+	}
+	return fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", s.keyspace.Name, s.table.Name, strings.Join(columns, ","), strings.Join(values, ","))
 }
 
 func (s *schema) GenCheckOp() string {
