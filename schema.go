@@ -59,8 +59,17 @@ func (s *schema) GenMutateOp() string {
 }
 
 func (s *schema) GenCheckOp() string {
-	limit := rand.Intn(99) + 1
-	return fmt.Sprintf("SELECT * FROM %s.%s LIMIT %d", s.keyspace.Name, s.table.Name, limit)
+	query := fmt.Sprintf("SELECT * FROM %s.%s", s.keyspace.Name, s.table.Name)
+	if rand.Intn(2) == 1 {
+		query += fmt.Sprintf(" ORDER BY %s", s.table.Columns[0].Name)
+		if rand.Intn(2) == 1 {
+			query += " ASC"
+		}
+	}
+	if rand.Intn(2) == 1 {
+		query += fmt.Sprintf(" LIMIT %d", rand.Intn(100))
+	}
+	return query
 }
 
 type SchemaBuilder interface {
