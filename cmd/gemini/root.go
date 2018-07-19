@@ -13,6 +13,7 @@ var (
 	testClusterHost   string
 	oracleClusterHost string
 	maxTests          int
+	dropSchema        bool
 	verbose           bool
 )
 
@@ -41,13 +42,15 @@ func run(cmd *cobra.Command, args []string) {
 		},
 	})
 	schema := schemaBuilder.Build()
-	for _, stmt := range schema.GetDropSchema() {
-		if verbose {
-			fmt.Println(stmt)
-		}
-		if err := session.Mutate(stmt); err != nil {
-			fmt.Printf("%v", err)
-			return
+	if dropSchema {
+		for _, stmt := range schema.GetDropSchema() {
+			if verbose {
+				fmt.Println(stmt)
+			}
+			if err := session.Mutate(stmt); err != nil {
+				fmt.Printf("%v", err)
+				return
+			}
 		}
 	}
 	for _, stmt := range schema.GetCreateSchema() {
@@ -99,5 +102,6 @@ func init() {
 	rootCmd.Flags().StringVarP(&oracleClusterHost, "oracle-cluster", "o", "", "Host name of the oracle cluster that provides correct answers")
 	rootCmd.MarkFlagRequired("oracle-cluster")
 	rootCmd.Flags().IntVarP(&maxTests, "max-tests", "m", 100, "Maximum number of test iterations to run")
+	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
 }
