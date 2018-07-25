@@ -70,24 +70,29 @@ func run(cmd *cobra.Command, args []string) {
 			return
 		}
 	}
+
 	nrPassedTests := 0
 
 	for i := 0; i < maxTests; i++ {
-		mutate := schema.GenMutateOp()
+		mutateStmt := schema.GenMutateStmt()
+		mutateQuery := mutateStmt.Query
+		mutateValues := mutateStmt.Values()
 		if verbose {
-			fmt.Printf("%s\n", mutate)
+			fmt.Printf("%s (values=%v)\n", mutateQuery, mutateValues)
 		}
-		if err := session.Mutate(mutate); err != nil {
-			fmt.Printf("Failed! Mutation '%s' caused an error: '%v'\n", mutate, err)
+		if err := session.Mutate(mutateQuery, mutateValues...); err != nil {
+			fmt.Printf("Failed! Mutation '%s' (values=%v) caused an error: '%v'\n", mutateQuery, mutateValues, err)
 			return
 		}
 
-		check := schema.GenCheckOp()
+		checkStmt := schema.GenCheckStmt()
+		checkQuery := checkStmt.Query
+		checkValues := checkStmt.Values()
 		if verbose {
-			fmt.Printf("%s\n", check)
+			fmt.Printf("%s (values=%v)\n", checkQuery, checkValues)
 		}
-		if diff := session.Check(check); diff != "" {
-			fmt.Printf("Failed! Check '%s' rows differ (-oracle +test)\n%s", check, diff)
+		if diff := session.Check(checkQuery, checkValues...); diff != "" {
+			fmt.Printf("Failed! Check '%s' (values=%v) rows differ (-oracle +test)\n%s", checkQuery, checkValues, diff)
 			return
 		}
 		nrPassedTests++

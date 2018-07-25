@@ -25,8 +25,13 @@ type Table struct {
 type Schema interface {
 	GetDropSchema() []string
 	GetCreateSchema() []string
-	GenMutateOp() string
-	GenCheckOp() string
+	GenMutateStmt() *Stmt
+	GenCheckStmt() *Stmt
+}
+
+type Stmt struct {
+	Query  string
+	Values func() []interface{}
 }
 
 type schema struct {
@@ -63,25 +68,41 @@ func (s *schema) GetCreateSchema() []string {
 	}
 }
 
-func (s *schema) GenMutateOp() string {
+func (s *schema) GenMutateStmt() *Stmt {
 	columns := []string{}
 	values := []string{}
 	for _, pk := range s.table.PartitionKeys {
 		columns = append(columns, pk.Name)
-		values = append(values, fmt.Sprintf("%d", rand.Intn(100)))
+		values = append(values, "?")
 	}
 	for _, pk := range s.table.ClusteringKeys {
 		columns = append(columns, pk.Name)
-		values = append(values, fmt.Sprintf("%d", rand.Intn(100)))
+		values = append(values, "?")
 	}
 	for _, cdef := range s.table.Columns {
 		columns = append(columns, cdef.Name)
-		values = append(values, fmt.Sprintf("%d", rand.Intn(100)))
+		values = append(values, "?")
 	}
-	return fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", s.keyspace.Name, s.table.Name, strings.Join(columns, ","), strings.Join(values, ","))
+	query := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", s.keyspace.Name, s.table.Name, strings.Join(columns, ","), strings.Join(values, ","))
+	return &Stmt{
+		Query: query,
+		Values: func() []interface{} {
+			values := make([]interface{}, 0)
+			for _, _ = range s.table.PartitionKeys {
+				values = append(values, rand.Intn(100))
+			}
+			for _, _ = range s.table.ClusteringKeys {
+				values = append(values, rand.Intn(100))
+			}
+			for _, _ = range s.table.Columns {
+				values = append(values, rand.Intn(100))
+			}
+			return values
+		},
+	}
 }
 
-func (s *schema) GenCheckOp() string {
+func (s *schema) GenCheckStmt() *Stmt {
 	query := fmt.Sprintf("SELECT * FROM %s.%s", s.keyspace.Name, s.table.Name)
 	if rand.Intn(2) == 1 {
 		query += fmt.Sprintf(" ORDER BY %s", s.table.Columns[0].Name)
@@ -92,7 +113,13 @@ func (s *schema) GenCheckOp() string {
 	if rand.Intn(2) == 1 {
 		query += fmt.Sprintf(" LIMIT %d", rand.Intn(100))
 	}
-	return query
+	values := func() []interface{} {
+		return nil
+	}
+	return &Stmt{
+		Query:  query,
+		Values: values,
+	}
 }
 
 type SchemaBuilder interface {

@@ -40,19 +40,19 @@ func (s *Session) Close() {
 	s.oracleSession.Close()
 }
 
-func (s *Session) Mutate(query string) error {
-	if err := s.testSession.Query(query).Exec(); err != nil {
+func (s *Session) Mutate(query string, values ...interface{}) error {
+	if err := s.testSession.Query(query, values...).Exec(); err != nil {
 		return fmt.Errorf("%v [cluster = test, query = '%s']", err, query)
 	}
-	if err := s.oracleSession.Query(query).Exec(); err != nil {
+	if err := s.oracleSession.Query(query, values...).Exec(); err != nil {
 		return fmt.Errorf("%v [cluster = oracle, query = '%s']", err, query)
 	}
 	return nil
 }
 
-func (s *Session) Check(query string) string {
-	testIter := s.testSession.Query(query).Iter()
-	oracleIter := s.oracleSession.Query(query).Iter()
+func (s *Session) Check(query string, values ...interface{}) string {
+	testIter := s.testSession.Query(query, values...).Iter()
+	oracleIter := s.oracleSession.Query(query, values...).Iter()
 	for {
 		testRow := make(map[string]interface{})
 		if !testIter.MapScan(testRow) {
