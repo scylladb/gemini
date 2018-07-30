@@ -103,18 +103,114 @@ func (s *schema) GenMutateStmt() *Stmt {
 }
 
 func (s *schema) GenCheckStmt() *Stmt {
-	query := fmt.Sprintf("SELECT * FROM %s.%s", s.keyspace.Name, s.table.Name)
-	if rand.Intn(2) == 1 {
-		query += fmt.Sprintf(" ORDER BY %s", s.table.Columns[0].Name)
-		if rand.Intn(2) == 1 {
-			query += " ASC"
-		}
+	switch n := rand.Intn(4); n {
+	case 0:
+		return s.genSinglePartitionQuery()
+	case 1:
+		return s.genMultiplePartitionQuery()
+	case 2:
+		return s.genClusteringRangeQuery()
+	case 3:
+		return s.genClusteringRangeQueryComplex()
 	}
-	if rand.Intn(2) == 1 {
-		query += fmt.Sprintf(" LIMIT %d", rand.Intn(100))
+	return nil
+}
+
+func (s *schema) genSinglePartitionQuery() *Stmt {
+	relations := []string{}
+	for _, pk := range s.table.PartitionKeys {
+		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
 	}
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, s.table.Name, strings.Join(relations, " AND "))
 	values := func() []interface{} {
-		return nil
+		values := make([]interface{}, 0)
+		for _, _ = range s.table.PartitionKeys {
+			values = append(values, rand.Intn(100))
+		}
+		return values
+	}
+	return &Stmt{
+		Query:  query,
+		Values: values,
+	}
+}
+
+func (s *schema) genMultiplePartitionQuery() *Stmt {
+	relations := []string{}
+	for _, pk := range s.table.PartitionKeys {
+		relations = append(relations, fmt.Sprintf("%s IN (?)", pk.Name))
+	}
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, s.table.Name, strings.Join(relations, " AND "))
+	values := func() []interface{} {
+		values := make([]interface{}, 0)
+		for _, _ = range s.table.PartitionKeys {
+			keys := []int{}
+			for i := 0; i < rand.Intn(10); i++ {
+				keys = append(keys, rand.Intn(100))
+			}
+			values = append(values, keys)
+		}
+		return values
+	}
+	return &Stmt{
+		Query:  query,
+		Values: values,
+	}
+}
+
+func (s *schema) genClusteringRangeQuery() *Stmt {
+	relations := []string{}
+	for _, pk := range s.table.PartitionKeys {
+		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
+	}
+	for _, ck := range s.table.ClusteringKeys {
+		relations = append(relations, fmt.Sprintf("%s > ? AND %s < ?", ck.Name, ck.Name))
+	}
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, s.table.Name, strings.Join(relations, " AND "))
+	values := func() []interface{} {
+		values := make([]interface{}, 0)
+		for _, _ = range s.table.PartitionKeys {
+			values = append(values, rand.Intn(100))
+		}
+		for _, _ = range s.table.ClusteringKeys {
+			start := rand.Intn(100)
+			end := start + rand.Intn(100)
+			values = append(values, start)
+			values = append(values, end)
+		}
+		return values
+	}
+	return &Stmt{
+		Query:  query,
+		Values: values,
+	}
+}
+
+func (s *schema) genClusteringRangeQueryComplex() *Stmt {
+	relations := []string{}
+	for _, pk := range s.table.PartitionKeys {
+		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
+	}
+	for _, ck := range s.table.ClusteringKeys {
+		relations = append(relations, fmt.Sprintf("%s > ? AND %s < ? AND %s > ? and %s < ?", ck.Name, ck.Name, ck.Name, ck.Name))
+	}
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, s.table.Name, strings.Join(relations, " AND "))
+	values := func() []interface{} {
+		values := make([]interface{}, 0)
+		for _, _ = range s.table.PartitionKeys {
+			values = append(values, rand.Intn(100))
+		}
+		for _, _ = range s.table.ClusteringKeys {
+			start := rand.Intn(100)
+			end := start + rand.Intn(100)
+			values = append(values, start)
+			values = append(values, end)
+			start = rand.Intn(100)
+			end = start + rand.Intn(100)
+			values = append(values, start)
+			values = append(values, end)
+		}
+		return values
 	}
 	return &Stmt{
 		Query:  query,
