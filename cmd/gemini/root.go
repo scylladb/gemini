@@ -4,20 +4,23 @@ package main
 
 import (
 	"fmt"
-
 	"github.com/scylladb/gemini"
 	"github.com/spf13/cobra"
+	"math/rand"
 )
 
 var (
 	testClusterHost   string
 	oracleClusterHost string
 	maxTests          int
+	seed              int
 	dropSchema        bool
 	verbose           bool
 )
 
 func run(cmd *cobra.Command, args []string) {
+	rand.Seed(int64(seed))
+	fmt.Printf("Seed: %d\n", seed)
 	fmt.Printf("Test cluster: %s\n", testClusterHost)
 	fmt.Printf("Oracle cluster: %s\n", oracleClusterHost)
 
@@ -115,6 +118,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&oracleClusterHost, "oracle-cluster", "o", "", "Host name of the oracle cluster that provides correct answers")
 	rootCmd.MarkFlagRequired("oracle-cluster")
 	rootCmd.Flags().IntVarP(&maxTests, "max-tests", "m", 100, "Maximum number of test iterations to run")
+	rootCmd.Flags().IntVarP(&seed, "seed", "s", 1, "PRNG seed value")
 	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
 }
