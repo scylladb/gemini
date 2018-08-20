@@ -1,18 +1,22 @@
 package gemini
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
-
-	"fmt"
 )
 
 type Session struct {
 	testSession   *gocql.Session
 	oracleSession *gocql.Session
 }
+
+var (
+	ErrReadNoDataReturned = errors.New("read: no data returned")
+)
 
 func NewSession(testClusterHost string, oracleClusterHost string) *Session {
 	testCluster := gocql.NewCluster(testClusterHost)
@@ -50,7 +54,7 @@ func (s *Session) Mutate(query string, values ...interface{}) error {
 	return nil
 }
 
-func (s *Session) Check(query string, values ...interface{}) string {
+func (s *Session) Check(query string, values ...interface{}) error {
 	testIter := s.testSession.Query(query, values...).Iter()
 	oracleIter := s.oracleSession.Query(query, values...).Iter()
 	for {
@@ -62,9 +66,11 @@ func (s *Session) Check(query string, values ...interface{}) string {
 		if !oracleIter.MapScan(oracleRow) {
 			break
 		}
-		if diff := cmp.Diff(oracleRow, testRow); diff != "" {
-			return diff
+		diff := cmp.Diff(oracleRow, testRow)
+		if diff != "" {
+			return fmt.Errorf("rows differ (-%v +%v): %v", oracleRow, testRow, diff)
 		}
+		return nil
 	}
-	return ""
+	return ErrReadNoDataReturned
 }
