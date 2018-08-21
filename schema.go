@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type Keyspace struct {
@@ -25,8 +27,8 @@ type Table struct {
 type Schema interface {
 	GetDropSchema() []string
 	GetCreateSchema() []string
-	GenMutateStmt() *Stmt
-	GenCheckStmt() *Stmt
+	GenMutateStmt(*PartitionRange) *Stmt
+	GenCheckStmt(*PartitionRange) *Stmt
 }
 
 type Stmt struct {
@@ -37,6 +39,15 @@ type Stmt struct {
 type schema struct {
 	keyspace Keyspace
 	table    Table
+}
+
+type PartitionRange struct {
+	Min int  `default:0`
+	Max int  `default:100`
+}
+
+func randRange(min int, max int) int {
+	return rand.Intn(max-min) + min
 }
 
 func (s *schema) GetDropSchema() []string {
@@ -68,7 +79,7 @@ func (s *schema) GetCreateSchema() []string {
 	}
 }
 
-func (s *schema) GenMutateStmt() *Stmt {
+func (s *schema) GenMutateStmt(p *PartitionRange) *Stmt {
 	columns := []string{}
 	values := []string{}
 	for _, pk := range s.table.PartitionKeys {
@@ -89,34 +100,35 @@ func (s *schema) GenMutateStmt() *Stmt {
 		Values: func() []interface{} {
 			values := make([]interface{}, 0)
 			for _, _ = range s.table.PartitionKeys {
-				values = append(values, rand.Intn(100))
+				values = append(values, randRange(p.Min, p.Max))
 			}
 			for _, _ = range s.table.ClusteringKeys {
-				values = append(values, rand.Intn(100))
+				values = append(values, randRange(p.Min, p.Max))
 			}
 			for _, _ = range s.table.Columns {
-				values = append(values, rand.Intn(100))
+				r, _ := uuid.NewRandom()
+				values = append(values, r.String())
 			}
 			return values
 		},
 	}
 }
 
-func (s *schema) GenCheckStmt() *Stmt {
+func (s *schema) GenCheckStmt(p *PartitionRange) *Stmt {
 	switch n := rand.Intn(4); n {
 	case 0:
-		return s.genSinglePartitionQuery()
+		return s.genSinglePartitionQuery(p)
 	case 1:
-		return s.genMultiplePartitionQuery()
+		return s.genMultiplePartitionQuery(p)
 	case 2:
-		return s.genClusteringRangeQuery()
+		return s.genClusteringRangeQuery(p)
 	case 3:
-		return s.genClusteringRangeQueryComplex()
+		return s.genMultiplePartitionClusteringRangeQuery(p)
 	}
 	return nil
 }
 
-func (s *schema) genSinglePartitionQuery() *Stmt {
+func (s *schema) genSinglePartitionQuery(p *PartitionRange) *Stmt {
 	relations := []string{}
 	for _, pk := range s.table.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
@@ -125,7 +137,7 @@ func (s *schema) genSinglePartitionQuery() *Stmt {
 	values := func() []interface{} {
 		values := make([]interface{}, 0)
 		for _, _ = range s.table.PartitionKeys {
-			values = append(values, rand.Intn(100))
+			values = append(values, randRange(p.Min, p.Max))
 		}
 		return values
 	}
@@ -135,20 +147,19 @@ func (s *schema) genSinglePartitionQuery() *Stmt {
 	}
 }
 
-func (s *schema) genMultiplePartitionQuery() *Stmt {
+func (s *schema) genMultiplePartitionQuery(p *PartitionRange) *Stmt {
 	relations := []string{}
+	pkNum := rand.Intn(10)
 	for _, pk := range s.table.PartitionKeys {
-		relations = append(relations, fmt.Sprintf("%s IN (?)", pk.Name))
+		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, s.table.Name, strings.Join(relations, " AND "))
 	values := func() []interface{} {
 		values := make([]interface{}, 0)
 		for _, _ = range s.table.PartitionKeys {
-			keys := []int{}
-			for i := 0; i < rand.Intn(10); i++ {
-				keys = append(keys, rand.Intn(100))
+			for i := 0; i < pkNum; i++ {
+				values = append(values, randRange(p.Min, p.Max))
 			}
-			values = append(values, keys)
 		}
 		return values
 	}
@@ -158,7 +169,7 @@ func (s *schema) genMultiplePartitionQuery() *Stmt {
 	}
 }
 
-func (s *schema) genClusteringRangeQuery() *Stmt {
+func (s *schema) genClusteringRangeQuery(p *PartitionRange) *Stmt {
 	relations := []string{}
 	for _, pk := range s.table.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
@@ -170,11 +181,11 @@ func (s *schema) genClusteringRangeQuery() *Stmt {
 	values := func() []interface{} {
 		values := make([]interface{}, 0)
 		for _, _ = range s.table.PartitionKeys {
-			values = append(values, rand.Intn(100))
+			values = append(values, randRange(p.Min, p.Max))
 		}
 		for _, _ = range s.table.ClusteringKeys {
-			start := rand.Intn(100)
-			end := start + rand.Intn(100)
+			start := randRange(p.Min, p.Max)
+			end := start + randRange(p.Min, p.Max)
 			values = append(values, start)
 			values = append(values, end)
 		}
@@ -186,27 +197,26 @@ func (s *schema) genClusteringRangeQuery() *Stmt {
 	}
 }
 
-func (s *schema) genClusteringRangeQueryComplex() *Stmt {
+func (s *schema) genMultiplePartitionClusteringRangeQuery(p *PartitionRange) *Stmt {
 	relations := []string{}
+	pkNum := rand.Intn(10)
 	for _, pk := range s.table.PartitionKeys {
-		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
+		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 	}
 	for _, ck := range s.table.ClusteringKeys {
-		relations = append(relations, fmt.Sprintf("%s > ? AND %s < ? AND %s > ? and %s < ?", ck.Name, ck.Name, ck.Name, ck.Name))
+		relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, s.table.Name, strings.Join(relations, " AND "))
 	values := func() []interface{} {
 		values := make([]interface{}, 0)
 		for _, _ = range s.table.PartitionKeys {
-			values = append(values, rand.Intn(100))
+			for i := 0; i < pkNum; i++ {
+				values = append(values, randRange(p.Min, p.Max))
+			}
 		}
 		for _, _ = range s.table.ClusteringKeys {
-			start := rand.Intn(100)
-			end := start + rand.Intn(100)
-			values = append(values, start)
-			values = append(values, end)
-			start = rand.Intn(100)
-			end = start + rand.Intn(100)
+			start := randRange(p.Min, p.Max)
+			end := start + randRange(p.Min, p.Max)
 			values = append(values, start)
 			values = append(values, end)
 		}
