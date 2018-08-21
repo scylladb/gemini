@@ -123,7 +123,7 @@ func (s *schema) GenCheckStmt(p *PartitionRange) *Stmt {
 	case 2:
 		return s.genClusteringRangeQuery(p)
 	case 3:
-		return s.genClusteringRangeQueryComplex(p)
+		return s.genMultiplePartitionClusteringRangeQuery(p)
 	}
 	return nil
 }
@@ -149,18 +149,17 @@ func (s *schema) genSinglePartitionQuery(p *PartitionRange) *Stmt {
 
 func (s *schema) genMultiplePartitionQuery(p *PartitionRange) *Stmt {
 	relations := []string{}
+	pkNum := rand.Intn(10)
 	for _, pk := range s.table.PartitionKeys {
-		relations = append(relations, fmt.Sprintf("%s IN (?)", pk.Name))
+		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, s.table.Name, strings.Join(relations, " AND "))
 	values := func() []interface{} {
 		values := make([]interface{}, 0)
 		for _, _ = range s.table.PartitionKeys {
-			keys := []int{}
-			for i := 0; i < rand.Intn(10); i++ {
-				keys = append(keys, randRange(p.Min, p.Max))
+			for i := 0; i < pkNum; i++ {
+				values = append(values, randRange(p.Min, p.Max))
 			}
-			values = append(values, keys)
 		}
 		return values
 	}
@@ -198,27 +197,26 @@ func (s *schema) genClusteringRangeQuery(p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *schema) genClusteringRangeQueryComplex(p *PartitionRange) *Stmt {
+func (s *schema) genMultiplePartitionClusteringRangeQuery(p *PartitionRange) *Stmt {
 	relations := []string{}
+	pkNum := rand.Intn(10)
 	for _, pk := range s.table.PartitionKeys {
-		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
+		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 	}
 	for _, ck := range s.table.ClusteringKeys {
-		relations = append(relations, fmt.Sprintf("%s > ? AND %s < ? OR %s > ? AND %s < ?", ck.Name, ck.Name, ck.Name, ck.Name))
+		relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, s.table.Name, strings.Join(relations, " AND "))
 	values := func() []interface{} {
 		values := make([]interface{}, 0)
 		for _, _ = range s.table.PartitionKeys {
-			values = append(values, randRange(p.Min, p.Max))
+			for i := 0; i < pkNum; i++ {
+				values = append(values, randRange(p.Min, p.Max))
+			}
 		}
 		for _, _ = range s.table.ClusteringKeys {
 			start := randRange(p.Min, p.Max)
 			end := start + randRange(p.Min, p.Max)
-			values = append(values, start)
-			values = append(values, end)
-			start = randRange(p.Min, p.Max)
-			end = start + randRange(p.Min, p.Max)
 			values = append(values, start)
 			values = append(values, end)
 		}
