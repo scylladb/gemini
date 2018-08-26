@@ -3,8 +3,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
+	"os"
 
 	"github.com/scylladb/gemini"
 	"github.com/spf13/cobra"
@@ -22,6 +25,8 @@ var (
 	mode              string
 )
 
+const confFile = "schema.json"
+
 type Status struct {
 	WriteOps    int
 	WriteErrors int
@@ -33,6 +38,13 @@ type Results interface {
 	Merge(*Status) Status
 	Print()
 }
+
+type jsonSchema struct {
+	Keyspace gemini.Keyspace `json:"keyspace"`
+	Tables   []gemini.Table  `json:"tables"`
+}
+
+type testJob func(gemini.Schema, gemini.Table, *gemini.Session, gemini.PartitionRange, chan Status, string)
 
 func (r *Status) Merge(sum *Status) Status {
 	sum.WriteOps += r.WriteOps
@@ -50,41 +62,49 @@ func (r *Status) Print() {
 	fmt.Printf("\tread errors: %v\n", r.ReadErrors)
 }
 
+func createSchema() (gemini.Schema, error) {
+	conf, err := os.Open(confFile)
+	if err != nil {
+		return nil, err
+	}
+	defer conf.Close()
+
+	byteValue, err := ioutil.ReadAll(conf)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("Schema: %v", string(byteValue))
+
+	var shm jsonSchema
+
+	err = json.Unmarshal(byteValue, &shm)
+	if err != nil {
+		return nil, err
+	}
+
+	schemaBuilder := gemini.NewSchemaBuilder()
+	schemaBuilder.Keyspace(shm.Keyspace)
+	for _, tbl := range shm.Tables {
+		schemaBuilder.Table(tbl)
+	}
+	return schemaBuilder.Build(), nil
+}
+
 func run(cmd *cobra.Command, args []string) {
 	rand.Seed(int64(seed))
 	fmt.Printf("Seed: %d\n", seed)
 	fmt.Printf("Test cluster: %s\n", testClusterHost)
 	fmt.Printf("Oracle cluster: %s\n", oracleClusterHost)
 
+	schema, err := createSchema()
+	if err != nil {
+		fmt.Printf("cannot create schema: %v", err)
+		return
+	}
+
 	session := gemini.NewSession(testClusterHost, oracleClusterHost)
 	defer session.Close()
 
-	schemaBuilder := gemini.NewSchemaBuilder()
-	schemaBuilder.Keyspace(gemini.Keyspace{
-		Name: "gemini",
-	})
-	schemaBuilder.Table(gemini.Table{
-		Name: "data",
-		PartitionKeys: []gemini.ColumnDef{
-			{
-				Name: "pk",
-				Type: "int",
-			},
-		},
-		ClusteringKeys: []gemini.ColumnDef{
-			{
-				Name: "ck",
-				Type: "int",
-			},
-		},
-		Columns: []gemini.ColumnDef{
-			{
-				Name: "n",
-				Type: "blob",
-			},
-		},
-	})
-	schema := schemaBuilder.Build()
 	if dropSchema && mode != "read" {
 		for _, stmt := range schema.GetDropSchema() {
 			if verbose {
@@ -109,18 +129,20 @@ func run(cmd *cobra.Command, args []string) {
 	runJob(Job, schema, session, mode)
 }
 
-func runJob(f func(gemini.Schema, *gemini.Session, gemini.PartitionRange, chan Status, string), schema gemini.Schema, s *gemini.Session, mode string) {
+func runJob(f testJob, schema gemini.Schema, s *gemini.Session, mode string) {
 	c := make(chan Status)
 	minRange := 0
 	maxRange := pkNumberPerThread
 
-	for i := 0; i < threads; i++ {
-		p := gemini.PartitionRange{Min: minRange + i*maxRange, Max: maxRange + i*maxRange}
-		go f(schema, s, p, c, mode)
+	for _, table := range schema.Tables() {
+		for i := 0; i < threads; i++ {
+			p := gemini.PartitionRange{Min: minRange + i*maxRange, Max: maxRange + i*maxRange}
+			go f(schema, table, s, p, c, mode)
+		}
 	}
 
 	var testRes Status
-	for i := 0; i < threads; i++ {
+	for i := 0; i < threads*len(schema.Tables()); i++ {
 		res := <-c
 		testRes = res.Merge(&testRes)
 	}
@@ -128,12 +150,12 @@ func runJob(f func(gemini.Schema, *gemini.Session, gemini.PartitionRange, chan S
 	testRes.Print()
 }
 
-func Job(schema gemini.Schema, s *gemini.Session, p gemini.PartitionRange, c chan Status, mode string) {
+func Job(schema gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, c chan Status, mode string) {
 	testStatus := Status{}
 
 	for i := 0; i < maxTests; i++ {
 		if mode == "write" || mode == "mixed" {
-			mutateStmt := schema.GenMutateStmt(&p)
+			mutateStmt := schema.GenMutateStmt(table, &p)
 			mutateQuery := mutateStmt.Query
 			mutateValues := mutateStmt.Values()
 			if verbose {
@@ -146,7 +168,7 @@ func Job(schema gemini.Schema, s *gemini.Session, p gemini.PartitionRange, c cha
 			}
 		}
 		if mode == "read" || mode == "mixed" {
-			checkStmt := schema.GenCheckStmt(&p)
+			checkStmt := schema.GenCheckStmt(table, &p)
 			checkQuery := checkStmt.Query
 			checkValues := checkStmt.Values()
 			if verbose {

@@ -1,0 +1,61 @@
+{
+    "keyspace": {
+      "name": "gemini"
+    },
+    "tables": [
+        {
+          "name": "data1",
+          "partition_keys": [
+              {
+                  "name": "pk",
+                  "type": "int"
+              }
+          ],
+          "clustering_keys": [
+              {
+                  "name": "ck",
+                  "type": "int"
+              }
+          ],
+          "columns": [
+              {
+                  "name": "n",
+                  "type": "blob"
+              }
+          ]
+        },
+        {
+          "name": "data2",
+          "partition_keys": [
+            {
+              "name": "pk1",
+              "type": "int"
+            },
+            {
+              "name": "pk2",
+              "type": "int"
+            }
+          ],
+          "clustering_keys": [
+            {
+              "name": "ck1",
+              "type": "int"
+            },
+            {
+              "name": "ck2",
+              "type": "int"
+            }
+          ],
+          "columns": [
+            {
+              "name": "n1",
+              "type": "blob"
+            },
+            {
+              "name": "n2",
+              "type": "blob"
+            }
+          ]
+        }
+    ]
+}
