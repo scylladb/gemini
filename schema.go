@@ -1,9 +1,11 @@
 package gemini
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math/rand"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -43,12 +45,27 @@ type schema struct {
 }
 
 type PartitionRange struct {
-	Min int  `default:0`
-	Max int  `default:100`
+	Min int `default:0`
+	Max int `default:100`
 }
 
 func randRange(min int, max int) int {
-	return rand.Intn(max-min) + min
+	return rand.Intn(max - min) + min
+}
+
+func randString(len int) string {
+	buff := make([]byte, len)
+	rand.Read(buff)
+	str := base64.StdEncoding.EncodeToString(buff)
+	return str[:len]
+}
+
+func randDate() time.Time {
+	min := time.Date(1970, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
+	max := time.Date(2019, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
+
+	sec := rand.Int63n(max - min) + min
+	return time.Unix(sec, 0)
 }
 
 func (s *schema) Tables() []Table {
@@ -65,14 +82,20 @@ func generateValue(columnType string, p *PartitionRange, values []interface{}) [
 	switch columnType {
 	case "int":
 		values = append(values, randRange(p.Min, p.Max))
+	case "bigint":
+		values = append(values, rand.Int63())
 	case "int_range":
 		start := randRange(p.Min, p.Max)
 		end := start + randRange(p.Min, p.Max)
 		values = append(values, start)
 		values = append(values, end)
-	case "blob":
+	case "blob", "uuid":
 		r, _ := uuid.NewRandom()
 		values = append(values, r.String())
+	case "text", "varchar":
+		values = append(values, randString(randRange(p.Min, p.Max)))
+	case "timestamp", "date":
+		values = append(values, randDate())
 	default:
 		fmt.Errorf("generate value: not supported type %s", columnType)
 	}
@@ -101,7 +124,7 @@ func (s *schema) GetCreateSchema() []string {
 		}
 		var createTable string
 		if len(clusteringKeys) == 0 {
-			createTable = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY (%s))", s.keyspace.Name, t.Name, strings.Join(columns, ","),strings.Join(partitionKeys, ","))
+			createTable = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY (%s))", s.keyspace.Name, t.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","))
 		} else {
 			createTable = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s), %s))", s.keyspace.Name, t.Name, strings.Join(columns, ","),
 				strings.Join(partitionKeys, ","), strings.Join(clusteringKeys, ","))
@@ -162,7 +185,7 @@ func (s *schema) genSinglePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
-		Query:  query,
+		Query: query,
 		Values: func() []interface{} {
 			return values
 		},
@@ -181,7 +204,7 @@ func (s *schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
-		Query:  query,
+		Query: query,
 		Values: func() []interface{} {
 			return values
 		},
@@ -201,7 +224,7 @@ func (s *schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
-		Query:  query,
+		Query: query,
 		Values: func() []interface{} {
 			return values
 		},
@@ -224,7 +247,7 @@ func (s *schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
-		Query:  query,
+		Query: query,
 		Values: func() []interface{} {
 			return values
 		},

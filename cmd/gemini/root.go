@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
-	"os"
 
 	"github.com/scylladb/gemini"
 	"github.com/spf13/cobra"
@@ -25,7 +24,12 @@ var (
 	mode              string
 )
 
-const confFile = "schema.json"
+const (
+	confFile  = "schema.json"
+	writeMode = "write"
+	readMode  = "read"
+	mixedMode = "mixed"
+)
 
 type Status struct {
 	WriteOps    int
@@ -63,13 +67,7 @@ func (r *Status) Print() {
 }
 
 func createSchema() (gemini.Schema, error) {
-	conf, err := os.Open(confFile)
-	if err != nil {
-		return nil, err
-	}
-	defer conf.Close()
-
-	byteValue, err := ioutil.ReadAll(conf)
+	byteValue, err := ioutil.ReadFile(confFile)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +103,7 @@ func run(cmd *cobra.Command, args []string) {
 	session := gemini.NewSession(testClusterHost, oracleClusterHost)
 	defer session.Close()
 
-	if dropSchema && mode != "read" {
+	if dropSchema && mode != readMode {
 		for _, stmt := range schema.GetDropSchema() {
 			if verbose {
 				fmt.Println(stmt)
@@ -154,7 +152,7 @@ func Job(schema gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.P
 	testStatus := Status{}
 
 	for i := 0; i < maxTests; i++ {
-		if mode == "write" || mode == "mixed" {
+		if mode == writeMode || mode == mixedMode {
 			mutateStmt := schema.GenMutateStmt(table, &p)
 			mutateQuery := mutateStmt.Query
 			mutateValues := mutateStmt.Values()
@@ -167,7 +165,7 @@ func Job(schema gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.P
 				testStatus.WriteErrors++
 			}
 		}
-		if mode == "read" || mode == "mixed" {
+		if mode == readMode || mode == mixedMode {
 			checkStmt := schema.GenCheckStmt(table, &p)
 			checkQuery := checkStmt.Query
 			checkValues := checkStmt.Values()
@@ -203,7 +201,7 @@ func init() {
 	rootCmd.MarkFlagRequired("test-cluster")
 	rootCmd.Flags().StringVarP(&oracleClusterHost, "oracle-cluster", "o", "", "Host name of the oracle cluster that provides correct answers")
 	rootCmd.MarkFlagRequired("oracle-cluster")
-	rootCmd.Flags().StringVarP(&mode, "mode", "m", "mixed", "Mode options: write, read, mixed(default)")
+	rootCmd.Flags().StringVarP(&mode, "mode", "m", "mixed", "Query operation mode. Mode options: write, read, mixed (default)")
 	rootCmd.Flags().IntVarP(&maxTests, "max-tests", "n", 100, "Maximum number of test iterations to run")
 	rootCmd.Flags().IntVarP(&threads, "threads", "c", 10, "Number of threads to run concurrently")
 	rootCmd.Flags().IntVarP(&pkNumberPerThread, "max-pk-per-thread", "p", 50, "Maximum number of partition keys per thread")
