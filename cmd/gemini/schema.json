@@ -1,0 +1,77 @@
+{
+    "keyspace": {
+        "name": "gemini"
+    },
+    "tables": [
+        {
+            "name": "data1",
+            "partition_keys": [
+                {
+                    "name": "pk",
+                    "type": "int"
+                }
+            ],
+            "clustering_keys": [
+                {
+                    "name": "ck",
+                    "type": "int"
+                }
+            ],
+            "columns": [
+                {
+                    "name": "n",
+                    "type": "uuid"
+                },
+                {
+                    "name": "t",
+                    "type": "timestamp"
+                }
+            ]
+        },
+        {
+            "name": "data2",
+            "partition_keys": [
+                {
+                    "name": "pk1",
+                    "type": "int"
+                },
+                {
+                    "name": "pk2",
+                    "type": "int"
+                }
+            ],
+            "clustering_keys": [
+                {
+                    "name": "ck1",
+                    "type": "int"
+                },
+                {
+                    "name": "ck2",
+                    "type": "int"
+                }
+            ],
+            "columns": [
+                {
+                    "name": "a",
+                    "type": "bigint"
+                },
+                {
+                    "name": "b",
+                    "type": "blob"
+                },
+                {
+                    "name": "c",
+                    "type": "text"
+                },
+                {
+                    "name": "d",
+                    "type": "date"
+                },
+                {
+                    "name": "e",
+                    "type": "varchar"
+                }
+            ]
+        }
+    ]
+}
