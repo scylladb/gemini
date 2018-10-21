@@ -134,7 +134,7 @@ func (s *schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *schema) GenMutateStmt(t Table, p *PartitionRange) *Stmt {
+func (s *schema) GenInsertStmt(t Table, p *PartitionRange) *Stmt {
 	columns := []string{}
 	placeholders := []string{}
 	values := make([]interface{}, 0)
@@ -160,6 +160,38 @@ func (s *schema) GenMutateStmt(t Table, p *PartitionRange) *Stmt {
 			return values
 		},
 	}
+}
+
+func (s *schema) GenDeleteRows(t Table, p *PartitionRange) *Stmt {
+	relations := []string{}
+	values := make([]interface{}, 0)
+	for _, pk := range t.PartitionKeys {
+		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
+		values = generateValue(pk.Type, p, values)
+	}
+	if len(t.ClusteringKeys) == 1 {
+		for _, ck := range t.ClusteringKeys {
+			relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
+			values = generateValue(ck.Type+"_range", p, values)
+		}
+	}
+	query := fmt.Sprintf("DELETE FROM %s.%s WHERE %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "))
+	return &Stmt{
+		Query: query,
+		Values: func() []interface{} {
+			return values
+		},
+	}
+}
+
+func (s *schema) GenMutateStmt(t Table, p *PartitionRange) *Stmt {
+	switch n := rand.Intn(1000); n {
+	case 10, 100:
+		return s.GenDeleteRows(t, p)
+	default:
+		return s.GenInsertStmt(t, p)
+	}
+	return nil
 }
 
 func (s *schema) GenCheckStmt(t Table, p *PartitionRange) *Stmt {

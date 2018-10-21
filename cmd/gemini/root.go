@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/rand"
+	"os"
 
 	"github.com/scylladb/gemini"
 	"github.com/spf13/cobra"
@@ -16,12 +17,13 @@ var (
 	testClusterHost   string
 	oracleClusterHost string
 	maxTests          int
-	threads           int
+	concurrency       int
 	pkNumberPerThread int
 	seed              int
 	dropSchema        bool
 	verbose           bool
 	mode              string
+	failFast          bool
 )
 
 const (
@@ -58,12 +60,16 @@ func (r *Status) Merge(sum *Status) Status {
 	return *sum
 }
 
-func (r *Status) Print() {
+func (r *Status) PrintResult() {
 	fmt.Println("Results:")
-	fmt.Printf("\twrite ops: %v\n", r.WriteOps)
+	fmt.Printf("\twrite ops:    %v\n", r.WriteOps)
+	fmt.Printf("\tread ops:     %v\n", r.ReadOps)
 	fmt.Printf("\twrite errors: %v\n", r.WriteErrors)
-	fmt.Printf("\tread ops: %v\n", r.ReadOps)
-	fmt.Printf("\tread errors: %v\n", r.ReadErrors)
+	fmt.Printf("\tread errors:  %v\n", r.ReadErrors)
+}
+
+func (r Status) String() string {
+	return fmt.Sprintf("write ops: %v | read ops: %v | write errors: %v | read errors: %v", r.WriteOps, r.ReadOps, r.WriteErrors, r.ReadErrors)
 }
 
 func createSchema() (gemini.Schema, error) {
@@ -90,9 +96,12 @@ func createSchema() (gemini.Schema, error) {
 
 func run(cmd *cobra.Command, args []string) {
 	rand.Seed(int64(seed))
-	fmt.Printf("Seed: %d\n", seed)
-	fmt.Printf("Test cluster: %s\n", testClusterHost)
-	fmt.Printf("Oracle cluster: %s\n", oracleClusterHost)
+	fmt.Printf("Seed:                            %d\n", seed)
+	fmt.Printf("Number of iterations:            %d\n", maxTests)
+	fmt.Printf("Concurrency:                     %d\n", concurrency)
+	fmt.Printf("Number of partitions per thread: %d\n", pkNumberPerThread)
+	fmt.Printf("Test cluster:                    %s\n", testClusterHost)
+	fmt.Printf("Oracle cluster:                  %s\n", oracleClusterHost)
 
 	schema, err := createSchema()
 	if err != nil {
@@ -133,54 +142,84 @@ func runJob(f testJob, schema gemini.Schema, s *gemini.Session, mode string) {
 	maxRange := pkNumberPerThread
 
 	for _, table := range schema.Tables() {
-		for i := 0; i < threads; i++ {
+		for i := 0; i < concurrency; i++ {
 			p := gemini.PartitionRange{Min: minRange + i*maxRange, Max: maxRange + i*maxRange}
 			go f(schema, table, s, p, c, mode)
 		}
 	}
 
 	var testRes Status
-	for i := 0; i < threads*len(schema.Tables()); i++ {
+	for i := 0; i < concurrency*len(schema.Tables()); i++ {
 		res := <-c
 		testRes = res.Merge(&testRes)
+		if testRes.ReadErrors > 0 {
+			testRes.PrintResult()
+			fmt.Println("Error in data validation. Exiting.")
+			os.Exit(1)
+		}
 	}
 
-	testRes.Print()
+	testRes.PrintResult()
+}
+
+func mutationJob(schema gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, testStatus *Status) {
+	mutateStmt := schema.GenMutateStmt(table, &p)
+	mutateQuery := mutateStmt.Query
+	mutateValues := mutateStmt.Values()
+	if verbose {
+		fmt.Printf("%s (values=%v)\n", mutateQuery, mutateValues)
+	}
+	testStatus.WriteOps++
+	if err := s.Mutate(mutateQuery, mutateValues...); err != nil {
+		fmt.Printf("Failed! Mutation '%s' (values=%v) caused an error: '%v'\n", mutateQuery, mutateValues, err)
+		testStatus.WriteErrors++
+	}
+}
+
+func validationJob(schema gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, testStatus *Status) {
+	checkStmt := schema.GenCheckStmt(table, &p)
+	checkQuery := checkStmt.Query
+	checkValues := checkStmt.Values()
+	if verbose {
+		fmt.Printf("%s (values=%v)\n", checkQuery, checkValues)
+	}
+	err := s.Check(checkQuery, checkValues...)
+	if err == nil {
+		testStatus.ReadOps++
+	} else {
+		if err != gemini.ErrReadNoDataReturned {
+			fmt.Printf("Failed! Check '%s' (values=%v)\n%s\n", checkQuery, checkValues, err)
+			testStatus.ReadErrors++
+		}
+	}
 }
 
 func Job(schema gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, c chan Status, mode string) {
 	testStatus := Status{}
 
 	for i := 0; i < maxTests; i++ {
-		if mode == writeMode || mode == mixedMode {
-			mutateStmt := schema.GenMutateStmt(table, &p)
-			mutateQuery := mutateStmt.Query
-			mutateValues := mutateStmt.Values()
-			if verbose {
-				fmt.Printf("%s (values=%v)\n", mutateQuery, mutateValues)
-			}
-			testStatus.WriteOps++
-			if err := s.Mutate(mutateQuery, mutateValues...); err != nil {
-				fmt.Printf("Failed! Mutation '%s' (values=%v) caused an error: '%v'\n", mutateQuery, mutateValues, err)
-				testStatus.WriteErrors++
+		switch mode {
+		case writeMode:
+			mutationJob(schema, table, s, p, &testStatus)
+		case readMode:
+			validationJob(schema, table, s, p, &testStatus)
+		default:
+			ind := rand.Intn(maxTests) % 2
+			if ind == 0 {
+				mutationJob(schema, table, s, p, &testStatus)
+			} else {
+				validationJob(schema, table, s, p, &testStatus)
 			}
 		}
-		if mode == readMode || mode == mixedMode {
-			checkStmt := schema.GenCheckStmt(table, &p)
-			checkQuery := checkStmt.Query
-			checkValues := checkStmt.Values()
-			if verbose {
-				fmt.Printf("%s (values=%v)\n", checkQuery, checkValues)
-			}
-			err := s.Check(checkQuery, checkValues...)
-			if err == nil {
-				testStatus.ReadOps++
-			} else {
-				if err != gemini.ErrReadNoDataReturned {
-					fmt.Printf("Failed! Check '%s' (values=%v)\n%s\n", checkQuery, checkValues, err)
-					testStatus.ReadErrors++
-				}
-			}
+
+		threadNum := p.Min/pkNumberPerThread
+		if i % 1000 == 0 && threadNum == rand.Intn(concurrency) {
+			fmt.Printf("thread %v: ", threadNum)
+			fmt.Println(testStatus)
+		}
+		
+		if failFast && testStatus.ReadErrors > 0 {
+			break
 		}
 	}
 
@@ -201,11 +240,12 @@ func init() {
 	rootCmd.MarkFlagRequired("test-cluster")
 	rootCmd.Flags().StringVarP(&oracleClusterHost, "oracle-cluster", "o", "", "Host name of the oracle cluster that provides correct answers")
 	rootCmd.MarkFlagRequired("oracle-cluster")
-	rootCmd.Flags().StringVarP(&mode, "mode", "m", "mixed", "Query operation mode. Mode options: write, read, mixed (default)")
+	rootCmd.Flags().StringVarP(&mode, "mode", "m", mixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	rootCmd.Flags().IntVarP(&maxTests, "max-tests", "n", 100, "Maximum number of test iterations to run")
-	rootCmd.Flags().IntVarP(&threads, "threads", "c", 10, "Number of threads to run concurrently")
+	rootCmd.Flags().IntVarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
 	rootCmd.Flags().IntVarP(&pkNumberPerThread, "max-pk-per-thread", "p", 50, "Maximum number of partition keys per thread")
 	rootCmd.Flags().IntVarP(&seed, "seed", "s", 1, "PRNG seed value")
 	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
+	rootCmd.Flags().BoolVarP(&failFast, "fail-fast", "f", false, "Stop on the first failure")
 }
