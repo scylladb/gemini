@@ -228,13 +228,15 @@ func (s *schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	relations := []string{}
 	values := make([]interface{}, 0)
 	pkNum := rand.Intn(10)
+	pkNames := []string{}
 	for _, pk := range t.PartitionKeys {
+		pkNames = append(pkNames, pk.Name)
 		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 		for i := 0; i < pkNum; i++ {
 			values = generateValue(pk.Type, p, values)
 		}
 	}
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "))
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s ORDER BY %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "), strings.Join(pkNames, ","))
 	return &Stmt{
 		Query: query,
 		Values: func() []interface{} {
@@ -266,8 +268,10 @@ func (s *schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 func (s *schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	relations := []string{}
 	pkNum := rand.Intn(10)
+	pkNames := []string{}
 	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
+		pkNames = append(pkNames, pk.Name)
 		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 		for i := 0; i < pkNum; i++ {
 			values = generateValue(pk.Type, p, values)
@@ -277,7 +281,7 @@ func (s *schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 		relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
 		values = generateValue(ck.Type+"_range", p, values)
 	}
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "))
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s ORDER BY %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "), strings.Join(pkNames, ","))
 	return &Stmt{
 		Query: query,
 		Values: func() []interface{} {
