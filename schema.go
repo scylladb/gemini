@@ -121,7 +121,7 @@ func GenSchema() *Schema {
 	return builder.Build()
 }
 
-func generateValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
+func genValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
 	switch columnType {
 	case "int":
 		values = append(values, randRange(p.Min, p.Max))
@@ -184,17 +184,17 @@ func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) *Stmt {
 	for _, pk := range t.PartitionKeys {
 		columns = append(columns, pk.Name)
 		placeholders = append(placeholders, "?")
-		values = generateValue(pk.Type, p, values)
+		values = genValue(pk.Type, p, values)
 	}
 	for _, ck := range t.ClusteringKeys {
 		columns = append(columns, ck.Name)
 		placeholders = append(placeholders, "?")
-		values = generateValue(ck.Type, p, values)
+		values = genValue(ck.Type, p, values)
 	}
 	for _, cdef := range t.Columns {
 		columns = append(columns, cdef.Name)
 		placeholders = append(placeholders, "?")
-		values = generateValue(cdef.Type, p, values)
+		values = genValue(cdef.Type, p, values)
 	}
 	query := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", s.Keyspace.Name, t.Name, strings.Join(columns, ","), strings.Join(placeholders, ","))
 	return &Stmt{
@@ -210,12 +210,12 @@ func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) *Stmt {
 	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
-		values = generateValue(pk.Type, p, values)
+		values = genValue(pk.Type, p, values)
 	}
 	if len(t.ClusteringKeys) == 1 {
 		for _, ck := range t.ClusteringKeys {
 			relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
-			values = generateValue(ck.Type+"_range", p, values)
+			values = genValue(ck.Type+"_range", p, values)
 		}
 	}
 	query := fmt.Sprintf("DELETE FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
@@ -256,7 +256,7 @@ func (s *Schema) genSinglePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
-		values = generateValue(pk.Type, p, values)
+		values = genValue(pk.Type, p, values)
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
@@ -276,7 +276,7 @@ func (s *Schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
 		pkNames = append(pkNames, pk.Name)
 		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 		for i := 0; i < pkNum; i++ {
-			values = generateValue(pk.Type, p, values)
+			values = genValue(pk.Type, p, values)
 		}
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s ORDER BY %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "), strings.Join(pkNames, ","))
@@ -293,11 +293,11 @@ func (s *Schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
-		values = generateValue(pk.Type, p, values)
+		values = genValue(pk.Type, p, values)
 	}
 	for _, ck := range t.ClusteringKeys {
 		relations = append(relations, fmt.Sprintf("%s > ? AND %s < ?", ck.Name, ck.Name))
-		values = generateValue(ck.Type+"_range", p, values)
+		values = genValue(ck.Type+"_range", p, values)
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
@@ -317,12 +317,12 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 		pkNames = append(pkNames, pk.Name)
 		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 		for i := 0; i < pkNum; i++ {
-			values = generateValue(pk.Type, p, values)
+			values = genValue(pk.Type, p, values)
 		}
 	}
 	for _, ck := range t.ClusteringKeys {
 		relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
-		values = generateValue(ck.Type+"_range", p, values)
+		values = genValue(ck.Type+"_range", p, values)
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s ORDER BY %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "), strings.Join(pkNames, ","))
 	return &Stmt{
