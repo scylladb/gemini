@@ -127,11 +127,6 @@ func genValue(columnType string, p *PartitionRange, values []interface{}) []inte
 		values = append(values, randRange(p.Min, p.Max))
 	case "bigint":
 		values = append(values, rand.Int63())
-	case "int_range":
-		start := randRange(p.Min, p.Max)
-		end := start + randRange(p.Min, p.Max)
-		values = append(values, start)
-		values = append(values, end)
 	case "blob", "uuid":
 		r, _ := uuid.NewRandom()
 		values = append(values, r.String())
@@ -141,6 +136,19 @@ func genValue(columnType string, p *PartitionRange, values []interface{}) []inte
 		values = append(values, randDate())
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", columnType))
+	}
+	return values
+}
+
+func genValueRange(columnType string, p *PartitionRange, values []interface{}) []interface{} {
+	switch columnType {
+	case "int":
+		start := randRange(p.Min, p.Max)
+		end := start + randRange(p.Min, p.Max)
+		values = append(values, start)
+		values = append(values, end)
+	default:
+		panic(fmt.Sprintf("generate value range: not supported type %s", columnType))
 	}
 	return values
 }
@@ -215,7 +223,7 @@ func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) *Stmt {
 	if len(t.ClusteringKeys) == 1 {
 		for _, ck := range t.ClusteringKeys {
 			relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
-			values = genValue(ck.Type+"_range", p, values)
+			values = genValueRange(ck.Type, p, values)
 		}
 	}
 	query := fmt.Sprintf("DELETE FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
@@ -297,7 +305,7 @@ func (s *Schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	}
 	for _, ck := range t.ClusteringKeys {
 		relations = append(relations, fmt.Sprintf("%s > ? AND %s < ?", ck.Name, ck.Name))
-		values = genValue(ck.Type+"_range", p, values)
+		values = genValueRange(ck.Type, p, values)
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
@@ -322,7 +330,7 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 	}
 	for _, ck := range t.ClusteringKeys {
 		relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
-		values = genValue(ck.Type+"_range", p, values)
+		values = genValueRange(ck.Type, p, values)
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s ORDER BY %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "), strings.Join(pkNames, ","))
 	return &Stmt{
