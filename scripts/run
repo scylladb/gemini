@@ -1,0 +1,18 @@
+#!/bin/bash
+
+ORACLE_NAME=gemini-oracle
+TEST_NAME=gemini-test
+
+docker run --name $ORACLE_NAME -d cassandra:3.11.3
+docker run --name $TEST_NAME -d scylladb/scylla:3.0.2 --smp 1 --memory 128M
+
+sleep 30
+
+GEMINI_CMD=cmd/gemini/gemini
+
+$GEMINI_CMD \
+	--max-tests=100000000 \
+	--fail-fast \
+	--test-cluster=$(docker inspect --format='{{ .NetworkSettings.IPAddress }}' $TEST_NAME) \
+	--oracle-cluster=$(docker inspect --format='{{ .NetworkSettings.IPAddress }}' $ORACLE_NAME)
+
