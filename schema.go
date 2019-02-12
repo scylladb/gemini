@@ -97,7 +97,7 @@ func generateValue(columnType string, p *PartitionRange, values []interface{}) [
 	case "timestamp", "date":
 		values = append(values, randDate())
 	default:
-		fmt.Errorf("generate value: not supported type %s", columnType)
+		panic(fmt.Sprintf("generate value: not supported type %s", columnType))
 	}
 	return values
 }
