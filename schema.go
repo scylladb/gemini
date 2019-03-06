@@ -26,22 +26,14 @@ type Table struct {
 	Columns        []ColumnDef `json:"columns"`
 }
 
-type Schema interface {
-	Tables() []Table
-	GetDropSchema() []string
-	GetCreateSchema() []string
-	GenMutateStmt(Table, *PartitionRange) *Stmt
-	GenCheckStmt(Table, *PartitionRange) *Stmt
-}
-
 type Stmt struct {
 	Query  string
 	Values func() []interface{}
 }
 
-type schema struct {
-	keyspace Keyspace
-	tables   []Table
+type Schema struct {
+	Keyspace Keyspace `json:"keyspace"`
+	Tables   []Table  `json:"tables"`
 }
 
 type PartitionRange struct {
@@ -68,27 +60,73 @@ func randDate() time.Time {
 	return time.Unix(sec, 0)
 }
 
-func (s *schema) Tables() []Table {
-	return s.tables
-}
-
-func (s *schema) GetDropSchema() []string {
+func (s *Schema) GetDropSchema() []string {
 	return []string{
-		fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", s.keyspace.Name),
+		fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", s.Keyspace.Name),
 	}
 }
 
-func generateValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
+var types = [...]string{"int", "bigint", "blob", "uuid", "text", "varchar", "timestamp", "date"}
+
+func genColumnName(prefix string, idx int) string {
+	return fmt.Sprintf("%s%d", prefix, idx)
+}
+
+func genColumnType() string {
+	n := rand.Intn(len(types))
+	return types[n]
+}
+
+func genColumnDef(prefix string, idx int) ColumnDef {
+	return ColumnDef{
+		Name: genColumnName(prefix, idx),
+		Type: genColumnType(),
+	}
+}
+
+const (
+	MaxPartitionKeys = 2
+	MaxClusteringKeys = 4
+	MaxColumns = 8
+)
+
+func GenSchema() *Schema {
+	builder := NewSchemaBuilder()
+	keyspace := Keyspace{
+		Name: "ks1",
+	}
+	builder.Keyspace(keyspace)
+	partitionKeys := []ColumnDef{}
+	numPartitionKeys := rand.Intn(MaxPartitionKeys-1) + 1
+	for i := 0; i < numPartitionKeys; i++ {
+		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: "int"})
+	}
+	clusteringKeys := []ColumnDef{}
+	numClusteringKeys := rand.Intn(MaxClusteringKeys)
+	for i := 0; i < numClusteringKeys; i++ {
+		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: "int"})
+	}
+	columns := []ColumnDef{}
+	numColumns := rand.Intn(MaxColumns)
+	for i := 0; i < numColumns; i++ {
+		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType()})
+	}
+	table := Table{
+		Name:           "table1",
+		PartitionKeys:  partitionKeys,
+		ClusteringKeys: clusteringKeys,
+		Columns:        columns,
+	}
+	builder.Table(table)
+	return builder.Build()
+}
+
+func genValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
 	switch columnType {
 	case "int":
 		values = append(values, randRange(p.Min, p.Max))
 	case "bigint":
 		values = append(values, rand.Int63())
-	case "int_range":
-		start := randRange(p.Min, p.Max)
-		end := start + randRange(p.Min, p.Max)
-		values = append(values, start)
-		values = append(values, end)
 	case "blob", "uuid":
 		r, _ := uuid.NewRandom()
 		values = append(values, r.String())
@@ -97,17 +135,30 @@ func generateValue(columnType string, p *PartitionRange, values []interface{}) [
 	case "timestamp", "date":
 		values = append(values, randDate())
 	default:
-		fmt.Errorf("generate value: not supported type %s", columnType)
+		panic(fmt.Sprintf("generate value: not supported type %s", columnType))
 	}
 	return values
 }
 
-func (s *schema) GetCreateSchema() []string {
-	createKeyspace := fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}", s.keyspace.Name)
+func genValueRange(columnType string, p *PartitionRange, values []interface{}) []interface{} {
+	switch columnType {
+	case "int":
+		start := randRange(p.Min, p.Max)
+		end := start + randRange(p.Min, p.Max)
+		values = append(values, start)
+		values = append(values, end)
+	default:
+		panic(fmt.Sprintf("generate value range: not supported type %s", columnType))
+	}
+	return values
+}
+
+func (s *Schema) GetCreateSchema() []string {
+	createKeyspace := fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}", s.Keyspace.Name)
 
 	stmts := []string{createKeyspace}
 
-	for _, t := range s.tables {
+	for _, t := range s.Tables {
 		partitionKeys := []string{}
 		clusteringKeys := []string{}
 		columns := []string{}
@@ -124,9 +175,9 @@ func (s *schema) GetCreateSchema() []string {
 		}
 		var createTable string
 		if len(clusteringKeys) == 0 {
-			createTable = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY (%s))", s.keyspace.Name, t.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","))
+			createTable = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY (%s))", s.Keyspace.Name, t.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","))
 		} else {
-			createTable = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s), %s))", s.keyspace.Name, t.Name, strings.Join(columns, ","),
+			createTable = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s), %s))", s.Keyspace.Name, t.Name, strings.Join(columns, ","),
 				strings.Join(partitionKeys, ","), strings.Join(clusteringKeys, ","))
 		}
 		stmts = append(stmts, createTable)
@@ -134,26 +185,26 @@ func (s *schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *schema) GenInsertStmt(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) *Stmt {
 	columns := []string{}
 	placeholders := []string{}
 	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
 		columns = append(columns, pk.Name)
 		placeholders = append(placeholders, "?")
-		values = generateValue(pk.Type, p, values)
+		values = genValue(pk.Type, p, values)
 	}
 	for _, ck := range t.ClusteringKeys {
 		columns = append(columns, ck.Name)
 		placeholders = append(placeholders, "?")
-		values = generateValue(ck.Type, p, values)
+		values = genValue(ck.Type, p, values)
 	}
 	for _, cdef := range t.Columns {
 		columns = append(columns, cdef.Name)
 		placeholders = append(placeholders, "?")
-		values = generateValue(cdef.Type, p, values)
+		values = genValue(cdef.Type, p, values)
 	}
-	query := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", s.keyspace.Name, t.Name, strings.Join(columns, ","), strings.Join(placeholders, ","))
+	query := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", s.Keyspace.Name, t.Name, strings.Join(columns, ","), strings.Join(placeholders, ","))
 	return &Stmt{
 		Query: query,
 		Values: func() []interface{} {
@@ -162,20 +213,20 @@ func (s *schema) GenInsertStmt(t Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *schema) GenDeleteRows(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) *Stmt {
 	relations := []string{}
 	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
-		values = generateValue(pk.Type, p, values)
+		values = genValue(pk.Type, p, values)
 	}
 	if len(t.ClusteringKeys) == 1 {
 		for _, ck := range t.ClusteringKeys {
 			relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
-			values = generateValue(ck.Type+"_range", p, values)
+			values = genValueRange(ck.Type, p, values)
 		}
 	}
-	query := fmt.Sprintf("DELETE FROM %s.%s WHERE %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "))
+	query := fmt.Sprintf("DELETE FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
 		Query: query,
 		Values: func() []interface{} {
@@ -184,7 +235,7 @@ func (s *schema) GenDeleteRows(t Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *schema) GenMutateStmt(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) *Stmt {
 	switch n := rand.Intn(1000); n {
 	case 10, 100:
 		return s.GenDeleteRows(t, p)
@@ -194,7 +245,7 @@ func (s *schema) GenMutateStmt(t Table, p *PartitionRange) *Stmt {
 	return nil
 }
 
-func (s *schema) GenCheckStmt(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenCheckStmt(t Table, p *PartitionRange) *Stmt {
 	switch n := rand.Intn(4); n {
 	case 0:
 		return s.genSinglePartitionQuery(t, p)
@@ -208,14 +259,14 @@ func (s *schema) GenCheckStmt(t Table, p *PartitionRange) *Stmt {
 	return nil
 }
 
-func (s *schema) genSinglePartitionQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genSinglePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	relations := []string{}
 	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
-		values = generateValue(pk.Type, p, values)
+		values = genValue(pk.Type, p, values)
 	}
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "))
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
 		Query: query,
 		Values: func() []interface{} {
@@ -224,7 +275,7 @@ func (s *schema) genSinglePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	relations := []string{}
 	values := make([]interface{}, 0)
 	pkNum := rand.Intn(10)
@@ -233,10 +284,10 @@ func (s *schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
 		pkNames = append(pkNames, pk.Name)
 		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 		for i := 0; i < pkNum; i++ {
-			values = generateValue(pk.Type, p, values)
+			values = genValue(pk.Type, p, values)
 		}
 	}
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s ORDER BY %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "), strings.Join(pkNames, ","))
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s ORDER BY %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "), strings.Join(pkNames, ","))
 	return &Stmt{
 		Query: query,
 		Values: func() []interface{} {
@@ -245,18 +296,18 @@ func (s *schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	relations := []string{}
 	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
-		values = generateValue(pk.Type, p, values)
+		values = genValue(pk.Type, p, values)
 	}
 	for _, ck := range t.ClusteringKeys {
 		relations = append(relations, fmt.Sprintf("%s > ? AND %s < ?", ck.Name, ck.Name))
-		values = generateValue(ck.Type+"_range", p, values)
+		values = genValueRange(ck.Type, p, values)
 	}
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "))
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
 		Query: query,
 		Values: func() []interface{} {
@@ -265,7 +316,7 @@ func (s *schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	relations := []string{}
 	pkNum := rand.Intn(10)
 	pkNames := []string{}
@@ -274,14 +325,14 @@ func (s *schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 		pkNames = append(pkNames, pk.Name)
 		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 		for i := 0; i < pkNum; i++ {
-			values = generateValue(pk.Type, p, values)
+			values = genValue(pk.Type, p, values)
 		}
 	}
 	for _, ck := range t.ClusteringKeys {
 		relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
-		values = generateValue(ck.Type+"_range", p, values)
+		values = genValueRange(ck.Type, p, values)
 	}
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s ORDER BY %s", s.keyspace.Name, t.Name, strings.Join(relations, " AND "), strings.Join(pkNames, ","))
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s ORDER BY %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "), strings.Join(pkNames, ","))
 	return &Stmt{
 		Query: query,
 		Values: func() []interface{} {
@@ -293,7 +344,7 @@ func (s *schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 type SchemaBuilder interface {
 	Keyspace(Keyspace) SchemaBuilder
 	Table(Table) SchemaBuilder
-	Build() Schema
+	Build() *Schema
 }
 
 type schemaBuilder struct {
@@ -311,8 +362,8 @@ func (s *schemaBuilder) Table(table Table) SchemaBuilder {
 	return s
 }
 
-func (s *schemaBuilder) Build() Schema {
-	return &schema{keyspace: s.keyspace, tables: s.tables}
+func (s *schemaBuilder) Build() *Schema {
+	return &Schema{Keyspace: s.keyspace, Tables: s.tables}
 }
 
 func NewSchemaBuilder() SchemaBuilder {
