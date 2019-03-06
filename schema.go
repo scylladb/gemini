@@ -50,7 +50,7 @@ type PartitionRange struct {
 }
 
 func randRange(min int, max int) int {
-	return rand.Intn(max - min) + min
+	return rand.Intn(max-min) + min
 }
 
 func randString(len int) string {
@@ -64,7 +64,7 @@ func randDate() time.Time {
 	min := time.Date(1970, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 	max := time.Date(2019, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 
-	sec := rand.Int63n(max - min) + min
+	sec := rand.Int63n(max-min) + min
 	return time.Unix(sec, 0)
 }
 
