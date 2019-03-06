@@ -212,12 +212,12 @@ func Job(schema gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.P
 			}
 		}
 
-		threadNum := p.Min/pkNumberPerThread
-		if i % 1000 == 0 && threadNum == rand.Intn(concurrency) {
+		threadNum := p.Min / pkNumberPerThread
+		if i%1000 == 0 && threadNum == rand.Intn(concurrency) {
 			fmt.Printf("thread %v: ", threadNum)
 			fmt.Println(testStatus)
 		}
-		
+
 		if failFast && testStatus.ReadErrors > 0 {
 			break
 		}
