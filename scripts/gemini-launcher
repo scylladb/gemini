@@ -4,31 +4,20 @@ ORACLE_NAME=gemini-oracle
 TEST_NAME=gemini-test
 GEMINI_CMD=/tmp/gemini
 
-if [[ ! "$(docker ps -q -f name=${ORACLE_NAME})" ]]; then
-    if [[ "$(docker ps -aq -f status=exited -f name=${ORACLE_NAME})" ]]; then
-        # cleanup
-        docker rm ${ORACLE_NAME}
-    fi
-    # gemini-launcher your container
-    docker run --name ${ORACLE_NAME} -d cassandra:3.11.3
-fi
+docker-compose -f scripts/docker-compose.yml up -d
 
-if [[ ! "$(docker ps -q -f name=${TEST_NAME})" ]]; then
-    if [[ "$(docker ps -aq -f status=exited -f name=${TEST_NAME})" ]]; then
-        # cleanup
-        docker rm ${TEST_NAME}
-    fi
-    # gemini-launcher your container
-    docker run --name ${TEST_NAME} -d scylladb/scylla:3.0.2 --smp 1 --memory 128M
-fi
-
-sleep 30
+ORACLE_IP=$(docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' ${ORACLE_NAME})
+TEST_IP=$(docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' ${TEST_NAME})
 
 GOBIN="$(dirname ${GEMINI_CMD})" go install ./...
+
+echo "Waiting for ${ORACLE_NAME} to start"
+until docker logs ${ORACLE_NAME} | grep "Starting listening for CQL clients" > /dev/null; do sleep 2; done
+echo "Waiting for ${TEST_NAME} to start"
+until docker logs ${TEST_NAME} | grep "Starting listening for CQL clients" > /dev/null; do sleep 2; done
 
 $GEMINI_CMD \
 	--max-tests=100000000 \
 	--fail-fast \
-	--test-cluster=$(docker inspect --format='{{ .NetworkSettings.IPAddress }}' $TEST_NAME) \
-	--oracle-cluster=$(docker inspect --format='{{ .NetworkSettings.IPAddress }}' $ORACLE_NAME)
-
+	--test-cluster=${TEST_IP} \
+	--oracle-cluster=${ORACLE_IP}
