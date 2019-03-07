@@ -1,0 +1,23 @@
+#!/bin/bash
+
+ORACLE_NAME=gemini-oracle
+TEST_NAME=gemini-test
+GEMINI_CMD=/tmp/gemini
+
+docker-compose -f scripts/docker-compose.yml up -d
+
+ORACLE_IP=$(docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' ${ORACLE_NAME})
+TEST_IP=$(docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' ${TEST_NAME})
+
+GOBIN="$(dirname ${GEMINI_CMD})" go install ./...
+
+echo "Waiting for ${ORACLE_NAME} to start"
+until docker logs ${ORACLE_NAME} | grep "Starting listening for CQL clients" > /dev/null; do sleep 2; done
+echo "Waiting for ${TEST_NAME} to start"
+until docker logs ${TEST_NAME} | grep "Starting listening for CQL clients" > /dev/null; do sleep 2; done
+
+$GEMINI_CMD \
+	--max-tests=100000000 \
+	--fail-fast \
+	--test-cluster=${TEST_IP} \
+	--oracle-cluster=${ORACLE_IP}
