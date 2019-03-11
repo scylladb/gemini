@@ -66,7 +66,7 @@ func (s *Schema) GetDropSchema() []string {
 	}
 }
 
-var types = [...]string{"int", "bigint", "blob", "uuid", "text", "varchar", "timestamp", "date"}
+var types = [...]string{"int", "bigint", "blob", "uuid", "text", "varchar", "timestamp"}
 
 func genColumnName(prefix string, idx int) string {
 	return fmt.Sprintf("%s%d", prefix, idx)
@@ -85,9 +85,9 @@ func genColumnDef(prefix string, idx int) ColumnDef {
 }
 
 const (
-	MaxPartitionKeys = 2
+	MaxPartitionKeys  = 2
 	MaxClusteringKeys = 4
-	MaxColumns = 8
+	MaxColumns        = 8
 )
 
 func GenSchema() *Schema {
