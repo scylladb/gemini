@@ -18,7 +18,7 @@ services:
       gemini:
 
   gemini-test:
-    image: scylladb/scylla:3.0.2
+    image: scylladb/scylla:3.0.3
     container_name: gemini-test
     command: --smp 1 --memory 128M --api-address 0.0.0.0
     networks:
