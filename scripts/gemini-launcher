@@ -1,5 +1,10 @@
 #!/bin/bash
 
+function quit () {
+    echo $2
+    exit $1
+}
+
 ORACLE_NAME=gemini-oracle
 TEST_NAME=gemini-test
 GEMINI_CMD=/tmp/gemini
@@ -9,7 +14,7 @@ docker-compose -f scripts/docker-compose.yml up -d
 ORACLE_IP=$(docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' ${ORACLE_NAME})
 TEST_IP=$(docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' ${TEST_NAME})
 
-GOBIN="$(dirname ${GEMINI_CMD})" go install ./...
+GOBIN="$(dirname ${GEMINI_CMD})" go install ./... || quit $? "Compilation failed"
 
 echo "Waiting for ${ORACLE_NAME} to start"
 until docker logs ${ORACLE_NAME} | grep "Starting listening for CQL clients" > /dev/null; do sleep 2; done
