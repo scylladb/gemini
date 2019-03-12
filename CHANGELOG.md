@@ -15,3 +15,7 @@
   Docker.
 - Schema generation support. Gemini generates a random schema unless user
   specifies one with the `--schema` command line option.
+
+### Changed
+
+- Improve progress indicator ([#14](https://github.com/scylladb/gemini/issues/14)).
