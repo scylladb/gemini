@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/gocql/gocql"
+	"github.com/segmentio/ksuid"
 )
 
 type Keyspace struct {
@@ -45,18 +46,65 @@ func randRange(min int, max int) int {
 	return rand.Intn(max-min) + min
 }
 
+func nonEmptyRandRange(min int, max int, def int) int {
+	if min >= max {
+		return randRange(min, min+def)
+	}
+	return randRange(min, max)
+}
+
+func randRange64(min int64, max int64) int64 {
+	return rand.Int63n(max-min) + min
+}
+
+func nonEmptyRandRange64(min int64, max int64, def int64) int64 {
+	if min >= max {
+		return randRange64(min, min+def)
+	}
+	return randRange64(min, max)
+}
+
 func randString(len int) string {
-	buff := make([]byte, len)
+	return nonEmptyRandStringWithTime(len, time.Now().UTC())
+}
+
+func randStringWithTime(len int, t time.Time) string {
+	id, _ := ksuid.NewRandomWithTime(t)
+
+	var buf strings.Builder
+	buf.WriteString(id.String())
+	if buf.Len() >= len {
+		return buf.String()[:len]
+	}
+
+	// Pad some extra random data
+	buff := make([]byte, len-buf.Len())
 	rand.Read(buff)
-	str := base64.StdEncoding.EncodeToString(buff)
-	return str[:len]
+	buf.WriteString(base64.StdEncoding.EncodeToString(buff))
+
+	return buf.String()[:len]
+}
+
+func nonEmptyRandStringWithTime(len int, t time.Time) string {
+	if len <= 0 {
+		len = 1
+	}
+	return randStringWithTime(len, t)
 }
 
 func randDate() time.Time {
 	min := time.Date(1970, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
-	max := time.Date(2019, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
+	max := time.Date(2024, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 
 	sec := rand.Int63n(max-min) + min
+	return time.Unix(sec, 0)
+}
+
+func randDateNewer(d time.Time) time.Time {
+	min := time.Date(d.Year()+1, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
+	max := time.Date(2024, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
+
+	sec := rand.Int63n(max-min+1) + min
 	return time.Unix(sec, 0)
 }
 
@@ -104,7 +152,7 @@ func GenSchema() *Schema {
 	clusteringKeys := []ColumnDef{}
 	numClusteringKeys := rand.Intn(MaxClusteringKeys)
 	for i := 0; i < numClusteringKeys; i++ {
-		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: "int"})
+		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genColumnType()})
 	}
 	columns := []ColumnDef{}
 	numColumns := rand.Intn(MaxColumns)
@@ -124,14 +172,14 @@ func GenSchema() *Schema {
 func genValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
 	switch columnType {
 	case "int":
-		values = append(values, randRange(p.Min, p.Max))
+		values = append(values, nonEmptyRandRange(p.Min, p.Max, 10))
 	case "bigint":
 		values = append(values, rand.Int63())
-	case "blob", "uuid":
-		r, _ := uuid.NewRandom()
+	case "uuid":
+		r := gocql.UUIDFromTime(randDate())
 		values = append(values, r.String())
-	case "text", "varchar":
-		values = append(values, randString(randRange(p.Min, p.Max)))
+	case "blob", "text", "varchar":
+		values = append(values, randStringWithTime(nonEmptyRandRange(p.Max, p.Max, 10), randDate()))
 	case "timestamp", "date":
 		values = append(values, randDate())
 	default:
@@ -143,8 +191,29 @@ func genValue(columnType string, p *PartitionRange, values []interface{}) []inte
 func genValueRange(columnType string, p *PartitionRange, values []interface{}) []interface{} {
 	switch columnType {
 	case "int":
-		start := randRange(p.Min, p.Max)
-		end := start + randRange(p.Min, p.Max)
+		start := nonEmptyRandRange(p.Min, p.Max, 10)
+		end := start + nonEmptyRandRange(p.Min, p.Max, 10)
+		values = append(values, start)
+		values = append(values, end)
+	case "bigint":
+		start := nonEmptyRandRange64(int64(p.Min), int64(p.Max), 10)
+		end := start + nonEmptyRandRange64(int64(p.Min), int64(p.Max), 10)
+		values = append(values, start)
+		values = append(values, end)
+	case "uuid":
+		start := randDate()
+		end := randDateNewer(start)
+		values = append(values, gocql.UUIDFromTime(start).String())
+		values = append(values, gocql.UUIDFromTime(end).String())
+	case "blob", "text", "varchar":
+		startTime := randDate()
+		start := nonEmptyRandRange(p.Min, p.Max, 10)
+		end := start + nonEmptyRandRange(p.Min, p.Max, 10)
+		values = append(values, nonEmptyRandStringWithTime(start, startTime))
+		values = append(values, nonEmptyRandStringWithTime(end, randDateNewer(startTime)))
+	case "timestamp", "date":
+		start := randDate()
+		end := randDateNewer(start)
 		values = append(values, start)
 		values = append(values, end)
 	default:
