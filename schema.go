@@ -1,13 +1,11 @@
 package gemini
 
 import (
-	"encoding/base64"
 	"fmt"
 	"math/rand"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
+	"github.com/gocql/gocql"
 )
 
 type Keyspace struct {
@@ -39,25 +37,6 @@ type Schema struct {
 type PartitionRange struct {
 	Min int `default:0`
 	Max int `default:100`
-}
-
-func randRange(min int, max int) int {
-	return rand.Intn(max-min) + min
-}
-
-func randString(len int) string {
-	buff := make([]byte, len)
-	rand.Read(buff)
-	str := base64.StdEncoding.EncodeToString(buff)
-	return str[:len]
-}
-
-func randDate() time.Time {
-	min := time.Date(1970, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
-	max := time.Date(2019, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
-
-	sec := rand.Int63n(max-min) + min
-	return time.Unix(sec, 0)
 }
 
 func (s *Schema) GetDropSchema() []string {
@@ -104,7 +83,7 @@ func GenSchema() *Schema {
 	clusteringKeys := []ColumnDef{}
 	numClusteringKeys := rand.Intn(MaxClusteringKeys)
 	for i := 0; i < numClusteringKeys; i++ {
-		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: "int"})
+		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genColumnType()})
 	}
 	columns := []ColumnDef{}
 	numColumns := rand.Intn(MaxColumns)
@@ -124,14 +103,14 @@ func GenSchema() *Schema {
 func genValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
 	switch columnType {
 	case "int":
-		values = append(values, randRange(p.Min, p.Max))
+		values = append(values, nonEmptyRandRange(p.Min, p.Max, 10))
 	case "bigint":
 		values = append(values, rand.Int63())
-	case "blob", "uuid":
-		r, _ := uuid.NewRandom()
+	case "uuid":
+		r := gocql.UUIDFromTime(randDate())
 		values = append(values, r.String())
-	case "text", "varchar":
-		values = append(values, randString(randRange(p.Min, p.Max)))
+	case "blob", "text", "varchar":
+		values = append(values, randStringWithTime(nonEmptyRandRange(p.Max, p.Max, 10), randDate()))
 	case "timestamp", "date":
 		values = append(values, randDate())
 	default:
@@ -143,8 +122,29 @@ func genValue(columnType string, p *PartitionRange, values []interface{}) []inte
 func genValueRange(columnType string, p *PartitionRange, values []interface{}) []interface{} {
 	switch columnType {
 	case "int":
-		start := randRange(p.Min, p.Max)
-		end := start + randRange(p.Min, p.Max)
+		start := nonEmptyRandRange(p.Min, p.Max, 10)
+		end := start + nonEmptyRandRange(p.Min, p.Max, 10)
+		values = append(values, start)
+		values = append(values, end)
+	case "bigint":
+		start := nonEmptyRandRange64(int64(p.Min), int64(p.Max), 10)
+		end := start + nonEmptyRandRange64(int64(p.Min), int64(p.Max), 10)
+		values = append(values, start)
+		values = append(values, end)
+	case "uuid":
+		start := randDate()
+		end := randDateNewer(start)
+		values = append(values, gocql.UUIDFromTime(start).String())
+		values = append(values, gocql.UUIDFromTime(end).String())
+	case "blob", "text", "varchar":
+		startTime := randDate()
+		start := nonEmptyRandRange(p.Min, p.Max, 10)
+		end := start + nonEmptyRandRange(p.Min, p.Max, 10)
+		values = append(values, nonEmptyRandStringWithTime(start, startTime))
+		values = append(values, nonEmptyRandStringWithTime(end, randDateNewer(startTime)))
+	case "timestamp", "date":
+		start := randDate()
+		end := randDateNewer(start)
 		values = append(values, start)
 		values = append(values, end)
 	default:
