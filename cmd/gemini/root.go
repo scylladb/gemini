@@ -5,10 +5,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"golang.org/x/net/context"
 	"io/ioutil"
 	"math/rand"
-	"os"
+	"sync"
+	"time"
 
+	"github.com/briandowns/spinner"
 	"github.com/scylladb/gemini"
 	"github.com/spf13/cobra"
 )
@@ -25,6 +28,7 @@ var (
 	verbose           bool
 	mode              string
 	failFast          bool
+	nonInteractive    bool
 )
 
 const (
@@ -45,7 +49,11 @@ type Results interface {
 	Print()
 }
 
-type testJob func(*gemini.Schema, gemini.Table, *gemini.Session, gemini.PartitionRange, chan Status, string)
+func interactive() bool {
+	return !nonInteractive
+}
+
+type testJob func(context.Context, *sync.WaitGroup, *gemini.Schema, gemini.Table, *gemini.Session, gemini.PartitionRange, chan Status, string)
 
 func (r *Status) Merge(sum *Status) Status {
 	sum.WriteOps += r.WriteOps
@@ -144,23 +152,54 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 	minRange := 0
 	maxRange := pkNumberPerThread
 
+	// Wait group for the worker goroutines.
+	var workers sync.WaitGroup
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	for _, table := range schema.Tables {
 		for i := 0; i < concurrency; i++ {
 			p := gemini.PartitionRange{Min: minRange + i*maxRange, Max: maxRange + i*maxRange}
-			go f(schema, table, s, p, c, mode)
+			workers.Add(1)
+			go f(workerCtx, &workers, schema, table, s, p, c, mode)
 		}
 	}
 
+	// Wait group for the reporter goroutine.
+	var reporter sync.WaitGroup
+	reporter.Add(1)
+
 	var testRes Status
-	for i := 0; i < concurrency*len(schema.Tables); i++ {
-		res := <-c
-		testRes = res.Merge(&testRes)
-		if testRes.ReadErrors > 0 {
-			testRes.PrintResult()
-			fmt.Println("Error in data validation. Exiting.")
-			os.Exit(1)
+	reporterCtx, cancelReporter := context.WithCancel(context.Background())
+	go func() {
+		defer reporter.Done()
+
+		var sp *spinner.Spinner = nil
+		if interactive() {
+			spinnerCharSet := []string{"|", "/", "-", "\\"}
+			sp = spinner.New(spinnerCharSet, 1*time.Second)
+			sp.Color("black")
+			sp.Start()
+			defer sp.Stop()
 		}
-	}
+		for {
+			select {
+			case <-reporterCtx.Done():
+				return
+			case res := <-c:
+				testRes = res.Merge(&testRes)
+				sp.Suffix = fmt.Sprintf(" Running Gemini... %v", testRes)
+				if testRes.ReadErrors > 0 {
+					testRes.PrintResult()
+					fmt.Println("Error in data validation. Exiting.")
+					cancelWorkers()
+					return
+				}
+			}
+		}
+	}()
+
+	workers.Wait()
+	cancelReporter()
+	reporter.Wait()
 
 	testRes.PrintResult()
 }
@@ -197,10 +236,16 @@ func validationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session,
 	}
 }
 
-func Job(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, c chan Status, mode string) {
+func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, c chan Status, mode string) {
+	defer wg.Done()
 	testStatus := Status{}
 
 	for i := 0; i < maxTests; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		switch mode {
 		case writeMode:
 			mutationJob(schema, table, s, p, &testStatus)
@@ -215,12 +260,10 @@ func Job(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.
 			}
 		}
 
-		threadNum := p.Min / pkNumberPerThread
-		if i%1000 == 0 && threadNum == rand.Intn(concurrency) {
-			fmt.Printf("thread %v: ", threadNum)
-			fmt.Println(testStatus)
+		if i%1000 == 0 {
+			c <- testStatus
+			testStatus = Status{}
 		}
-
 		if failFast && testStatus.ReadErrors > 0 {
 			break
 		}
@@ -252,4 +295,5 @@ func init() {
 	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
 	rootCmd.Flags().BoolVarP(&failFast, "fail-fast", "f", false, "Stop on the first failure")
+	rootCmd.Flags().BoolVarP(&nonInteractive, "non-interactive", "", false, "Run in non-interactive mode (disable progress indicator)")
 }
