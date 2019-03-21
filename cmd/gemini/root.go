@@ -5,7 +5,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"golang.org/x/net/context"
 	"io/ioutil"
 	"math/rand"
 	"sync"
@@ -14,6 +13,7 @@ import (
 	"github.com/briandowns/spinner"
 	"github.com/scylladb/gemini"
 	"github.com/spf13/cobra"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -166,12 +166,10 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 	// Wait group for the reporter goroutine.
 	var reporter sync.WaitGroup
 	reporter.Add(1)
-
-	var testRes Status
 	reporterCtx, cancelReporter := context.WithCancel(context.Background())
 	go func() {
 		defer reporter.Done()
-
+		var testRes Status
 		var sp *spinner.Spinner = nil
 		if interactive() {
 			spinnerCharSet := []string{"|", "/", "-", "\\"}
@@ -183,6 +181,7 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 		for {
 			select {
 			case <-reporterCtx.Done():
+				testRes.PrintResult()
 				return
 			case res := <-c:
 				testRes = res.Merge(&testRes)
@@ -200,8 +199,6 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 	workers.Wait()
 	cancelReporter()
 	reporter.Wait()
-
-	testRes.PrintResult()
 }
 
 func mutationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, testStatus *Status) {
