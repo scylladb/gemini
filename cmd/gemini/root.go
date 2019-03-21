@@ -20,7 +20,6 @@ var (
 	testClusterHost   string
 	oracleClusterHost string
 	schemaFile        string
-	maxTests          int
 	concurrency       int
 	pkNumberPerThread int
 	seed              int
@@ -29,6 +28,7 @@ var (
 	mode              string
 	failFast          bool
 	nonInteractive    bool
+	duration          time.Duration
 )
 
 const (
@@ -99,7 +99,7 @@ func readSchema(confFile string) (*gemini.Schema, error) {
 func run(cmd *cobra.Command, args []string) {
 	rand.Seed(int64(seed))
 	fmt.Printf("Seed:                            %d\n", seed)
-	fmt.Printf("Number of iterations:            %d\n", maxTests)
+	fmt.Printf("Maximum duration:                %s\n", duration)
 	fmt.Printf("Concurrency:                     %d\n", concurrency)
 	fmt.Printf("Number of partitions per thread: %d\n", pkNumberPerThread)
 	fmt.Printf("Test cluster:                    %s\n", testClusterHost)
@@ -155,10 +155,11 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 	// Wait group for the worker goroutines.
 	var workers sync.WaitGroup
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	workers.Add(len(schema.Tables) * concurrency)
+
 	for _, table := range schema.Tables {
 		for i := 0; i < concurrency; i++ {
 			p := gemini.PartitionRange{Min: minRange + i*maxRange, Max: maxRange + i*maxRange}
-			workers.Add(1)
 			go f(workerCtx, &workers, schema, table, s, p, c, mode)
 		}
 	}
@@ -167,9 +168,10 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 	var reporter sync.WaitGroup
 	reporter.Add(1)
 	reporterCtx, cancelReporter := context.WithCancel(context.Background())
-	go func() {
+	go func(d time.Duration) {
 		defer reporter.Done()
 		var testRes Status
+		timer := time.NewTimer(d)
 		var sp *spinner.Spinner = nil
 		if interactive() {
 			spinnerCharSet := []string{"|", "/", "-", "\\"}
@@ -180,6 +182,11 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 		}
 		for {
 			select {
+			case <-timer.C:
+				testRes.PrintResult()
+				fmt.Println("Test run completed. Exiting.")
+				cancelWorkers()
+				return
 			case <-reporterCtx.Done():
 				testRes.PrintResult()
 				return
@@ -194,7 +201,7 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 				}
 			}
 		}
-	}()
+	}(duration)
 
 	workers.Wait()
 	cancelReporter()
@@ -237,7 +244,8 @@ func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table g
 	defer wg.Done()
 	testStatus := Status{}
 
-	for i := 0; i < maxTests; i++ {
+	var i int
+	for {
 		select {
 		case <-ctx.Done():
 			return
@@ -249,7 +257,7 @@ func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table g
 		case readMode:
 			validationJob(schema, table, s, p, &testStatus)
 		default:
-			ind := rand.Intn(maxTests) % 2
+			ind := rand.Intn(100000) % 2
 			if ind == 0 {
 				mutationJob(schema, table, s, p, &testStatus)
 			} else {
@@ -264,6 +272,7 @@ func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table g
 		if failFast && testStatus.ReadErrors > 0 {
 			break
 		}
+		i++
 	}
 
 	c <- testStatus
@@ -285,7 +294,6 @@ func init() {
 	rootCmd.MarkFlagRequired("oracle-cluster")
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", mixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
-	rootCmd.Flags().IntVarP(&maxTests, "max-tests", "n", 100, "Maximum number of test iterations to run")
 	rootCmd.Flags().IntVarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
 	rootCmd.Flags().IntVarP(&pkNumberPerThread, "max-pk-per-thread", "p", 50, "Maximum number of partition keys per thread")
 	rootCmd.Flags().IntVarP(&seed, "seed", "s", 1, "PRNG seed value")
@@ -293,4 +301,5 @@ func init() {
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
 	rootCmd.Flags().BoolVarP(&failFast, "fail-fast", "f", false, "Stop on the first failure")
 	rootCmd.Flags().BoolVarP(&nonInteractive, "non-interactive", "", false, "Run in non-interactive mode (disable progress indicator)")
+	rootCmd.Flags().DurationVarP(&duration, "duration", "", 30*time.Second, "")
 }
