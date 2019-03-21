@@ -225,7 +225,7 @@ func validationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session,
 	if verbose {
 		fmt.Printf("%s (values=%v)\n", checkQuery, checkValues)
 	}
-	err := s.Check(checkQuery, checkValues...)
+	err := s.Check(table, checkQuery, checkValues...)
 	if err == nil {
 		testStatus.ReadOps++
 	} else {

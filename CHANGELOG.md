@@ -4,6 +4,7 @@
 
 ### Added
 
+- Support for queries using secondary indexes added.
 - Switched to using the upstream Go driver https://github.com/scylladb/gocql instead
   of the regular driver. The goal is performance gains by using that shard awareness
   feature as well as providing proper more real testing of the driver.
