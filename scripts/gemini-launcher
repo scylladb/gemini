@@ -22,7 +22,7 @@ echo "Waiting for ${TEST_NAME} to start"
 until docker logs ${TEST_NAME} | grep "Starting listening for CQL clients" > /dev/null; do sleep 2; done
 
 $GEMINI_CMD \
-	--max-tests=100000000 \
+	--duration=10m \
 	--fail-fast \
 	--test-cluster=${TEST_IP} \
 	--oracle-cluster=${ORACLE_IP} \
