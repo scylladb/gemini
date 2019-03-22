@@ -88,7 +88,7 @@ func GenSchema() *Schema {
 	var partitionKeys []ColumnDef
 	numPartitionKeys := rand.Intn(MaxPartitionKeys-1) + 1
 	for i := 0; i < numPartitionKeys; i++ {
-		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: genColumnType()})
+		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: "int"})
 	}
 	var clusteringKeys []ColumnDef
 	numClusteringKeys := rand.Intn(MaxClusteringKeys)
