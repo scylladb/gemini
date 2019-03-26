@@ -8,7 +8,7 @@ import (
 
 func TestNonEmptyRandRange(t *testing.T) {
 	f := func(x, y int) bool {
-		r := nonEmptyRandRange(x, y, 10)
+		r := nonEmptyRandIntRange(x, y, 10)
 		return r > 0
 	}
 	if err := quick.Check(f, nil); err != nil {
@@ -18,7 +18,27 @@ func TestNonEmptyRandRange(t *testing.T) {
 
 func TestNonEmptyRandRange64(t *testing.T) {
 	f := func(x, y int) bool {
-		r := nonEmptyRandRange(x, y, 10)
+		r := nonEmptyRandIntRange(x, y, 10)
+		return r > 0
+	}
+	if err := quick.Check(f, nil); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestNonEmptyRandFloat32Range(t *testing.T) {
+	f := func(x, y float32) bool {
+		r := nonEmptyRandFloat32Range(x, y, 10)
+		return r > 0
+	}
+	if err := quick.Check(f, nil); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestNonEmptyRandFloat64Range(t *testing.T) {
+	f := func(x, y float64) bool {
+		r := nonEmptyRandFloat64Range(x, y, 10)
 		return r > 0
 	}
 	if err := quick.Check(f, nil); err != nil {
@@ -61,7 +81,7 @@ var bench_rr int
 
 func BenchmarkNonEmptyRandRange(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		bench_rr = nonEmptyRandRange(0, 50, 30)
+		bench_rr = nonEmptyRandIntRange(0, 50, 30)
 	}
 }
 
@@ -69,6 +89,6 @@ var bench_rr64 int64
 
 func BenchmarkNonEmptyRandRange64(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		bench_rr64 = nonEmptyRandRange64(0, 50, 30)
+		bench_rr64 = nonEmptyRandInt64Range(0, 50, 30)
 	}
 }

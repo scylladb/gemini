@@ -19,6 +19,7 @@ require (
 	github.com/spf13/pflag v1.0.3 // indirect
 	github.com/stretchr/testify v1.3.0 // indirect
 	golang.org/x/net v0.0.0-20190313082753-5c2c250b6a70
+	gopkg.in/inf.v0 v0.9.1
 )
 
 replace github.com/gocql/gocql => github.com/scylladb/gocql v1.0.1
