@@ -3,14 +3,15 @@ package gemini
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
 	"github.com/scylladb/go-set/strset"
+	"gopkg.in/inf.v0"
 )
 
 type Session struct {
@@ -87,7 +88,12 @@ func (s *Session) Check(table Table, query string, values ...interface{}) error 
 	})
 	for i, oracleRow := range oracleRows {
 		testRow := testRows[i]
-		diff := cmp.Diff(oracleRow, testRow)
+		cmp.AllowUnexported()
+		diff := cmp.Diff(oracleRow, testRow, cmp.Comparer(func(x, y *inf.Dec) bool {
+			return x.Cmp(y) == 0
+		}), cmp.Comparer(func(x, y *big.Int) bool {
+			return x.Cmp(y) == 0
+		}))
 		if diff != "" {
 			return fmt.Errorf("rows differ (-%v +%v): %v", oracleRow, testRow, diff)
 		}
@@ -108,29 +114,7 @@ func pks(t Table, rows []map[string]interface{}) []string {
 
 func extractRowValues(values []string, columns []ColumnDef, row map[string]interface{}) []string {
 	for _, pk := range columns {
-		cv := row[pk.Name]
-		switch pk.Type {
-		case "int":
-			v, _ := cv.(int)
-			values = append(values, pk.Name+"="+strconv.Itoa(v))
-		case "bigint":
-			v, _ := cv.(int64)
-			values = append(values, pk.Name+"="+strconv.FormatInt(v, 10))
-		case "uuid":
-			v, _ := cv.(gocql.UUID)
-			values = append(values, pk.Name+"="+v.String())
-		case "blob":
-			v, _ := cv.([]byte)
-			values = append(values, pk.Name+"="+string(v))
-		case "text", "varchar":
-			v, _ := cv.(string)
-			values = append(values, pk.Name+"="+v)
-		case "timestamp", "date":
-			v, _ := cv.(time.Time)
-			values = append(values, pk.Name+"="+v.String())
-		default:
-			panic(fmt.Sprintf("not supported type %s", pk))
-		}
+		values = append(values, fmt.Sprintf(pk.Name+"=%v", row[pk.Name]))
 	}
 	return values
 }

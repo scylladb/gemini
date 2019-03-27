@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
-
-	"github.com/gocql/gocql"
 )
 
 type Keyspace struct {
@@ -51,7 +49,11 @@ func (s *Schema) GetDropSchema() []string {
 	}
 }
 
-var types = [...]string{"int", "bigint", "blob", "uuid", "text", "varchar", "timestamp"}
+// TODO: Add support for time when gocql bug is fixed.
+var (
+	pkTypes = []string{"ascii", "bigint", "blob", "date", "decimal", "double", "float", "inet", "int", "smallint", "text" /*"time",*/, "timestamp", "timeuuid", "tinyint", "uuid", "varchar", "varint"}
+	types   = append(append([]string{}, pkTypes...), "boolean", "duration")
+)
 
 func genColumnName(prefix string, idx int) string {
 	return fmt.Sprintf("%s%d", prefix, idx)
@@ -59,6 +61,11 @@ func genColumnName(prefix string, idx int) string {
 
 func genColumnType() string {
 	n := rand.Intn(len(types))
+	return types[n]
+}
+
+func genPrimaryKeyColumnType() string {
+	n := rand.Intn(len(pkTypes))
 	return types[n]
 }
 
@@ -76,7 +83,7 @@ func genIndexName(prefix string, idx int) string {
 const (
 	MaxPartitionKeys  = 2
 	MaxClusteringKeys = 4
-	MaxColumns        = 8
+	MaxColumns        = 16
 )
 
 func GenSchema() *Schema {
@@ -93,7 +100,7 @@ func GenSchema() *Schema {
 	var clusteringKeys []ColumnDef
 	numClusteringKeys := rand.Intn(MaxClusteringKeys)
 	for i := 0; i < numClusteringKeys; i++ {
-		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genColumnType()})
+		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genPrimaryKeyColumnType()})
 	}
 	var columns []ColumnDef
 	numColumns := rand.Intn(MaxColumns)
@@ -116,59 +123,6 @@ func GenSchema() *Schema {
 	}
 	builder.Table(table)
 	return builder.Build()
-}
-
-func genValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
-	switch columnType {
-	case "int":
-		values = append(values, nonEmptyRandRange(p.Min, p.Max, 10))
-	case "bigint":
-		values = append(values, rand.Int63())
-	case "uuid":
-		r := gocql.UUIDFromTime(randDate())
-		values = append(values, r.String())
-	case "blob", "text", "varchar":
-		values = append(values, randStringWithTime(nonEmptyRandRange(p.Max, p.Max, 10), randDate()))
-	case "timestamp", "date":
-		values = append(values, randDate())
-	default:
-		panic(fmt.Sprintf("generate value: not supported type %s", columnType))
-	}
-	return values
-}
-
-func genValueRange(columnType string, p *PartitionRange, values []interface{}) []interface{} {
-	switch columnType {
-	case "int":
-		start := nonEmptyRandRange(p.Min, p.Max, 10)
-		end := start + nonEmptyRandRange(p.Min, p.Max, 10)
-		values = append(values, start)
-		values = append(values, end)
-	case "bigint":
-		start := nonEmptyRandRange64(int64(p.Min), int64(p.Max), 10)
-		end := start + nonEmptyRandRange64(int64(p.Min), int64(p.Max), 10)
-		values = append(values, start)
-		values = append(values, end)
-	case "uuid":
-		start := randDate()
-		end := randDateNewer(start)
-		values = append(values, gocql.UUIDFromTime(start).String())
-		values = append(values, gocql.UUIDFromTime(end).String())
-	case "blob", "text", "varchar":
-		startTime := randDate()
-		start := nonEmptyRandRange(p.Min, p.Max, 10)
-		end := start + nonEmptyRandRange(p.Min, p.Max, 10)
-		values = append(values, nonEmptyRandStringWithTime(start, startTime))
-		values = append(values, nonEmptyRandStringWithTime(end, randDateNewer(startTime)))
-	case "timestamp", "date":
-		start := randDate()
-		end := randDateNewer(start)
-		values = append(values, start)
-		values = append(values, end)
-	default:
-		panic(fmt.Sprintf("generate value range: not supported type %s", columnType))
-	}
-	return values
 }
 
 func (s *Schema) GetCreateSchema() []string {
