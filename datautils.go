@@ -88,7 +88,7 @@ func nonEmptyRandStringWithTime(len int, t time.Time) string {
 	return randStringWithTime(len, t)
 }
 
-func randDate() time.Time {
+func randTime() time.Time {
 	min := time.Date(1970, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 	max := time.Date(2024, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 
@@ -96,7 +96,7 @@ func randDate() time.Time {
 	return time.Unix(sec, 0)
 }
 
-func randDateNewer(d time.Time) time.Time {
+func randTimeNewer(d time.Time) time.Time {
 	min := time.Date(d.Year()+1, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 	max := time.Date(2024, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 
@@ -125,13 +125,13 @@ func randIpV4Address(v, pos int) string {
 func genValue(columnType string, p *PartitionRange) interface{} {
 	switch columnType {
 	case "ascii", "blob", "text", "varchar":
-		return randStringWithTime(nonEmptyRandIntRange(p.Max, p.Max, 10), randDate())
+		return randStringWithTime(nonEmptyRandIntRange(p.Max, p.Max, 10), randTime())
 	case "bigint":
 		return rand.Int63()
 	case "boolean":
 		return rand.Int()%2 == 0
 	case "date", "time", "timestamp":
-		return randDate()
+		return randTime()
 	case "decimal":
 		return inf.NewDec(randInt64Range(int64(p.Min), int64(p.Max)), 3)
 	case "double":
@@ -147,7 +147,7 @@ func genValue(columnType string, p *PartitionRange) interface{} {
 	case "smallint":
 		return int16(nonEmptyRandIntRange(p.Min, p.Max, 10))
 	case "timeuuid", "uuid":
-		r := gocql.UUIDFromTime(randDate())
+		r := gocql.UUIDFromTime(randTime())
 		return r.String()
 	case "tinyint":
 		return int8(nonEmptyRandIntRange(p.Min, p.Max, 10))
@@ -165,19 +165,19 @@ func appendValue(columnType string, p *PartitionRange, values []interface{}) []i
 func appendValueRange(columnType string, p *PartitionRange, values []interface{}) []interface{} {
 	switch columnType {
 	case "ascii", "blob", "text", "varchar":
-		startTime := randDate()
+		startTime := randTime()
 		start := nonEmptyRandIntRange(p.Min, p.Max, 10)
 		end := start + nonEmptyRandIntRange(p.Min, p.Max, 10)
 		values = append(values, nonEmptyRandStringWithTime(start, startTime))
-		values = append(values, nonEmptyRandStringWithTime(end, randDateNewer(startTime)))
+		values = append(values, nonEmptyRandStringWithTime(end, randTimeNewer(startTime)))
 	case "bigint":
 		start := nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
 		end := start + nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
 		values = append(values, start)
 		values = append(values, end)
 	case "date", "time", "timestamp":
-		start := randDate()
-		end := randDateNewer(start)
+		start := randTime()
+		end := randTimeNewer(start)
 		values = append(values, start)
 		values = append(values, end)
 	case "decimal":
@@ -216,8 +216,8 @@ func appendValueRange(columnType string, p *PartitionRange, values []interface{}
 		values = append(values, start)
 		values = append(values, end)
 	case "timeuuid", "uuid":
-		start := randDate()
-		end := randDateNewer(start)
+		start := randTime()
+		end := randTimeNewer(start)
 		values = append(values, gocql.UUIDFromTime(start).String())
 		values = append(values, gocql.UUIDFromTime(end).String())
 	case "tinyint":
