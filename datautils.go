@@ -88,6 +88,11 @@ func nonEmptyRandStringWithTime(len int, t time.Time) string {
 	return randStringWithTime(len, t)
 }
 
+func randDate() string {
+	time := randTime()
+	return time.Format("2006-01-02")
+}
+
 func randTime() time.Time {
 	min := time.Date(1970, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 	max := time.Date(2024, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
@@ -130,7 +135,9 @@ func genValue(columnType string, p *PartitionRange) interface{} {
 		return rand.Int63()
 	case "boolean":
 		return rand.Int()%2 == 0
-	case "date", "time", "timestamp":
+	case "date":
+		return randDate()
+	case "time", "timestamp":
 		return randTime()
 	case "decimal":
 		return inf.NewDec(randInt64Range(int64(p.Min), int64(p.Max)), 3)
