@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- CQL `INSERT JSON` statement support.
+
 ## [0.9.0] - 2019-04-03
 
 ### Added

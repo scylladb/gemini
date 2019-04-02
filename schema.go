@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -162,7 +163,7 @@ func (s *Schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	var (
 		columns      []string
 		placeholders []string
@@ -189,10 +190,37 @@ func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) *Stmt {
 		Values: func() []interface{} {
 			return values
 		},
-	}
+	}, nil
 }
 
-func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenInsertJsonStmt(t Table, p *PartitionRange) (*Stmt, error) {
+	var (
+		values map[string]interface{}
+	)
+	values = make(map[string]interface{})
+	for _, pk := range t.PartitionKeys {
+		values[pk.Name] = genValue(pk.Type, p)
+	}
+	for _, ck := range t.ClusteringKeys {
+		values[ck.Name] = genValue(ck.Type, p)
+	}
+	for _, cdef := range t.Columns {
+		values[cdef.Name] = genValue(cdef.Type, p)
+	}
+	jsonString, err := json.Marshal(values)
+	if err != nil {
+		return nil, err
+	}
+	query := fmt.Sprintf("INSERT INTO %s.%s JSON ?", s.Keyspace.Name, t.Name)
+	return &Stmt{
+		Query: query,
+		Values: func() []interface{} {
+			return []interface{}{string(jsonString)}
+		},
+	}, nil
+}
+
+func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) (*Stmt, error) {
 	var (
 		relations []string
 		values    []interface{}
@@ -213,15 +241,20 @@ func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) *Stmt {
 		Values: func() []interface{} {
 			return values
 		},
-	}
+	}, nil
 }
 
-func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	switch n := rand.Intn(1000); n {
 	case 10, 100:
 		return s.GenDeleteRows(t, p)
 	default:
-		return s.GenInsertStmt(t, p)
+		switch n := rand.Intn(2); n {
+		case 0:
+			return s.GenInsertJsonStmt(t, p)
+		default:
+			return s.GenInsertStmt(t, p)
+		}
 	}
 }
 
