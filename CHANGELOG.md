@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 - 2019-04-03
 
 ### Added
 
@@ -20,3 +20,5 @@
 ### Changed
 
 - Improve progress indicator ([#14](https://github.com/scylladb/gemini/issues/14)).
+
+[0.9.0]: https://github.com/scylladb/gemini/releases/tag/v0.9.0
