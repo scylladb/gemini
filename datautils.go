@@ -122,7 +122,7 @@ func randIpV4Address(v, pos int) string {
 	return strings.Join(blocks, ".")
 }
 
-func genValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
+func appendValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
 	switch columnType {
 	case "ascii", "blob", "text", "varchar":
 		values = append(values, randStringWithTime(nonEmptyRandIntRange(p.Max, p.Max, 10), randDate()))
@@ -159,7 +159,7 @@ func genValue(columnType string, p *PartitionRange, values []interface{}) []inte
 	return values
 }
 
-func genValueRange(columnType string, p *PartitionRange, values []interface{}) []interface{} {
+func appendValueRange(columnType string, p *PartitionRange, values []interface{}) []interface{} {
 	switch columnType {
 	case "ascii", "blob", "text", "varchar":
 		startTime := randDate()
