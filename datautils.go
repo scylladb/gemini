@@ -144,7 +144,7 @@ func genValue(columnType string, p *PartitionRange) interface{} {
 	case "double":
 		return randFloat64Range(float64(p.Min), float64(p.Max))
 	case "duration":
-		return time.Minute*time.Duration(randIntRange(p.Min, p.Max))
+		return (time.Minute * time.Duration(randIntRange(p.Min, p.Max))).String()
 	case "float":
 		return randFloat32Range(float32(p.Min), float32(p.Max))
 	case "inet":
