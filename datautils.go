@@ -122,41 +122,44 @@ func randIpV4Address(v, pos int) string {
 	return strings.Join(blocks, ".")
 }
 
-func appendValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
+func genValue(columnType string, p *PartitionRange) interface{} {
 	switch columnType {
 	case "ascii", "blob", "text", "varchar":
-		values = append(values, randStringWithTime(nonEmptyRandIntRange(p.Max, p.Max, 10), randDate()))
+		return randStringWithTime(nonEmptyRandIntRange(p.Max, p.Max, 10), randDate())
 	case "bigint":
-		values = append(values, rand.Int63())
+		return rand.Int63()
 	case "boolean":
-		values = append(values, rand.Int()%2 == 0)
+		return rand.Int()%2 == 0
 	case "date", "time", "timestamp":
-		values = append(values, randDate())
+		return randDate()
 	case "decimal":
-		values = append(values, inf.NewDec(randInt64Range(int64(p.Min), int64(p.Max)), 3))
+		return inf.NewDec(randInt64Range(int64(p.Min), int64(p.Max)), 3)
 	case "double":
-		values = append(values, randFloat64Range(float64(p.Min), float64(p.Max)))
+		return randFloat64Range(float64(p.Min), float64(p.Max))
 	case "duration":
-		values = append(values, time.Minute*time.Duration(randIntRange(p.Min, p.Max)))
+		return time.Minute*time.Duration(randIntRange(p.Min, p.Max))
 	case "float":
-		values = append(values, randFloat32Range(float32(p.Min), float32(p.Max)))
+		return randFloat32Range(float32(p.Min), float32(p.Max))
 	case "inet":
-		values = append(values, net.ParseIP(randIpV4Address(rand.Intn(255), 2)))
+		return net.ParseIP(randIpV4Address(rand.Intn(255), 2))
 	case "int":
-		values = append(values, nonEmptyRandIntRange(p.Min, p.Max, 10))
+		return nonEmptyRandIntRange(p.Min, p.Max, 10)
 	case "smallint":
-		values = append(values, int16(nonEmptyRandIntRange(p.Min, p.Max, 10)))
+		return int16(nonEmptyRandIntRange(p.Min, p.Max, 10))
 	case "timeuuid", "uuid":
 		r := gocql.UUIDFromTime(randDate())
-		values = append(values, r.String())
+		return r.String()
 	case "tinyint":
-		values = append(values, int8(nonEmptyRandIntRange(p.Min, p.Max, 10)))
+		return int8(nonEmptyRandIntRange(p.Min, p.Max, 10))
 	case "varint":
-		values = append(values, big.NewInt(randInt64Range(int64(p.Min), int64(p.Max))))
+		return big.NewInt(randInt64Range(int64(p.Min), int64(p.Max)))
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", columnType))
 	}
-	return values
+}
+
+func appendValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
+	return append(values, genValue(columnType, p))
 }
 
 func appendValueRange(columnType string, p *PartitionRange, values []interface{}) []interface{} {
