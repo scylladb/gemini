@@ -195,9 +195,11 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 				sp.Suffix = fmt.Sprintf(" Running Gemini... %v", testRes)
 				if testRes.ReadErrors > 0 {
 					testRes.PrintResult()
-					fmt.Println("Error in data validation. Exiting.")
-					cancelWorkers()
-					return
+					if failFast {
+						fmt.Println("Error in data validation. Exiting.")
+						cancelWorkers()
+						return
+					}
 				}
 			}
 		}
