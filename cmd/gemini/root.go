@@ -295,6 +295,8 @@ func Execute() {
 }
 
 func init() {
+
+	rootCmd.Version = version + ", commit " + commit + ", date " + date
 	rootCmd.Flags().StringVarP(&testClusterHost, "test-cluster", "t", "", "Host name of the test cluster that is system under test")
 	rootCmd.MarkFlagRequired("test-cluster")
 	rootCmd.Flags().StringVarP(&oracleClusterHost, "oracle-cluster", "o", "", "Host name of the oracle cluster that provides correct answers")

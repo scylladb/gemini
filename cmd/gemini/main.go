@@ -7,6 +7,12 @@ import (
 	"os"
 )
 
+var (
+	commit  = "none"
+	version = "dev"
+	date    = "unknown"
+)
+
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)

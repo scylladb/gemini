@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added version info printing using '--version' program argument.
 - CQL `INSERT JSON` statement support.
 
 ## [0.9.0] - 2019-04-03
