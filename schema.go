@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -162,7 +163,7 @@ func (s *Schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	var (
 		columns      []string
 		placeholders []string
@@ -171,17 +172,17 @@ func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) *Stmt {
 	for _, pk := range t.PartitionKeys {
 		columns = append(columns, pk.Name)
 		placeholders = append(placeholders, "?")
-		values = genValue(pk.Type, p, values)
+		values = appendValue(pk.Type, p, values)
 	}
 	for _, ck := range t.ClusteringKeys {
 		columns = append(columns, ck.Name)
 		placeholders = append(placeholders, "?")
-		values = genValue(ck.Type, p, values)
+		values = appendValue(ck.Type, p, values)
 	}
 	for _, cdef := range t.Columns {
 		columns = append(columns, cdef.Name)
 		placeholders = append(placeholders, "?")
-		values = genValue(cdef.Type, p, values)
+		values = appendValue(cdef.Type, p, values)
 	}
 	query := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", s.Keyspace.Name, t.Name, strings.Join(columns, ","), strings.Join(placeholders, ","))
 	return &Stmt{
@@ -189,22 +190,49 @@ func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) *Stmt {
 		Values: func() []interface{} {
 			return values
 		},
-	}
+	}, nil
 }
 
-func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenInsertJsonStmt(t Table, p *PartitionRange) (*Stmt, error) {
+	var (
+		values map[string]interface{}
+	)
+	values = make(map[string]interface{})
+	for _, pk := range t.PartitionKeys {
+		values[pk.Name] = genValue(pk.Type, p)
+	}
+	for _, ck := range t.ClusteringKeys {
+		values[ck.Name] = genValue(ck.Type, p)
+	}
+	for _, cdef := range t.Columns {
+		values[cdef.Name] = genValue(cdef.Type, p)
+	}
+	jsonString, err := json.Marshal(values)
+	if err != nil {
+		return nil, err
+	}
+	query := fmt.Sprintf("INSERT INTO %s.%s JSON ?", s.Keyspace.Name, t.Name)
+	return &Stmt{
+		Query: query,
+		Values: func() []interface{} {
+			return []interface{}{string(jsonString)}
+		},
+	}, nil
+}
+
+func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) (*Stmt, error) {
 	var (
 		relations []string
 		values    []interface{}
 	)
 	for _, pk := range t.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
-		values = genValue(pk.Type, p, values)
+		values = appendValue(pk.Type, p, values)
 	}
 	if len(t.ClusteringKeys) == 1 {
 		for _, ck := range t.ClusteringKeys {
 			relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
-			values = genValueRange(ck.Type, p, values)
+			values = appendValueRange(ck.Type, p, values)
 		}
 	}
 	query := fmt.Sprintf("DELETE FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
@@ -213,15 +241,20 @@ func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) *Stmt {
 		Values: func() []interface{} {
 			return values
 		},
-	}
+	}, nil
 }
 
-func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	switch n := rand.Intn(1000); n {
 	case 10, 100:
 		return s.GenDeleteRows(t, p)
 	default:
-		return s.GenInsertStmt(t, p)
+		switch n := rand.Intn(2); n {
+		case 0:
+			return s.GenInsertJsonStmt(t, p)
+		default:
+			return s.GenInsertStmt(t, p)
+		}
 	}
 }
 
@@ -252,7 +285,7 @@ func (s *Schema) genSinglePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
-		values = genValue(pk.Type, p, values)
+		values = appendValue(pk.Type, p, values)
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
@@ -275,7 +308,7 @@ func (s *Schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	for _, pk := range t.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 		for i := 0; i < pkNum; i++ {
-			values = genValue(pk.Type, p, values)
+			values = appendValue(pk.Type, p, values)
 		}
 	}
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
@@ -294,18 +327,18 @@ func (s *Schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	)
 	for _, pk := range t.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
-		values = genValue(pk.Type, p, values)
+		values = appendValue(pk.Type, p, values)
 	}
 	maxClusteringRels := 0
 	if len(t.ClusteringKeys) > 1 {
 		maxClusteringRels = rand.Intn(len(t.ClusteringKeys) - 1)
 		for i := 0; i < maxClusteringRels; i++ {
 			relations = append(relations, fmt.Sprintf("%s = ?", t.ClusteringKeys[i].Name))
-			values = genValue(t.ClusteringKeys[i].Type, p, values)
+			values = appendValue(t.ClusteringKeys[i].Type, p, values)
 		}
 	}
 	relations = append(relations, fmt.Sprintf("%s > ? AND %s < ?", t.ClusteringKeys[maxClusteringRels].Name, t.ClusteringKeys[maxClusteringRels].Name))
-	values = genValueRange(t.ClusteringKeys[maxClusteringRels].Type, p, values)
+	values = appendValueRange(t.ClusteringKeys[maxClusteringRels].Type, p, values)
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
 		Query: query,
@@ -327,7 +360,7 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 	for _, pk := range t.PartitionKeys {
 		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
 		for i := 0; i < pkNum; i++ {
-			values = genValue(pk.Type, p, values)
+			values = appendValue(pk.Type, p, values)
 		}
 	}
 	maxClusteringRels := 0
@@ -335,11 +368,11 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 		maxClusteringRels = rand.Intn(len(t.ClusteringKeys) - 1)
 		for i := 0; i < maxClusteringRels; i++ {
 			relations = append(relations, fmt.Sprintf("%s = ?", t.ClusteringKeys[i].Name))
-			values = genValue(t.ClusteringKeys[i].Type, p, values)
+			values = appendValue(t.ClusteringKeys[i].Type, p, values)
 		}
 	}
 	relations = append(relations, fmt.Sprintf("%s > ? AND %s < ?", t.ClusteringKeys[maxClusteringRels].Name, t.ClusteringKeys[maxClusteringRels].Name))
-	values = genValueRange(t.ClusteringKeys[maxClusteringRels].Type, p, values)
+	values = appendValueRange(t.ClusteringKeys[maxClusteringRels].Type, p, values)
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
 		Query: query,
@@ -355,7 +388,7 @@ func (s *Schema) genSingleIndexQuery(t Table, p *PartitionRange) *Stmt {
 	}
 	idx := rand.Intn(len(t.Indexes))
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s=?", s.Keyspace.Name, t.Name, t.Indexes[idx].Column.Name)
-	values := genValue(t.Indexes[idx].Column.Type, p, nil)
+	values := appendValue(t.Indexes[idx].Column.Type, p, nil)
 	return &Stmt{
 		Query: query,
 		Values: func() []interface{} {

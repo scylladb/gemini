@@ -211,7 +211,12 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 }
 
 func mutationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, testStatus *Status) {
-	mutateStmt := schema.GenMutateStmt(table, &p)
+	mutateStmt, err := schema.GenMutateStmt(table, &p)
+	if err != nil {
+		fmt.Printf("Failed! Mutation statement generation failed: '%v'\n", err)
+		testStatus.WriteErrors++
+		return
+	}
 	mutateQuery := mutateStmt.Query
 	mutateValues := mutateStmt.Values()
 	if verbose {
