@@ -3,8 +3,43 @@ package gemini
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"math/rand"
+	"net"
 	"strings"
+	"time"
+
+	"github.com/gocql/gocql"
+	"gopkg.in/inf.v0"
+)
+
+const (
+	TYPE_ASCII     = SimpleType("ascii")
+	TYPE_BIGINT    = SimpleType("bigint")
+	TYPE_BLOB      = SimpleType("blob")
+	TYPE_BOOLEAN   = SimpleType("boolean")
+	TYPE_DATE      = SimpleType("date")
+	TYPE_DECIMAL   = SimpleType("decimal")
+	TYPE_DOUBLE    = SimpleType("double")
+	TYPE_DURATION  = SimpleType("duration")
+	TYPE_FLOAT     = SimpleType("float")
+	TYPE_INET      = SimpleType("inet")
+	TYPE_INT       = SimpleType("int")
+	TYPE_SMALLINT  = SimpleType("smallint")
+	TYPE_TEXT      = SimpleType("text")
+	TYPE_TIME      = SimpleType("time")
+	TYPE_TIMESTAMP = SimpleType("timestamp")
+	TYPE_TIMEUUID  = SimpleType("timeuuid")
+	TYPE_TINYINT   = SimpleType("tinyint")
+	TYPE_UUID      = SimpleType("uuid")
+	TYPE_VARCHAR   = SimpleType("varchar")
+	TYPE_VARINT    = SimpleType("varint")
+)
+
+// TODO: Add support for time when gocql bug is fixed.
+var (
+	pkTypes = []SimpleType{TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT /*TYPE_TIME,*/, TYPE_TIMESTAMP, TYPE_TIMEUUID, TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT}
+	types   = append(append([]SimpleType{}, pkTypes...), TYPE_BOOLEAN, TYPE_DURATION)
 )
 
 type Keyspace struct {
@@ -13,7 +48,15 @@ type Keyspace struct {
 
 type ColumnDef struct {
 	Name string
-	Type string
+	Type Type
+}
+
+type Type interface {
+	Name() string
+	CQLDef() string
+	CQLHolder() string
+	GenValue(*PartitionRange) []interface{}
+	GenValueRange(p *PartitionRange) ([]interface{}, []interface{})
 }
 
 type IndexDef struct {
@@ -50,31 +93,220 @@ func (s *Schema) GetDropSchema() []string {
 	}
 }
 
-// TODO: Add support for time when gocql bug is fixed.
-var (
-	pkTypes = []string{"ascii", "bigint", "blob", "date", "decimal", "double", "float", "inet", "int", "smallint", "text" /*"time",*/, "timestamp", "timeuuid", "tinyint", "uuid", "varchar", "varint"}
-	types   = append(append([]string{}, pkTypes...), "boolean", "duration")
-)
+type SimpleType string
+
+func (st SimpleType) Name() string {
+	return string(st)
+}
+
+func (st SimpleType) CQLDef() string {
+	return string(st)
+}
+
+func (st SimpleType) CQLHolder() string {
+	return "?"
+}
+
+func (st SimpleType) GenValue(p *PartitionRange) []interface{} {
+	var val interface{}
+	switch st {
+	case TYPE_ASCII, TYPE_BLOB, TYPE_TEXT, TYPE_VARCHAR:
+		val = randStringWithTime(nonEmptyRandIntRange(p.Max, p.Max, 10), randTime())
+	case TYPE_BIGINT:
+		val = rand.Int63()
+	case TYPE_BOOLEAN:
+		val = rand.Int()%2 == 0
+	case TYPE_DATE:
+		val = randDate()
+	case TYPE_TIME, TYPE_TIMESTAMP:
+		val = randTime()
+	case TYPE_DECIMAL:
+		val = inf.NewDec(randInt64Range(int64(p.Min), int64(p.Max)), 3)
+	case TYPE_DOUBLE:
+		val = randFloat64Range(float64(p.Min), float64(p.Max))
+	case TYPE_DURATION:
+		val = (time.Minute * time.Duration(randIntRange(p.Min, p.Max))).String()
+	case TYPE_FLOAT:
+		val = randFloat32Range(float32(p.Min), float32(p.Max))
+	case TYPE_INET:
+		val = net.ParseIP(randIpV4Address(rand.Intn(255), 2))
+	case TYPE_INT:
+		val = nonEmptyRandIntRange(p.Min, p.Max, 10)
+	case TYPE_SMALLINT:
+		val = int16(nonEmptyRandIntRange(p.Min, p.Max, 10))
+	case TYPE_TIMEUUID, TYPE_UUID:
+		r := gocql.UUIDFromTime(randTime())
+		val = r.String()
+	case TYPE_TINYINT:
+		val = int8(nonEmptyRandIntRange(p.Min, p.Max, 10))
+	case TYPE_VARINT:
+		val = big.NewInt(randInt64Range(int64(p.Min), int64(p.Max)))
+	default:
+		panic(fmt.Sprintf("generate value: not supported type %s", st))
+	}
+	return []interface{}{
+		val,
+	}
+}
+
+func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}) {
+	var (
+		left  interface{}
+		right interface{}
+	)
+	switch st {
+	case TYPE_ASCII, TYPE_BLOB, TYPE_TEXT, TYPE_VARCHAR:
+		startTime := randTime()
+		start := nonEmptyRandIntRange(p.Min, p.Max, 10)
+		end := start + nonEmptyRandIntRange(p.Min, p.Max, 10)
+		left = nonEmptyRandStringWithTime(start, startTime)
+		right = nonEmptyRandStringWithTime(end, randTimeNewer(startTime))
+	case TYPE_BIGINT:
+		start := nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
+		end := start + nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
+		left = start
+		right = end
+	case TYPE_DATE, TYPE_TIME, TYPE_TIMESTAMP:
+		start := randTime()
+		end := randTimeNewer(start)
+		left = start
+		right = end
+	case TYPE_DECIMAL:
+		start := nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
+		end := start + nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
+		left = inf.NewDec(start, 3)
+		right = inf.NewDec(end, 3)
+	case TYPE_DOUBLE:
+		start := nonEmptyRandFloat64Range(float64(p.Min), float64(p.Max), 10)
+		end := start + nonEmptyRandFloat64Range(float64(p.Min), float64(p.Max), 10)
+		left = start
+		right = end
+	case TYPE_DURATION:
+		start := time.Minute * time.Duration(nonEmptyRandIntRange(p.Min, p.Max, 10))
+		end := start + time.Minute*time.Duration(nonEmptyRandIntRange(p.Min, p.Max, 10))
+		left = start
+		right = end
+	case TYPE_FLOAT:
+		start := nonEmptyRandFloat32Range(float32(p.Min), float32(p.Max), 10)
+		end := start + nonEmptyRandFloat32Range(float32(p.Min), float32(p.Max), 10)
+		left = start
+		right = end
+	case TYPE_INET:
+		start := randIpV4Address(0, 3)
+		end := randIpV4Address(255, 3)
+		left = net.ParseIP(start)
+		right = net.ParseIP(end)
+	case TYPE_INT:
+		start := nonEmptyRandIntRange(p.Min, p.Max, 10)
+		end := start + nonEmptyRandIntRange(p.Min, p.Max, 10)
+		left = start
+		right = end
+	case TYPE_SMALLINT:
+		start := int16(nonEmptyRandIntRange(p.Min, p.Max, 10))
+		end := start + int16(nonEmptyRandIntRange(p.Min, p.Max, 10))
+		left = start
+		right = end
+	case TYPE_TIMEUUID, TYPE_UUID:
+		start := randTime()
+		end := randTimeNewer(start)
+		left = gocql.UUIDFromTime(start).String()
+		right = gocql.UUIDFromTime(end).String()
+	case TYPE_TINYINT:
+		start := int8(nonEmptyRandIntRange(p.Min, p.Max, 10))
+		end := start + int8(nonEmptyRandIntRange(p.Min, p.Max, 10))
+		left = start
+		right = end
+	case TYPE_VARINT:
+		end := &big.Int{}
+		start := big.NewInt(randInt64Range(int64(p.Min), int64(p.Max)))
+		end.Set(start)
+		end = end.Add(start, big.NewInt(randInt64Range(int64(p.Min), int64(p.Max))))
+		left = start
+		right = end
+	default:
+		panic(fmt.Sprintf("generate value range: not supported type %s", st))
+	}
+	return []interface{}{left}, []interface{}{right}
+}
+
+type TupleType struct {
+	Types []SimpleType
+}
+
+func (tt TupleType) Name() string {
+	names := make([]string, len(tt.Types), len(tt.Types))
+	for i, t := range tt.Types {
+		names[i] = t.Name()
+	}
+	return "Type: " + strings.Join(names, ",")
+}
+
+func (tt TupleType) CQLDef() string {
+	names := make([]string, len(tt.Types), len(tt.Types))
+	for i, t := range tt.Types {
+		names[i] = t.Name()
+	}
+	return "tuple<" + strings.Join(names, ",") + ">"
+}
+
+func (tt TupleType) CQLHolder() string {
+	return "(" + strings.TrimRight(strings.Repeat("?,", len(tt.Types)), ",") + ")"
+}
+
+func (tt TupleType) GenValue(p *PartitionRange) []interface{} {
+	vals := make([]interface{}, 0, len(tt.Types))
+	for _, t := range tt.Types {
+		vals = append(vals, t.GenValue(p)...)
+	}
+	return vals
+}
+
+func (tt TupleType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}) {
+	left := make([]interface{}, 0, len(tt.Types))
+	right := make([]interface{}, 0, len(tt.Types))
+	for _, t := range tt.Types {
+		ttLeft, ttRight := t.GenValueRange(p)
+		left = append(left, ttLeft...)
+		right = append(right, ttRight...)
+	}
+	return left, right
+}
 
 func genColumnName(prefix string, idx int) string {
 	return fmt.Sprintf("%s%d", prefix, idx)
 }
 
-func genColumnType() string {
-	n := rand.Intn(len(types))
-	return types[n]
+func genColumnType(numColumns int) Type {
+	n := rand.Intn(numColumns + 1)
+	switch n {
+	case numColumns:
+		return genTupleType()
+	default:
+		return genSimpleType()
+	}
 }
 
-func genPrimaryKeyColumnType() string {
+func genSimpleType() SimpleType {
+	return types[rand.Intn(len(types))]
+}
+
+func genTupleType() Type {
+	n := rand.Intn(5)
+	if n == 0 {
+		n = 1
+	}
+	typeList := make([]SimpleType, n, n)
+	for i := 0; i < n; i++ {
+		typeList[i] = genSimpleType()
+	}
+	return TupleType{
+		Types: typeList,
+	}
+}
+
+func genPrimaryKeyColumnType() Type {
 	n := rand.Intn(len(pkTypes))
 	return types[n]
-}
-
-func genColumnDef(prefix string, idx int) ColumnDef {
-	return ColumnDef{
-		Name: genColumnName(prefix, idx),
-		Type: genColumnType(),
-	}
 }
 
 func genIndexName(prefix string, idx int) string {
@@ -96,7 +328,7 @@ func GenSchema() *Schema {
 	var partitionKeys []ColumnDef
 	numPartitionKeys := rand.Intn(MaxPartitionKeys-1) + 1
 	for i := 0; i < numPartitionKeys; i++ {
-		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: "int"})
+		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: TYPE_INT})
 	}
 	var clusteringKeys []ColumnDef
 	numClusteringKeys := rand.Intn(MaxClusteringKeys)
@@ -106,7 +338,7 @@ func GenSchema() *Schema {
 	var columns []ColumnDef
 	numColumns := rand.Intn(MaxColumns)
 	for i := 0; i < numColumns; i++ {
-		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType()})
+		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns)})
 	}
 	var indexes []IndexDef
 	if numColumns > 0 {
@@ -139,14 +371,14 @@ func (s *Schema) GetCreateSchema() []string {
 		)
 		for _, pk := range t.PartitionKeys {
 			partitionKeys = append(partitionKeys, pk.Name)
-			columns = append(columns, fmt.Sprintf("%s %s", pk.Name, pk.Type))
+			columns = append(columns, fmt.Sprintf("%s %s", pk.Name, pk.Type.CQLDef()))
 		}
 		for _, ck := range t.ClusteringKeys {
 			clusteringKeys = append(clusteringKeys, ck.Name)
-			columns = append(columns, fmt.Sprintf("%s %s", ck.Name, ck.Type))
+			columns = append(columns, fmt.Sprintf("%s %s", ck.Name, ck.Type.CQLDef()))
 		}
 		for _, cdef := range t.Columns {
-			columns = append(columns, fmt.Sprintf("%s %s", cdef.Name, cdef.Type))
+			columns = append(columns, fmt.Sprintf("%s %s", cdef.Name, cdef.Type.CQLDef()))
 		}
 		var createTable string
 		if len(clusteringKeys) == 0 {
@@ -171,17 +403,17 @@ func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
 		columns = append(columns, pk.Name)
-		placeholders = append(placeholders, "?")
+		placeholders = append(placeholders, pk.Type.CQLHolder())
 		values = appendValue(pk.Type, p, values)
 	}
 	for _, ck := range t.ClusteringKeys {
 		columns = append(columns, ck.Name)
-		placeholders = append(placeholders, "?")
+		placeholders = append(placeholders, ck.Type.CQLHolder())
 		values = appendValue(ck.Type, p, values)
 	}
 	for _, cdef := range t.Columns {
 		columns = append(columns, cdef.Name)
-		placeholders = append(placeholders, "?")
+		placeholders = append(placeholders, cdef.Type.CQLHolder())
 		values = appendValue(cdef.Type, p, values)
 	}
 	query := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", s.Keyspace.Name, t.Name, strings.Join(columns, ","), strings.Join(placeholders, ","))
@@ -199,13 +431,13 @@ func (s *Schema) GenInsertJsonStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	)
 	values = make(map[string]interface{})
 	for _, pk := range t.PartitionKeys {
-		values[pk.Name] = genValue(pk.Type, p)
+		values[pk.Name] = pk.Type.GenValue(p)
 	}
 	for _, ck := range t.ClusteringKeys {
-		values[ck.Name] = genValue(ck.Type, p)
+		values[ck.Name] = ck.Type.GenValue(p)
 	}
 	for _, cdef := range t.Columns {
-		values[cdef.Name] = genValue(cdef.Type, p)
+		values[cdef.Name] = cdef.Type.GenValue(p)
 	}
 	jsonString, err := json.Marshal(values)
 	if err != nil {
@@ -250,8 +482,8 @@ func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) (*Stmt, error) {
 		return s.GenDeleteRows(t, p)
 	default:
 		switch n := rand.Intn(2); n {
-		case 0:
-			return s.GenInsertJsonStmt(t, p)
+		//case 0:
+		//	return s.GenInsertJsonStmt(t, p)
 		default:
 			return s.GenInsertStmt(t, p)
 		}

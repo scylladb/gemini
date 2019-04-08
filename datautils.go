@@ -3,15 +3,10 @@ package gemini
 import (
 	"encoding/base64"
 	"fmt"
-	"math/big"
 	"math/rand"
-	"net"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/gocql/gocql"
-	"gopkg.in/inf.v0"
 
 	"github.com/segmentio/ksuid"
 )
@@ -127,120 +122,13 @@ func randIpV4Address(v, pos int) string {
 	return strings.Join(blocks, ".")
 }
 
-func genValue(columnType string, p *PartitionRange) interface{} {
-	switch columnType {
-	case "ascii", "blob", "text", "varchar":
-		return randStringWithTime(nonEmptyRandIntRange(p.Max, p.Max, 10), randTime())
-	case "bigint":
-		return rand.Int63()
-	case "boolean":
-		return rand.Int()%2 == 0
-	case "date":
-		return randDate()
-	case "time", "timestamp":
-		return randTime()
-	case "decimal":
-		return inf.NewDec(randInt64Range(int64(p.Min), int64(p.Max)), 3)
-	case "double":
-		return randFloat64Range(float64(p.Min), float64(p.Max))
-	case "duration":
-		return (time.Minute * time.Duration(randIntRange(p.Min, p.Max))).String()
-	case "float":
-		return randFloat32Range(float32(p.Min), float32(p.Max))
-	case "inet":
-		return net.ParseIP(randIpV4Address(rand.Intn(255), 2))
-	case "int":
-		return nonEmptyRandIntRange(p.Min, p.Max, 10)
-	case "smallint":
-		return int16(nonEmptyRandIntRange(p.Min, p.Max, 10))
-	case "timeuuid", "uuid":
-		r := gocql.UUIDFromTime(randTime())
-		return r.String()
-	case "tinyint":
-		return int8(nonEmptyRandIntRange(p.Min, p.Max, 10))
-	case "varint":
-		return big.NewInt(randInt64Range(int64(p.Min), int64(p.Max)))
-	default:
-		panic(fmt.Sprintf("generate value: not supported type %s", columnType))
-	}
+func appendValue(columnType Type, p *PartitionRange, values []interface{}) []interface{} {
+	return append(values, columnType.GenValue(p)...)
 }
 
-func appendValue(columnType string, p *PartitionRange, values []interface{}) []interface{} {
-	return append(values, genValue(columnType, p))
-}
-
-func appendValueRange(columnType string, p *PartitionRange, values []interface{}) []interface{} {
-	switch columnType {
-	case "ascii", "blob", "text", "varchar":
-		startTime := randTime()
-		start := nonEmptyRandIntRange(p.Min, p.Max, 10)
-		end := start + nonEmptyRandIntRange(p.Min, p.Max, 10)
-		values = append(values, nonEmptyRandStringWithTime(start, startTime))
-		values = append(values, nonEmptyRandStringWithTime(end, randTimeNewer(startTime)))
-	case "bigint":
-		start := nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
-		end := start + nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
-		values = append(values, start)
-		values = append(values, end)
-	case "date", "time", "timestamp":
-		start := randTime()
-		end := randTimeNewer(start)
-		values = append(values, start)
-		values = append(values, end)
-	case "decimal":
-		start := nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
-		end := start + nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
-		values = append(values, inf.NewDec(start, 3))
-		values = append(values, inf.NewDec(end, 3))
-	case "double":
-		start := nonEmptyRandFloat64Range(float64(p.Min), float64(p.Max), 10)
-		end := start + nonEmptyRandFloat64Range(float64(p.Min), float64(p.Max), 10)
-		values = append(values, start)
-		values = append(values, end)
-	case "duration":
-		start := time.Minute * time.Duration(nonEmptyRandIntRange(p.Min, p.Max, 10))
-		end := start + time.Minute*time.Duration(nonEmptyRandIntRange(p.Min, p.Max, 10))
-		values = append(values, start)
-		values = append(values, end)
-	case "float":
-		start := nonEmptyRandFloat32Range(float32(p.Min), float32(p.Max), 10)
-		end := start + nonEmptyRandFloat32Range(float32(p.Min), float32(p.Max), 10)
-		values = append(values, start)
-		values = append(values, end)
-	case "inet":
-		start := randIpV4Address(0, 3)
-		end := randIpV4Address(255, 3)
-		values = append(values, net.ParseIP(start))
-		values = append(values, net.ParseIP(end))
-	case "int":
-		start := nonEmptyRandIntRange(p.Min, p.Max, 10)
-		end := start + nonEmptyRandIntRange(p.Min, p.Max, 10)
-		values = append(values, start)
-		values = append(values, end)
-	case "smallint":
-		start := int16(nonEmptyRandIntRange(p.Min, p.Max, 10))
-		end := start + int16(nonEmptyRandIntRange(p.Min, p.Max, 10))
-		values = append(values, start)
-		values = append(values, end)
-	case "timeuuid", "uuid":
-		start := randTime()
-		end := randTimeNewer(start)
-		values = append(values, gocql.UUIDFromTime(start).String())
-		values = append(values, gocql.UUIDFromTime(end).String())
-	case "tinyint":
-		start := int8(nonEmptyRandIntRange(p.Min, p.Max, 10))
-		end := start + int8(nonEmptyRandIntRange(p.Min, p.Max, 10))
-		values = append(values, start)
-		values = append(values, end)
-	case "varint":
-		end := &big.Int{}
-		start := big.NewInt(randInt64Range(int64(p.Min), int64(p.Max)))
-		end.Set(start)
-		end = end.Add(start, big.NewInt(randInt64Range(int64(p.Min), int64(p.Max))))
-		values = append(values, start)
-		values = append(values, end)
-	default:
-		panic(fmt.Sprintf("generate value range: not supported type %s", columnType))
-	}
+func appendValueRange(columnType Type, p *PartitionRange, values []interface{}) []interface{} {
+	left, right := columnType.GenValueRange(p)
+	values = append(values, left...)
+	values = append(values, right...)
 	return values
 }
