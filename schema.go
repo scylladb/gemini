@@ -37,6 +37,10 @@ const (
 	TYPE_VARINT    = SimpleType("varint")
 )
 
+const (
+	KnownIssuesJsonWithTuples = "https://github.com/scylladb/scylla/issues/3708"
+)
+
 // TODO: Add support for time when gocql bug is fixed.
 var (
 	pkTypes = []SimpleType{TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT /*TYPE_TIME,*/, TYPE_TIMESTAMP, TYPE_TIMEUUID, TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT}
@@ -104,6 +108,7 @@ type Table struct {
 	ClusteringKeys Columns    `json:"clustering_keys"`
 	Columns        Columns    `json:"columns"`
 	Indexes        []IndexDef `json:"indexes"`
+	KnownIssues    map[string]bool
 }
 
 type Stmt struct {
@@ -395,6 +400,9 @@ func GenSchema() *Schema {
 		ClusteringKeys: clusteringKeys,
 		Columns:        columns,
 		Indexes:        indexes,
+		KnownIssues: map[string]bool{
+			KnownIssuesJsonWithTuples: true,
+		},
 	}
 	builder.Table(table)
 	return builder.Build()
@@ -517,6 +525,9 @@ func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	default:
 		switch n := rand.Intn(2); n {
 		case 0:
+			if t.KnownIssues[KnownIssuesJsonWithTuples] {
+				return s.GenInsertStmt(t, p)
+			}
 			return s.GenInsertJsonStmt(t, p)
 		default:
 			return s.GenInsertStmt(t, p)
