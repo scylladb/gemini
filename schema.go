@@ -383,12 +383,27 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 }
 
 func (s *Schema) genSingleIndexQuery(t Table, p *PartitionRange) *Stmt {
+	var (
+		relations []string
+		values    []interface{}
+	)
+
 	if len(t.Indexes) == 0 {
 		return nil
 	}
+	pkNum := rand.Intn(len(t.PartitionKeys))
+	if pkNum == 0 {
+		pkNum = 1
+	}
+	for _, pk := range t.PartitionKeys {
+		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
+		for i := 0; i < pkNum; i++ {
+			values = appendValue(pk.Type, p, values)
+		}
+	}
 	idx := rand.Intn(len(t.Indexes))
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s=?", s.Keyspace.Name, t.Name, t.Indexes[idx].Column.Name)
-	values := appendValue(t.Indexes[idx].Column.Type, p, nil)
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s AND %s=?", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "), t.Indexes[idx].Column.Name)
+	values = appendValue(t.Indexes[idx].Column.Type, p, nil)
 	return &Stmt{
 		Query: query,
 		Values: func() []interface{} {
