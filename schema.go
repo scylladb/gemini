@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -64,12 +65,45 @@ type IndexDef struct {
 	Column ColumnDef
 }
 
+type Columns []ColumnDef
+
+func (cs Columns) ToJSONMap(values map[string]interface{}, p *PartitionRange) map[string]interface{} {
+	for _, k := range cs {
+		switch t := k.Type.(type) {
+		case SimpleType:
+			if t != TYPE_BLOB {
+				values[k.Name] = t.GenValue(p)[0]
+				continue
+			}
+			v, ok := t.GenValue(p)[0].(string)
+			if ok {
+				values[k.Name] = "0x" + v
+			}
+		case TupleType:
+			vv := t.GenValue(p)
+			for i, val := range vv {
+				if t.Types[i] == TYPE_BLOB {
+					v, ok := val.(string)
+					if ok {
+						v = "0x" + v
+					}
+					vv[i] = v
+				}
+			}
+			values[k.Name] = vv
+		default:
+			panic(fmt.Sprintf("unknown type: %s", t.Name()))
+		}
+	}
+	return values
+}
+
 type Table struct {
-	Name           string      `json:"name"`
-	PartitionKeys  []ColumnDef `json:"partition_keys"`
-	ClusteringKeys []ColumnDef `json:"clustering_keys"`
-	Columns        []ColumnDef `json:"columns"`
-	Indexes        []IndexDef  `json:"indexes"`
+	Name           string     `json:"name"`
+	PartitionKeys  Columns    `json:"partition_keys"`
+	ClusteringKeys Columns    `json:"clustering_keys"`
+	Columns        Columns    `json:"columns"`
+	Indexes        []IndexDef `json:"indexes"`
 }
 
 type Stmt struct {
@@ -110,8 +144,10 @@ func (st SimpleType) CQLHolder() string {
 func (st SimpleType) GenValue(p *PartitionRange) []interface{} {
 	var val interface{}
 	switch st {
-	case TYPE_ASCII, TYPE_BLOB, TYPE_TEXT, TYPE_VARCHAR:
+	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
 		val = randStringWithTime(nonEmptyRandIntRange(p.Max, p.Max, 10), randTime())
+	case TYPE_BLOB:
+		val = hex.EncodeToString([]byte(randStringWithTime(nonEmptyRandIntRange(p.Max, p.Max, 10), randTime())))
 	case TYPE_BIGINT:
 		val = rand.Int63()
 	case TYPE_BOOLEAN:
@@ -155,12 +191,18 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 		right interface{}
 	)
 	switch st {
-	case TYPE_ASCII, TYPE_BLOB, TYPE_TEXT, TYPE_VARCHAR:
+	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
 		startTime := randTime()
 		start := nonEmptyRandIntRange(p.Min, p.Max, 10)
 		end := start + nonEmptyRandIntRange(p.Min, p.Max, 10)
 		left = nonEmptyRandStringWithTime(start, startTime)
 		right = nonEmptyRandStringWithTime(end, randTimeNewer(startTime))
+	case TYPE_BLOB:
+		startTime := randTime()
+		start := nonEmptyRandIntRange(p.Min, p.Max, 10)
+		end := start + nonEmptyRandIntRange(p.Min, p.Max, 10)
+		left = hex.EncodeToString([]byte(nonEmptyRandStringWithTime(start, startTime)))
+		right = hex.EncodeToString([]byte(nonEmptyRandStringWithTime(end, randTimeNewer(startTime))))
 	case TYPE_BIGINT:
 		start := nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
 		end := start + nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
@@ -292,8 +334,8 @@ func genSimpleType() SimpleType {
 
 func genTupleType() Type {
 	n := rand.Intn(5)
-	if n == 0 {
-		n = 1
+	if n < 2 {
+		n = 2
 	}
 	typeList := make([]SimpleType, n, n)
 	for i := 0; i < n; i++ {
@@ -426,19 +468,11 @@ func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) (*Stmt, error) {
 }
 
 func (s *Schema) GenInsertJsonStmt(t Table, p *PartitionRange) (*Stmt, error) {
-	var (
-		values map[string]interface{}
-	)
-	values = make(map[string]interface{})
-	for _, pk := range t.PartitionKeys {
-		values[pk.Name] = pk.Type.GenValue(p)
-	}
-	for _, ck := range t.ClusteringKeys {
-		values[ck.Name] = ck.Type.GenValue(p)
-	}
-	for _, cdef := range t.Columns {
-		values[cdef.Name] = cdef.Type.GenValue(p)
-	}
+	values := make(map[string]interface{})
+	values = t.PartitionKeys.ToJSONMap(values, p)
+	values = t.ClusteringKeys.ToJSONMap(values, p)
+	values = t.Columns.ToJSONMap(values, p)
+
 	jsonString, err := json.Marshal(values)
 	if err != nil {
 		return nil, err
@@ -482,8 +516,8 @@ func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) (*Stmt, error) {
 		return s.GenDeleteRows(t, p)
 	default:
 		switch n := rand.Intn(2); n {
-		//case 0:
-		//	return s.GenInsertJsonStmt(t, p)
+		case 0:
+			return s.GenInsertJsonStmt(t, p)
 		default:
 			return s.GenInsertStmt(t, p)
 		}
