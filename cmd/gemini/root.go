@@ -159,7 +159,11 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 
 	for _, table := range schema.Tables {
 		for i := 0; i < concurrency; i++ {
-			p := gemini.PartitionRange{Min: minRange + i*maxRange, Max: maxRange + i*maxRange}
+			p := gemini.PartitionRange{
+				Min:  minRange + i*maxRange,
+				Max:  maxRange + i*maxRange,
+				Rand: rand.New(rand.NewSource(int64(seed))),
+			}
 			go f(workerCtx, &workers, schema, table, s, p, c, mode)
 		}
 	}
@@ -264,7 +268,7 @@ func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table g
 		case readMode:
 			validationJob(schema, table, s, p, &testStatus)
 		default:
-			ind := rand.Intn(100000) % 2
+			ind := p.Rand.Intn(100000) % 2
 			if ind == 0 {
 				mutationJob(schema, table, s, p, &testStatus)
 			} else {
