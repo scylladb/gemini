@@ -33,4 +33,5 @@
 
 - Improve progress indicator ([#14](https://github.com/scylladb/gemini/issues/14)).
 
+[0.9.1]: https://github.com/scylladb/gemini/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/scylladb/gemini/releases/tag/v0.9.0
