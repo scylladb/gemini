@@ -22,6 +22,11 @@ checksum:
   name_template: 'checksums.txt'
 snapshot:
   name_template: "{{ .Tag }}-next"
+s3:
+  bucket: downloads.scylladb.com
+  region: us-east-1
+  folder: "gemini/{{.Version}}"
+  acl: public-read
 changelog:
   sort: asc
   filters:
