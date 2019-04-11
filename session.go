@@ -76,9 +76,10 @@ func (s *Session) Check(table Table, query string, values ...interface{}) error 
 	if len(testRows) != len(oracleRows) {
 		testSet := strset.New(pks(table, testRows)...)
 		oracleSet := strset.New(pks(table, oracleRows)...)
-		fmt.Printf("Missing in Test: %s\n", strset.Difference(oracleSet, testSet).List())
-		fmt.Printf("Missing in Oracle: %s\n", strset.Difference(testSet, oracleSet).List())
-		return fmt.Errorf("row count differ (%d ne %d)", len(testRows), len(oracleRows))
+		missingInTest := strset.Difference(oracleSet, testSet).List()
+		missingInOracle := strset.Difference(testSet, oracleSet).List()
+		return fmt.Errorf("row count differ (test has %d rows, oracle has %d rows, test is missing rows: %s, oracle is missing rows: %s)",
+			len(testRows), len(oracleRows), missingInTest, missingInOracle)
 	}
 	sort.SliceStable(testRows, func(i, j int) bool {
 		return lt(testRows[i], testRows[j])
