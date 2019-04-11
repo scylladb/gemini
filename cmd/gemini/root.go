@@ -192,7 +192,9 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 				return
 			case res := <-c:
 				testRes = res.Merge(&testRes)
-				sp.Suffix = fmt.Sprintf(" Running Gemini... %v", testRes)
+				if sp != nil {
+					sp.Suffix = fmt.Sprintf(" Running Gemini... %v", testRes)
+				}
 				if testRes.ReadErrors > 0 {
 					testRes.PrintResult()
 					if failFast {
