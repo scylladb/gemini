@@ -4,6 +4,7 @@
 
 ### Added
 
+- Tuple support added for simple columns.
 - Added version info printing using '--version' program argument.
 - CQL `INSERT JSON` statement support.
 
