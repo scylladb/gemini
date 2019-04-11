@@ -11,7 +11,7 @@ ORACLE_NAME=gemini-oracle
 TEST_NAME=gemini-test
 GEMINI_CMD=/tmp/gemini
 
-docker-compose -f scripts/docker-compose.yml up -d
+docker-compose --log-level WARNING -f scripts/docker-compose.yml up -d
 
 ORACLE_IP=$(docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' ${ORACLE_NAME})
 TEST_IP=$(docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' ${TEST_NAME})
@@ -29,3 +29,4 @@ $GEMINI_CMD \
 	--test-cluster=${TEST_IP} \
 	--oracle-cluster=${ORACLE_IP} \
 	"$@"
+exit $?
