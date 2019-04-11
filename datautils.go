@@ -11,55 +11,51 @@ import (
 	"github.com/segmentio/ksuid"
 )
 
-func randIntRange(min int, max int) int {
-	return rand.Intn(max-min) + min
+func randIntRange(rnd *rand.Rand, min int, max int) int {
+	return rnd.Intn(max-min) + min
 }
 
-func nonEmptyRandIntRange(min int, max int, def int) int {
+func nonEmptyRandIntRange(rnd *rand.Rand, min int, max int, def int) int {
 	if max > min && min > 0 {
-		return randIntRange(min, max)
+		return randIntRange(rnd, min, max)
 	}
-	return randIntRange(1, def)
+	return randIntRange(rnd, 1, def)
 }
 
-func randInt64Range(min int64, max int64) int64 {
-	return rand.Int63n(max-min) + min
+func randInt64Range(rnd *rand.Rand, min int64, max int64) int64 {
+	return rnd.Int63n(max-min) + min
 }
 
-func nonEmptyRandInt64Range(min int64, max int64, def int64) int64 {
+func nonEmptyRandInt64Range(rnd *rand.Rand, min int64, max int64, def int64) int64 {
 	if max > min && min > 0 {
-		return randInt64Range(min, max)
+		return randInt64Range(rnd, min, max)
 	}
-	return randInt64Range(1, def)
+	return randInt64Range(rnd, 1, def)
 }
 
-func randFloat32Range(min float32, max float32) float32 {
-	return rand.Float32() * (max - min)
+func randFloat32Range(rnd *rand.Rand, min float32, max float32) float32 {
+	return rnd.Float32() * (max - min)
 }
 
-func nonEmptyRandFloat32Range(min float32, max float32, def float32) float32 {
+func nonEmptyRandFloat32Range(rnd *rand.Rand, min float32, max float32, def float32) float32 {
 	if max > min && min > 0 {
-		return randFloat32Range(min, max)
+		return randFloat32Range(rnd, min, max)
 	}
-	return randFloat32Range(1, def)
+	return randFloat32Range(rnd, 1, def)
 }
 
-func randFloat64Range(min float64, max float64) float64 {
-	return rand.Float64() * (max - min)
+func randFloat64Range(rnd *rand.Rand, min float64, max float64) float64 {
+	return rnd.Float64() * (max - min)
 }
 
-func nonEmptyRandFloat64Range(min float64, max float64, def float64) float64 {
+func nonEmptyRandFloat64Range(rnd *rand.Rand, min float64, max float64, def float64) float64 {
 	if max > min && min > 0 {
-		return randFloat64Range(min, max)
+		return randFloat64Range(rnd, min, max)
 	}
-	return randFloat64Range(1, def)
+	return randFloat64Range(rnd, 1, def)
 }
 
-func randString(len int) string {
-	return nonEmptyRandStringWithTime(len, time.Now().UTC())
-}
-
-func randStringWithTime(len int, t time.Time) string {
+func randStringWithTime(rnd *rand.Rand, len int, t time.Time) string {
 	id, _ := ksuid.NewRandomWithTime(t)
 
 	var buf strings.Builder
@@ -70,41 +66,41 @@ func randStringWithTime(len int, t time.Time) string {
 
 	// Pad some extra random data
 	buff := make([]byte, len-buf.Len())
-	rand.Read(buff)
+	rnd.Read(buff)
 	buf.WriteString(base64.StdEncoding.EncodeToString(buff))
 
 	return buf.String()[:len]
 }
 
-func nonEmptyRandStringWithTime(len int, t time.Time) string {
+func nonEmptyRandStringWithTime(rnd *rand.Rand, len int, t time.Time) string {
 	if len <= 0 {
 		len = 1
 	}
-	return randStringWithTime(len, t)
+	return randStringWithTime(rnd, len, t)
 }
 
-func randDate() string {
-	time := randTime()
+func randDate(rnd *rand.Rand) string {
+	time := randTime(rnd)
 	return time.Format("2006-01-02")
 }
 
-func randTime() time.Time {
+func randTime(rnd *rand.Rand) time.Time {
 	min := time.Date(1970, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 	max := time.Date(2024, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 
-	sec := rand.Int63n(max-min) + min
+	sec := rnd.Int63n(max-min) + min
 	return time.Unix(sec, 0)
 }
 
-func randTimeNewer(d time.Time) time.Time {
+func randTimeNewer(rnd *rand.Rand, d time.Time) time.Time {
 	min := time.Date(d.Year()+1, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 	max := time.Date(2024, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 
-	sec := rand.Int63n(max-min+1) + min
+	sec := rnd.Int63n(max-min+1) + min
 	return time.Unix(sec, 0)
 }
 
-func randIpV4Address(v, pos int) string {
+func randIpV4Address(rnd *rand.Rand, v, pos int) string {
 	if pos < 0 || pos > 4 {
 		panic(fmt.Sprintf("invalid position for the desired value of the IP part %d, 0-3 supported", pos))
 	}
@@ -116,7 +112,7 @@ func randIpV4Address(v, pos int) string {
 		if i == pos {
 			blocks = append(blocks, strconv.Itoa(v))
 		} else {
-			blocks = append(blocks, strconv.Itoa(rand.Intn(255)))
+			blocks = append(blocks, strconv.Itoa(rnd.Intn(255)))
 		}
 	}
 	return strings.Join(blocks, ".")

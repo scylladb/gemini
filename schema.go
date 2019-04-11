@@ -122,8 +122,9 @@ type Schema struct {
 }
 
 type PartitionRange struct {
-	Min int `default:0`
-	Max int `default:100`
+	Min  int `default:0`
+	Max  int `default:100`
+	Rand *rand.Rand
 }
 
 func (s *Schema) GetDropSchema() []string {
@@ -150,38 +151,38 @@ func (st SimpleType) GenValue(p *PartitionRange) []interface{} {
 	var val interface{}
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
-		val = randStringWithTime(nonEmptyRandIntRange(p.Max, p.Max, 10), randTime())
+		val = randStringWithTime(p.Rand, nonEmptyRandIntRange(p.Rand, p.Max, p.Max, 10), randTime(p.Rand))
 	case TYPE_BLOB:
-		val = hex.EncodeToString([]byte(randStringWithTime(nonEmptyRandIntRange(p.Max, p.Max, 10), randTime())))
+		val = hex.EncodeToString([]byte(randStringWithTime(p.Rand, nonEmptyRandIntRange(p.Rand, p.Max, p.Max, 10), randTime(p.Rand))))
 	case TYPE_BIGINT:
-		val = rand.Int63()
+		val = p.Rand.Int63()
 	case TYPE_BOOLEAN:
-		val = rand.Int()%2 == 0
+		val = p.Rand.Int()%2 == 0
 	case TYPE_DATE:
-		val = randDate()
+		val = randDate(p.Rand)
 	case TYPE_TIME, TYPE_TIMESTAMP:
-		val = randTime()
+		val = randTime(p.Rand)
 	case TYPE_DECIMAL:
-		val = inf.NewDec(randInt64Range(int64(p.Min), int64(p.Max)), 3)
+		val = inf.NewDec(randInt64Range(p.Rand, int64(p.Min), int64(p.Max)), 3)
 	case TYPE_DOUBLE:
-		val = randFloat64Range(float64(p.Min), float64(p.Max))
+		val = randFloat64Range(p.Rand, float64(p.Min), float64(p.Max))
 	case TYPE_DURATION:
-		val = (time.Minute * time.Duration(randIntRange(p.Min, p.Max))).String()
+		val = (time.Minute * time.Duration(randIntRange(p.Rand, p.Min, p.Max))).String()
 	case TYPE_FLOAT:
-		val = randFloat32Range(float32(p.Min), float32(p.Max))
+		val = randFloat32Range(p.Rand, float32(p.Min), float32(p.Max))
 	case TYPE_INET:
-		val = net.ParseIP(randIpV4Address(rand.Intn(255), 2))
+		val = net.ParseIP(randIpV4Address(p.Rand, p.Rand.Intn(255), 2))
 	case TYPE_INT:
-		val = nonEmptyRandIntRange(p.Min, p.Max, 10)
+		val = nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
 	case TYPE_SMALLINT:
-		val = int16(nonEmptyRandIntRange(p.Min, p.Max, 10))
+		val = int16(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
 	case TYPE_TIMEUUID, TYPE_UUID:
-		r := gocql.UUIDFromTime(randTime())
+		r := gocql.UUIDFromTime(randTime(p.Rand))
 		val = r.String()
 	case TYPE_TINYINT:
-		val = int8(nonEmptyRandIntRange(p.Min, p.Max, 10))
+		val = int8(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
 	case TYPE_VARINT:
-		val = big.NewInt(randInt64Range(int64(p.Min), int64(p.Max)))
+		val = big.NewInt(randInt64Range(p.Rand, int64(p.Min), int64(p.Max)))
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", st))
 	}
@@ -197,77 +198,77 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 	)
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
-		startTime := randTime()
-		start := nonEmptyRandIntRange(p.Min, p.Max, 10)
-		end := start + nonEmptyRandIntRange(p.Min, p.Max, 10)
-		left = nonEmptyRandStringWithTime(start, startTime)
-		right = nonEmptyRandStringWithTime(end, randTimeNewer(startTime))
+		startTime := randTime(p.Rand)
+		start := nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
+		end := start + nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
+		left = nonEmptyRandStringWithTime(p.Rand, start, startTime)
+		right = nonEmptyRandStringWithTime(p.Rand, end, randTimeNewer(p.Rand, startTime))
 	case TYPE_BLOB:
-		startTime := randTime()
-		start := nonEmptyRandIntRange(p.Min, p.Max, 10)
-		end := start + nonEmptyRandIntRange(p.Min, p.Max, 10)
-		left = hex.EncodeToString([]byte(nonEmptyRandStringWithTime(start, startTime)))
-		right = hex.EncodeToString([]byte(nonEmptyRandStringWithTime(end, randTimeNewer(startTime))))
+		startTime := randTime(p.Rand)
+		start := nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
+		end := start + nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
+		left = hex.EncodeToString([]byte(nonEmptyRandStringWithTime(p.Rand, start, startTime)))
+		right = hex.EncodeToString([]byte(nonEmptyRandStringWithTime(p.Rand, end, randTimeNewer(p.Rand, startTime))))
 	case TYPE_BIGINT:
-		start := nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
-		end := start + nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
+		start := nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)
+		end := start + nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)
 		left = start
 		right = end
 	case TYPE_DATE, TYPE_TIME, TYPE_TIMESTAMP:
-		start := randTime()
-		end := randTimeNewer(start)
+		start := randTime(p.Rand)
+		end := randTimeNewer(p.Rand, start)
 		left = start
 		right = end
 	case TYPE_DECIMAL:
-		start := nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
-		end := start + nonEmptyRandInt64Range(int64(p.Min), int64(p.Max), 10)
+		start := nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)
+		end := start + nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)
 		left = inf.NewDec(start, 3)
 		right = inf.NewDec(end, 3)
 	case TYPE_DOUBLE:
-		start := nonEmptyRandFloat64Range(float64(p.Min), float64(p.Max), 10)
-		end := start + nonEmptyRandFloat64Range(float64(p.Min), float64(p.Max), 10)
+		start := nonEmptyRandFloat64Range(p.Rand, float64(p.Min), float64(p.Max), 10)
+		end := start + nonEmptyRandFloat64Range(p.Rand, float64(p.Min), float64(p.Max), 10)
 		left = start
 		right = end
 	case TYPE_DURATION:
-		start := time.Minute * time.Duration(nonEmptyRandIntRange(p.Min, p.Max, 10))
-		end := start + time.Minute*time.Duration(nonEmptyRandIntRange(p.Min, p.Max, 10))
+		start := time.Minute * time.Duration(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
+		end := start + time.Minute*time.Duration(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
 		left = start
 		right = end
 	case TYPE_FLOAT:
-		start := nonEmptyRandFloat32Range(float32(p.Min), float32(p.Max), 10)
-		end := start + nonEmptyRandFloat32Range(float32(p.Min), float32(p.Max), 10)
+		start := nonEmptyRandFloat32Range(p.Rand, float32(p.Min), float32(p.Max), 10)
+		end := start + nonEmptyRandFloat32Range(p.Rand, float32(p.Min), float32(p.Max), 10)
 		left = start
 		right = end
 	case TYPE_INET:
-		start := randIpV4Address(0, 3)
-		end := randIpV4Address(255, 3)
+		start := randIpV4Address(p.Rand, 0, 3)
+		end := randIpV4Address(p.Rand, 255, 3)
 		left = net.ParseIP(start)
 		right = net.ParseIP(end)
 	case TYPE_INT:
-		start := nonEmptyRandIntRange(p.Min, p.Max, 10)
-		end := start + nonEmptyRandIntRange(p.Min, p.Max, 10)
+		start := nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
+		end := start + nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
 		left = start
 		right = end
 	case TYPE_SMALLINT:
-		start := int16(nonEmptyRandIntRange(p.Min, p.Max, 10))
-		end := start + int16(nonEmptyRandIntRange(p.Min, p.Max, 10))
+		start := int16(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
+		end := start + int16(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
 		left = start
 		right = end
 	case TYPE_TIMEUUID, TYPE_UUID:
-		start := randTime()
-		end := randTimeNewer(start)
+		start := randTime(p.Rand)
+		end := randTimeNewer(p.Rand, start)
 		left = gocql.UUIDFromTime(start).String()
 		right = gocql.UUIDFromTime(end).String()
 	case TYPE_TINYINT:
-		start := int8(nonEmptyRandIntRange(p.Min, p.Max, 10))
-		end := start + int8(nonEmptyRandIntRange(p.Min, p.Max, 10))
+		start := int8(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
+		end := start + int8(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
 		left = start
 		right = end
 	case TYPE_VARINT:
 		end := &big.Int{}
-		start := big.NewInt(randInt64Range(int64(p.Min), int64(p.Max)))
+		start := big.NewInt(randInt64Range(p.Rand, int64(p.Min), int64(p.Max)))
 		end.Set(start)
-		end = end.Add(start, big.NewInt(randInt64Range(int64(p.Min), int64(p.Max))))
+		end = end.Add(start, big.NewInt(randInt64Range(p.Rand, int64(p.Min), int64(p.Max))))
 		left = start
 		right = end
 	default:
@@ -519,11 +520,11 @@ func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) (*Stmt, error) {
 }
 
 func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) (*Stmt, error) {
-	switch n := rand.Intn(1000); n {
+	switch n := p.Rand.Intn(1000); n {
 	case 10, 100:
 		return s.GenDeleteRows(t, p)
 	default:
-		switch n := rand.Intn(2); n {
+		switch n := p.Rand.Intn(2); n {
 		case 0:
 			if t.KnownIssues[KnownIssuesJsonWithTuples] {
 				return s.GenInsertStmt(t, p)
@@ -538,9 +539,9 @@ func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) (*Stmt, error) {
 func (s *Schema) GenCheckStmt(t Table, p *PartitionRange) *Stmt {
 	var n int
 	if len(t.Indexes) > 0 {
-		n = rand.Intn(5)
+		n = p.Rand.Intn(5)
 	} else {
-		n = rand.Intn(4)
+		n = p.Rand.Intn(4)
 	}
 	switch n {
 	case 0:
@@ -578,7 +579,7 @@ func (s *Schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
 		relations []string
 		values    []interface{}
 	)
-	pkNum := rand.Intn(len(t.PartitionKeys))
+	pkNum := p.Rand.Intn(len(t.PartitionKeys))
 	if pkNum == 0 {
 		pkNum = 1
 	}
@@ -608,7 +609,7 @@ func (s *Schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	}
 	maxClusteringRels := 0
 	if len(t.ClusteringKeys) > 1 {
-		maxClusteringRels = rand.Intn(len(t.ClusteringKeys) - 1)
+		maxClusteringRels = p.Rand.Intn(len(t.ClusteringKeys) - 1)
 		for i := 0; i < maxClusteringRels; i++ {
 			relations = append(relations, fmt.Sprintf("%s = ?", t.ClusteringKeys[i].Name))
 			values = appendValue(t.ClusteringKeys[i].Type, p, values)
@@ -630,7 +631,7 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 		relations []string
 		values    []interface{}
 	)
-	pkNum := rand.Intn(len(t.PartitionKeys))
+	pkNum := p.Rand.Intn(len(t.PartitionKeys))
 	if pkNum == 0 {
 		pkNum = 1
 	}
@@ -642,7 +643,7 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 	}
 	maxClusteringRels := 0
 	if len(t.ClusteringKeys) > 1 {
-		maxClusteringRels = rand.Intn(len(t.ClusteringKeys) - 1)
+		maxClusteringRels = p.Rand.Intn(len(t.ClusteringKeys) - 1)
 		for i := 0; i < maxClusteringRels; i++ {
 			relations = append(relations, fmt.Sprintf("%s = ?", t.ClusteringKeys[i].Name))
 			values = appendValue(t.ClusteringKeys[i].Type, p, values)
@@ -668,7 +669,7 @@ func (s *Schema) genSingleIndexQuery(t Table, p *PartitionRange) *Stmt {
 	if len(t.Indexes) == 0 {
 		return nil
 	}
-	pkNum := rand.Intn(len(t.PartitionKeys))
+	pkNum := p.Rand.Intn(len(t.PartitionKeys))
 	if pkNum == 0 {
 		pkNum = 1
 	}
@@ -678,7 +679,7 @@ func (s *Schema) genSingleIndexQuery(t Table, p *PartitionRange) *Stmt {
 			values = appendValue(pk.Type, p, values)
 		}
 	}
-	idx := rand.Intn(len(t.Indexes))
+	idx := p.Rand.Intn(len(t.Indexes))
 	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s AND %s=?", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "), t.Indexes[idx].Column.Name)
 	values = appendValue(t.Indexes[idx].Column.Type, p, nil)
 	return &Stmt{
