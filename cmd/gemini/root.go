@@ -5,12 +5,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
+	"os"
 	"sync"
+	"text/tabwriter"
 	"time"
 
 	"github.com/briandowns/spinner"
+	"github.com/pkg/errors"
 	"github.com/scylladb/gemini"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/context"
@@ -20,6 +24,7 @@ var (
 	testClusterHost   string
 	oracleClusterHost string
 	schemaFile        string
+	outFileArg        string
 	concurrency       int
 	pkNumberPerThread int
 	seed              int
@@ -38,10 +43,11 @@ const (
 )
 
 type Status struct {
-	WriteOps    int
-	WriteErrors int
-	ReadOps     int
-	ReadErrors  int
+	WriteOps    int     `json:"write_ops"`
+	WriteErrors int     `json:"write_errors"`
+	ReadOps     int     `json:"read_ops"`
+	ReadErrors  int     `json:"read_errors"`
+	Errors      []error `json:"errors"`
 }
 
 type Results interface {
@@ -53,22 +59,44 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, *sync.WaitGroup, *gemini.Schema, gemini.Table, *gemini.Session, gemini.PartitionRange, chan Status, string)
+type testJob func(context.Context, *sync.WaitGroup, *gemini.Schema, gemini.Table, *gemini.Session, gemini.PartitionRange, chan Status, string, *os.File)
 
 func (r *Status) Merge(sum *Status) Status {
 	sum.WriteOps += r.WriteOps
 	sum.WriteErrors += r.WriteErrors
 	sum.ReadOps += r.ReadOps
 	sum.ReadErrors += r.ReadErrors
+	sum.Errors = append(sum.Errors, r.Errors...)
 	return *sum
 }
 
-func (r *Status) PrintResult() {
-	fmt.Println("Results:")
-	fmt.Printf("\twrite ops:    %v\n", r.WriteOps)
-	fmt.Printf("\tread ops:     %v\n", r.ReadOps)
-	fmt.Printf("\twrite errors: %v\n", r.WriteErrors)
-	fmt.Printf("\tread errors:  %v\n", r.ReadErrors)
+func (r *Status) PrintResult(w io.Writer) {
+	if err := r.PrintResultAsJSON(w); err != nil {
+		// In case there has been it has been a long run we want to display it anyway...
+		fmt.Printf("Unable to print result as json, using plain text to stdout, error=%s\n", err)
+		fmt.Printf("Results:\n")
+		fmt.Printf("\twrite ops:    %v\n", r.WriteOps)
+		fmt.Printf("\tread ops:     %v\n", r.ReadOps)
+		fmt.Printf("\twrite errors: %v\n", r.WriteErrors)
+		fmt.Printf("\tread errors:  %v\n", r.ReadErrors)
+		for i, err := range r.Errors {
+			fmt.Printf("Error %d: %s\n", i, err)
+		}
+	}
+}
+
+func (r *Status) PrintResultAsJSON(w io.Writer) error {
+	result := map[string]*Status{
+		"result": r,
+	}
+	b, err := json.MarshalIndent(result, "  ", "  ")
+	if err != nil {
+		return errors.Wrap(err, "unable to create json from result")
+	}
+	if _, err := fmt.Fprintf(w, "%s\n", b); err != nil {
+		return errors.Wrapf(err, "unable to print json result to file, using stdout, error=%s\n", err)
+	}
+	return nil
 }
 
 func (r Status) String() string {
@@ -97,13 +125,21 @@ func readSchema(confFile string) (*gemini.Schema, error) {
 }
 
 func run(cmd *cobra.Command, args []string) {
-	rand.Seed(int64(seed))
-	fmt.Printf("Seed:                            %d\n", seed)
-	fmt.Printf("Maximum duration:                %s\n", duration)
-	fmt.Printf("Concurrency:                     %d\n", concurrency)
-	fmt.Printf("Number of partitions per thread: %d\n", pkNumberPerThread)
-	fmt.Printf("Test cluster:                    %s\n", testClusterHost)
-	fmt.Printf("Oracle cluster:                  %s\n", oracleClusterHost)
+	if err := printSetup(); err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	outFile := os.Stdout
+	if outFileArg != "" {
+		of, err := os.Create(outFileArg)
+		if err != nil {
+			fmt.Printf("Unable to open output file %s, error=%s\n", outFileArg, err)
+			return
+		}
+		outFile = of
+	}
+	defer outFile.Sync()
 
 	var schema *gemini.Schema
 	if len(schemaFile) > 0 {
@@ -144,10 +180,10 @@ func run(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	runJob(Job, schema, session, mode)
+	runJob(Job, schema, session, mode, outFile)
 }
 
-func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
+func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string, out *os.File) {
 	c := make(chan Status)
 	minRange := 0
 	maxRange := pkNumberPerThread
@@ -164,7 +200,7 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 				Max:  maxRange + i*maxRange,
 				Rand: rand.New(rand.NewSource(int64(seed))),
 			}
-			go f(workerCtx, &workers, schema, table, s, p, c, mode)
+			go f(workerCtx, &workers, schema, table, s, p, c, mode, out)
 		}
 	}
 
@@ -187,12 +223,12 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 		for {
 			select {
 			case <-timer.C:
-				testRes.PrintResult()
+				testRes.PrintResult(out)
 				fmt.Println("Test run completed. Exiting.")
 				cancelWorkers()
 				return
 			case <-reporterCtx.Done():
-				testRes.PrintResult()
+				testRes.PrintResult(out)
 				return
 			case res := <-c:
 				testRes = res.Merge(&testRes)
@@ -200,7 +236,7 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 					sp.Suffix = fmt.Sprintf(" Running Gemini... %v", testRes)
 				}
 				if testRes.ReadErrors > 0 {
-					testRes.PrintResult()
+					testRes.PrintResult(out)
 					if failFast {
 						fmt.Println("Error in data validation. Exiting.")
 						cancelWorkers()
@@ -216,7 +252,7 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string) {
 	reporter.Wait()
 }
 
-func mutationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, testStatus *Status) {
+func mutationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, testStatus *Status, out *os.File) {
 	mutateStmt, err := schema.GenMutateStmt(table, &p)
 	if err != nil {
 		fmt.Printf("Failed! Mutation statement generation failed: '%v'\n", err)
@@ -230,12 +266,12 @@ func mutationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p
 	}
 	testStatus.WriteOps++
 	if err := s.Mutate(mutateQuery, mutateValues...); err != nil {
-		fmt.Printf("Failed! Mutation '%s' (values=%v) caused an error: '%v'\n", mutateQuery, mutateValues, err)
+		testStatus.Errors = append(testStatus.Errors, errors.Wrapf(err, "Failed! Mutation '%s' (values=%v) caused an error: '%v'\n", mutateQuery, mutateValues))
 		testStatus.WriteErrors++
 	}
 }
 
-func validationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, testStatus *Status) {
+func validationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, testStatus *Status, out *os.File) {
 	checkStmt := schema.GenCheckStmt(table, &p)
 	checkQuery := checkStmt.Query
 	checkValues := checkStmt.Values()
@@ -247,13 +283,14 @@ func validationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session,
 		testStatus.ReadOps++
 	} else {
 		if err != gemini.ErrReadNoDataReturned {
-			fmt.Printf("Failed! Check '%s' (values=%v)\n%s\n", checkQuery, checkValues, err)
+			// De-duplication needed?
+			testStatus.Errors = append(testStatus.Errors, errors.Wrapf(err, "Failed! Check '%s' (values=%v)\n%s\n", checkQuery, checkValues))
 			testStatus.ReadErrors++
 		}
 	}
 }
 
-func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, c chan Status, mode string) {
+func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, c chan Status, mode string, out *os.File) {
 	defer wg.Done()
 	testStatus := Status{}
 
@@ -266,15 +303,15 @@ func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table g
 		}
 		switch mode {
 		case writeMode:
-			mutationJob(schema, table, s, p, &testStatus)
+			mutationJob(schema, table, s, p, &testStatus, out)
 		case readMode:
-			validationJob(schema, table, s, p, &testStatus)
+			validationJob(schema, table, s, p, &testStatus, out)
 		default:
 			ind := p.Rand.Intn(100000) % 2
 			if ind == 0 {
-				mutationJob(schema, table, s, p, &testStatus)
+				mutationJob(schema, table, s, p, &testStatus, out)
 			} else {
-				validationJob(schema, table, s, p, &testStatus)
+				validationJob(schema, table, s, p, &testStatus, out)
 			}
 		}
 
@@ -317,4 +354,24 @@ func init() {
 	rootCmd.Flags().BoolVarP(&failFast, "fail-fast", "f", false, "Stop on the first failure")
 	rootCmd.Flags().BoolVarP(&nonInteractive, "non-interactive", "", false, "Run in non-interactive mode (disable progress indicator)")
 	rootCmd.Flags().DurationVarP(&duration, "duration", "", 30*time.Second, "")
+	rootCmd.Flags().StringVarP(&outFileArg, "outfile", "", "", "Specify the name of the file where the results should go")
+}
+
+func printSetup() error {
+	tw := new(tabwriter.Writer)
+	tw.Init(os.Stdout, 0, 8, 2, '\t', tabwriter.AlignRight)
+	rand.Seed(int64(seed))
+	fmt.Fprintf(tw, "Seed:\t%d\n", seed)
+	fmt.Fprintf(tw, "Maximum duration:\t%s\n", duration)
+	fmt.Fprintf(tw, "Concurrency:\t%d\n", concurrency)
+	fmt.Fprintf(tw, "Number of partitions per thread:\t%d\n", pkNumberPerThread)
+	fmt.Fprintf(tw, "Test cluster:\t%s\n", testClusterHost)
+	fmt.Fprintf(tw, "Oracle cluster:\t%s\n", oracleClusterHost)
+	if outFileArg == "" {
+		fmt.Fprintf(tw, "Output file:\t%s\n", "<stdout>")
+	} else {
+		fmt.Fprintf(tw, "Output file:\t%s\n", outFileArg)
+	}
+	tw.Flush()
+	return nil
 }
