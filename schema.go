@@ -392,6 +392,9 @@ func GenSchema() *Schema {
 	if numColumns > 0 {
 		numIndexes := rand.Intn(numColumns)
 		for i := 0; i < numIndexes; i++ {
+			if columns[i].Type == TYPE_DURATION {
+				continue
+			}
 			indexes = append(indexes, IndexDef{Name: genIndexName("col", i), Column: columns[i]})
 		}
 	}
