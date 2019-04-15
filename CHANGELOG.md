@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Support for collections such as sets, lists and maps added for simple columns.
 - Support for writing the result to a file in JSON format.
 
 ## [0.9.1] - 2019-04-11
