@@ -34,6 +34,8 @@ const (
 	TYPE_UUID      = SimpleType("uuid")
 	TYPE_VARCHAR   = SimpleType("varchar")
 	TYPE_VARINT    = SimpleType("varint")
+
+	MaxUDTParts = 10
 )
 
 // TODO: Add support for time when gocql bug is fixed.
@@ -249,6 +251,55 @@ func (tt TupleType) GenValueRange(p *PartitionRange) ([]interface{}, []interface
 	return left, right
 }
 
+type UDTType struct {
+	Types    map[string]SimpleType
+	TypeName string
+	Frozen   bool
+}
+
+func (tt UDTType) Name() string {
+	return tt.TypeName
+}
+
+func (tt UDTType) CQLDef() string {
+	if tt.Frozen {
+		return "frozen<" + tt.TypeName + ">"
+	}
+	return tt.TypeName
+}
+
+func (tt UDTType) CQLHolder() string {
+	return "?"
+}
+
+func (tt UDTType) Indexable() bool {
+	for _, t := range tt.Types {
+		if t == TYPE_DURATION {
+			return false
+		}
+	}
+	return true
+}
+
+func (tt UDTType) GenValue(p *PartitionRange) []interface{} {
+	vals := make(map[string]interface{})
+	for name, typ := range tt.Types {
+		vals[name] = typ.GenValue(p)[0]
+	}
+	return []interface{}{vals}
+}
+
+func (tt UDTType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}) {
+	left := make(map[string]interface{})
+	right := make(map[string]interface{})
+	for name, t := range tt.Types {
+		ttLeft, ttRight := t.GenValueRange(p)
+		left[name] = ttLeft[0]
+		right[name] = ttRight[0]
+	}
+	return []interface{}{left}, []interface{}{right}
+}
+
 type SetType struct {
 	Type   SimpleType
 	Frozen bool
@@ -370,15 +421,17 @@ func genColumnName(prefix string, idx int) string {
 }
 
 func genColumnType(numColumns int) Type {
-	n := rand.Intn(numColumns + 4)
+	n := rand.Intn(numColumns + 5)
 	switch n {
 	case numColumns:
 		return genTupleType()
 	case numColumns + 1:
-		return genSetType()
+		return genUDTType()
 	case numColumns + 2:
-		return genListType()
+		return genSetType()
 	case numColumns + 3:
+		return genListType()
+	case numColumns + 4:
 		return genMapType()
 	default:
 		return genSimpleType()
@@ -401,6 +454,22 @@ func genTupleType() Type {
 	return TupleType{
 		Types:  typeList,
 		Frozen: rand.Uint32()%2 == 0,
+	}
+}
+
+func genUDTType() UDTType {
+	udtNum := rand.Uint32()
+	typeName := fmt.Sprintf("udt_%d", udtNum)
+	ts := make(map[string]SimpleType)
+
+	for i := 0; i < rand.Intn(MaxUDTParts)+1; i++ {
+		ts[typeName+fmt.Sprintf("_%d", i)] = genSimpleType()
+	}
+
+	return UDTType{
+		Types:    ts,
+		TypeName: typeName,
+		Frozen:   true,
 	}
 }
 
