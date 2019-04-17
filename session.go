@@ -10,6 +10,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/scylladb/go-set/strset"
 	"gopkg.in/inf.v0"
 )
@@ -90,11 +91,15 @@ func (s *Session) Check(table Table, query string, values ...interface{}) error 
 	for i, oracleRow := range oracleRows {
 		testRow := testRows[i]
 		cmp.AllowUnexported()
-		diff := cmp.Diff(oracleRow, testRow, cmp.Comparer(func(x, y *inf.Dec) bool {
-			return x.Cmp(y) == 0
-		}), cmp.Comparer(func(x, y *big.Int) bool {
-			return x.Cmp(y) == 0
-		}))
+		diff := cmp.Diff(oracleRow, testRow,
+			cmpopts.SortMaps(func(x, y *inf.Dec) bool {
+				return x.Cmp(y) < 0
+			}),
+			cmp.Comparer(func(x, y *inf.Dec) bool {
+				return x.Cmp(y) == 0
+			}), cmp.Comparer(func(x, y *big.Int) bool {
+				return x.Cmp(y) == 0
+			}))
 		if diff != "" {
 			return fmt.Errorf("rows differ (-%v +%v): %v", oracleRow, testRow, diff)
 		}
