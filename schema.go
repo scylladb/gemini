@@ -170,6 +170,17 @@ func (s *Schema) GetCreateSchema() []string {
 		for _, cdef := range t.Columns {
 			columns = append(columns, fmt.Sprintf("%s %s", cdef.Name, cdef.Type.CQLDef()))
 		}
+		for _, column := range t.Columns {
+			switch c := column.Type.(type) {
+			case UDTType:
+				createType := "CREATE TYPE %s.%s (%s)"
+				var typs []string
+				for name, typ := range c.Types {
+					typs = append(typs, name+" "+typ.CQLDef())
+				}
+				stmts = append(stmts, fmt.Sprintf(createType, s.Keyspace.Name, c.TypeName, strings.Join(typs, ",")))
+			}
+		}
 		var createTable string
 		if len(clusteringKeys) == 0 {
 			createTable = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY (%s))", s.Keyspace.Name, t.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","))

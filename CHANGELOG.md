@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Support for User Defined Types (UDT) added for simple columns.
 - Support for collections such as sets, lists and maps added for simple columns.
 - Support for writing the result to a file in JSON format.
 
