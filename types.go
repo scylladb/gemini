@@ -196,8 +196,8 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 }
 
 type TupleType struct {
-	Types  []SimpleType
-	Frozen bool
+	Types  []SimpleType `json:"types"`
+	Frozen bool         `json:"frozen"`
 }
 
 func (tt TupleType) Name() string {
@@ -252,9 +252,9 @@ func (tt TupleType) GenValueRange(p *PartitionRange) ([]interface{}, []interface
 }
 
 type UDTType struct {
-	Types    map[string]SimpleType
-	TypeName string
-	Frozen   bool
+	Types    map[string]SimpleType `json:"types"`
+	TypeName string                `json:"type_name"`
+	Frozen   bool                  `json:"frozen"`
 }
 
 func (tt UDTType) Name() string {
@@ -301,8 +301,8 @@ func (tt UDTType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}
 }
 
 type SetType struct {
-	Type   SimpleType
-	Frozen bool
+	Type   SimpleType `json:"type"`
+	Frozen bool       `json:"frozen"`
 }
 
 func (ct SetType) Name() string {
@@ -367,9 +367,9 @@ func (lt ListType) CQLDef() string {
 }
 
 type MapType struct {
-	KeyType   SimpleType
-	ValueType SimpleType
-	Frozen    bool
+	KeyType   SimpleType `json:"key_type"`
+	ValueType SimpleType `json:"value_type"`
+	Frozen    bool       `json:"frozen"`
 }
 
 func (mt MapType) Name() string {

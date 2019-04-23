@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- JSON schema definition file has simpler index definition.
+
 ## [0.9.2] - 2019-04-18
 
 - Support for User Defined Types (UDT) added for simple columns.
