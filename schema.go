@@ -16,8 +16,8 @@ type Keyspace struct {
 }
 
 type ColumnDef struct {
-	Name string
-	Type Type
+	Name string `json:"name"`
+	Type Type   `json:"type"`
 }
 
 type Type interface {
@@ -30,8 +30,8 @@ type Type interface {
 }
 
 type IndexDef struct {
-	Name   string
-	Column ColumnDef
+	Name   string `json:"name"`
+	Column string `json:"column"`
 }
 
 type Columns []ColumnDef
@@ -68,12 +68,12 @@ func (cs Columns) ToJSONMap(values map[string]interface{}, p *PartitionRange) ma
 }
 
 type Table struct {
-	Name           string     `json:"name"`
-	PartitionKeys  Columns    `json:"partition_keys"`
-	ClusteringKeys Columns    `json:"clustering_keys"`
-	Columns        Columns    `json:"columns"`
-	Indexes        []IndexDef `json:"indexes"`
-	KnownIssues    map[string]bool
+	Name           string          `json:"name"`
+	PartitionKeys  Columns         `json:"partition_keys"`
+	ClusteringKeys Columns         `json:"clustering_keys"`
+	Columns        Columns         `json:"columns"`
+	Indexes        []IndexDef      `json:"indexes"`
+	KnownIssues    map[string]bool `json:"known_issues"`
 }
 
 type Stmt struct {
@@ -130,7 +130,7 @@ func GenSchema() *Schema {
 		numIndexes := rand.Intn(numColumns)
 		for i := 0; i < numIndexes; i++ {
 			if columns[i].Type.Indexable() {
-				indexes = append(indexes, IndexDef{Name: genIndexName("col", i), Column: columns[i]})
+				indexes = append(indexes, IndexDef{Name: genIndexName("col", i), Column: columns[i].Name})
 			}
 		}
 	}
@@ -190,7 +190,7 @@ func (s *Schema) GetCreateSchema() []string {
 		}
 		stmts = append(stmts, createTable)
 		for _, idef := range t.Indexes {
-			stmts = append(stmts, fmt.Sprintf("CREATE INDEX %s ON %s.%s (%s)", idef.Name, s.Keyspace.Name, t.Name, idef.Column.Name))
+			stmts = append(stmts, fmt.Sprintf("CREATE INDEX %s ON %s.%s (%s)", idef.Name, s.Keyspace.Name, t.Name, idef.Column))
 		}
 	}
 	return stmts
@@ -430,8 +430,8 @@ func (s *Schema) genSingleIndexQuery(t Table, p *PartitionRange) *Stmt {
 		}
 	}
 	idx := p.Rand.Intn(len(t.Indexes))
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s AND %s=?", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "), t.Indexes[idx].Column.Name)
-	values = appendValue(t.Indexes[idx].Column.Type, p, nil)
+	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s AND %s=?", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "), t.Indexes[idx].Column)
+	values = appendValue(t.Columns[idx].Type, p, nil)
 	return &Stmt{
 		Query: query,
 		Values: func() []interface{} {
