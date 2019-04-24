@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"math/rand"
 	"net"
+	"reflect"
 	"strings"
 	"time"
 
@@ -56,6 +57,42 @@ func (st SimpleType) CQLDef() string {
 
 func (st SimpleType) CQLHolder() string {
 	return "?"
+}
+
+func (st SimpleType) CQLPretty(query string, value []interface{}) (string, int) {
+	if len(value) == 0 {
+		return query, 0
+	}
+	var replacement string
+	switch st {
+	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR, TYPE_INET, TYPE_DATE:
+		replacement = fmt.Sprintf("'%s'", value[0])
+	case TYPE_BLOB:
+		if v, ok := value[0].(string); ok {
+			replacement = "textasblob('" + v + "')"
+		}
+	case TYPE_BIGINT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT:
+		replacement = fmt.Sprintf("%d", value[0])
+	case TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT:
+		replacement = fmt.Sprintf("%.2f", value[0])
+	case TYPE_BOOLEAN:
+		if v, ok := value[0].(bool); ok {
+			replacement = fmt.Sprintf("%t", v)
+		}
+	case TYPE_TIME, TYPE_TIMESTAMP:
+		if v, ok := value[0].(time.Time); ok {
+			replacement = "'" + v.Format(time.RFC3339) + "'"
+		}
+	case TYPE_DURATION, TYPE_TIMEUUID, TYPE_UUID:
+		replacement = fmt.Sprintf("%s", value[0])
+	case TYPE_VARINT:
+		if s, ok := value[0].(*big.Int); ok {
+			replacement = fmt.Sprintf("%d", s.Int64())
+		}
+	default:
+		panic(fmt.Sprintf("cql pretty: not supported type %s", st))
+	}
+	return strings.Replace(query, "?", replacement, 1), 1
 }
 
 func (st SimpleType) Indexable() bool {
@@ -223,6 +260,18 @@ func (tt TupleType) CQLHolder() string {
 	return "(" + strings.TrimRight(strings.Repeat("?,", len(tt.Types)), ",") + ")"
 }
 
+func (tt TupleType) CQLPretty(query string, value []interface{}) (string, int) {
+	if len(value) == 0 {
+		return query, 0
+	}
+	var cnt, tmp int
+	for i, t := range tt.Types {
+		query, tmp = t.CQLPretty(query, value[i:])
+		cnt += tmp
+	}
+	return query, cnt
+}
+
 func (st TupleType) Indexable() bool {
 	for _, t := range st.Types {
 		if t == TYPE_DURATION {
@@ -270,6 +319,22 @@ func (tt UDTType) CQLDef() string {
 
 func (tt UDTType) CQLHolder() string {
 	return "?"
+}
+
+func (tt UDTType) CQLPretty(query string, value []interface{}) (string, int) {
+	if len(value) == 0 {
+		return query, 0
+	}
+	if s, ok := value[0].(map[string]interface{}); ok {
+		vv := "{"
+		for k, v := range tt.Types {
+			vv += k + ":" + "?"
+			vv, _ = v.CQLPretty(vv, []interface{}{s[k]})
+		}
+		vv += "}"
+		return strings.Replace(query, "?", vv, 1), 1
+	}
+	panic(fmt.Sprintf("udt pretty, unknown type %v", tt))
 }
 
 func (tt UDTType) Indexable() bool {
@@ -321,6 +386,25 @@ func (ct SetType) CQLDef() string {
 
 func (ct SetType) CQLHolder() string {
 	return "?"
+}
+
+func (ct SetType) CQLPretty(query string, value []interface{}) (string, int) {
+	if len(value) == 0 {
+		return query, 0
+	}
+	switch reflect.TypeOf(value[0]).Kind() {
+	case reflect.Slice:
+		s := reflect.ValueOf(value[0])
+		vv := "{"
+		vv += strings.Repeat("?,", s.Len())
+		vv = strings.TrimRight(vv, ",")
+		vv += "}"
+		for i := 0; i < s.Len(); i++ {
+			vv, _ = ct.Type.CQLPretty(vv, []interface{}{s.Index(i).Interface()})
+		}
+		return strings.Replace(query, "?", vv, 1), 1
+	}
+	panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
 }
 
 func (ct SetType) GenValue(p *PartitionRange) []interface{} {
@@ -381,6 +465,21 @@ func (mt MapType) Name() string {
 
 func (mt MapType) CQLHolder() string {
 	return "?"
+}
+
+func (mt MapType) CQLPretty(query string, value []interface{}) (string, int) {
+	switch reflect.TypeOf(value[0]).Kind() {
+	case reflect.Map:
+		s := reflect.ValueOf(value[0]).MapRange()
+		vv := "{"
+		for s.Next() {
+			vv += fmt.Sprintf("%s:?", s.Key().Interface())
+			vv, _ = mt.ValueType.CQLPretty(vv, []interface{}{s.Value().Interface()})
+		}
+		vv += "}"
+		return strings.Replace(query, "?", vv, 1), 1
+	}
+	panic(fmt.Sprintf("map cql pretty, unknown type %v", mt))
 }
 
 func (mt MapType) GenValue(p *PartitionRange) []interface{} {
@@ -493,7 +592,7 @@ func genListType() ListType {
 	}
 }
 
-func genMapType() Type {
+func genMapType() MapType {
 	var t SimpleType
 	for {
 		t = genSimpleType()

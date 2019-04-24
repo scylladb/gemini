@@ -43,11 +43,11 @@ const (
 )
 
 type Status struct {
-	WriteOps    int     `json:"write_ops"`
-	WriteErrors int     `json:"write_errors"`
-	ReadOps     int     `json:"read_ops"`
-	ReadErrors  int     `json:"read_errors"`
-	Errors      []error `json:"errors"`
+	WriteOps    int               `json:"write_ops"`
+	WriteErrors int               `json:"write_errors"`
+	ReadOps     int               `json:"read_ops"`
+	ReadErrors  int               `json:"read_errors"`
+	Errors      []gemini.JobError `json:"errors,omitempty"`
 }
 
 type Results interface {
@@ -237,6 +237,7 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string, ou
 				}
 				if testRes.ReadErrors > 0 {
 					testRes.PrintResult(out)
+					fmt.Println(testRes.Errors)
 					if failFast {
 						fmt.Println("Error in data validation. Exiting.")
 						cancelWorkers()
@@ -262,11 +263,15 @@ func mutationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p
 	mutateQuery := mutateStmt.Query
 	mutateValues := mutateStmt.Values()
 	if verbose {
-		fmt.Printf("%s (values=%v)\n", mutateQuery, mutateValues)
+		fmt.Println(mutateStmt.PrettyCQL())
 	}
 	testStatus.WriteOps++
 	if err := s.Mutate(mutateQuery, mutateValues...); err != nil {
-		testStatus.Errors = append(testStatus.Errors, errors.Wrapf(err, "Failed! Mutation '%s' (values=%v) caused an error: '%v'\n", mutateQuery, mutateValues))
+		e := gemini.JobError{
+			Message: "Mutation failed: " + err.Error(),
+			Query:   mutateStmt.PrettyCQL(),
+		}
+		testStatus.Errors = append(testStatus.Errors, e)
 		testStatus.WriteErrors++
 	}
 }
@@ -276,7 +281,7 @@ func validationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session,
 	checkQuery := checkStmt.Query
 	checkValues := checkStmt.Values()
 	if verbose {
-		fmt.Printf("%s (values=%v)\n", checkQuery, checkValues)
+		fmt.Println(checkStmt.PrettyCQL())
 	}
 	err := s.Check(table, checkQuery, checkValues...)
 	if err == nil {
@@ -284,7 +289,11 @@ func validationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session,
 	} else {
 		if err != gemini.ErrReadNoDataReturned {
 			// De-duplication needed?
-			testStatus.Errors = append(testStatus.Errors, errors.Wrapf(err, "Failed! Check '%s' (values=%v)\n%s\n", checkQuery, checkValues))
+			e := gemini.JobError{
+				Message: "Validation failed: " + err.Error(),
+				Query:   checkStmt.PrettyCQL(),
+			}
+			testStatus.Errors = append(testStatus.Errors, e)
 			testStatus.ReadErrors++
 		}
 	}

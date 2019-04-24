@@ -25,6 +25,11 @@ var (
 	ErrReadNoDataReturned = errors.New("read: no data returned")
 )
 
+type JobError struct {
+	Message string `json:"message"`
+	Query   string `json:"query"`
+}
+
 func NewSession(testClusterHost string, oracleClusterHost string) *Session {
 	testCluster := gocql.NewCluster(testClusterHost)
 	testCluster.Timeout = 5 * time.Second

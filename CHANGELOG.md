@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Printing executable CQL statements when logging errors or in verbose mode.
 - JSON schema definition file has simpler index definition.
 
 ## [0.9.2] - 2019-04-18
