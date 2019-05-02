@@ -1,7 +1,6 @@
 package gemini
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -12,6 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/scylladb/go-set/strset"
+	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
 )
 
@@ -20,10 +20,6 @@ type Session struct {
 	oracleSession *gocql.Session
 	schema        *Schema
 }
-
-var (
-	ErrReadNoDataReturned = errors.New("read: no data returned")
-)
 
 type JobError struct {
 	Message string `json:"message"`
@@ -66,18 +62,19 @@ func (s *Session) Mutate(query string, values ...interface{}) error {
 	return nil
 }
 
-func (s *Session) Check(table Table, query string, values ...interface{}) error {
+func (s *Session) Check(table Table, query string, values ...interface{}) (err error) {
 	testIter := s.testSession.Query(query, values...).Iter()
 	oracleIter := s.oracleSession.Query(query, values...).Iter()
 	defer func() {
-		testIter.Close()
-		oracleIter.Close()
+		err = multierr.Append(err, testIter.Close())
+		err = multierr.Append(err, oracleIter.Close())
 	}()
 
 	testRows := loadSet(testIter)
 	oracleRows := loadSet(oracleIter)
 	if len(testRows) == 0 && len(oracleRows) == 0 {
-		return ErrReadNoDataReturned
+		// Both empty is fine
+		return nil
 	}
 	if len(testRows) != len(oracleRows) {
 		testSet := strset.New(pks(table, testRows)...)
