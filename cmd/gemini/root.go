@@ -265,7 +265,6 @@ func mutationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p
 	if verbose {
 		fmt.Println(mutateStmt.PrettyCQL())
 	}
-	testStatus.WriteOps++
 	if err := s.Mutate(mutateQuery, mutateValues...); err != nil {
 		e := gemini.JobError{
 			Message: "Mutation failed: " + err.Error(),
@@ -273,6 +272,8 @@ func mutationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p
 		}
 		testStatus.Errors = append(testStatus.Errors, e)
 		testStatus.WriteErrors++
+	} else {
+		testStatus.WriteOps++
 	}
 }
 
@@ -283,19 +284,16 @@ func validationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session,
 	if verbose {
 		fmt.Println(checkStmt.PrettyCQL())
 	}
-	err := s.Check(table, checkQuery, checkValues...)
-	if err == nil {
-		testStatus.ReadOps++
-	} else {
-		if err != gemini.ErrReadNoDataReturned {
-			// De-duplication needed?
-			e := gemini.JobError{
-				Message: "Validation failed: " + err.Error(),
-				Query:   checkStmt.PrettyCQL(),
-			}
-			testStatus.Errors = append(testStatus.Errors, e)
-			testStatus.ReadErrors++
+	if err := s.Check(table, checkQuery, checkValues...); err != nil {
+		// De-duplication needed?
+		e := gemini.JobError{
+			Message: "Validation failed: " + err.Error(),
+			Query:   checkStmt.PrettyCQL(),
 		}
+		testStatus.Errors = append(testStatus.Errors, e)
+		testStatus.ReadErrors++
+	} else {
+		testStatus.ReadOps++
 	}
 }
 
