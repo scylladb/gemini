@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Gemini version is now available in the resulting output.
 - Improved error handling in validation code.
 - Avoiding small double booking of write ops in case of mutation errors.
 - Printing executable CQL statements when logging errors or in verbose mode.
