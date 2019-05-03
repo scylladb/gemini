@@ -74,6 +74,7 @@ func (r *Status) PrintResult(w io.Writer) {
 	if err := r.PrintResultAsJSON(w); err != nil {
 		// In case there has been it has been a long run we want to display it anyway...
 		fmt.Printf("Unable to print result as json, using plain text to stdout, error=%s\n", err)
+		fmt.Printf("Gemini version: %s\n", version)
 		fmt.Printf("Results:\n")
 		fmt.Printf("\twrite ops:    %v\n", r.WriteOps)
 		fmt.Printf("\tread ops:     %v\n", r.ReadOps)
@@ -86,8 +87,9 @@ func (r *Status) PrintResult(w io.Writer) {
 }
 
 func (r *Status) PrintResultAsJSON(w io.Writer) error {
-	result := map[string]*Status{
-		"result": r,
+	result := map[string]interface{}{
+		"result":         r,
+		"gemini_version": version,
 	}
 	b, err := json.MarshalIndent(result, "  ", "  ")
 	if err != nil {
