@@ -21,8 +21,8 @@ import (
 )
 
 var (
-	testClusterHost   string
-	oracleClusterHost string
+	testClusterHost   []string
+	oracleClusterHost []string
 	schemaFile        string
 	outFileArg        string
 	concurrency       int
@@ -349,9 +349,9 @@ func Execute() {
 func init() {
 
 	rootCmd.Version = version + ", commit " + commit + ", date " + date
-	rootCmd.Flags().StringVarP(&testClusterHost, "test-cluster", "t", "", "Host name of the test cluster that is system under test")
+	rootCmd.Flags().StringSliceVarP(&testClusterHost, "test-cluster", "t", []string{}, "Host names or IPs of the test cluster that is system under test")
 	rootCmd.MarkFlagRequired("test-cluster")
-	rootCmd.Flags().StringVarP(&oracleClusterHost, "oracle-cluster", "o", "", "Host name of the oracle cluster that provides correct answers")
+	rootCmd.Flags().StringSliceVarP(&oracleClusterHost, "oracle-cluster", "o", []string{}, "Host names or IPs of the oracle cluster that provides correct answers")
 	rootCmd.MarkFlagRequired("oracle-cluster")
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", mixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
