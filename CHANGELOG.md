@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Gemini now accepts a list of node host names or IPs for the test
+  and Oracle clusters.
+
 ## [1.0.0] - 2019-05-06
 
 - Gemini version is now available in the resulting output.
