@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
-
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/pkg/errors"
 	"github.com/scylladb/go-set/strset"
+	"github.com/scylladb/gocqlx/qb"
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
 )
@@ -55,7 +55,8 @@ func (s *Session) Close() {
 	s.oracleSession.Close()
 }
 
-func (s *Session) Mutate(query string, values ...interface{}) (e error) {
+func (s *Session) Mutate(builder qb.Builder, values ...interface{}) (e error) {
+	query, _ := builder.ToCql()
 	if err := s.testSession.Query(query, values...).Exec(); err != nil {
 		e = multierr.Append(e, fmt.Errorf("%v [cluster = test, query = '%s']", err, query))
 	}
@@ -65,7 +66,8 @@ func (s *Session) Mutate(query string, values ...interface{}) (e error) {
 	return
 }
 
-func (s *Session) Check(table Table, query string, values ...interface{}) (err error) {
+func (s *Session) Check(table Table, builder qb.Builder, values ...interface{}) (err error) {
+	query, _ := builder.ToCql()
 	testIter := s.testSession.Query(query, values...).Iter()
 	oracleIter := s.oracleSession.Query(query, values...).Iter()
 	defer func() {

@@ -127,6 +127,14 @@ func readSchema(confFile string) (*gemini.Schema, error) {
 	return schemaBuilder.Build(), nil
 }
 
+type createBuilder struct {
+	stmt string
+}
+
+func (cb createBuilder) ToCql() (stmt string, names []string) {
+	return cb.stmt, nil
+}
+
 func run(cmd *cobra.Command, args []string) {
 	if pkNumberPerThread <= 0 || pkNumberPerThread > (math.MaxInt32/concurrency) {
 		pkNumberPerThread = math.MaxInt32 / concurrency
@@ -170,7 +178,7 @@ func run(cmd *cobra.Command, args []string) {
 			if verbose {
 				fmt.Println(stmt)
 			}
-			if err := session.Mutate(stmt); err != nil {
+			if err := session.Mutate(createBuilder{stmt: stmt}); err != nil {
 				fmt.Printf("%v", err)
 				return
 			}
@@ -180,7 +188,7 @@ func run(cmd *cobra.Command, args []string) {
 		if verbose {
 			fmt.Println(stmt)
 		}
-		if err := session.Mutate(stmt); err != nil {
+		if err := session.Mutate(createBuilder{stmt: stmt}); err != nil {
 			fmt.Printf("%v", err)
 			return
 		}
