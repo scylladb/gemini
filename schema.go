@@ -110,7 +110,7 @@ func (s *Stmt) PrettyCQL() string {
 
 type Schema struct {
 	Keyspace Keyspace `json:"keyspace"`
-	Tables   []Table  `json:"tables"`
+	Tables   []*Table `json:"tables"`
 }
 
 type PartitionRange struct {
@@ -202,7 +202,7 @@ func GenSchema() *Schema {
 			KnownIssuesJsonWithTuples: true,
 		},
 	}
-	builder.Table(table)
+	builder.Table(&table)
 	return builder.Build()
 }
 
@@ -288,7 +288,7 @@ func (s *Schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenInsertStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 	var (
 		typs []Type
 	)
@@ -323,7 +323,7 @@ func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	}, nil
 }
 
-func (s *Schema) GenInsertJsonStmt(t Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenInsertJsonStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 	values := make(map[string]interface{})
 	values = t.PartitionKeys.ToJSONMap(values, p)
 	values = t.ClusteringKeys.ToJSONMap(values, p)
@@ -344,7 +344,7 @@ func (s *Schema) GenInsertJsonStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	}, nil
 }
 
-func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenDeleteRows(t *Table, p *PartitionRange) (*Stmt, error) {
 	var (
 		values []interface{}
 		typs   []Type
@@ -370,7 +370,7 @@ func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) (*Stmt, error) {
 	}, nil
 }
 
-func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenMutateStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 	switch n := p.Rand.Intn(1000); n {
 	case 10, 100:
 		return s.GenDeleteRows(t, p)
@@ -387,7 +387,7 @@ func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	}
 }
 
-func (s *Schema) GenCheckStmt(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenCheckStmt(t *Table, p *PartitionRange) *Stmt {
 	var n int
 	if len(t.Indexes) > 0 {
 		n = p.Rand.Intn(5)
@@ -409,7 +409,7 @@ func (s *Schema) GenCheckStmt(t Table, p *PartitionRange) *Stmt {
 	return nil
 }
 
-func (s *Schema) genSinglePartitionQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genSinglePartitionQuery(t *Table, p *PartitionRange) *Stmt {
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
@@ -434,7 +434,7 @@ func (s *Schema) genSinglePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *Schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genMultiplePartitionQuery(t *Table, p *PartitionRange) *Stmt {
 	var (
 		values []interface{}
 		typs   []Type
@@ -467,7 +467,7 @@ func (s *Schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *Schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
 	var (
 		values []interface{}
 		typs   []Type
@@ -508,7 +508,7 @@ func (s *Schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
 	var (
 		values []interface{}
 		typs   []Type
@@ -555,7 +555,7 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 	}
 }
 
-func (s *Schema) genSingleIndexQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genSingleIndexQuery(t *Table, p *PartitionRange) *Stmt {
 	var (
 		values []interface{}
 		typs   []Type
@@ -591,13 +591,13 @@ func (s *Schema) genSingleIndexQuery(t Table, p *PartitionRange) *Stmt {
 
 type SchemaBuilder interface {
 	Keyspace(Keyspace) SchemaBuilder
-	Table(Table) SchemaBuilder
+	Table(*Table) SchemaBuilder
 	Build() *Schema
 }
 
 type schemaBuilder struct {
 	keyspace Keyspace
-	tables   []Table
+	tables   []*Table
 }
 
 func (s *schemaBuilder) Keyspace(keyspace Keyspace) SchemaBuilder {
@@ -605,7 +605,7 @@ func (s *schemaBuilder) Keyspace(keyspace Keyspace) SchemaBuilder {
 	return s
 }
 
-func (s *schemaBuilder) Table(table Table) SchemaBuilder {
+func (s *schemaBuilder) Table(table *Table) SchemaBuilder {
 	s.tables = append(s.tables, table)
 	return s
 }

@@ -11,6 +11,9 @@
  
 ## [1.0.1] - 2019-05-16
 
+- A new Store abstraction is introduced in preparation to enable
+  implementations such as an in-memory store.
+- Gemini now uses github.com/scylladb/gocqlx/qb builder.
 - Gemini ensures that primary key buckets do not overflow int32.
 - Gemini now accepts a list of node host names or IPs for the test
   and Oracle clusters.

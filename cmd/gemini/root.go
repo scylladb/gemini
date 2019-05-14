@@ -17,6 +17,7 @@ import (
 	"github.com/briandowns/spinner"
 	"github.com/pkg/errors"
 	"github.com/scylladb/gemini"
+	"github.com/scylladb/gemini/store"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/context"
 )
@@ -44,11 +45,17 @@ const (
 )
 
 type Status struct {
-	WriteOps    int               `json:"write_ops"`
-	WriteErrors int               `json:"write_errors"`
-	ReadOps     int               `json:"read_ops"`
-	ReadErrors  int               `json:"read_errors"`
-	Errors      []gemini.JobError `json:"errors,omitempty"`
+	WriteOps    int        `json:"write_ops"`
+	WriteErrors int        `json:"write_errors"`
+	ReadOps     int        `json:"read_ops"`
+	ReadErrors  int        `json:"read_errors"`
+	Errors      []JobError `json:"errors,omitempty"`
+}
+
+type JobError struct {
+	Timestamp time.Time
+	Message   string `json:"message"`
+	Query     string `json:"query"`
 }
 
 type Results interface {
@@ -60,7 +67,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, *sync.WaitGroup, *gemini.Schema, gemini.Table, *gemini.Session, gemini.PartitionRange, chan Status, string, *os.File)
+type testJob func(context.Context, *sync.WaitGroup, *gemini.Schema, *gemini.Table, store.Store, gemini.PartitionRange, chan Status, string, *os.File)
 
 func (r *Status) Merge(sum *Status) Status {
 	sum.WriteOps += r.WriteOps
@@ -170,15 +177,15 @@ func run(cmd *cobra.Command, args []string) {
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
 	fmt.Printf("Schema: %v\n", string(jsonSchema))
 
-	session := gemini.NewSession(testClusterHost, oracleClusterHost)
-	defer session.Close()
+	store := store.New(schema, testClusterHost, oracleClusterHost)
+	defer store.Close()
 
 	if dropSchema && mode != readMode {
 		for _, stmt := range schema.GetDropSchema() {
 			if verbose {
 				fmt.Println(stmt)
 			}
-			if err := session.Mutate(createBuilder{stmt: stmt}); err != nil {
+			if err := store.Mutate(createBuilder{stmt: stmt}); err != nil {
 				fmt.Printf("%v", err)
 				return
 			}
@@ -188,16 +195,16 @@ func run(cmd *cobra.Command, args []string) {
 		if verbose {
 			fmt.Println(stmt)
 		}
-		if err := session.Mutate(createBuilder{stmt: stmt}); err != nil {
+		if err := store.Mutate(createBuilder{stmt: stmt}); err != nil {
 			fmt.Printf("%v", err)
 			return
 		}
 	}
 
-	runJob(Job, schema, session, mode, outFile)
+	runJob(Job, schema, store, mode, outFile)
 }
 
-func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string, out *os.File) {
+func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *os.File) {
 	c := make(chan Status)
 	minRange := 0
 	maxRange := pkNumberPerThread
@@ -267,7 +274,7 @@ func runJob(f testJob, schema *gemini.Schema, s *gemini.Session, mode string, ou
 	reporter.Wait()
 }
 
-func mutationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, testStatus *Status, out *os.File) {
+func mutationJob(schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File) {
 	mutateStmt, err := schema.GenMutateStmt(table, &p)
 	if err != nil {
 		fmt.Printf("Failed! Mutation statement generation failed: '%v'\n", err)
@@ -280,7 +287,7 @@ func mutationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p
 		fmt.Println(mutateStmt.PrettyCQL())
 	}
 	if err := s.Mutate(mutateQuery, mutateValues...); err != nil {
-		e := gemini.JobError{
+		e := JobError{
 			Timestamp: time.Now(),
 			Message:   "Mutation failed: " + err.Error(),
 			Query:     mutateStmt.PrettyCQL(),
@@ -292,7 +299,7 @@ func mutationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p
 	}
 }
 
-func validationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, testStatus *Status, out *os.File) {
+func validationJob(schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File) {
 	checkStmt := schema.GenCheckStmt(table, &p)
 	checkQuery := checkStmt.Query
 	checkValues := checkStmt.Values()
@@ -301,7 +308,7 @@ func validationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session,
 	}
 	if err := s.Check(table, checkQuery, checkValues...); err != nil {
 		// De-duplication needed?
-		e := gemini.JobError{
+		e := JobError{
 			Timestamp: time.Now(),
 			Message:   "Validation failed: " + err.Error(),
 			Query:     checkStmt.PrettyCQL(),
@@ -313,7 +320,7 @@ func validationJob(schema *gemini.Schema, table gemini.Table, s *gemini.Session,
 	}
 }
 
-func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table gemini.Table, s *gemini.Session, p gemini.PartitionRange, c chan Status, mode string, out *os.File) {
+func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, c chan Status, mode string, out *os.File) {
 	defer wg.Done()
 	testStatus := Status{}
 
