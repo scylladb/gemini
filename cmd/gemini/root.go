@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"math/rand"
 	"os"
 	"sync"
@@ -127,6 +128,9 @@ func readSchema(confFile string) (*gemini.Schema, error) {
 }
 
 func run(cmd *cobra.Command, args []string) {
+	if pkNumberPerThread == 0 {
+		pkNumberPerThread = math.MaxInt32 / concurrency
+	}
 	if err := printSetup(); err != nil {
 		fmt.Println(err)
 		return
@@ -356,7 +360,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", mixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	rootCmd.Flags().IntVarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
-	rootCmd.Flags().IntVarP(&pkNumberPerThread, "max-pk-per-thread", "p", 50, "Maximum number of partition keys per thread")
+	rootCmd.Flags().IntVarP(&pkNumberPerThread, "max-pk-per-thread", "p", 0, "Maximum number of partition keys per thread")
 	rootCmd.Flags().IntVarP(&seed, "seed", "s", 1, "PRNG seed value")
 	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
