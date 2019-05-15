@@ -352,12 +352,11 @@ func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) (*Stmt, error) {
 		values = appendValue(pk.Type, p, values)
 		typs = append(typs, pk.Type)
 	}
-	if len(t.ClusteringKeys) == 1 {
-		for _, ck := range t.ClusteringKeys {
-			relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
-			values = appendValueRange(ck.Type, p, values)
-			typs = append(typs, ck.Type, ck.Type)
-		}
+	if len(t.ClusteringKeys) > 0 {
+		ck := t.ClusteringKeys[0]
+		relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
+		values = appendValueRange(ck.Type, p, values)
+		typs = append(typs, ck.Type, ck.Type)
 	}
 	query := fmt.Sprintf("DELETE FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
