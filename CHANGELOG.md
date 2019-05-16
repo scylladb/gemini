@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Gemini now timestamps errors for easier correlation.
+ 
 ## [1.0.1] - 2019-05-16
 
 - Gemini ensures that primary key buckets do not overflow int32.
