@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Gemini now tries to perform mutation on both systems regardless of
+  if one of them fail.
+
 ## [1.0.1] - 2019-05-16
 
 - Gemini ensures that primary key buckets do not overflow int32.
