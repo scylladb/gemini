@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.0.1] - 2019-05-16
 
 - Gemini ensures that primary key buckets do not overflow int32.
 - Gemini now accepts a list of node host names or IPs for the test
@@ -56,6 +56,7 @@
 
 - Improve progress indicator ([#14](https://github.com/scylladb/gemini/issues/14)).
 
+[1.0.1]: https://github.com/scylladb/gemini/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/scylladb/gemini/compare/v0.9.2...v1.0.0
 [0.9.2]: https://github.com/scylladb/gemini/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/scylladb/gemini/compare/v0.9.0...v0.9.1
