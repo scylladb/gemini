@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -66,8 +68,12 @@ func (s *Session) Check(table Table, query string, values ...interface{}) (err e
 	testIter := s.testSession.Query(query, values...).Iter()
 	oracleIter := s.oracleSession.Query(query, values...).Iter()
 	defer func() {
-		err = multierr.Append(err, testIter.Close())
-		err = multierr.Append(err, oracleIter.Close())
+		if e := testIter.Close(); e != nil {
+			err = multierr.Append(err, errors.Errorf("test system failed: %s", err.Error()))
+		}
+		if e := oracleIter.Close(); e != nil {
+			err = multierr.Append(err, errors.Errorf("oracle failed: %s", err.Error()))
+		}
 	}()
 
 	testRows := loadSet(testIter)
