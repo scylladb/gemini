@@ -4,6 +4,8 @@
 
 - Gemini now accepts a list of node host names or IPs for the test
   and Oracle clusters.
+- Default maximum primary keys increased to MAX_INT32/concurrency.
+- Range tombstones are being generated. 
 
 ## [1.0.0] - 2019-05-06
 
