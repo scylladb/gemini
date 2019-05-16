@@ -128,7 +128,7 @@ func readSchema(confFile string) (*gemini.Schema, error) {
 }
 
 func run(cmd *cobra.Command, args []string) {
-	if pkNumberPerThread == 0 {
+	if pkNumberPerThread <= 0 || pkNumberPerThread > (math.MaxInt32/concurrency) {
 		pkNumberPerThread = math.MaxInt32 / concurrency
 	}
 	if err := printSetup(); err != nil {

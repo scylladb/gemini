@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Gemini ensures that primary key buckets do not overflow int32.
 - Gemini now accepts a list of node host names or IPs for the test
   and Oracle clusters.
 - Default maximum primary keys increased to MAX_INT32/concurrency.
