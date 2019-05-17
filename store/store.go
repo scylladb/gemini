@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -21,7 +22,7 @@ type loader interface {
 }
 
 type storer interface {
-	mutate(qb.Builder, ...interface{}) error
+	mutate(qb.Builder, time.Time, ...interface{}) error
 }
 
 type storeLoader interface {
@@ -55,10 +56,11 @@ type delegatingStore struct {
 }
 
 func (ds delegatingStore) Mutate(builder qb.Builder, values ...interface{}) error {
-	if err := ds.testStore.mutate(builder, values...); err != nil {
+	ts := time.Now()
+	if err := ds.testStore.mutate(builder, ts, values...); err != nil {
 		return errors.Wrapf(err, "unable to apply mutations to the test store")
 	}
-	if err := ds.oracleStore.mutate(builder, values...); err != nil {
+	if err := ds.oracleStore.mutate(builder, ts, values...); err != nil {
 		return errors.Wrapf(err, "unable to apply mutations to the oracle store")
 	}
 	return nil
