@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+
+	"github.com/scylladb/gocqlx/qb"
 )
 
 const (
@@ -86,14 +88,14 @@ type MaterializedView struct {
 }
 
 type Stmt struct {
-	Query  string
+	Query  qb.Builder
 	Values func() []interface{}
 	Types  []Type
 }
 
 func (s *Stmt) PrettyCQL() string {
 	var replaced int
-	query := s.Query
+	query, _ := s.Query.ToCql()
 	values := s.Values()
 	for _, typ := range s.Types {
 		query, replaced = typ.CQLPretty(query, values)
@@ -108,7 +110,7 @@ func (s *Stmt) PrettyCQL() string {
 
 type Schema struct {
 	Keyspace Keyspace `json:"keyspace"`
-	Tables   []Table  `json:"tables"`
+	Tables   []*Table `json:"tables"`
 }
 
 type PartitionRange struct {
@@ -200,7 +202,7 @@ func GenSchema() *Schema {
 			KnownIssuesJsonWithTuples: true,
 		},
 	}
-	builder.Table(table)
+	builder.Table(&table)
 	return builder.Build()
 }
 
@@ -286,34 +288,34 @@ func (s *Schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenInsertStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 	var (
-		columns      []string
-		placeholders []string
-		typs         []Type
+		typs []Type
 	)
+	builder := qb.Insert(s.Keyspace.Name + "." + t.Name)
 	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
-		columns = append(columns, pk.Name)
-		placeholders = append(placeholders, pk.Type.CQLHolder())
+		builder = builder.Columns(pk.Name)
 		values = appendValue(pk.Type, p, values)
 		typs = append(typs, pk.Type)
 	}
 	for _, ck := range t.ClusteringKeys {
-		columns = append(columns, ck.Name)
-		placeholders = append(placeholders, ck.Type.CQLHolder())
+		builder = builder.Columns(ck.Name)
 		values = appendValue(ck.Type, p, values)
 		typs = append(typs, ck.Type)
 	}
 	for _, cdef := range t.Columns {
-		columns = append(columns, cdef.Name)
-		placeholders = append(placeholders, cdef.Type.CQLHolder())
+		switch t := cdef.Type.(type) {
+		case TupleType:
+			builder = builder.TupleColumn(cdef.Name, len(t.Types))
+		default:
+			builder = builder.Columns(cdef.Name)
+		}
 		values = appendValue(cdef.Type, p, values)
 		typs = append(typs, cdef.Type)
 	}
-	query := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", s.Keyspace.Name, t.Name, strings.Join(columns, ","), strings.Join(placeholders, ","))
 	return &Stmt{
-		Query: query,
+		Query: builder,
 		Values: func() []interface{} {
 			return values
 		},
@@ -321,7 +323,7 @@ func (s *Schema) GenInsertStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	}, nil
 }
 
-func (s *Schema) GenInsertJsonStmt(t Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenInsertJsonStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 	values := make(map[string]interface{})
 	values = t.PartitionKeys.ToJSONMap(values, p)
 	values = t.ClusteringKeys.ToJSONMap(values, p)
@@ -331,9 +333,10 @@ func (s *Schema) GenInsertJsonStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	if err != nil {
 		return nil, err
 	}
-	query := fmt.Sprintf("INSERT INTO %s.%s JSON ?", s.Keyspace.Name, t.Name)
+
+	builder := qb.Insert(s.Keyspace.Name + "." + t.Name).Json()
 	return &Stmt{
-		Query: query,
+		Query: builder,
 		Values: func() []interface{} {
 			return []interface{}{string(jsonString)}
 		},
@@ -341,26 +344,25 @@ func (s *Schema) GenInsertJsonStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	}, nil
 }
 
-func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenDeleteRows(t *Table, p *PartitionRange) (*Stmt, error) {
 	var (
-		relations []string
-		values    []interface{}
-		typs      []Type
+		values []interface{}
+		typs   []Type
 	)
+	builder := qb.Delete(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
-		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
+		builder = builder.Where(qb.Eq(pk.Name))
 		values = appendValue(pk.Type, p, values)
 		typs = append(typs, pk.Type)
 	}
 	if len(t.ClusteringKeys) > 0 {
 		ck := t.ClusteringKeys[0]
-		relations = append(relations, fmt.Sprintf("%s >= ? AND %s <= ?", ck.Name, ck.Name))
+		builder = builder.Where(qb.GtOrEq(ck.Name)).Where(qb.LtOrEq(ck.Name))
 		values = appendValueRange(ck.Type, p, values)
 		typs = append(typs, ck.Type, ck.Type)
 	}
-	query := fmt.Sprintf("DELETE FROM %s.%s WHERE %s", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "))
 	return &Stmt{
-		Query: query,
+		Query: builder,
 		Values: func() []interface{} {
 			return values
 		},
@@ -368,7 +370,7 @@ func (s *Schema) GenDeleteRows(t Table, p *PartitionRange) (*Stmt, error) {
 	}, nil
 }
 
-func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenMutateStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 	switch n := p.Rand.Intn(1000); n {
 	case 10, 100:
 		return s.GenDeleteRows(t, p)
@@ -385,7 +387,7 @@ func (s *Schema) GenMutateStmt(t Table, p *PartitionRange) (*Stmt, error) {
 	}
 }
 
-func (s *Schema) GenCheckStmt(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenCheckStmt(t *Table, p *PartitionRange) *Stmt {
 	var n int
 	if len(t.Indexes) > 0 {
 		n = p.Rand.Intn(5)
@@ -407,7 +409,7 @@ func (s *Schema) GenCheckStmt(t Table, p *PartitionRange) *Stmt {
 	return nil
 }
 
-func (s *Schema) genSinglePartitionQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genSinglePartitionQuery(t *Table, p *PartitionRange) *Stmt {
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
@@ -415,17 +417,16 @@ func (s *Schema) genSinglePartitionQuery(t Table, p *PartitionRange) *Stmt {
 		tableName = t.MaterializedViews[view].Name
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
 	}
-	var relations []string
+	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	values := make([]interface{}, 0)
 	typs := make([]Type, 0, 10)
 	for _, pk := range partitionKeys {
-		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
+		builder = builder.Where(qb.Eq(pk.Name))
 		values = appendValue(pk.Type, p, values)
 		typs = append(typs, pk.Type)
 	}
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, tableName, strings.Join(relations, " AND "))
 	return &Stmt{
-		Query: query,
+		Query: builder,
 		Values: func() []interface{} {
 			return values
 		},
@@ -433,11 +434,10 @@ func (s *Schema) genSinglePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *Schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genMultiplePartitionQuery(t *Table, p *PartitionRange) *Stmt {
 	var (
-		relations []string
-		values    []interface{}
-		typs      []Type
+		values []interface{}
+		typs   []Type
 	)
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
@@ -450,16 +450,16 @@ func (s *Schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	if pkNum == 0 {
 		pkNum = 1
 	}
+	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	for _, pk := range partitionKeys {
-		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
+		builder = builder.Where(qb.InTuple(pk.Name, pkNum))
 		for i := 0; i < pkNum; i++ {
 			values = appendValue(pk.Type, p, values)
 			typs = append(typs, pk.Type)
 		}
 	}
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, tableName, strings.Join(relations, " AND "))
 	return &Stmt{
-		Query: query,
+		Query: builder,
 		Values: func() []interface{} {
 			return values
 		},
@@ -467,11 +467,10 @@ func (s *Schema) genMultiplePartitionQuery(t Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *Schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
 	var (
-		relations []string
-		values    []interface{}
-		typs      []Type
+		values []interface{}
+		typs   []Type
 	)
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
@@ -482,8 +481,9 @@ func (s *Schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
 		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
 	}
+	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	for _, pk := range partitionKeys {
-		relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
+		builder = builder.Where(qb.Eq(pk.Name))
 		values = appendValue(pk.Type, p, values)
 		typs = append(typs, pk.Type)
 	}
@@ -491,17 +491,16 @@ func (s *Schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	if len(clusteringKeys) > 1 {
 		maxClusteringRels = p.Rand.Intn(len(clusteringKeys) - 1)
 		for i := 0; i < maxClusteringRels; i++ {
-			relations = append(relations, fmt.Sprintf("%s = ?", clusteringKeys[i].Name))
+			builder = builder.Where(qb.Eq(clusteringKeys[i].Name))
 			values = appendValue(clusteringKeys[i].Type, p, values)
 			typs = append(typs, clusteringKeys[i].Type)
 		}
 	}
-	relations = append(relations, fmt.Sprintf("%s > ? AND %s < ?", clusteringKeys[maxClusteringRels].Name, clusteringKeys[maxClusteringRels].Name))
+	builder = builder.Where(qb.Gt(clusteringKeys[maxClusteringRels].Name)).Where(qb.Lt(clusteringKeys[maxClusteringRels].Name))
 	values = appendValueRange(t.ClusteringKeys[maxClusteringRels].Type, p, values)
 	typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, tableName, strings.Join(relations, " AND "))
 	return &Stmt{
-		Query: query,
+		Query: builder,
 		Values: func() []interface{} {
 			return values
 		},
@@ -509,11 +508,10 @@ func (s *Schema) genClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
 	var (
-		relations []string
-		values    []interface{}
-		typs      []Type
+		values []interface{}
+		typs   []Type
 	)
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
@@ -528,8 +526,9 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 	if pkNum == 0 {
 		pkNum = 1
 	}
+	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	for _, pk := range partitionKeys {
-		relations = append(relations, fmt.Sprintf("%s IN (%s)", pk.Name, strings.TrimRight(strings.Repeat("?,", pkNum), ",")))
+		builder = builder.Where(qb.InTuple(pk.Name, pkNum))
 		for i := 0; i < pkNum; i++ {
 			values = appendValue(pk.Type, p, values)
 			typs = append(typs, pk.Type)
@@ -539,17 +538,16 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 	if len(clusteringKeys) > 1 {
 		maxClusteringRels = p.Rand.Intn(len(clusteringKeys) - 1)
 		for i := 0; i < maxClusteringRels; i++ {
-			relations = append(relations, fmt.Sprintf("%s = ?", clusteringKeys[i].Name))
+			builder = builder.Where(qb.Eq(clusteringKeys[i].Name))
 			values = appendValue(clusteringKeys[i].Type, p, values)
 			typs = append(typs, clusteringKeys[i].Type)
 		}
 	}
-	relations = append(relations, fmt.Sprintf("%s > ? AND %s < ?", clusteringKeys[maxClusteringRels].Name, clusteringKeys[maxClusteringRels].Name))
+	builder = builder.Where(qb.Gt(clusteringKeys[maxClusteringRels].Name)).Where(qb.Lt(clusteringKeys[maxClusteringRels].Name))
 	values = appendValueRange(clusteringKeys[maxClusteringRels].Type, p, values)
 	typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s", s.Keyspace.Name, tableName, strings.Join(relations, " AND "))
 	return &Stmt{
-		Query: query,
+		Query: builder,
 		Values: func() []interface{} {
 			return values
 		},
@@ -557,11 +555,10 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t Table, p *PartitionR
 	}
 }
 
-func (s *Schema) genSingleIndexQuery(t Table, p *PartitionRange) *Stmt {
+func (s *Schema) genSingleIndexQuery(t *Table, p *PartitionRange) *Stmt {
 	var (
-		relations []string
-		values    []interface{}
-		typs      []Type
+		values []interface{}
+		typs   []Type
 	)
 
 	if len(t.Indexes) == 0 {
@@ -571,19 +568,20 @@ func (s *Schema) genSingleIndexQuery(t Table, p *PartitionRange) *Stmt {
 	if pkNum == 0 {
 		pkNum = 1
 	}
+	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		for i := 0; i < pkNum; i++ {
-			relations = append(relations, fmt.Sprintf("%s = ?", pk.Name))
+			builder = builder.Where(qb.Eq(pk.Name))
 			values = appendValue(pk.Type, p, values)
 			typs = append(typs, pk.Type)
 		}
 	}
 	idx := p.Rand.Intn(len(t.Indexes))
-	query := fmt.Sprintf("SELECT * FROM %s.%s WHERE %s AND %s=?", s.Keyspace.Name, t.Name, strings.Join(relations, " AND "), t.Indexes[idx].Column)
+	builder = builder.Where(qb.Eq(t.Indexes[idx].Column))
 	values = appendValue(t.Columns[idx].Type, p, values)
 	typs = append(typs, t.Columns[idx].Type)
 	return &Stmt{
-		Query: query,
+		Query: builder,
 		Values: func() []interface{} {
 			return values
 		},
@@ -593,13 +591,13 @@ func (s *Schema) genSingleIndexQuery(t Table, p *PartitionRange) *Stmt {
 
 type SchemaBuilder interface {
 	Keyspace(Keyspace) SchemaBuilder
-	Table(Table) SchemaBuilder
+	Table(*Table) SchemaBuilder
 	Build() *Schema
 }
 
 type schemaBuilder struct {
 	keyspace Keyspace
-	tables   []Table
+	tables   []*Table
 }
 
 func (s *schemaBuilder) Keyspace(keyspace Keyspace) SchemaBuilder {
@@ -607,7 +605,7 @@ func (s *schemaBuilder) Keyspace(keyspace Keyspace) SchemaBuilder {
 	return s
 }
 
-func (s *schemaBuilder) Table(table Table) SchemaBuilder {
+func (s *schemaBuilder) Table(table *Table) SchemaBuilder {
 	s.tables = append(s.tables, table)
 	return s
 }
