@@ -15,9 +15,10 @@ type cqlStore struct {
 	schema  *gemini.Schema
 }
 
-func (cs *cqlStore) mutate(builder qb.Builder, values ...interface{}) error {
+func (cs *cqlStore) mutate(builder qb.Builder, ts time.Time, values ...interface{}) error {
 	query, _ := builder.ToCql()
-	if err := cs.session.Query(query, values...).Exec(); err != nil {
+	var tsUsec int64 = ts.UnixNano() / 1000
+	if err := cs.session.Query(query, values...).WithTimestamp(tsUsec).Exec(); err != nil {
 		return errors.Errorf("%v [cluster = test, query = '%s']", err, query)
 	}
 	return nil
