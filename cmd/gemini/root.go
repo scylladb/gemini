@@ -185,7 +185,7 @@ func run(cmd *cobra.Command, args []string) {
 			if verbose {
 				fmt.Println(stmt)
 			}
-			if err := store.Mutate(createBuilder{stmt: stmt}); err != nil {
+			if err := store.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
 				fmt.Printf("%v", err)
 				return
 			}
@@ -195,7 +195,7 @@ func run(cmd *cobra.Command, args []string) {
 		if verbose {
 			fmt.Println(stmt)
 		}
-		if err := store.Mutate(createBuilder{stmt: stmt}); err != nil {
+		if err := store.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
 			fmt.Printf("%v", err)
 			return
 		}
@@ -244,12 +244,12 @@ func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *o
 		for {
 			select {
 			case <-timer.C:
+				cancelWorkers()
+				testRes = drain(c, testRes)
 				testRes.PrintResult(out)
 				fmt.Println("Test run completed. Exiting.")
-				cancelWorkers()
 				return
 			case <-reporterCtx.Done():
-				testRes.PrintResult(out)
 				return
 			case res := <-c:
 				testRes = res.Merge(&testRes)
@@ -257,24 +257,26 @@ func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *o
 					sp.Suffix = fmt.Sprintf(" Running Gemini... %v", testRes)
 				}
 				if testRes.ReadErrors > 0 {
-					testRes.PrintResult(out)
-					fmt.Println(testRes.Errors)
 					if failFast {
 						fmt.Println("Error in data validation. Exiting.")
 						cancelWorkers()
+						testRes = drain(c, testRes)
+						testRes.PrintResult(out)
 						return
 					}
+					testRes.PrintResult(out)
 				}
 			}
 		}
 	}(duration)
 
 	workers.Wait()
+	close(c)
 	cancelReporter()
 	reporter.Wait()
 }
 
-func mutationJob(schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File) {
+func mutationJob(ctx context.Context, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File) {
 	mutateStmt, err := schema.GenMutateStmt(table, &p)
 	if err != nil {
 		fmt.Printf("Failed! Mutation statement generation failed: '%v'\n", err)
@@ -286,7 +288,7 @@ func mutationJob(schema *gemini.Schema, table *gemini.Table, s store.Store, p ge
 	if verbose {
 		fmt.Println(mutateStmt.PrettyCQL())
 	}
-	if err := s.Mutate(mutateQuery, mutateValues...); err != nil {
+	if err := s.Mutate(ctx, mutateQuery, mutateValues...); err != nil {
 		e := JobError{
 			Timestamp: time.Now(),
 			Message:   "Mutation failed: " + err.Error(),
@@ -299,14 +301,14 @@ func mutationJob(schema *gemini.Schema, table *gemini.Table, s store.Store, p ge
 	}
 }
 
-func validationJob(schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File) {
+func validationJob(ctx context.Context, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File) {
 	checkStmt := schema.GenCheckStmt(table, &p)
 	checkQuery := checkStmt.Query
 	checkValues := checkStmt.Values()
 	if verbose {
 		fmt.Println(checkStmt.PrettyCQL())
 	}
-	if err := s.Check(table, checkQuery, checkValues...); err != nil {
+	if err := s.Check(ctx, table, checkQuery, checkValues...); err != nil {
 		// De-duplication needed?
 		e := JobError{
 			Timestamp: time.Now(),
@@ -333,15 +335,15 @@ func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table *
 		}
 		switch mode {
 		case writeMode:
-			mutationJob(schema, table, s, p, &testStatus, out)
+			mutationJob(ctx, schema, table, s, p, &testStatus, out)
 		case readMode:
-			validationJob(schema, table, s, p, &testStatus, out)
+			validationJob(ctx, schema, table, s, p, &testStatus, out)
 		default:
 			ind := p.Rand.Intn(100000) % 2
 			if ind == 0 {
-				mutationJob(schema, table, s, p, &testStatus, out)
+				mutationJob(ctx, schema, table, s, p, &testStatus, out)
 			} else {
-				validationJob(schema, table, s, p, &testStatus, out)
+				validationJob(ctx, schema, table, s, p, &testStatus, out)
 			}
 		}
 
@@ -349,7 +351,7 @@ func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table *
 			c <- testStatus
 			testStatus = Status{}
 		}
-		if failFast && testStatus.ReadErrors > 0 {
+		if failFast && (testStatus.ReadErrors > 0 || testStatus.WriteErrors > 0) {
 			break
 		}
 		i++
@@ -404,4 +406,11 @@ func printSetup() error {
 	}
 	tw.Flush()
 	return nil
+}
+
+func drain(ch chan Status, testRes Status) Status {
+	for res := range ch {
+		testRes = res.Merge(&testRes)
+	}
+	return testRes
 }

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Ensure proper termination when errors happen.
 - Fix mutation timestamps to match on system under test and test oracle.
 - Gemini now tries to perform mutation on both systems regardless of
   if one of them fail.
