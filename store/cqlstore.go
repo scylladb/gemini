@@ -29,10 +29,10 @@ func (cs *cqlStore) load(builder qb.Builder, values []interface{}) (result []map
 	oracleIter := cs.session.Query(query, values...).Iter()
 	defer func() {
 		if e := testIter.Close(); e != nil {
-			err = multierr.Append(err, errors.Errorf("test system failed: %s", err.Error()))
+			err = multierr.Append(err, errors.Errorf("test system failed: %s", e.Error()))
 		}
 		if e := oracleIter.Close(); e != nil {
-			err = multierr.Append(err, errors.Errorf("oracle failed: %s", err.Error()))
+			err = multierr.Append(err, errors.Errorf("oracle failed: %s", e.Error()))
 		}
 	}()
 	result = loadSet(testIter)
