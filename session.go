@@ -24,9 +24,9 @@ type Session struct {
 }
 
 type JobError struct {
-	Timestamp time.Time
-	Message   string `json:"message"`
-	Query     string `json:"query"`
+	Timestamp time.Time `json:"timestamp"`
+	Message   string    `json:"message"`
+	Query     string    `json:"query"`
 }
 
 func NewSession(testClusterHost []string, oracleClusterHost []string) *Session {
