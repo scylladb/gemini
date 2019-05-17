@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"sort"
@@ -55,26 +56,26 @@ func (s *Session) Close() {
 	s.oracleSession.Close()
 }
 
-func (s *Session) Mutate(query string, values ...interface{}) error {
+func (s *Session) Mutate(ctx context.Context, query string, values ...interface{}) error {
 	ts := time.Now()
 	var tsUsec int64 = ts.UnixNano() / 1000
-	if err := s.testSession.Query(query, values...).WithTimestamp(tsUsec).Exec(); err != nil {
+	if err := s.testSession.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec).Exec(); !ignore(err) {
 		return fmt.Errorf("%v [cluster = test, query = '%s']", err, query)
 	}
-	if err := s.oracleSession.Query(query, values...).WithTimestamp(tsUsec).Exec(); err != nil {
+	if err := s.oracleSession.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec).Exec(); !ignore(err) {
 		return fmt.Errorf("%v [cluster = oracle, query = '%s']", err, query)
 	}
 	return nil
 }
 
-func (s *Session) Check(table Table, query string, values ...interface{}) (err error) {
-	testIter := s.testSession.Query(query, values...).Iter()
-	oracleIter := s.oracleSession.Query(query, values...).Iter()
+func (s *Session) Check(ctx context.Context, table Table, query string, values ...interface{}) (err error) {
+	testIter := s.testSession.Query(query, values...).WithContext(ctx).Iter()
+	oracleIter := s.oracleSession.Query(query, values...).WithContext(ctx).Iter()
 	defer func() {
-		if e := testIter.Close(); e != nil {
+		if e := testIter.Close(); !ignore(e) {
 			err = multierr.Append(err, errors.Errorf("test system failed: %s", e.Error()))
 		}
-		if e := oracleIter.Close(); e != nil {
+		if e := oracleIter.Close(); !ignore(e) {
 			err = multierr.Append(err, errors.Errorf("oracle failed: %s", e.Error()))
 		}
 	}()
@@ -168,4 +169,16 @@ func loadSet(iter *gocql.Iter) []map[string]interface{} {
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+func ignore(err error) bool {
+	if err == nil {
+		return true
+	}
+	switch err {
+	case context.Canceled, context.DeadlineExceeded:
+		return true
+	default:
+		return false
+	}
 }
