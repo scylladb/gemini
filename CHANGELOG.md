@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fix mutation timestamps to match on system under test and test oracle.
 - Gemini now timestamps errors for easier correlation.
  
 ## [1.0.1] - 2019-05-16
