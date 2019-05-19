@@ -56,10 +56,12 @@ func (s *Session) Close() {
 }
 
 func (s *Session) Mutate(query string, values ...interface{}) error {
-	if err := s.testSession.Query(query, values...).Exec(); err != nil {
+	ts := time.Now()
+	var tsUsec int64 = ts.UnixNano() / 1000
+	if err := s.testSession.Query(query, values...).WithTimestamp(tsUsec).Exec(); err != nil {
 		return fmt.Errorf("%v [cluster = test, query = '%s']", err, query)
 	}
-	if err := s.oracleSession.Query(query, values...).Exec(); err != nil {
+	if err := s.oracleSession.Query(query, values...).WithTimestamp(tsUsec).Exec(); err != nil {
 		return fmt.Errorf("%v [cluster = oracle, query = '%s']", err, query)
 	}
 	return nil
