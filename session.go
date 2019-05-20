@@ -72,10 +72,10 @@ func (s *Session) Check(table Table, query string, values ...interface{}) (err e
 	oracleIter := s.oracleSession.Query(query, values...).Iter()
 	defer func() {
 		if e := testIter.Close(); e != nil {
-			err = multierr.Append(err, errors.Errorf("test system failed: %s", err.Error()))
+			err = multierr.Append(err, errors.Errorf("test system failed: %s", e.Error()))
 		}
 		if e := oracleIter.Close(); e != nil {
-			err = multierr.Append(err, errors.Errorf("oracle failed: %s", err.Error()))
+			err = multierr.Append(err, errors.Errorf("oracle failed: %s", e.Error()))
 		}
 	}()
 
