@@ -6,13 +6,7 @@
 - Fix mutation timestamps to match on system under test and test oracle.
 - Gemini now tries to perform mutation on both systems regardless of
   if one of them fail.
-
-## Unreleased
-
 - Gemini now timestamps errors for easier correlation.
- 
-## [1.0.1] - 2019-05-16
-
 - A new Store abstraction is introduced in preparation to enable
   implementations such as an in-memory store.
 - Gemini now uses github.com/scylladb/gocqlx/qb builder.
