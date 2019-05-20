@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Ensure proper termination when errors happen.
 - Fix mutation timestamps to match on system under test and test oracle.
 - Gemini now timestamps errors for easier correlation.
  
