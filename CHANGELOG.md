@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.0.2] -2019-05-20
 
 - Ensure proper termination when errors happen.
 - Fix mutation timestamps to match on system under test and test oracle.
@@ -62,6 +62,7 @@
 
 - Improve progress indicator ([#14](https://github.com/scylladb/gemini/issues/14)).
 
+[1.0.2]: https://github.com/scylladb/gemini/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/scylladb/gemini/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/scylladb/gemini/compare/v0.9.2...v1.0.0
 [0.9.2]: https://github.com/scylladb/gemini/compare/v0.9.1...v0.9.2
