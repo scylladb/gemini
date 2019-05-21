@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- JSON marshalling of Schema fixed. The schema input file has changed to
+  ensure marshalling of lists and sets. These types now have a _kind_
+  property with possible values (_list_,_set_).
 - Ensure proper termination when errors happen.
 - Fix mutation timestamps to match on system under test and test oracle.
 - Gemini now tries to perform mutation on both systems regardless of
