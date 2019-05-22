@@ -99,12 +99,11 @@ func (r *Status) PrintResultAsJSON(w io.Writer) error {
 		"result":         r,
 		"gemini_version": version,
 	}
-	b, err := json.MarshalIndent(result, "  ", "  ")
-	if err != nil {
+	encoder := json.NewEncoder(w)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent(" ", " ")
+	if err := encoder.Encode(result); err != nil {
 		return errors.Wrap(err, "unable to create json from result")
-	}
-	if _, err := fmt.Fprintf(w, "%s\n", b); err != nil {
-		return errors.Wrapf(err, "unable to print json result to file, using stdout, error=%s\n", err)
 	}
 	return nil
 }
