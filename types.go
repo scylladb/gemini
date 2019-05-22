@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/mitchellh/mapstructure"
+	"github.com/pkg/errors"
 	"gopkg.in/inf.v0"
 )
 
@@ -365,30 +368,31 @@ func (tt UDTType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}
 	return []interface{}{left}, []interface{}{right}
 }
 
-type SetType struct {
+type BagType struct {
+	Kind   string     `json:"kind"` // We need to differentiate between sets and lists
 	Type   SimpleType `json:"type"`
 	Frozen bool       `json:"frozen"`
 }
 
-func (ct SetType) Name() string {
+func (ct BagType) Name() string {
 	if ct.Frozen {
-		return "frozen<set<" + ct.Type.Name() + ">>"
+		return "frozen<" + ct.Kind + "<" + ct.Type.Name() + ">>"
 	}
-	return "set<" + ct.Type.Name() + ">"
+	return ct.Kind + "<" + ct.Type.Name() + ">"
 }
 
-func (ct SetType) CQLDef() string {
+func (ct BagType) CQLDef() string {
 	if ct.Frozen {
-		return "frozen<set<" + ct.Type.Name() + ">>"
+		return "frozen<" + ct.Kind + "<" + ct.Type.Name() + ">>"
 	}
-	return "set<" + ct.Type.Name() + ">"
+	return ct.Kind + "<" + ct.Type.Name() + ">"
 }
 
-func (ct SetType) CQLHolder() string {
+func (ct BagType) CQLHolder() string {
 	return "?"
 }
 
-func (ct SetType) CQLPretty(query string, value []interface{}) (string, int) {
+func (ct BagType) CQLPretty(query string, value []interface{}) (string, int) {
 	if len(value) == 0 {
 		return query, 0
 	}
@@ -407,7 +411,7 @@ func (ct SetType) CQLPretty(query string, value []interface{}) (string, int) {
 	panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
 }
 
-func (ct SetType) GenValue(p *PartitionRange) []interface{} {
+func (ct BagType) GenValue(p *PartitionRange) []interface{} {
 	count := p.Rand.Intn(9) + 1
 	vals := make([]interface{}, count, count)
 	for i := 0; i < count; i++ {
@@ -416,7 +420,7 @@ func (ct SetType) GenValue(p *PartitionRange) []interface{} {
 	return []interface{}{vals}
 }
 
-func (ct SetType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}) {
+func (ct BagType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}) {
 	count := p.Rand.Intn(9) + 1
 	left := make([]interface{}, 0, len(ct.Type))
 	right := make([]interface{}, 0, len(ct.Type))
@@ -428,26 +432,8 @@ func (ct SetType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}
 	return []interface{}{left}, []interface{}{right}
 }
 
-func (ct SetType) Indexable() bool {
+func (ct BagType) Indexable() bool {
 	return false
-}
-
-type ListType struct {
-	SetType
-}
-
-func (lt ListType) Name() string {
-	if lt.Frozen {
-		return "frozen<list<" + lt.Type.Name() + ">>"
-	}
-	return "list<" + lt.Type.Name() + ">"
-}
-
-func (lt ListType) CQLDef() string {
-	if lt.Frozen {
-		return "frozen<list<" + lt.Type.Name() + ">>"
-	}
-	return "list<" + lt.Type.Name() + ">"
 }
 
 type MapType struct {
@@ -572,7 +558,15 @@ func genUDTType() UDTType {
 	}
 }
 
-func genSetType() SetType {
+func genSetType() BagType {
+	return genBagType("set")
+}
+
+func genListType() BagType {
+	return genBagType("list")
+}
+
+func genBagType(kind string) BagType {
 	var t SimpleType
 	for {
 		t = genSimpleType()
@@ -580,15 +574,10 @@ func genSetType() SetType {
 			break
 		}
 	}
-	return SetType{
+	return BagType{
+		Kind:   kind,
 		Type:   t,
 		Frozen: rand.Uint32()%2 == 0,
-	}
-}
-
-func genListType() ListType {
-	return ListType{
-		SetType: genSetType(),
 	}
 }
 
@@ -614,4 +603,184 @@ func genPrimaryKeyColumnType() Type {
 
 func genIndexName(prefix string, idx int) string {
 	return fmt.Sprintf("%s_idx", genColumnName(prefix, idx))
+}
+
+// JSON Marshalling
+
+func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
+	dataMap := make(map[string]interface{})
+	if err := json.Unmarshal(data, &dataMap); err != nil {
+		return err
+	}
+
+	t, err := getSimpleTypeColumn(dataMap)
+	if err != nil {
+		t, err = getUDTTypeColumn(dataMap)
+		if err != nil {
+			t, err = getTupleTypeColumn(dataMap)
+			if err != nil {
+				t, err = getMapTypeColumn(dataMap)
+				if err != nil {
+					t, err = getBagTypeColumn(dataMap)
+					if err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+	*cd = ColumnDef{
+		Name: t.Name,
+		Type: t.Type,
+	}
+	return nil
+}
+
+func getMapTypeColumn(data map[string]interface{}) (ColumnDef, error) {
+	st := struct {
+		Name string
+		Type map[string]interface{}
+	}{}
+	err := mapstructure.Decode(data, &st)
+
+	if _, ok := st.Type["frozen"]; !ok {
+		return ColumnDef{}, errors.Errorf("not a map type, value=%v", st)
+	}
+
+	if _, ok := st.Type["value_type"]; !ok {
+		return ColumnDef{}, errors.Errorf("not a map type, value=%v", st)
+	}
+
+	if _, ok := st.Type["key_type"]; !ok {
+		return ColumnDef{}, errors.Errorf("not a map type, value=%v", st)
+	}
+
+	var frozen bool
+	if err := mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
+		return ColumnDef{}, errors.Wrapf(err, "can't decode bool value for MapType::Frozen, value=%v", st)
+	}
+	var valueType SimpleType
+	if err := mapstructure.Decode(st.Type["value_type"], &valueType); err != nil {
+		return ColumnDef{}, errors.Wrapf(err, "can't decode SimpleType value for MapType::ValueType, value=%v", st)
+	}
+	var keyType SimpleType
+	if err := mapstructure.Decode(st.Type["key_type"], &keyType); err != nil {
+		return ColumnDef{}, errors.Wrapf(err, "can't decode bool value for MapType::KeyType, value=%v", st)
+	}
+	return ColumnDef{
+		Name: st.Name,
+		Type: MapType{
+			Frozen:    frozen,
+			ValueType: valueType,
+			KeyType:   keyType,
+		},
+	}, err
+}
+
+func getBagTypeColumn(data map[string]interface{}) (ColumnDef, error) {
+	st := struct {
+		Name string
+		Type map[string]interface{}
+	}{}
+	err := mapstructure.Decode(data, &st)
+
+	var kind string
+	if err := mapstructure.Decode(st.Type["kind"], &kind); err != nil {
+		return ColumnDef{}, errors.Wrapf(err, "can't decode string value for BagType::Frozen, value=%v", st)
+	}
+	var frozen bool
+	if err := mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
+		return ColumnDef{}, errors.Wrapf(err, "can't decode bool value for BagType::Frozen, value=%v", st)
+	}
+	var typ SimpleType
+	if err := mapstructure.Decode(st.Type["type"], &typ); err != nil {
+		return ColumnDef{}, errors.Wrapf(err, "can't decode SimpleType value for BagType::ValueType, value=%v", st)
+	}
+	return ColumnDef{
+		Name: st.Name,
+		Type: BagType{
+			Kind:   kind,
+			Frozen: frozen,
+			Type:   typ,
+		},
+	}, err
+}
+
+func getTupleTypeColumn(data map[string]interface{}) (ColumnDef, error) {
+	st := struct {
+		Name string
+		Type map[string]interface{}
+	}{}
+	err := mapstructure.Decode(data, &st)
+
+	if _, ok := st.Type["types"]; !ok {
+		return ColumnDef{}, errors.Errorf("not a tuple type, value=%v", st)
+	}
+
+	var types []SimpleType
+	if err := mapstructure.Decode(st.Type["types"], &types); err != nil {
+		return ColumnDef{}, errors.Wrapf(err, "can't decode []SimpleType value for TupleType::Types, value=%v", st)
+	}
+	var frozen bool
+	if err := mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
+		return ColumnDef{}, errors.Wrapf(err, "can't decode bool value for TupleType::Types, value=%v", st)
+	}
+	return ColumnDef{
+		Name: st.Name,
+		Type: TupleType{
+			Types:  types,
+			Frozen: frozen,
+		},
+	}, err
+}
+
+func getUDTTypeColumn(data map[string]interface{}) (ColumnDef, error) {
+	st := struct {
+		Name string
+		Type map[string]interface{}
+	}{}
+	err := mapstructure.Decode(data, &st)
+
+	if _, ok := st.Type["types"]; !ok {
+		return ColumnDef{}, errors.Errorf("not a UDT type, value=%v", st)
+	}
+	if _, ok := st.Type["type_name"]; !ok {
+		return ColumnDef{}, errors.Errorf("not a UDT type, value=%v", st)
+	}
+
+	var types map[string]SimpleType
+	if err := mapstructure.Decode(st.Type["types"], &types); err != nil {
+		return ColumnDef{}, errors.Wrapf(err, "can't decode []SimpleType value for UDTType::Types, value=%v", st)
+	}
+	var frozen bool
+	if err := mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
+		return ColumnDef{}, errors.Wrapf(err, "can't decode bool value for UDTType::Frozen, value=%v", st)
+	}
+	var typeName string
+	if err := mapstructure.Decode(st.Type["type_name"], &typeName); err != nil {
+		return ColumnDef{}, errors.Wrapf(err, "can't decode string value for UDTType::TypeName, value=%v", st)
+	}
+	return ColumnDef{
+		Name: st.Name,
+		Type: UDTType{
+			Types:    types,
+			TypeName: typeName,
+			Frozen:   frozen,
+		},
+	}, err
+}
+
+func getSimpleTypeColumn(data map[string]interface{}) (ColumnDef, error) {
+	st := struct {
+		Name string
+		Type SimpleType
+	}{}
+	err := mapstructure.Decode(data, &st)
+	if err != nil {
+		return ColumnDef{}, err
+	}
+	return ColumnDef{
+		Name: st.Name,
+		Type: st.Type,
+	}, err
 }

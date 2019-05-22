@@ -1,11 +1,13 @@
 package gemini
 
 import (
+	"encoding/json"
 	"math/big"
 	"net"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"gopkg.in/inf.v0"
 )
 
@@ -140,7 +142,8 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0=1001",
 	},
 	{
-		typ: SetType{
+		typ: BagType{
+			Kind:   "set",
 			Type:   TYPE_ASCII,
 			Frozen: false,
 		},
@@ -149,11 +152,10 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0={'a','b'}",
 	},
 	{
-		typ: ListType{
-			SetType{
-				Type:   TYPE_ASCII,
-				Frozen: false,
-			},
+		typ: BagType{
+			Kind:   "list",
+			Type:   TYPE_ASCII,
+			Frozen: false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{[]string{"a", "b"}},
@@ -205,5 +207,99 @@ func TestCQLPretty(t *testing.T) {
 		if result != p.expected {
 			t.Fatalf("expected '%s', got '%s' for values %v and type '%v'", p.expected, result, p.values, p.typ)
 		}
+	}
+}
+
+func TestMarshalUnmarshal(t *testing.T) {
+	columns := Columns{
+		{
+			Name: genColumnName("col", 0),
+			Type: genMapType(),
+		},
+		{
+			Name: genColumnName("col", 1),
+			Type: genSetType(),
+		},
+		{
+			Name: genColumnName("col", 2),
+			Type: genListType(),
+		},
+		{
+			Name: genColumnName("col", 3),
+			Type: genTupleType(),
+		},
+		{
+			Name: genColumnName("col", 4),
+			Type: genUDTType(),
+		},
+	}
+	s1 := &Schema{
+		Tables: []*Table{
+			{
+				Name: "table",
+				PartitionKeys: Columns{
+					{
+						Name: genColumnName("pk", 0),
+						Type: genSimpleType(),
+					},
+				},
+				ClusteringKeys: Columns{
+					{
+						Name: genColumnName("ck", 0),
+						Type: genSimpleType(),
+					},
+				},
+				Columns: columns,
+				Indexes: []IndexDef{
+					{
+						Name:   genIndexName("col", 0),
+						Column: columns[0].Name,
+					},
+					{
+						Name:   genIndexName("col", 1),
+						Column: columns[1].Name,
+					},
+				},
+				MaterializedViews: []MaterializedView{
+					{
+						Name: "table1_mv_0",
+						PartitionKeys: []ColumnDef{
+							{
+								Name: "pk_mv_0",
+								Type: genListType(),
+							},
+							{
+								Name: "pk_mv_1",
+								Type: genTupleType(),
+							},
+						},
+						ClusteringKeys: []ColumnDef{
+							{
+								Name: "ck_mv_0",
+								Type: genSetType(),
+							},
+							{
+								Name: "ck_mv_1",
+								Type: genUDTType(),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	b, err := json.MarshalIndent(s1, "  ", "  ")
+	if err != nil {
+		t.Fatalf("unable to marshal json, error=%s\n", err)
+	}
+
+	s2 := &Schema{}
+	if err := json.Unmarshal(b, &s2); err != nil {
+		t.Fatalf("unable to unmarshal json, error=%s\n", err)
+	}
+
+	if diff := cmp.Diff(s1, s2); diff != "" {
+		t.Errorf("schema not the same after marshal/unmarshal, diff=%s", diff)
 	}
 }

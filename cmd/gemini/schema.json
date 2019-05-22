@@ -68,6 +68,14 @@
             ],
             "frozen": false
           }
+        },
+        {
+          "name": "col6",
+          "type": {
+            "kind": "list",
+            "type": "int",
+            "frozen": true
+          }
         }
       ],
       "indexes": [
