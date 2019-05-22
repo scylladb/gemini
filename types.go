@@ -331,9 +331,10 @@ func (tt UDTType) CQLPretty(query string, value []interface{}) (string, int) {
 	if s, ok := value[0].(map[string]interface{}); ok {
 		vv := "{"
 		for k, v := range tt.Types {
-			vv += k + ":" + "?"
+			vv += fmt.Sprintf("%s:?,", k)
 			vv, _ = v.CQLPretty(vv, []interface{}{s[k]})
 		}
+		vv = strings.TrimSuffix(vv, ",")
 		vv += "}"
 		return strings.Replace(query, "?", vv, 1), 1
 	}
@@ -459,9 +460,10 @@ func (mt MapType) CQLPretty(query string, value []interface{}) (string, int) {
 		s := reflect.ValueOf(value[0]).MapRange()
 		vv := "{"
 		for s.Next() {
-			vv += fmt.Sprintf("%s:?", s.Key().Interface())
+			vv += fmt.Sprintf("%v:?,", s.Key().Interface())
 			vv, _ = mt.ValueType.CQLPretty(vv, []interface{}{s.Value().Interface()})
 		}
+		vv = strings.TrimSuffix(vv, ",")
 		vv += "}"
 		return strings.Replace(query, "?", vv, 1), 1
 	}
