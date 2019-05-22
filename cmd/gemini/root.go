@@ -10,7 +10,9 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -204,6 +206,7 @@ func run(cmd *cobra.Command, args []string) {
 }
 
 func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *os.File) {
+	defer out.Sync()
 	c := make(chan Status)
 	minRange := 0
 	maxRange := pkNumberPerThread
@@ -224,6 +227,10 @@ func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *o
 		}
 	}
 
+	// Gracefully terminate
+	var gracefulStop = make(chan os.Signal)
+	signal.Notify(gracefulStop, syscall.SIGTERM, syscall.SIGINT)
+
 	// Wait group for the reporter goroutine.
 	var reporter sync.WaitGroup
 	reporter.Add(1)
@@ -242,10 +249,11 @@ func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *o
 		}
 		for {
 			select {
+			case <-gracefulStop:
+				stop(cancelWorkers, c, out, testRes)
+				fmt.Println("Test run aborted. Exiting.")
 			case <-timer.C:
-				cancelWorkers()
-				testRes = drain(c, testRes)
-				testRes.PrintResult(out)
+				stop(cancelWorkers, c, out, testRes)
 				fmt.Println("Test run completed. Exiting.")
 				return
 			case <-reporterCtx.Done():
@@ -258,9 +266,7 @@ func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *o
 				if testRes.ReadErrors > 0 {
 					if failFast {
 						fmt.Println("Error in data validation. Exiting.")
-						cancelWorkers()
-						testRes = drain(c, testRes)
-						testRes.PrintResult(out)
+						stop(cancelWorkers, c, out, testRes)
 						return
 					}
 					testRes.PrintResult(out)
@@ -273,6 +279,12 @@ func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *o
 	close(c)
 	cancelReporter()
 	reporter.Wait()
+}
+
+func stop(cancel context.CancelFunc, c chan Status, out io.Writer, res Status) {
+	cancel()
+	res = drain(c, res)
+	res.PrintResult(out)
 }
 
 func mutationJob(ctx context.Context, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File) {

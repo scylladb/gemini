@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Gracefully stopping on sigint and sigterm.
 - JSON marshalling of Schema fixed. The schema input file has changed to
   ensure marshalling of lists and sets. These types now have a _kind_
   property with possible values (_list_,_set_).
