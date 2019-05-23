@@ -564,17 +564,21 @@ func (s *Schema) genSingleIndexQuery(t *Table, p *PartitionRange) *Stmt {
 	if len(t.Indexes) == 0 {
 		return nil
 	}
+
+	/* Once we have ALLOW FILTERING SUPPORT this can be applied
 	pkNum := p.Rand.Intn(len(t.PartitionKeys))
 	if pkNum == 0 {
 		pkNum = 1
 	}
+	*/
+	pkNum := len(t.PartitionKeys)
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
-	for _, pk := range t.PartitionKeys {
-		for i := 0; i < pkNum; i++ {
-			builder = builder.Where(qb.Eq(pk.Name))
-			values = appendValue(pk.Type, p, values)
-			typs = append(typs, pk.Type)
-		}
+	partitionKeys := t.PartitionKeys
+	for i := 0; i < pkNum; i++ {
+		pk := partitionKeys[i]
+		builder = builder.Where(qb.Eq(pk.Name))
+		values = appendValue(pk.Type, p, values)
+		typs = append(typs, pk.Type)
 	}
 	idx := p.Rand.Intn(len(t.Indexes))
 	builder = builder.Where(qb.Eq(t.Indexes[idx].Column))
