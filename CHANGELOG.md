@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Gracefully stopping on sigint and sigterm.
+
 ## [1.0.2] -2019-05-20
 
 - Ensure proper termination when errors happen.
