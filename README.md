@@ -27,3 +27,27 @@ Alternatively, to start the clusters and run gemini in one go, type:
 ```sh
 ./scripts/gemini-launcher
 ```
+
+## Important CLI arguments
+
+### ___--concurrency___
+
+The _concurrency_ argument controls how many goroutines that are concurrently
+executing operations against each of the tables. For example, if we have a _concurrency_ of
+10 and 4 tables there will be 40 goroutines each operating independently.
+When calculating the concurrency to use it is wise to remember the above. A good target concurrency
+could for example be the total shard count of the target cluster but to set this parameter correctly
+it needs to be divided by number of tables.
+
+### ___--max-pk-per-thread___
+
+This is the range of partitioned keys that each goroutine handles. If an invalid number is given
+the value will set to `MAX(int32)/concurrency`. Invalid values are 0 or negative or greater than `MAX(int32)/concurrency`.
+If you are unsure of what to set for this value you should just not use it, the default is `MAX(int32)/concurrency`.
+The effect of this parameter is that the space of possible keys increase which will allow for a much larger working set.
+
+### ___--seed___
+
+This parameter controls the initialization of the _Random Number Generators (RNG)_ that gemini uses for various things.
+This includes generating random data as well as randomly selecting which types of queries should be executed.
+Being able to set it allows for a near replay of the queries and the data being generated.
