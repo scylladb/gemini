@@ -45,6 +45,7 @@ github.com/scylladb/gocql v1.1.0 h1:DVkQsArAUfvhsZoHtZSonnMIS1UEmW/PDu6VSr+A2bU=
 github.com/scylladb/gocql v1.1.0/go.mod h1:Q7Sru5153KG8D9zwueuQJB3ccJf9/bIwF/x8b3oKgT8=
 github.com/scylladb/gocqlx v1.3.0 h1:PKbWHoRAB2+sgVwKhhFTYwlDdXhFzvMZdQc0JMolLMs=
 github.com/scylladb/gocqlx v1.3.0/go.mod h1:1CisD8Z+VB7ByxGyc3B9OXusRNgWWtCMkO+hNCpgZAc=
+github.com/scylladb/gocqlx v1.3.1/go.mod h1:1CisD8Z+VB7ByxGyc3B9OXusRNgWWtCMkO+hNCpgZAc=
 github.com/segmentio/ksuid v1.0.2 h1:9yBfKyw4ECGTdALaF09Snw3sLJmYIX6AbPJrAy6MrDc=
 github.com/segmentio/ksuid v1.0.2/go.mod h1:BXuJDr2byAiHuQaQtSKoXh1J0YmUDurywOXgB2w+OSU=
 github.com/spf13/cobra v0.0.3 h1:ZlrZ4XsMRm04Fr5pSFxBgfND2EBVa1nLpiy1stUsX/8=
