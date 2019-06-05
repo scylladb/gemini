@@ -12,6 +12,7 @@ require (
 	github.com/mattn/go-isatty v0.0.6 // indirect
 	github.com/mitchellh/mapstructure v1.1.2
 	github.com/pkg/errors v0.8.1
+	github.com/prometheus/client_golang v0.9.3
 	github.com/scylladb/go-set v1.0.2
 	github.com/scylladb/gocqlx v1.3.1
 	github.com/segmentio/ksuid v1.0.2

@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"math"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/gemini/store"
 	"github.com/spf13/cobra"
@@ -38,6 +40,7 @@ var (
 	failFast          bool
 	nonInteractive    bool
 	duration          time.Duration
+	bind              string
 )
 
 const (
@@ -144,6 +147,12 @@ func (cb createBuilder) ToCql() (stmt string, names []string) {
 }
 
 func run(cmd *cobra.Command, args []string) {
+
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		_ = http.ListenAndServe(bind, nil)
+	}()
+
 	if pkNumberPerThread <= 0 || pkNumberPerThread > (math.MaxInt32/concurrency) {
 		pkNumberPerThread = math.MaxInt32 / concurrency
 	}
@@ -398,6 +407,7 @@ func init() {
 	rootCmd.Flags().BoolVarP(&nonInteractive, "non-interactive", "", false, "Run in non-interactive mode (disable progress indicator)")
 	rootCmd.Flags().DurationVarP(&duration, "duration", "", 30*time.Second, "")
 	rootCmd.Flags().StringVarP(&outFileArg, "outfile", "", "", "Specify the name of the file where the results should go")
+	rootCmd.Flags().StringVarP(&bind, "bind", "b", ":2112", "Specify the interface and port which to bind prometheus metrics on. Default is ':2112'")
 }
 
 func printSetup() error {

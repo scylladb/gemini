@@ -9,13 +9,14 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/scylladb/gemini"
 	"github.com/scylladb/go-set/strset"
+	"github.com/scylladb/gocqlx/qb"
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
-
-	"github.com/pkg/errors"
-	"github.com/scylladb/gemini"
-	"github.com/scylladb/gocqlx/qb"
 )
 
 type loader interface {
@@ -39,14 +40,23 @@ type Store interface {
 }
 
 func New(schema *gemini.Schema, testHosts []string, oracleHosts []string) Store {
+	ops := promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "gemini_cql_requests",
+		Help: "How many CQL requests processed, partitioned by name and CQL query type aka 'method' (batch, delete, insert, update).",
+	}, []string{"name", "method"},
+	)
 	return &delegatingStore{
 		testStore: &cqlStore{
 			session: newSession(testHosts),
 			schema:  schema,
+			name:    "test",
+			ops:     ops,
 		},
 		oracleStore: &cqlStore{
 			session: newSession(oracleHosts),
 			schema:  schema,
+			name:    "oracle",
+			ops:     ops,
 		},
 	}
 }
