@@ -6,6 +6,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/gocqlx/qb"
 	"go.uber.org/multierr"
@@ -14,6 +15,8 @@ import (
 type cqlStore struct {
 	session *gocql.Session
 	schema  *gemini.Schema
+	name    string
+	ops     *prometheus.CounterVec
 }
 
 func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time, values ...interface{}) error {
@@ -22,22 +25,20 @@ func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time
 	if err := cs.session.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec).Exec(); !ignore(err) {
 		return errors.Errorf("%v [cluster = test, query = '%s']", err, query)
 	}
+	cs.ops.WithLabelValues(cs.name, opType(builder)).Inc()
 	return nil
 }
 
 func (cs *cqlStore) load(ctx context.Context, builder qb.Builder, values []interface{}) (result []map[string]interface{}, err error) {
 	query, _ := builder.ToCql()
-	testIter := cs.session.Query(query, values...).WithContext(ctx).Iter()
-	oracleIter := cs.session.Query(query, values...).WithContext(ctx).Iter()
+	iter := cs.session.Query(query, values...).WithContext(ctx).Iter()
+	cs.ops.WithLabelValues(cs.name, opType(builder)).Inc()
 	defer func() {
-		if e := testIter.Close(); !ignore(e) {
-			err = multierr.Append(err, errors.Errorf("test system failed: %s", e.Error()))
-		}
-		if e := oracleIter.Close(); !ignore(e) {
-			err = multierr.Append(err, errors.Errorf("oracle failed: %s", e.Error()))
+		if e := iter.Close(); !ignore(e) {
+			err = multierr.Append(err, errors.Errorf("system failed: %s", e.Error()))
 		}
 	}()
-	result = loadSet(testIter)
+	result = loadSet(iter)
 	return
 }
 
@@ -65,5 +66,22 @@ func ignore(err error) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func opType(builder qb.Builder) string {
+	switch builder.(type) {
+	case *qb.InsertBuilder:
+		return "insert"
+	case *qb.DeleteBuilder:
+		return "delete"
+	case *qb.UpdateBuilder:
+		return "update"
+	case *qb.SelectBuilder:
+		return "select"
+	case *qb.BatchBuilder:
+		return "batch"
+	default:
+		return "unknown"
 	}
 }
