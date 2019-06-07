@@ -5,6 +5,7 @@
 - Prometheus metrics added that exposes internal runtime properties
   as well as counts fo CQL operations 'batch', 'delete', 'insert', 'select'
   and 'update'.
+- Warmup duration added during which only inserts are performed.
 - Generating valid single index queries when a complex primary key is used.
 - Gracefully stopping on sigint and sigterm.
 - JSON marshalling of Schema fixed. The schema input file has changed to

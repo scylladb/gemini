@@ -370,7 +370,10 @@ func (s *Schema) GenDeleteRows(t *Table, p *PartitionRange) (*Stmt, error) {
 	}, nil
 }
 
-func (s *Schema) GenMutateStmt(t *Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenMutateStmt(t *Table, p *PartitionRange, deletes bool) (*Stmt, error) {
+	if !deletes {
+		return s.GenInsertStmt(t, p)
+	}
 	switch n := p.Rand.Intn(1000); n {
 	case 10, 100:
 		return s.GenDeleteRows(t, p)

@@ -41,6 +41,7 @@ var (
 	nonInteractive    bool
 	duration          time.Duration
 	bind              string
+	warmup            time.Duration
 )
 
 const (
@@ -72,7 +73,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, *sync.WaitGroup, *gemini.Schema, *gemini.Table, store.Store, gemini.PartitionRange, chan Status, string, *os.File)
+type testJob func(context.Context, *sync.WaitGroup, *gemini.Schema, *gemini.Table, store.Store, gemini.PartitionRange, chan Status, string, *os.File, time.Duration)
 
 func (r *Status) Merge(sum *Status) Status {
 	sum.WriteOps += r.WriteOps
@@ -232,7 +233,7 @@ func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *o
 				Max:  maxRange + i*maxRange,
 				Rand: rand.New(rand.NewSource(int64(seed))),
 			}
-			go f(workerCtx, &workers, schema, table, s, p, c, mode, out)
+			go f(workerCtx, &workers, schema, table, s, p, c, mode, out, warmup)
 		}
 	}
 
@@ -282,7 +283,7 @@ func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *o
 				}
 			}
 		}
-	}(duration)
+	}(duration + warmup)
 
 	workers.Wait()
 	close(c)
@@ -296,8 +297,8 @@ func stop(cancel context.CancelFunc, c chan Status, out io.Writer, res Status) {
 	res.PrintResult(out)
 }
 
-func mutationJob(ctx context.Context, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File) {
-	mutateStmt, err := schema.GenMutateStmt(table, &p)
+func mutationJob(ctx context.Context, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File, deletes bool) {
+	mutateStmt, err := schema.GenMutateStmt(table, &p, deletes)
 	if err != nil {
 		fmt.Printf("Failed! Mutation statement generation failed: '%v'\n", err)
 		testStatus.WriteErrors++
@@ -342,11 +343,27 @@ func validationJob(ctx context.Context, schema *gemini.Schema, table *gemini.Tab
 	}
 }
 
-func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, c chan Status, mode string, out *os.File) {
+func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, c chan Status, mode string, out *os.File, warmup time.Duration) {
 	defer wg.Done()
 	testStatus := Status{}
-
 	var i int
+	warmupTimer := time.NewTimer(warmup)
+warmup:
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-warmupTimer.C:
+			break warmup
+		default:
+			mutationJob(ctx, schema, table, s, p, &testStatus, out, false)
+			if i%1000 == 0 {
+				c <- testStatus
+				testStatus = Status{}
+			}
+		}
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -355,13 +372,13 @@ func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table *
 		}
 		switch mode {
 		case writeMode:
-			mutationJob(ctx, schema, table, s, p, &testStatus, out)
+			mutationJob(ctx, schema, table, s, p, &testStatus, out, true)
 		case readMode:
 			validationJob(ctx, schema, table, s, p, &testStatus, out)
 		default:
 			ind := p.Rand.Intn(100000) % 2
 			if ind == 0 {
-				mutationJob(ctx, schema, table, s, p, &testStatus, out)
+				mutationJob(ctx, schema, table, s, p, &testStatus, out, true)
 			} else {
 				validationJob(ctx, schema, table, s, p, &testStatus, out)
 			}
@@ -408,6 +425,7 @@ func init() {
 	rootCmd.Flags().DurationVarP(&duration, "duration", "", 30*time.Second, "")
 	rootCmd.Flags().StringVarP(&outFileArg, "outfile", "", "", "Specify the name of the file where the results should go")
 	rootCmd.Flags().StringVarP(&bind, "bind", "b", ":2112", "Specify the interface and port which to bind prometheus metrics on. Default is ':2112'")
+	rootCmd.Flags().DurationVarP(&warmup, "warmup", "", 30*time.Second, "Specify the warmup perid as a duration for example 30s or 10h")
 }
 
 func printSetup() error {
@@ -416,6 +434,7 @@ func printSetup() error {
 	rand.Seed(int64(seed))
 	fmt.Fprintf(tw, "Seed:\t%d\n", seed)
 	fmt.Fprintf(tw, "Maximum duration:\t%s\n", duration)
+	fmt.Fprintf(tw, "Warmup duration:\t%s\n", warmup)
 	fmt.Fprintf(tw, "Concurrency:\t%d\n", concurrency)
 	fmt.Fprintf(tw, "Number of partitions per thread:\t%d\n", pkNumberPerThread)
 	fmt.Fprintf(tw, "Test cluster:\t%s\n", testClusterHost)
