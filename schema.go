@@ -108,7 +108,7 @@ func (t *Table) GetCreateTable(ks Keyspace) string {
 	}
 
 	if len(clusteringKeys) == 0 {
-		return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY (%s))", ks.Name, t.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","))
+		return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s)))", ks.Name, t.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","))
 	}
 	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s), %s))", ks.Name, t.Name, strings.Join(columns, ","),
 		strings.Join(partitionKeys, ","), strings.Join(clusteringKeys, ","))
@@ -124,7 +124,7 @@ func (t *Table) GetCreateTypes(keyspace Keyspace) []string {
 			for name, typ := range c.Types {
 				typs = append(typs, name+" "+typ.CQLDef())
 			}
-			stmts = append(stmts, fmt.Sprintf(createType, s.Keyspace.Name, c.TypeName, strings.Join(typs, ",")))
+			stmts = append(stmts, fmt.Sprintf(createType, keyspace.Name, c.TypeName, strings.Join(typs, ",")))
 		}
 	}
 	return stmts

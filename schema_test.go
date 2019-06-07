@@ -17,7 +17,7 @@ func TestGetCreateSchema(t *testing.T) {
 				Name:          "tbl0",
 				PartitionKeys: createColumns(1, "pk"),
 			},
-			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text, PRIMARY KEY (pk0))",
+			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text, PRIMARY KEY ((pk0)))",
 		},
 		"single_partition_key_single_column": {
 			table: &Table{
@@ -25,7 +25,7 @@ func TestGetCreateSchema(t *testing.T) {
 				PartitionKeys: createColumns(1, "pk"),
 				Columns:       createColumns(1, "col"),
 			},
-			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text,col0 text, PRIMARY KEY (pk0))",
+			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text,col0 text, PRIMARY KEY ((pk0)))",
 		},
 		"single_partition_key_multiple_column": {
 			table: &Table{
@@ -33,7 +33,7 @@ func TestGetCreateSchema(t *testing.T) {
 				PartitionKeys: createColumns(1, "pk"),
 				Columns:       createColumns(2, "col"),
 			},
-			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text,col0 text,col1 text, PRIMARY KEY (pk0))",
+			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text,col0 text,col1 text, PRIMARY KEY ((pk0)))",
 		},
 		"multiple_partition_key_multiple_column": {
 			table: &Table{
@@ -41,7 +41,7 @@ func TestGetCreateSchema(t *testing.T) {
 				PartitionKeys: createColumns(2, "pk"),
 				Columns:       createColumns(2, "col"),
 			},
-			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text,pk1 text,col0 text,col1 text, PRIMARY KEY (pk0,pk1))",
+			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text,pk1 text,col0 text,col1 text, PRIMARY KEY ((pk0,pk1)))",
 		},
 		"single_partition_key_single_clustering_key": {
 			table: &Table{
