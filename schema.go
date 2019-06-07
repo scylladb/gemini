@@ -40,6 +40,14 @@ type IndexDef struct {
 
 type Columns []ColumnDef
 
+func (c Columns) Names() []string {
+	names := make([]string, 0, len(c))
+	for _, col := range c {
+		names = append(names, col.Name)
+	}
+	return names
+}
+
 func (cs Columns) ToJSONMap(values map[string]interface{}, p *PartitionRange) map[string]interface{} {
 	for _, k := range cs {
 		switch t := k.Type.(type) {
@@ -79,6 +87,47 @@ type Table struct {
 	Indexes           []IndexDef         `json:"indexes"`
 	MaterializedViews []MaterializedView `json:"materialized_views"`
 	KnownIssues       map[string]bool    `json:"known_issues"`
+}
+
+func (t *Table) GetCreateTable(ks Keyspace) string {
+	var (
+		partitionKeys  []string
+		clusteringKeys []string
+		columns        []string
+	)
+	for _, pk := range t.PartitionKeys {
+		partitionKeys = append(partitionKeys, pk.Name)
+		columns = append(columns, fmt.Sprintf("%s %s", pk.Name, pk.Type.CQLDef()))
+	}
+	for _, ck := range t.ClusteringKeys {
+		clusteringKeys = append(clusteringKeys, ck.Name)
+		columns = append(columns, fmt.Sprintf("%s %s", ck.Name, ck.Type.CQLDef()))
+	}
+	for _, cdef := range t.Columns {
+		columns = append(columns, fmt.Sprintf("%s %s", cdef.Name, cdef.Type.CQLDef()))
+	}
+
+	if len(clusteringKeys) == 0 {
+		return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY (%s))", ks.Name, t.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","))
+	}
+	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s), %s))", ks.Name, t.Name, strings.Join(columns, ","),
+		strings.Join(partitionKeys, ","), strings.Join(clusteringKeys, ","))
+}
+
+func (t *Table) GetCreateTypes(keyspace Keyspace) []string {
+	var stmts []string
+	for _, column := range t.Columns {
+		switch c := column.Type.(type) {
+		case UDTType:
+			createType := "CREATE TYPE %s.%s (%s)"
+			var typs []string
+			for name, typ := range c.Types {
+				typs = append(typs, name+" "+typ.CQLDef())
+			}
+			stmts = append(stmts, fmt.Sprintf(createType, s.Keyspace.Name, c.TypeName, strings.Join(typs, ",")))
+		}
+	}
+	return stmts
 }
 
 type MaterializedView struct {
@@ -212,40 +261,9 @@ func (s *Schema) GetCreateSchema() []string {
 	stmts := []string{createKeyspace}
 
 	for _, t := range s.Tables {
-		var (
-			partitionKeys  []string
-			clusteringKeys []string
-			columns        []string
-		)
-		for _, pk := range t.PartitionKeys {
-			partitionKeys = append(partitionKeys, pk.Name)
-			columns = append(columns, fmt.Sprintf("%s %s", pk.Name, pk.Type.CQLDef()))
-		}
-		for _, ck := range t.ClusteringKeys {
-			clusteringKeys = append(clusteringKeys, ck.Name)
-			columns = append(columns, fmt.Sprintf("%s %s", ck.Name, ck.Type.CQLDef()))
-		}
-		for _, cdef := range t.Columns {
-			columns = append(columns, fmt.Sprintf("%s %s", cdef.Name, cdef.Type.CQLDef()))
-		}
-		for _, column := range t.Columns {
-			switch c := column.Type.(type) {
-			case UDTType:
-				createType := "CREATE TYPE %s.%s (%s)"
-				var typs []string
-				for name, typ := range c.Types {
-					typs = append(typs, name+" "+typ.CQLDef())
-				}
-				stmts = append(stmts, fmt.Sprintf(createType, s.Keyspace.Name, c.TypeName, strings.Join(typs, ",")))
-			}
-		}
-		var createTable string
-		if len(clusteringKeys) == 0 {
-			createTable = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY (%s))", s.Keyspace.Name, t.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","))
-		} else {
-			createTable = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s), %s))", s.Keyspace.Name, t.Name, strings.Join(columns, ","),
-				strings.Join(partitionKeys, ","), strings.Join(clusteringKeys, ","))
-		}
+		createTypes := t.GetCreateTypes(s.Keyspace)
+		stmts = append(stmts, createTypes...)
+		createTable := t.GetCreateTable(s.Keyspace)
 		stmts = append(stmts, createTable)
 		for _, idef := range t.Indexes {
 			stmts = append(stmts, fmt.Sprintf("CREATE INDEX %s ON %s.%s (%s)", idef.Name, s.Keyspace.Name, t.Name, idef.Column))
@@ -275,7 +293,7 @@ func (s *Schema) GetCreateSchema() []string {
 				stmts = append(stmts, fmt.Sprintf(createMaterializedView,
 					s.Keyspace.Name, mv.Name, s.Keyspace.Name, t.Name,
 					strings.Join(mvPrimaryKeysNotNull, " AND "),
-					strings.Join(mvPartitionKeys, ","), strings.Join(clusteringKeys, ",")))
+					strings.Join(mvPartitionKeys, ","), strings.Join(t.ClusteringKeys.Names(), ",")))
 			} else {
 				createMaterializedView = createMaterializedView + ")"
 				stmts = append(stmts, fmt.Sprintf(createMaterializedView,
