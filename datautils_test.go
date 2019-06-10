@@ -49,21 +49,6 @@ func TestNonEmptyRandFloat64Range(t *testing.T) {
 	}
 }
 
-/*
-func TestNonEmptyRandString(t *testing.T) {
-	// TODO: Figure out why this is so horribly slow...
-	tt := time.Now()
-	f := func(len int32) bool {
-		r := nonEmptyRandStringWithTime(rnd, int(len), tt)
-		return r != ""
-	}
-	cfg := &quick.Config{MaxCount: 10}
-	if err := quick.Check(f, cfg); err != nil {
-		t.Error(err)
-	}
-}
-*/
-
 var bench_r string
 
 func BenchmarkNonEmptyRandStringWithTime(b *testing.B) {
