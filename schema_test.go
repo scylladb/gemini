@@ -19,6 +19,14 @@ func TestGetCreateSchema(t *testing.T) {
 			},
 			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text, PRIMARY KEY ((pk0)))",
 		},
+		"single_partition_key_compact": {
+			table: &Table{
+				Name:               "tbl0",
+				PartitionKeys:      createColumns(1, "pk"),
+				CompactionStrategy: NewLeveledCompactionStrategy(),
+			},
+			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text, PRIMARY KEY ((pk0))) WITH compaction = {'class':'LeveledCompactionStrategy','enabled':true,'tombstone_threshold':0.2,'tombstone_compaction_interval':86400,'sstable_size_in_mb':160};",
+		},
 		"single_partition_key_single_column": {
 			table: &Table{
 				Name:          "tbl0",
@@ -50,6 +58,15 @@ func TestGetCreateSchema(t *testing.T) {
 				ClusteringKeys: createColumns(1, "ck"),
 			},
 			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text,ck0 text, PRIMARY KEY ((pk0), ck0))",
+		},
+		"single_partition_key_single_clustering_key_compact": {
+			table: &Table{
+				Name:               "tbl0",
+				PartitionKeys:      createColumns(1, "pk"),
+				ClusteringKeys:     createColumns(1, "ck"),
+				CompactionStrategy: NewLeveledCompactionStrategy(),
+			},
+			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text,ck0 text, PRIMARY KEY ((pk0), ck0)) WITH compaction = {'class':'LeveledCompactionStrategy','enabled':true,'tombstone_threshold':0.2,'tombstone_compaction_interval':86400,'sstable_size_in_mb':160};",
 		},
 		"single_partition_key_single_clustering_key_single_column": {
 			table: &Table{

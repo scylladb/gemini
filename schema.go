@@ -80,13 +80,14 @@ func (cs Columns) ToJSONMap(values map[string]interface{}, p *PartitionRange) ma
 }
 
 type Table struct {
-	Name              string             `json:"name"`
-	PartitionKeys     Columns            `json:"partition_keys"`
-	ClusteringKeys    Columns            `json:"clustering_keys"`
-	Columns           Columns            `json:"columns"`
-	Indexes           []IndexDef         `json:"indexes"`
-	MaterializedViews []MaterializedView `json:"materialized_views"`
-	KnownIssues       map[string]bool    `json:"known_issues"`
+	Name               string              `json:"name"`
+	PartitionKeys      Columns             `json:"partition_keys"`
+	ClusteringKeys     Columns             `json:"clustering_keys"`
+	Columns            Columns             `json:"columns"`
+	CompactionStrategy *CompactionStrategy `json:"compaction_strategy"`
+	Indexes            []IndexDef          `json:"indexes"`
+	MaterializedViews  []MaterializedView  `json:"materialized_views"`
+	KnownIssues        map[string]bool     `json:"known_issues"`
 }
 
 func (t *Table) GetCreateTable(ks Keyspace) string {
@@ -107,11 +108,17 @@ func (t *Table) GetCreateTable(ks Keyspace) string {
 		columns = append(columns, fmt.Sprintf("%s %s", cdef.Name, cdef.Type.CQLDef()))
 	}
 
+	var stmt string
 	if len(clusteringKeys) == 0 {
-		return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s)))", ks.Name, t.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","))
+		stmt = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s)))", ks.Name, t.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","))
+	} else {
+		stmt = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s), %s))", ks.Name, t.Name, strings.Join(columns, ","),
+			strings.Join(partitionKeys, ","), strings.Join(clusteringKeys, ","))
 	}
-	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s), %s))", ks.Name, t.Name, strings.Join(columns, ","),
-		strings.Join(partitionKeys, ","), strings.Join(clusteringKeys, ","))
+	if t.CompactionStrategy != nil {
+		stmt = stmt + " WITH compaction = " + t.CompactionStrategy.ToCQL() + ";"
+	}
+	return stmt
 }
 
 func (t *Table) GetCreateTypes(keyspace Keyspace) []string {
@@ -241,18 +248,30 @@ func GenSchema() *Schema {
 	}
 
 	table := Table{
-		Name:              "table1",
-		PartitionKeys:     partitionKeys,
-		ClusteringKeys:    clusteringKeys,
-		Columns:           columns,
-		MaterializedViews: mvs,
-		Indexes:           indexes,
+		Name:               "table1",
+		PartitionKeys:      partitionKeys,
+		ClusteringKeys:     clusteringKeys,
+		Columns:            columns,
+		CompactionStrategy: randomCompactionStrategy(),
+		MaterializedViews:  mvs,
+		Indexes:            indexes,
 		KnownIssues: map[string]bool{
 			KnownIssuesJsonWithTuples: true,
 		},
 	}
 	builder.Table(&table)
 	return builder.Build()
+}
+
+func randomCompactionStrategy() *CompactionStrategy {
+	switch rand.Intn(3) {
+	case 0:
+		return NewLeveledCompactionStrategy()
+	case 1:
+		return NewTimeWindowCompationStrategy()
+	default:
+		return NewSizeTieredCompactionStrategy()
+	}
 }
 
 func (s *Schema) GetCreateSchema() []string {
