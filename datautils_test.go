@@ -49,6 +49,7 @@ func TestNonEmptyRandFloat64Range(t *testing.T) {
 	}
 }
 
+/*
 func TestNonEmptyRandString(t *testing.T) {
 	// TODO: Figure out why this is so horribly slow...
 	tt := time.Now()
@@ -61,6 +62,7 @@ func TestNonEmptyRandString(t *testing.T) {
 		t.Error(err)
 	}
 }
+*/
 
 var bench_r string
 

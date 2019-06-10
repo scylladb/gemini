@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"text/tabwriter"
@@ -27,21 +28,22 @@ import (
 )
 
 var (
-	testClusterHost   []string
-	oracleClusterHost []string
-	schemaFile        string
-	outFileArg        string
-	concurrency       int
-	pkNumberPerThread int
-	seed              int
-	dropSchema        bool
-	verbose           bool
-	mode              string
-	failFast          bool
-	nonInteractive    bool
-	duration          time.Duration
-	bind              string
-	warmup            time.Duration
+	testClusterHost    []string
+	oracleClusterHost  []string
+	schemaFile         string
+	outFileArg         string
+	concurrency        int
+	pkNumberPerThread  int
+	seed               int
+	dropSchema         bool
+	verbose            bool
+	mode               string
+	failFast           bool
+	nonInteractive     bool
+	duration           time.Duration
+	bind               string
+	warmup             time.Duration
+	compactionStrategy string
 )
 
 const (
@@ -182,7 +184,7 @@ func run(cmd *cobra.Command, args []string) {
 			return
 		}
 	} else {
-		schema = gemini.GenSchema()
+		schema = gemini.GenSchema(getCompactionStrategy(compactionStrategy))
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
@@ -213,6 +215,26 @@ func run(cmd *cobra.Command, args []string) {
 	}
 
 	runJob(Job, schema, store, mode, outFile)
+}
+
+func getCompactionStrategy(cs string) *gemini.CompactionStrategy {
+	switch cs {
+	case "stcs":
+		return gemini.NewSizeTieredCompactionStrategy()
+	case "twcs":
+		return gemini.NewTimeWindowCompactionStrategy()
+	case "lcs":
+		return gemini.NewLeveledCompactionStrategy()
+	case "":
+		return nil
+	default:
+		compactionStrategy := &gemini.CompactionStrategy{}
+		if err := json.Unmarshal([]byte(strings.ReplaceAll(cs, "'", "\"")), compactionStrategy); err != nil {
+			fmt.Printf("unable to parse compaction strategy '%s', err=%s\n", cs, err)
+			return nil
+		}
+		return compactionStrategy
+	}
 }
 
 func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *os.File) {
@@ -426,6 +448,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&outFileArg, "outfile", "", "", "Specify the name of the file where the results should go")
 	rootCmd.Flags().StringVarP(&bind, "bind", "b", ":2112", "Specify the interface and port which to bind prometheus metrics on. Default is ':2112'")
 	rootCmd.Flags().DurationVarP(&warmup, "warmup", "", 30*time.Second, "Specify the warmup perid as a duration for example 30s or 10h")
+	rootCmd.Flags().StringVarP(&compactionStrategy, "compaction-strategy", "", "", "Specify the desired CS as either the coded short hand stcs|twcs|lcs to get the default for each type or provide the entire specification in the form {'class':'....'}")
 }
 
 func printSetup() error {

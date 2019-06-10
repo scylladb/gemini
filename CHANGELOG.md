@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Support for compation strategies added via a CLI argument `compaction-strategy`
+  as a set of string values "stcs", "twcs" or "lcs" which will make Gemini choose
+  the default values for the properties of the respective compaction strategies.
+  Alternatively the JSON-like definition of the compaction-strategy can be supplied
+  in a form like: `{"class"="SizeTieredCompactionStrategy", "enabled"=true, ....}`.
+  Note that the form needs to be given as actual valid JSON.
 - Prometheus metrics added that exposes internal runtime properties
   as well as counts fo CQL operations 'batch', 'delete', 'insert', 'select'
   and 'update'.
