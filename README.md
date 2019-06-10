@@ -4,6 +4,21 @@ Gemini is an is an automatic random testing tool for Scylla.
 
 ## Getting Started
 
+Geminis own test suite so far only consists of unit tests. Run these in the standard Go way: 
+
+```
+go test -v -race -cover
+```
+
+The suite has one build tag that controls what is being run: `slow`. This tag should be used for standard unit tests that
+for some reason take a long time to run perhaps because they do fuzzing or quick checks. 
+
+Run these tests like this:
+
+```
+go test -v -race -tags slow
+```
+
 To run Gemini, you need two clusters: an oracle cluster and a test cluster. The tool assumes that the oracle cluster is behaving correctly and compares the behavior of the test cluster to it.
 
 For development, install [docker-compose](https://docs.docker.com/compose/) for your platform.
