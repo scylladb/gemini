@@ -187,7 +187,7 @@ const (
 	MaxColumns        = 16
 )
 
-func GenSchema() *Schema {
+func GenSchema(cs *CompactionStrategy) *Schema {
 	builder := NewSchemaBuilder()
 	keyspace := Keyspace{
 		Name: "ks1",
@@ -252,13 +252,17 @@ func GenSchema() *Schema {
 		PartitionKeys:      partitionKeys,
 		ClusteringKeys:     clusteringKeys,
 		Columns:            columns,
-		CompactionStrategy: randomCompactionStrategy(),
+		CompactionStrategy: cs,
 		MaterializedViews:  mvs,
 		Indexes:            indexes,
 		KnownIssues: map[string]bool{
 			KnownIssuesJsonWithTuples: true,
 		},
 	}
+	if cs == nil {
+		table.CompactionStrategy = randomCompactionStrategy()
+	}
+
 	builder.Table(&table)
 	return builder.Build()
 }
@@ -268,7 +272,7 @@ func randomCompactionStrategy() *CompactionStrategy {
 	case 0:
 		return NewLeveledCompactionStrategy()
 	case 1:
-		return NewTimeWindowCompationStrategy()
+		return NewTimeWindowCompactionStrategy()
 	default:
 		return NewSizeTieredCompactionStrategy()
 	}

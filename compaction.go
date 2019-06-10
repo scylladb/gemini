@@ -50,9 +50,9 @@ func NewLeveledCompactionStrategy() *CompactionStrategy {
 	}
 }
 
-func NewTimeWindowCompationStrategy() *CompactionStrategy {
+func NewTimeWindowCompactionStrategy() *CompactionStrategy {
 	return &CompactionStrategy{
-		Class:                       "TimeWindowCompationStrategy",
+		Class:                       "TimeWindowCompactionStrategy",
 		Enabled:                     true,
 		TombstoneThreshold:          0.2,
 		TombstoneCompactionInterval: 86400,
