@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Support for compation strategies added via a CLI argument `compaction-strategy`
+- Support for changing consistency level via a CLI argument `consistency`.
+- Support for compaction strategies added via a CLI argument `compaction-strategy`
   as a set of string values "stcs", "twcs" or "lcs" which will make Gemini choose
   the default values for the properties of the respective compaction strategies.
   Alternatively the JSON-like definition of the compaction-strategy can be supplied

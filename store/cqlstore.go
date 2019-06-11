@@ -23,7 +23,7 @@ func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time
 	query, _ := builder.ToCql()
 	var tsUsec int64 = ts.UnixNano() / 1000
 	if err := cs.session.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec).Exec(); !ignore(err) {
-		return errors.Errorf("%v [cluster = test, query = '%s']", err, query)
+		return errors.Errorf("%v [cluster = %s, query = '%s']", err, cs.name, query)
 	}
 	cs.ops.WithLabelValues(cs.name, opType(builder)).Inc()
 	return nil
@@ -47,9 +47,7 @@ func (cs cqlStore) close() error {
 	return nil
 }
 
-func newSession(hosts []string) *gocql.Session {
-	cluster := gocql.NewCluster(hosts...)
-	cluster.Timeout = 5 * time.Second
+func newSession(cluster *gocql.ClusterConfig) *gocql.Session {
 	session, err := cluster.CreateSession()
 	if err != nil {
 		panic(err)
