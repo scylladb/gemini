@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Exponential backoff retry policy added with 5 retries between 1 and 10 seconds.
 - Support for changing consistency level via a CLI argument `consistency`.
 - Support for compaction strategies added via a CLI argument `compaction-strategy`
   as a set of string values "stcs", "twcs" or "lcs" which will make Gemini choose

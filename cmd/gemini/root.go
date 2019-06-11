@@ -227,11 +227,18 @@ func run(cmd *cobra.Command, args []string) {
 }
 
 func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
+	retryPolicy := &gocql.ExponentialBackoffRetryPolicy{
+		Min:        time.Second,
+		Max:        10 * time.Second,
+		NumRetries: 5,
+	}
 	testCluster := gocql.NewCluster(testClusterHost...)
 	testCluster.Timeout = 5 * time.Second
+	testCluster.RetryPolicy = retryPolicy
 	testCluster.Consistency = consistency
 	oracleCluster := gocql.NewCluster(oracleClusterHost...)
 	oracleCluster.Timeout = 5 * time.Second
+	oracleCluster.RetryPolicy = retryPolicy
 	oracleCluster.Consistency = consistency
 	return testCluster, oracleCluster
 }
