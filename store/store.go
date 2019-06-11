@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
@@ -39,7 +40,7 @@ type Store interface {
 	Close() error
 }
 
-func New(schema *gemini.Schema, testHosts []string, oracleHosts []string) Store {
+func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster *gocql.ClusterConfig) Store {
 	ops := promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gemini_cql_requests",
 		Help: "How many CQL requests processed, partitioned by name and CQL query type aka 'method' (batch, delete, insert, update).",
@@ -47,13 +48,13 @@ func New(schema *gemini.Schema, testHosts []string, oracleHosts []string) Store 
 	)
 	return &delegatingStore{
 		testStore: &cqlStore{
-			session: newSession(testHosts),
+			session: newSession(testCluster),
 			schema:  schema,
 			name:    "test",
 			ops:     ops,
 		},
 		oracleStore: &cqlStore{
-			session: newSession(oracleHosts),
+			session: newSession(oracleCluster),
 			schema:  schema,
 			name:    "oracle",
 			ops:     ops,

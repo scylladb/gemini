@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
+	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/scylladb/gemini"
@@ -44,6 +45,7 @@ var (
 	bind               string
 	warmup             time.Duration
 	compactionStrategy string
+	consistency        string
 )
 
 const (
@@ -151,6 +153,12 @@ func (cb createBuilder) ToCql() (stmt string, names []string) {
 
 func run(cmd *cobra.Command, args []string) {
 
+	cons, err := gocql.ParseConsistencyWrapper(consistency)
+	if err != nil {
+		fmt.Printf("Unable parse consistency, error=%s. Falling back on Quorum\n", err)
+		cons = gocql.Quorum
+	}
+
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
 		_ = http.ListenAndServe(bind, nil)
@@ -190,7 +198,8 @@ func run(cmd *cobra.Command, args []string) {
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
 	fmt.Printf("Schema: %v\n", string(jsonSchema))
 
-	store := store.New(schema, testClusterHost, oracleClusterHost)
+	testCluster, oracleCluster := createClusters(cons)
+	store := store.New(schema, testCluster, oracleCluster)
 	defer store.Close()
 
 	if dropSchema && mode != readMode {
@@ -215,6 +224,16 @@ func run(cmd *cobra.Command, args []string) {
 	}
 
 	runJob(Job, schema, store, mode, outFile)
+}
+
+func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
+	testCluster := gocql.NewCluster(testClusterHost...)
+	testCluster.Timeout = 5 * time.Second
+	testCluster.Consistency = consistency
+	oracleCluster := gocql.NewCluster(oracleClusterHost...)
+	oracleCluster.Timeout = 5 * time.Second
+	oracleCluster.Consistency = consistency
+	return testCluster, oracleCluster
 }
 
 func getCompactionStrategy(cs string) *gemini.CompactionStrategy {
@@ -449,6 +468,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&bind, "bind", "b", ":2112", "Specify the interface and port which to bind prometheus metrics on. Default is ':2112'")
 	rootCmd.Flags().DurationVarP(&warmup, "warmup", "", 30*time.Second, "Specify the warmup perid as a duration for example 30s or 10h")
 	rootCmd.Flags().StringVarP(&compactionStrategy, "compaction-strategy", "", "", "Specify the desired CS as either the coded short hand stcs|twcs|lcs to get the default for each type or provide the entire specification in the form {'class':'....'}")
+	rootCmd.Flags().StringVarP(&consistency, "consistency", "", "QUORUM", "Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE")
 }
 
 func printSetup() error {
