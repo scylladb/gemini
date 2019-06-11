@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.1.0] - 2019-06-11
 
 - Exponential backoff retry policy added with 5 retries between 1 and 10 seconds.
 - Support for changing consistency level via a CLI argument `consistency`.
