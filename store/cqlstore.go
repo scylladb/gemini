@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -22,8 +23,13 @@ type cqlStore struct {
 func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time, values ...interface{}) error {
 	query, _ := builder.ToCql()
 	var tsUsec int64 = ts.UnixNano() / 1000
-	if err := cs.session.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec).Exec(); !ignore(err) {
-		return errors.Errorf("%v [cluster = %s, query = '%s']", err, cs.name, query)
+	if err := cs.session.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec).Exec(); err != nil {
+		if err == context.DeadlineExceeded {
+			fmt.Printf("system=%s has exceeded it's dealine for mutation query='%s', error=%s", cs.name, query, err)
+		}
+		if !ignore(err) {
+			return errors.Errorf("%v [cluster = %s, query = '%s']", err, cs.name, query)
+		}
 	}
 	cs.ops.WithLabelValues(cs.name, opType(builder)).Inc()
 	return nil
@@ -34,8 +40,13 @@ func (cs *cqlStore) load(ctx context.Context, builder qb.Builder, values []inter
 	iter := cs.session.Query(query, values...).WithContext(ctx).Iter()
 	cs.ops.WithLabelValues(cs.name, opType(builder)).Inc()
 	defer func() {
-		if e := iter.Close(); !ignore(e) {
-			err = multierr.Append(err, errors.Errorf("system failed: %s", e.Error()))
+		if e := iter.Close(); err != nil {
+			if e == context.DeadlineExceeded {
+				fmt.Printf("system=%s has exceeded it's dealine for load query='%s', error=%s", cs.name, query, e)
+			}
+			if !ignore(e) {
+				err = multierr.Append(err, errors.Errorf("system failed: %s", e.Error()))
+			}
 		}
 	}()
 	result = loadSet(iter)
