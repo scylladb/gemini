@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"gopkg.in/inf.v0"
 )
 
@@ -293,6 +294,11 @@ func TestMarshalUnmarshal(t *testing.T) {
 		},
 	}
 
+	opts := cmp.Options{
+		cmp.AllowUnexported(Table{}),
+		cmpopts.IgnoreUnexported(Table{}),
+	}
+
 	b, err := json.MarshalIndent(s1, "  ", "  ")
 	if err != nil {
 		t.Fatalf("unable to marshal json, error=%s\n", err)
@@ -303,7 +309,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 		t.Fatalf("unable to unmarshal json, error=%s\n", err)
 	}
 
-	if diff := cmp.Diff(s1, s2); diff != "" {
+	if diff := cmp.Diff(s1, s2, opts); diff != "" {
 		t.Errorf("schema not the same after marshal/unmarshal, diff=%s", diff)
 	}
 }

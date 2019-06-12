@@ -80,7 +80,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, *gemini.Table, store.Store, gemini.PartitionRange, chan Status, string, *os.File, time.Duration)
+type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, *gemini.SchemaConfig, *gemini.Table, store.Store, gemini.PartitionRange, chan Status, string, *os.File, time.Duration)
 
 func (r *Status) Merge(sum *Status) Status {
 	sum.WriteOps += r.WriteOps
@@ -350,7 +350,7 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig,
 				MaxStringLength: schemaConfig.MaxStringLength,
 				MinStringLength: schemaConfig.MinStringLength,
 			}
-			go f(workerCtx, pump.ch, &workers, schema, table, s, p, c, mode, out, warmup)
+			go f(workerCtx, pump.ch, &workers, schema, schemaConfig, table, s, p, c, mode, out, warmup)
 		}
 	}
 
@@ -389,7 +389,48 @@ func sampleResults(p *Pump, c chan Status, sp *spinner.Spinner) Status {
 	return testRes
 }
 
-func mutationJob(ctx context.Context, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File, deletes bool) {
+func ddlJob(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status) {
+	if sc.CQLFeature != gemini.CQL_FEATURE_ALL {
+		if verbose {
+			fmt.Println("ddl statements disabled")
+		}
+		return
+	}
+	table.Lock()
+	defer table.Unlock()
+	ddlStmts, postStmtHook, err := schema.GenDDLStmt(table, &p, sc)
+	if err != nil {
+		fmt.Printf("Failed! Mutation statement generation failed: '%v'\n", err)
+		testStatus.WriteErrors++
+		return
+	}
+	defer postStmtHook()
+	defer func() {
+		if verbose {
+			jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
+			fmt.Printf("Schema: %v\n", string(jsonSchema))
+		}
+	}()
+	for _, ddlStmt := range ddlStmts {
+		ddlQuery := ddlStmt.Query
+		if verbose {
+			fmt.Println(ddlStmt.PrettyCQL())
+		}
+		if err := s.Mutate(ctx, ddlQuery); err != nil {
+			e := JobError{
+				Timestamp: time.Now(),
+				Message:   "DDL failed: " + err.Error(),
+				Query:     ddlStmt.PrettyCQL(),
+			}
+			testStatus.Errors = append(testStatus.Errors, e)
+			testStatus.WriteErrors++
+		} else {
+			testStatus.WriteOps++
+		}
+	}
+}
+
+func mutationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File, deletes bool) {
 	mutateStmt, err := schema.GenMutateStmt(table, &p, deletes)
 	if err != nil {
 		fmt.Printf("Failed! Mutation statement generation failed: '%v'\n", err)
@@ -414,7 +455,7 @@ func mutationJob(ctx context.Context, schema *gemini.Schema, table *gemini.Table
 	}
 }
 
-func validationJob(ctx context.Context, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File) {
+func validationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File) {
 	checkStmt := schema.GenCheckStmt(table, &p)
 	checkQuery := checkStmt.Query
 	checkValues := checkStmt.Values()
@@ -444,7 +485,7 @@ func (hb heartBeat) await() {
 		time.Sleep(hb.sleep)
 	}
 }
-func Job(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, c chan Status, mode string, out *os.File, warmup time.Duration) {
+func Job(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, c chan Status, mode string, out *os.File, warmup time.Duration) {
 	defer wg.Done()
 	testStatus := Status{}
 	var i int
@@ -457,7 +498,7 @@ warmup:
 		case <-warmupTimer.C:
 			break warmup
 		default:
-			mutationJob(ctx, schema, table, s, p, &testStatus, out, false)
+			mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, out, false)
 			if i%1000 == 0 {
 				c <- testStatus
 				testStatus = Status{}
@@ -469,15 +510,19 @@ warmup:
 		hb.await()
 		switch mode {
 		case writeMode:
-			mutationJob(ctx, schema, table, s, p, &testStatus, out, true)
+			mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, out, true)
 		case readMode:
-			validationJob(ctx, schema, table, s, p, &testStatus, out)
+			validationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, out)
 		default:
-			ind := p.Rand.Intn(100000) % 2
-			if ind == 0 {
-				mutationJob(ctx, schema, table, s, p, &testStatus, out, true)
+			ind := p.Rand.Intn(1000000)
+			if ind%2 == 0 {
+				if ind%100000 == 0 {
+					ddlJob(ctx, schema, schemaConfig, table, s, p, &testStatus)
+				} else {
+					mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, out, true)
+				}
 			} else {
-				validationJob(ctx, schema, table, s, p, &testStatus, out)
+				validationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, out)
 			}
 		}
 
