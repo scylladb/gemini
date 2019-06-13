@@ -39,7 +39,8 @@ const (
 	TYPE_VARCHAR   = SimpleType("varchar")
 	TYPE_VARINT    = SimpleType("varint")
 
-	MaxUDTParts = 10
+	MaxTupleParts = 20
+	MaxUDTParts   = 10
 )
 
 // TODO: Add support for time when gocql bug is fixed.
@@ -530,7 +531,7 @@ func genSimpleType() SimpleType {
 }
 
 func genTupleType() Type {
-	n := rand.Intn(5)
+	n := rand.Intn(MaxTupleParts)
 	if n < 2 {
 		n = 2
 	}
