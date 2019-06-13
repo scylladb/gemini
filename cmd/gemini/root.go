@@ -46,6 +46,9 @@ var (
 	warmup             time.Duration
 	compactionStrategy string
 	consistency        string
+	maxPartitionKeys   int
+	maxClusteringKeys  int
+	maxColumns         int
 )
 
 const (
@@ -192,7 +195,7 @@ func run(cmd *cobra.Command, args []string) {
 			return
 		}
 	} else {
-		schema = gemini.GenSchema(getCompactionStrategy(compactionStrategy))
+		schema = gemini.GenSchema(getCompactionStrategy(compactionStrategy), maxPartitionKeys, maxClusteringKeys, maxColumns)
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
@@ -476,6 +479,9 @@ func init() {
 	rootCmd.Flags().DurationVarP(&warmup, "warmup", "", 30*time.Second, "Specify the warmup perid as a duration for example 30s or 10h")
 	rootCmd.Flags().StringVarP(&compactionStrategy, "compaction-strategy", "", "", "Specify the desired CS as either the coded short hand stcs|twcs|lcs to get the default for each type or provide the entire specification in the form {'class':'....'}")
 	rootCmd.Flags().StringVarP(&consistency, "consistency", "", "QUORUM", "Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE")
+	rootCmd.Flags().IntVarP(&maxPartitionKeys, "max-partition-keys", "", 2, "Maximum number of generated partition keys")
+	rootCmd.Flags().IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 4, "Maximum number of generated clustering keys")
+	rootCmd.Flags().IntVarP(&maxColumns, "max-columns", "", 16, "Maximum number of generated columns")
 }
 
 func printSetup() error {

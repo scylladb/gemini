@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pkg/errors"
 	"github.com/scylladb/gocqlx/qb"
 )
 
@@ -181,30 +182,24 @@ func (s *Schema) GetDropSchema() []string {
 	}
 }
 
-const (
-	MaxPartitionKeys  = 2
-	MaxClusteringKeys = 4
-	MaxColumns        = 16
-)
-
-func GenSchema(cs *CompactionStrategy) *Schema {
+func GenSchema(cs *CompactionStrategy, maxPartitionKeys, maxClusteringKeys, maxColumns int) *Schema {
 	builder := NewSchemaBuilder()
 	keyspace := Keyspace{
 		Name: "ks1",
 	}
 	builder.Keyspace(keyspace)
 	var partitionKeys []ColumnDef
-	numPartitionKeys := rand.Intn(MaxPartitionKeys-1) + 1
+	numPartitionKeys := rand.Intn(maxPartitionKeys-1) + 1
 	for i := 0; i < numPartitionKeys; i++ {
 		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: TYPE_INT})
 	}
 	var clusteringKeys []ColumnDef
-	numClusteringKeys := rand.Intn(MaxClusteringKeys)
+	numClusteringKeys := rand.Intn(maxClusteringKeys)
 	for i := 0; i < numClusteringKeys; i++ {
 		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genPrimaryKeyColumnType()})
 	}
 	var columns []ColumnDef
-	numColumns := rand.Intn(MaxColumns)
+	numColumns := rand.Intn(maxColumns)
 	for i := 0; i < numColumns; i++ {
 		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns)})
 	}
@@ -217,7 +212,7 @@ func GenSchema(cs *CompactionStrategy) *Schema {
 			}
 		}
 	}
-	validMVColumn := func() ColumnDef {
+	validMVColumn := func() (ColumnDef, error) {
 		validCols := make([]ColumnDef, 0, len(columns))
 		for _, col := range columns {
 			valid := false
@@ -231,13 +226,22 @@ func GenSchema(cs *CompactionStrategy) *Schema {
 				validCols = append(validCols, col)
 			}
 		}
-		return validCols[rand.Intn(len(validCols))]
+		if len(validCols) == 0 {
+			return ColumnDef{}, errors.New("no valid MV columns found")
+		}
+		return validCols[rand.Intn(len(validCols))], nil
 	}
 	var mvs []MaterializedView
 	numMvs := 1
 	for i := 0; i < numMvs; i++ {
+		col, err := validMVColumn()
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+
 		cols := []ColumnDef{
-			validMVColumn(),
+			col,
 		}
 		mv := MaterializedView{
 			Name:           "table1_mv_" + strconv.Itoa(i),
@@ -519,8 +523,8 @@ func (s *Schema) genClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	clusteringKeys := t.ClusteringKeys
-	view := p.Rand.Intn(len(t.MaterializedViews))
 	if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
+		view := p.Rand.Intn(len(t.MaterializedViews))
 		tableName = t.MaterializedViews[view].Name
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
 		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
@@ -560,8 +564,8 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, p *Partition
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	clusteringKeys := t.ClusteringKeys
-	view := p.Rand.Intn(len(t.MaterializedViews))
 	if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
+		view := p.Rand.Intn(len(t.MaterializedViews))
 		tableName = t.MaterializedViews[view].Name
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
 		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
