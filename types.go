@@ -39,8 +39,10 @@ const (
 	TYPE_VARCHAR   = SimpleType("varchar")
 	TYPE_VARINT    = SimpleType("varint")
 
-	MaxTupleParts = 20
-	MaxUDTParts   = 20
+	MaxStringLength = 1000
+	MinStringLength = 100
+	MaxTupleParts   = 20
+	MaxUDTParts     = 20
 )
 
 // TODO: Add support for time when gocql bug is fixed.
@@ -110,9 +112,11 @@ func (st SimpleType) GenValue(p *PartitionRange) []interface{} {
 	var val interface{}
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
-		val = randStringWithTime(p.Rand, nonEmptyRandIntRange(p.Rand, p.Max, p.Max, 10), randTime(p.Rand))
+		ln := p.Rand.Intn(MaxStringLength) + MinStringLength
+		val = randStringWithTime(p.Rand, ln, randTime(p.Rand))
 	case TYPE_BLOB:
-		val = hex.EncodeToString([]byte(randStringWithTime(p.Rand, nonEmptyRandIntRange(p.Rand, p.Max, p.Max, 10), randTime(p.Rand))))
+		ln := p.Rand.Intn(MaxStringLength) + MinStringLength
+		val = hex.EncodeToString([]byte(randStringWithTime(p.Rand, ln, randTime(p.Rand))))
 	case TYPE_BIGINT:
 		val = p.Rand.Int63()
 	case TYPE_BOOLEAN:
