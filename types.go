@@ -40,7 +40,7 @@ const (
 	TYPE_VARINT    = SimpleType("varint")
 
 	MaxTupleParts = 20
-	MaxUDTParts   = 10
+	MaxUDTParts   = 20
 )
 
 // TODO: Add support for time when gocql bug is fixed.
