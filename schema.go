@@ -15,6 +15,13 @@ const (
 	KnownIssuesJsonWithTuples = "https://github.com/scylladb/scylla/issues/3708"
 )
 
+type SchemaConfig struct {
+	CompactionStrategy *CompactionStrategy
+	MaxPartitionKeys   int
+	MaxClusteringKeys  int
+	MaxColumns         int
+}
+
 type Keyspace struct {
 	Name string `json:"name"`
 }
@@ -182,24 +189,24 @@ func (s *Schema) GetDropSchema() []string {
 	}
 }
 
-func GenSchema(cs *CompactionStrategy, maxPartitionKeys, maxClusteringKeys, maxColumns int) *Schema {
+func GenSchema(sc SchemaConfig) *Schema {
 	builder := NewSchemaBuilder()
 	keyspace := Keyspace{
 		Name: "ks1",
 	}
 	builder.Keyspace(keyspace)
 	var partitionKeys []ColumnDef
-	numPartitionKeys := rand.Intn(maxPartitionKeys-1) + 1
+	numPartitionKeys := rand.Intn(sc.MaxPartitionKeys-1) + 1
 	for i := 0; i < numPartitionKeys; i++ {
 		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: TYPE_INT})
 	}
 	var clusteringKeys []ColumnDef
-	numClusteringKeys := rand.Intn(maxClusteringKeys)
+	numClusteringKeys := rand.Intn(sc.MaxClusteringKeys)
 	for i := 0; i < numClusteringKeys; i++ {
 		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genPrimaryKeyColumnType()})
 	}
 	var columns []ColumnDef
-	numColumns := rand.Intn(maxColumns)
+	numColumns := rand.Intn(sc.MaxColumns)
 	for i := 0; i < numColumns; i++ {
 		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns)})
 	}
@@ -252,19 +259,20 @@ func GenSchema(cs *CompactionStrategy, maxPartitionKeys, maxClusteringKeys, maxC
 	}
 
 	table := Table{
-		Name:               "table1",
-		PartitionKeys:      partitionKeys,
-		ClusteringKeys:     clusteringKeys,
-		Columns:            columns,
-		CompactionStrategy: cs,
-		MaterializedViews:  mvs,
-		Indexes:            indexes,
+		Name:              "table1",
+		PartitionKeys:     partitionKeys,
+		ClusteringKeys:    clusteringKeys,
+		Columns:           columns,
+		MaterializedViews: mvs,
+		Indexes:           indexes,
 		KnownIssues: map[string]bool{
 			KnownIssuesJsonWithTuples: true,
 		},
 	}
-	if cs == nil {
+	if sc.CompactionStrategy == nil {
 		table.CompactionStrategy = randomCompactionStrategy()
+	} else {
+		table.CompactionStrategy = &(*sc.CompactionStrategy)
 	}
 
 	builder.Table(&table)

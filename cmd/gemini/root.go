@@ -195,7 +195,13 @@ func run(cmd *cobra.Command, args []string) {
 			return
 		}
 	} else {
-		schema = gemini.GenSchema(getCompactionStrategy(compactionStrategy), maxPartitionKeys, maxClusteringKeys, maxColumns)
+		sc := gemini.SchemaConfig{
+			CompactionStrategy: getCompactionStrategy(compactionStrategy),
+			MaxPartitionKeys:   maxPartitionKeys,
+			MaxClusteringKeys:  maxClusteringKeys,
+			MaxColumns:         maxColumns,
+		}
+		schema = gemini.GenSchema(sc)
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
