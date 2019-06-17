@@ -243,7 +243,7 @@ func GenSchema(sc SchemaConfig) *Schema {
 	for i := 0; i < numMvs; i++ {
 		col, err := validMVColumn()
 		if err != nil {
-			fmt.Println(err)
+			fmt.Printf("unable to generate valid columns for materialized view, error=%s", err)
 			continue
 		}
 
