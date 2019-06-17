@@ -39,6 +39,8 @@ const (
 	TYPE_VARCHAR   = SimpleType("varchar")
 	TYPE_VARINT    = SimpleType("varint")
 
+	MaxBlobLength   = 1e6
+	MinBlobLength   = 1000
 	MaxStringLength = 1000
 	MinStringLength = 100
 	MaxTupleParts   = 20
@@ -115,7 +117,7 @@ func (st SimpleType) GenValue(p *PartitionRange) []interface{} {
 		ln := p.Rand.Intn(MaxStringLength) + MinStringLength
 		val = randStringWithTime(p.Rand, ln, randTime(p.Rand))
 	case TYPE_BLOB:
-		ln := p.Rand.Intn(MaxStringLength) + MinStringLength
+		ln := p.Rand.Intn(MaxBlobLength) + MinBlobLength
 		val = hex.EncodeToString([]byte(randStringWithTime(p.Rand, ln, randTime(p.Rand))))
 	case TYPE_BIGINT:
 		val = p.Rand.Int63()
@@ -170,8 +172,8 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 		startTime := randTime(p.Rand)
 		start := nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
 		end := start + nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
-		left = hex.EncodeToString([]byte(nonEmptyRandStringWithTime(p.Rand, start, startTime)))
-		right = hex.EncodeToString([]byte(nonEmptyRandStringWithTime(p.Rand, end, randTimeNewer(p.Rand, startTime))))
+		left = hex.EncodeToString(nonEmptyRandBlobWithTime(p.Rand, start, startTime))
+		right = hex.EncodeToString(nonEmptyRandBlobWithTime(p.Rand, end, randTimeNewer(p.Rand, startTime)))
 	case TYPE_BIGINT:
 		start := nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)
 		end := start + nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)

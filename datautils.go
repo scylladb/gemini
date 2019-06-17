@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"math/rand"
@@ -55,6 +56,25 @@ func nonEmptyRandFloat64Range(rnd *rand.Rand, min float64, max float64, def floa
 	return randFloat64Range(rnd, 1, def)
 }
 
+func randBlobWithTime(rnd *rand.Rand, len int, t time.Time) []byte {
+	id, _ := ksuid.NewRandomWithTime(t)
+
+	var buf bytes.Buffer
+	buf.Write(id.Bytes())
+
+	if buf.Len() >= len {
+		return buf.Bytes()[:len]
+	}
+
+	// Pad some extra random data
+	buff := make([]byte, len-buf.Len())
+	rnd.Read(buff)
+	buf.WriteString(base64.StdEncoding.EncodeToString(buff))
+
+	return buf.Bytes()[:len]
+
+}
+
 func randStringWithTime(rnd *rand.Rand, len int, t time.Time) string {
 	id, _ := ksuid.NewRandomWithTime(t)
 
@@ -70,6 +90,13 @@ func randStringWithTime(rnd *rand.Rand, len int, t time.Time) string {
 	buf.WriteString(base64.StdEncoding.EncodeToString(buff))
 
 	return buf.String()[:len]
+}
+
+func nonEmptyRandBlobWithTime(rnd *rand.Rand, len int, t time.Time) []byte {
+	if len <= 0 {
+		len = 1
+	}
+	return randBlobWithTime(rnd, len, t)
 }
 
 func nonEmptyRandStringWithTime(rnd *rand.Rand, len int, t time.Time) string {
