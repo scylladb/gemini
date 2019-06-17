@@ -77,6 +77,9 @@ func (st SimpleType) CQLPretty(query string, value []interface{}) (string, int) 
 		replacement = fmt.Sprintf("'%s'", value[0])
 	case TYPE_BLOB:
 		if v, ok := value[0].(string); ok {
+			if len(v) > 100 {
+				v = v[:100]
+			}
 			replacement = "textasblob('" + v + "')"
 		}
 	case TYPE_BIGINT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT:
