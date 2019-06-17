@@ -39,7 +39,12 @@ const (
 	TYPE_VARCHAR   = SimpleType("varchar")
 	TYPE_VARINT    = SimpleType("varint")
 
-	MaxUDTParts = 10
+	MaxBlobLength   = 1e6
+	MinBlobLength   = 1000
+	MaxStringLength = 1000
+	MinStringLength = 100
+	MaxTupleParts   = 20
+	MaxUDTParts     = 20
 )
 
 // TODO: Add support for time when gocql bug is fixed.
@@ -109,9 +114,11 @@ func (st SimpleType) GenValue(p *PartitionRange) []interface{} {
 	var val interface{}
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
-		val = randStringWithTime(p.Rand, nonEmptyRandIntRange(p.Rand, p.Max, p.Max, 10), randTime(p.Rand))
+		ln := p.Rand.Intn(MaxStringLength) + MinStringLength
+		val = randStringWithTime(p.Rand, ln, randTime(p.Rand))
 	case TYPE_BLOB:
-		val = hex.EncodeToString([]byte(randStringWithTime(p.Rand, nonEmptyRandIntRange(p.Rand, p.Max, p.Max, 10), randTime(p.Rand))))
+		ln := p.Rand.Intn(MaxBlobLength) + MinBlobLength
+		val = hex.EncodeToString([]byte(randStringWithTime(p.Rand, ln, randTime(p.Rand))))
 	case TYPE_BIGINT:
 		val = p.Rand.Int63()
 	case TYPE_BOOLEAN:
@@ -165,8 +172,8 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 		startTime := randTime(p.Rand)
 		start := nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
 		end := start + nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
-		left = hex.EncodeToString([]byte(nonEmptyRandStringWithTime(p.Rand, start, startTime)))
-		right = hex.EncodeToString([]byte(nonEmptyRandStringWithTime(p.Rand, end, randTimeNewer(p.Rand, startTime))))
+		left = hex.EncodeToString(nonEmptyRandBlobWithTime(p.Rand, start, startTime))
+		right = hex.EncodeToString(nonEmptyRandBlobWithTime(p.Rand, end, randTimeNewer(p.Rand, startTime)))
 	case TYPE_BIGINT:
 		start := nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)
 		end := start + nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)
@@ -530,7 +537,7 @@ func genSimpleType() SimpleType {
 }
 
 func genTupleType() Type {
-	n := rand.Intn(5)
+	n := rand.Intn(MaxTupleParts)
 	if n < 2 {
 		n = 2
 	}

@@ -7,12 +7,20 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/pkg/errors"
 	"github.com/scylladb/gocqlx/qb"
 )
 
 const (
 	KnownIssuesJsonWithTuples = "https://github.com/scylladb/scylla/issues/3708"
 )
+
+type SchemaConfig struct {
+	CompactionStrategy *CompactionStrategy
+	MaxPartitionKeys   int
+	MaxClusteringKeys  int
+	MaxColumns         int
+}
 
 type Keyspace struct {
 	Name string `json:"name"`
@@ -181,30 +189,24 @@ func (s *Schema) GetDropSchema() []string {
 	}
 }
 
-const (
-	MaxPartitionKeys  = 2
-	MaxClusteringKeys = 4
-	MaxColumns        = 16
-)
-
-func GenSchema(cs *CompactionStrategy) *Schema {
+func GenSchema(sc SchemaConfig) *Schema {
 	builder := NewSchemaBuilder()
 	keyspace := Keyspace{
 		Name: "ks1",
 	}
 	builder.Keyspace(keyspace)
 	var partitionKeys []ColumnDef
-	numPartitionKeys := rand.Intn(MaxPartitionKeys-1) + 1
+	numPartitionKeys := rand.Intn(sc.MaxPartitionKeys-1) + 1
 	for i := 0; i < numPartitionKeys; i++ {
 		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: TYPE_INT})
 	}
 	var clusteringKeys []ColumnDef
-	numClusteringKeys := rand.Intn(MaxClusteringKeys)
+	numClusteringKeys := rand.Intn(sc.MaxClusteringKeys)
 	for i := 0; i < numClusteringKeys; i++ {
 		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genPrimaryKeyColumnType()})
 	}
 	var columns []ColumnDef
-	numColumns := rand.Intn(MaxColumns)
+	numColumns := rand.Intn(sc.MaxColumns)
 	for i := 0; i < numColumns; i++ {
 		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns)})
 	}
@@ -217,7 +219,7 @@ func GenSchema(cs *CompactionStrategy) *Schema {
 			}
 		}
 	}
-	validMVColumn := func() ColumnDef {
+	validMVColumn := func() (ColumnDef, error) {
 		validCols := make([]ColumnDef, 0, len(columns))
 		for _, col := range columns {
 			valid := false
@@ -231,13 +233,22 @@ func GenSchema(cs *CompactionStrategy) *Schema {
 				validCols = append(validCols, col)
 			}
 		}
-		return validCols[rand.Intn(len(validCols))]
+		if len(validCols) == 0 {
+			return ColumnDef{}, errors.New("no valid MV columns found")
+		}
+		return validCols[rand.Intn(len(validCols))], nil
 	}
 	var mvs []MaterializedView
 	numMvs := 1
 	for i := 0; i < numMvs; i++ {
+		col, err := validMVColumn()
+		if err != nil {
+			fmt.Printf("unable to generate valid columns for materialized view, error=%s", err)
+			continue
+		}
+
 		cols := []ColumnDef{
-			validMVColumn(),
+			col,
 		}
 		mv := MaterializedView{
 			Name:           "table1_mv_" + strconv.Itoa(i),
@@ -248,19 +259,20 @@ func GenSchema(cs *CompactionStrategy) *Schema {
 	}
 
 	table := Table{
-		Name:               "table1",
-		PartitionKeys:      partitionKeys,
-		ClusteringKeys:     clusteringKeys,
-		Columns:            columns,
-		CompactionStrategy: cs,
-		MaterializedViews:  mvs,
-		Indexes:            indexes,
+		Name:              "table1",
+		PartitionKeys:     partitionKeys,
+		ClusteringKeys:    clusteringKeys,
+		Columns:           columns,
+		MaterializedViews: mvs,
+		Indexes:           indexes,
 		KnownIssues: map[string]bool{
 			KnownIssuesJsonWithTuples: true,
 		},
 	}
-	if cs == nil {
+	if sc.CompactionStrategy == nil {
 		table.CompactionStrategy = randomCompactionStrategy()
+	} else {
+		table.CompactionStrategy = &(*sc.CompactionStrategy)
 	}
 
 	builder.Table(&table)
@@ -519,8 +531,8 @@ func (s *Schema) genClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	clusteringKeys := t.ClusteringKeys
-	view := p.Rand.Intn(len(t.MaterializedViews))
 	if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
+		view := p.Rand.Intn(len(t.MaterializedViews))
 		tableName = t.MaterializedViews[view].Name
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
 		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
@@ -560,8 +572,8 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, p *Partition
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	clusteringKeys := t.ClusteringKeys
-	view := p.Rand.Intn(len(t.MaterializedViews))
 	if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
+		view := p.Rand.Intn(len(t.MaterializedViews))
 		tableName = t.MaterializedViews[view].Name
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
 		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
