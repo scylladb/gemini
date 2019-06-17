@@ -39,10 +39,10 @@ const (
 	TYPE_VARCHAR   = SimpleType("varchar")
 	TYPE_VARINT    = SimpleType("varint")
 
-	MaxBlobLength   = 1e6
-	MinBlobLength   = 1000
+	MaxBlobLength   = 1e4
+	MinBlobLength   = 0
 	MaxStringLength = 1000
-	MinStringLength = 100
+	MinStringLength = 0
 	MaxTupleParts   = 20
 	MaxUDTParts     = 20
 )
