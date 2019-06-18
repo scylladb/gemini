@@ -141,14 +141,14 @@ func (st SimpleType) GenValue(p *PartitionRange) []interface{} {
 	case TYPE_INET:
 		val = net.ParseIP(randIpV4Address(p.Rand, p.Rand.Intn(255), 2))
 	case TYPE_INT:
-		val = nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
+		val = randIntRange(p.Rand, p.Min, p.Max)
 	case TYPE_SMALLINT:
-		val = int16(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
+		val = int16(randIntRange(p.Rand, p.Min, p.Max))
 	case TYPE_TIMEUUID, TYPE_UUID:
 		r := gocql.UUIDFromTime(randTime(p.Rand))
 		val = r.String()
 	case TYPE_TINYINT:
-		val = int8(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
+		val = int8(randIntRange(p.Rand, p.Min, p.Max))
 	case TYPE_VARINT:
 		val = big.NewInt(randInt64Range(p.Rand, int64(p.Min), int64(p.Max)))
 	default:
@@ -167,19 +167,19 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
 		startTime := randTime(p.Rand)
-		start := nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
-		end := start + nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
+		start := randIntRange(p.Rand, p.Min, p.Max)
+		end := start + randIntRange(p.Rand, p.Min, p.Max)
 		left = nonEmptyRandStringWithTime(p.Rand, start, startTime)
 		right = nonEmptyRandStringWithTime(p.Rand, end, randTimeNewer(p.Rand, startTime))
 	case TYPE_BLOB:
 		startTime := randTime(p.Rand)
-		start := nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
-		end := start + nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
+		start := randIntRange(p.Rand, p.Min, p.Max)
+		end := start + randIntRange(p.Rand, p.Min, p.Max)
 		left = hex.EncodeToString(nonEmptyRandBlobWithTime(p.Rand, start, startTime))
 		right = hex.EncodeToString(nonEmptyRandBlobWithTime(p.Rand, end, randTimeNewer(p.Rand, startTime)))
 	case TYPE_BIGINT:
-		start := nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)
-		end := start + nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)
+		start := randInt64Range(p.Rand, int64(p.Min), int64(p.Max))
+		end := start + randInt64Range(p.Rand, int64(p.Min), int64(p.Max))
 		left = start
 		right = end
 	case TYPE_DATE, TYPE_TIME, TYPE_TIMESTAMP:
@@ -188,8 +188,8 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 		left = start
 		right = end
 	case TYPE_DECIMAL:
-		start := nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)
-		end := start + nonEmptyRandInt64Range(p.Rand, int64(p.Min), int64(p.Max), 10)
+		start := randInt64Range(p.Rand, int64(p.Min), int64(p.Max))
+		end := start + randInt64Range(p.Rand, int64(p.Min), int64(p.Max))
 		left = inf.NewDec(start, 3)
 		right = inf.NewDec(end, 3)
 	case TYPE_DOUBLE:
@@ -198,8 +198,8 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 		left = start
 		right = end
 	case TYPE_DURATION:
-		start := time.Minute * time.Duration(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
-		end := start + time.Minute*time.Duration(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
+		start := time.Minute * time.Duration(randIntRange(p.Rand, p.Min, p.Max))
+		end := start + time.Minute*time.Duration(randIntRange(p.Rand, p.Min, p.Max))
 		left = start
 		right = end
 	case TYPE_FLOAT:
@@ -213,13 +213,13 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 		left = net.ParseIP(start)
 		right = net.ParseIP(end)
 	case TYPE_INT:
-		start := nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
-		end := start + nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10)
+		start := randIntRange(p.Rand, p.Min, p.Max)
+		end := start + randIntRange(p.Rand, p.Min, p.Max)
 		left = start
 		right = end
 	case TYPE_SMALLINT:
-		start := int16(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
-		end := start + int16(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
+		start := int16(randIntRange(p.Rand, p.Min, p.Max))
+		end := start + int16(randIntRange(p.Rand, p.Min, p.Max))
 		left = start
 		right = end
 	case TYPE_TIMEUUID, TYPE_UUID:
@@ -228,8 +228,8 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 		left = gocql.UUIDFromTime(start).String()
 		right = gocql.UUIDFromTime(end).String()
 	case TYPE_TINYINT:
-		start := int8(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
-		end := start + int8(nonEmptyRandIntRange(p.Rand, p.Min, p.Max, 10))
+		start := int8(randIntRange(p.Rand, p.Min, p.Max))
+		end := start + int8(randIntRange(p.Rand, p.Min, p.Max))
 		left = start
 		right = end
 	case TYPE_VARINT:

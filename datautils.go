@@ -13,28 +13,23 @@ import (
 )
 
 func randIntRange(rnd *rand.Rand, min int, max int) int {
+	if max <= min {
+		return min
+	}
 	return rnd.Intn(max-min) + min
 }
 
-func nonEmptyRandIntRange(rnd *rand.Rand, min int, max int, def int) int {
-	if max > min && min > 0 {
-		return randIntRange(rnd, min, max)
-	}
-	return randIntRange(rnd, 1, def)
-}
-
 func randInt64Range(rnd *rand.Rand, min int64, max int64) int64 {
+	if max <= min {
+		return min
+	}
 	return rnd.Int63n(max-min) + min
 }
 
-func nonEmptyRandInt64Range(rnd *rand.Rand, min int64, max int64, def int64) int64 {
-	if max > min && min > 0 {
-		return randInt64Range(rnd, min, max)
-	}
-	return randInt64Range(rnd, 1, def)
-}
-
 func randFloat32Range(rnd *rand.Rand, min float32, max float32) float32 {
+	if max <= min {
+		return min
+	}
 	return rnd.Float32() * (max - min)
 }
 
@@ -46,6 +41,9 @@ func nonEmptyRandFloat32Range(rnd *rand.Rand, min float32, max float32, def floa
 }
 
 func randFloat64Range(rnd *rand.Rand, min float64, max float64) float64 {
+	if max <= min {
+		return min
+	}
 	return rnd.Float64() * (max - min)
 }
 
