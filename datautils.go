@@ -33,25 +33,11 @@ func randFloat32Range(rnd *rand.Rand, min float32, max float32) float32 {
 	return rnd.Float32() * (max - min)
 }
 
-func nonEmptyRandFloat32Range(rnd *rand.Rand, min float32, max float32, def float32) float32 {
-	if max > min && min > 0 {
-		return randFloat32Range(rnd, min, max)
-	}
-	return randFloat32Range(rnd, 1, def)
-}
-
 func randFloat64Range(rnd *rand.Rand, min float64, max float64) float64 {
 	if max <= min {
 		return min
 	}
 	return rnd.Float64() * (max - min)
-}
-
-func nonEmptyRandFloat64Range(rnd *rand.Rand, min float64, max float64, def float64) float64 {
-	if max > min && min > 0 {
-		return randFloat64Range(rnd, min, max)
-	}
-	return randFloat64Range(rnd, 1, def)
 }
 
 func randBlobWithTime(rnd *rand.Rand, len int, t time.Time) []byte {

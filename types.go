@@ -193,8 +193,8 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 		left = inf.NewDec(start, 3)
 		right = inf.NewDec(end, 3)
 	case TYPE_DOUBLE:
-		start := nonEmptyRandFloat64Range(p.Rand, float64(p.Min), float64(p.Max), 10)
-		end := start + nonEmptyRandFloat64Range(p.Rand, float64(p.Min), float64(p.Max), 10)
+		start := randFloat64Range(p.Rand, float64(p.Min), float64(p.Max))
+		end := start + randFloat64Range(p.Rand, float64(p.Min), float64(p.Max))
 		left = start
 		right = end
 	case TYPE_DURATION:
@@ -203,8 +203,8 @@ func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interfac
 		left = start
 		right = end
 	case TYPE_FLOAT:
-		start := nonEmptyRandFloat32Range(p.Rand, float32(p.Min), float32(p.Max), 10)
-		end := start + nonEmptyRandFloat32Range(p.Rand, float32(p.Min), float32(p.Max), 10)
+		start := randFloat32Range(p.Rand, float32(p.Min), float32(p.Max))
+		end := start + randFloat32Range(p.Rand, float32(p.Min), float32(p.Max))
 		left = start
 		right = end
 	case TYPE_INET:
