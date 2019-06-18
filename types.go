@@ -39,10 +39,10 @@ const (
 	TYPE_VARCHAR   = SimpleType("varchar")
 	TYPE_VARINT    = SimpleType("varint")
 
-	MaxBlobLength   = 1e6
-	MinBlobLength   = 1000
+	MaxBlobLength   = 1e4
+	MinBlobLength   = 0
 	MaxStringLength = 1000
-	MinStringLength = 100
+	MinStringLength = 0
 	MaxTupleParts   = 20
 	MaxUDTParts     = 20
 )
@@ -77,6 +77,9 @@ func (st SimpleType) CQLPretty(query string, value []interface{}) (string, int) 
 		replacement = fmt.Sprintf("'%s'", value[0])
 	case TYPE_BLOB:
 		if v, ok := value[0].(string); ok {
+			if len(v) > 100 {
+				v = v[:100]
+			}
 			replacement = "textasblob('" + v + "')"
 		}
 	case TYPE_BIGINT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT:
