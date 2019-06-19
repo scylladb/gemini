@@ -330,9 +330,9 @@ func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *o
 				if sp != nil {
 					sp.Suffix = fmt.Sprintf(" Running Gemini... %v", testRes)
 				}
-				if testRes.ReadErrors > 0 {
+				if testRes.ReadErrors > 0 || testRes.WriteErrors > 0 {
 					if failFast {
-						fmt.Println("Error in data validation. Exiting.")
+						fmt.Println("Errors detected. Exiting.")
 						stop(cancelWorkers, c, out, testRes)
 						return
 					}
