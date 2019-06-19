@@ -32,6 +32,7 @@ type storeLoader interface {
 	storer
 	loader
 	close() error
+	name() string
 }
 
 type Store interface {
@@ -43,20 +44,20 @@ type Store interface {
 func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster *gocql.ClusterConfig) Store {
 	ops := promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gemini_cql_requests",
-		Help: "How many CQL requests processed, partitioned by name and CQL query type aka 'method' (batch, delete, insert, update).",
-	}, []string{"name", "method"},
+		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
+	}, []string{"system", "method"},
 	)
 	return &delegatingStore{
 		testStore: &cqlStore{
 			session: newSession(testCluster),
 			schema:  schema,
-			name:    "test",
+			system:  "test",
 			ops:     ops,
 		},
 		oracleStore: &cqlStore{
 			session: newSession(oracleCluster),
 			schema:  schema,
-			name:    "oracle",
+			system:  "oracle",
 			ops:     ops,
 		},
 	}
@@ -67,13 +68,16 @@ type delegatingStore struct {
 	testStore   storeLoader
 }
 
-func (ds delegatingStore) Mutate(ctx context.Context, builder qb.Builder, values ...interface{}) error {
+func (ds delegatingStore) Mutate(ctx context.Context, builder qb.Builder, values ...interface{}) (err error) {
 	ts := time.Now()
-	if err := ds.testStore.mutate(ctx, builder, ts, values...); err != nil {
-		return errors.Wrapf(err, "unable to apply mutations to the test store")
-	}
-	if err := ds.oracleStore.mutate(ctx, builder, ts, values...); err != nil {
-		return errors.Wrapf(err, "unable to apply mutations to the oracle store")
+	err = multierr.Append(err, mutate(ctx, ds.testStore, ts, builder, values...))
+	err = multierr.Append(err, mutate(ctx, ds.oracleStore, ts, builder, values...))
+	return
+}
+
+func mutate(ctx context.Context, s storeLoader, ts time.Time, builder qb.Builder, values ...interface{}) error {
+	if err := s.mutate(ctx, builder, ts, values...); err != nil {
+		return errors.Wrapf(err, "unable to apply mutations to the %s store", s.name())
 	}
 	return nil
 }
@@ -85,7 +89,7 @@ func (ds delegatingStore) Check(ctx context.Context, table *gemini.Table, builde
 	}
 	oracleRows, err := load(ctx, ds.oracleStore, builder, values)
 	if err != nil {
-		return errors.Wrapf(err, "unable to load check data from the test store")
+		return errors.Wrapf(err, "unable to load check data from the oracle store")
 	}
 
 	if len(testRows) != len(oracleRows) {

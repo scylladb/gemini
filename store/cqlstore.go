@@ -16,8 +16,12 @@ import (
 type cqlStore struct {
 	session *gocql.Session
 	schema  *gemini.Schema
-	name    string
+	system  string
 	ops     *prometheus.CounterVec
+}
+
+func (cs *cqlStore) name() string {
+	return cs.system
 }
 
 func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time, values ...interface{}) error {
@@ -25,24 +29,24 @@ func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time
 	var tsUsec int64 = ts.UnixNano() / 1000
 	if err := cs.session.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec).Exec(); err != nil {
 		if err == context.DeadlineExceeded {
-			fmt.Printf("system=%s has exceeded it's dealine for mutation query='%s', error=%s", cs.name, query, err)
+			fmt.Printf("system=%s has exceeded it's dealine for mutation query='%s', error=%s", cs.system, query, err)
 		}
 		if !ignore(err) {
-			return errors.Errorf("%v [cluster = %s, query = '%s']", err, cs.name, query)
+			return errors.Errorf("%v [cluster = %s, query = '%s']", err, cs.system, query)
 		}
 	}
-	cs.ops.WithLabelValues(cs.name, opType(builder)).Inc()
+	cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
 	return nil
 }
 
 func (cs *cqlStore) load(ctx context.Context, builder qb.Builder, values []interface{}) (result []map[string]interface{}, err error) {
 	query, _ := builder.ToCql()
 	iter := cs.session.Query(query, values...).WithContext(ctx).Iter()
-	cs.ops.WithLabelValues(cs.name, opType(builder)).Inc()
+	cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
 	defer func() {
 		if e := iter.Close(); err != nil {
 			if e == context.DeadlineExceeded {
-				fmt.Printf("system=%s has exceeded it's dealine for load query='%s', error=%s", cs.name, query, e)
+				fmt.Printf("system=%s has exceeded it's dealine for load query='%s', error=%s", cs.system, query, e)
 			}
 			if !ignore(e) {
 				err = multierr.Append(err, errors.Errorf("system failed: %s", e.Error()))
