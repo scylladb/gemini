@@ -38,13 +38,6 @@ const (
 	TYPE_UUID      = SimpleType("uuid")
 	TYPE_VARCHAR   = SimpleType("varchar")
 	TYPE_VARINT    = SimpleType("varint")
-
-	MaxBlobLength   = 1e4
-	MinBlobLength   = 0
-	MaxStringLength = 1000
-	MinStringLength = 0
-	MaxTupleParts   = 20
-	MaxUDTParts     = 20
 )
 
 // TODO: Add support for time when gocql bug is fixed.
@@ -117,10 +110,10 @@ func (st SimpleType) GenValue(p *PartitionRange) []interface{} {
 	var val interface{}
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
-		ln := p.Rand.Intn(MaxStringLength) + MinStringLength
+		ln := p.Rand.Intn(p.MaxStringLength) + p.MinStringLength
 		val = randStringWithTime(p.Rand, ln, randTime(p.Rand))
 	case TYPE_BLOB:
-		ln := p.Rand.Intn(MaxBlobLength) + MinBlobLength
+		ln := p.Rand.Intn(p.MaxBlobLength) + p.MinBlobLength
 		val = hex.EncodeToString([]byte(randStringWithTime(p.Rand, ln, randTime(p.Rand))))
 	case TYPE_BIGINT:
 		val = p.Rand.Int63()
@@ -517,36 +510,36 @@ func genColumnName(prefix string, idx int) string {
 	return fmt.Sprintf("%s%d", prefix, idx)
 }
 
-func genColumnType(numColumns int) Type {
+func genColumnType(numColumns int, sc *SchemaConfig) Type {
 	n := rand.Intn(numColumns + 5)
 	switch n {
 	case numColumns:
-		return genTupleType()
+		return genTupleType(sc)
 	case numColumns + 1:
-		return genUDTType()
+		return genUDTType(sc)
 	case numColumns + 2:
-		return genSetType()
+		return genSetType(sc)
 	case numColumns + 3:
-		return genListType()
+		return genListType(sc)
 	case numColumns + 4:
-		return genMapType()
+		return genMapType(sc)
 	default:
-		return genSimpleType()
+		return genSimpleType(sc)
 	}
 }
 
-func genSimpleType() SimpleType {
+func genSimpleType(sc *SchemaConfig) SimpleType {
 	return types[rand.Intn(len(types))]
 }
 
-func genTupleType() Type {
-	n := rand.Intn(MaxTupleParts)
+func genTupleType(sc *SchemaConfig) Type {
+	n := rand.Intn(sc.MaxTupleParts)
 	if n < 2 {
 		n = 2
 	}
 	typeList := make([]SimpleType, n, n)
 	for i := 0; i < n; i++ {
-		typeList[i] = genSimpleType()
+		typeList[i] = genSimpleType(sc)
 	}
 	return TupleType{
 		Types:  typeList,
@@ -554,13 +547,13 @@ func genTupleType() Type {
 	}
 }
 
-func genUDTType() UDTType {
+func genUDTType(sc *SchemaConfig) UDTType {
 	udtNum := rand.Uint32()
 	typeName := fmt.Sprintf("udt_%d", udtNum)
 	ts := make(map[string]SimpleType)
 
-	for i := 0; i < rand.Intn(MaxUDTParts)+1; i++ {
-		ts[typeName+fmt.Sprintf("_%d", i)] = genSimpleType()
+	for i := 0; i < rand.Intn(sc.MaxUDTParts)+1; i++ {
+		ts[typeName+fmt.Sprintf("_%d", i)] = genSimpleType(sc)
 	}
 
 	return UDTType{
@@ -570,18 +563,18 @@ func genUDTType() UDTType {
 	}
 }
 
-func genSetType() BagType {
-	return genBagType("set")
+func genSetType(sc *SchemaConfig) BagType {
+	return genBagType("set", sc)
 }
 
-func genListType() BagType {
-	return genBagType("list")
+func genListType(sc *SchemaConfig) BagType {
+	return genBagType("list", sc)
 }
 
-func genBagType(kind string) BagType {
+func genBagType(kind string, sc *SchemaConfig) BagType {
 	var t SimpleType
 	for {
-		t = genSimpleType()
+		t = genSimpleType(sc)
 		if t != TYPE_DURATION {
 			break
 		}
@@ -593,17 +586,17 @@ func genBagType(kind string) BagType {
 	}
 }
 
-func genMapType() MapType {
+func genMapType(sc *SchemaConfig) MapType {
 	var t SimpleType
 	for {
-		t = genSimpleType()
+		t = genSimpleType(sc)
 		if t != TYPE_DURATION {
 			break
 		}
 	}
 	return MapType{
 		KeyType:   t,
-		ValueType: genSimpleType(),
+		ValueType: genSimpleType(sc),
 		Frozen:    rand.Uint32()%2 == 0,
 	}
 }
