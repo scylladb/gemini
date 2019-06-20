@@ -211,26 +211,30 @@ func TestCQLPretty(t *testing.T) {
 }
 
 func TestMarshalUnmarshal(t *testing.T) {
+	sc := &SchemaConfig{
+		MaxTupleParts: 2,
+		MaxUDTParts:   2,
+	}
 	columns := Columns{
 		{
 			Name: genColumnName("col", 0),
-			Type: genMapType(),
+			Type: genMapType(sc),
 		},
 		{
 			Name: genColumnName("col", 1),
-			Type: genSetType(),
+			Type: genSetType(sc),
 		},
 		{
 			Name: genColumnName("col", 2),
-			Type: genListType(),
+			Type: genListType(sc),
 		},
 		{
 			Name: genColumnName("col", 3),
-			Type: genTupleType(),
+			Type: genTupleType(sc),
 		},
 		{
 			Name: genColumnName("col", 4),
-			Type: genUDTType(),
+			Type: genUDTType(sc),
 		},
 	}
 	s1 := &Schema{
@@ -240,13 +244,13 @@ func TestMarshalUnmarshal(t *testing.T) {
 				PartitionKeys: Columns{
 					{
 						Name: genColumnName("pk", 0),
-						Type: genSimpleType(),
+						Type: genSimpleType(sc),
 					},
 				},
 				ClusteringKeys: Columns{
 					{
 						Name: genColumnName("ck", 0),
-						Type: genSimpleType(),
+						Type: genSimpleType(sc),
 					},
 				},
 				Columns: columns,
@@ -266,21 +270,21 @@ func TestMarshalUnmarshal(t *testing.T) {
 						PartitionKeys: []ColumnDef{
 							{
 								Name: "pk_mv_0",
-								Type: genListType(),
+								Type: genListType(sc),
 							},
 							{
 								Name: "pk_mv_1",
-								Type: genTupleType(),
+								Type: genTupleType(sc),
 							},
 						},
 						ClusteringKeys: []ColumnDef{
 							{
 								Name: "ck_mv_0",
-								Type: genSetType(),
+								Type: genSetType(sc),
 							},
 							{
 								Name: "ck_mv_1",
-								Type: genUDTType(),
+								Type: genUDTType(sc),
 							},
 						},
 					},

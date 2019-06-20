@@ -47,6 +47,7 @@ var (
 	maxPartitionKeys   int
 	maxClusteringKeys  int
 	maxColumns         int
+	datasetSize        string
 )
 
 const (
@@ -184,6 +185,7 @@ func run(cmd *cobra.Command, args []string) {
 	}
 	defer outFile.Sync()
 
+	schemaConfig := createSchemaConfig()
 	var schema *gemini.Schema
 	if len(schemaFile) > 0 {
 		var err error
@@ -193,13 +195,7 @@ func run(cmd *cobra.Command, args []string) {
 			return
 		}
 	} else {
-		sc := gemini.SchemaConfig{
-			CompactionStrategy: getCompactionStrategy(compactionStrategy),
-			MaxPartitionKeys:   maxPartitionKeys,
-			MaxClusteringKeys:  maxClusteringKeys,
-			MaxColumns:         maxColumns,
-		}
-		schema = gemini.GenSchema(sc)
+		schema = gemini.GenSchema(schemaConfig)
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
@@ -230,7 +226,49 @@ func run(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	runJob(Job, schema, store, mode, outFile)
+	runJob(Job, schema, schemaConfig, store, mode, outFile)
+}
+
+func createSchemaConfig() *gemini.SchemaConfig {
+	defaultConfig := createDefaultSchemaConfig()
+	switch strings.ToLower(datasetSize) {
+	case "small":
+		return &gemini.SchemaConfig{
+			CompactionStrategy: defaultConfig.CompactionStrategy,
+			MaxPartitionKeys:   defaultConfig.MaxPartitionKeys,
+			MaxClusteringKeys:  defaultConfig.MaxClusteringKeys,
+			MaxColumns:         defaultConfig.MaxColumns,
+			MaxUDTParts:        2,
+			MaxTupleParts:      2,
+			MaxBlobLength:      20,
+			MaxStringLength:    20,
+		}
+	default:
+		return defaultConfig
+	}
+}
+
+func createDefaultSchemaConfig() *gemini.SchemaConfig {
+	const (
+		MaxBlobLength   = 1e4
+		MinBlobLength   = 0
+		MaxStringLength = 1000
+		MinStringLength = 0
+		MaxTupleParts   = 20
+		MaxUDTParts     = 20
+	)
+	return &gemini.SchemaConfig{
+		CompactionStrategy: getCompactionStrategy(compactionStrategy),
+		MaxPartitionKeys:   maxPartitionKeys,
+		MaxClusteringKeys:  maxClusteringKeys,
+		MaxColumns:         maxColumns,
+		MaxUDTParts:        MaxUDTParts,
+		MaxTupleParts:      MaxTupleParts,
+		MaxBlobLength:      MaxBlobLength,
+		MinBlobLength:      MinBlobLength,
+		MaxStringLength:    MaxStringLength,
+		MinStringLength:    MinStringLength,
+	}
 }
 
 func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
@@ -270,7 +308,7 @@ func getCompactionStrategy(cs string) *gemini.CompactionStrategy {
 	}
 }
 
-func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *os.File) {
+func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig, s store.Store, mode string, out *os.File) {
 	defer out.Sync()
 	c := make(chan Status, 10000)
 	minRange := 0
@@ -290,9 +328,13 @@ func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *o
 	for _, table := range schema.Tables {
 		for i := 0; i < concurrency; i++ {
 			p := gemini.PartitionRange{
-				Min:  minRange + i*maxRange,
-				Max:  maxRange + i*maxRange,
-				Rand: rand.New(rand.NewSource(int64(seed))),
+				Min:             minRange + i*maxRange,
+				Max:             maxRange + i*maxRange,
+				Rand:            rand.New(rand.NewSource(int64(seed))),
+				MaxBlobLength:   schemaConfig.MaxBlobLength,
+				MinBlobLength:   schemaConfig.MinBlobLength,
+				MaxStringLength: schemaConfig.MaxStringLength,
+				MinStringLength: schemaConfig.MinStringLength,
 			}
 			go f(workerCtx, pump.ch, &workers, schema, table, s, p, c, mode, out, warmup)
 		}
@@ -474,6 +516,7 @@ func init() {
 	rootCmd.Flags().IntVarP(&maxPartitionKeys, "max-partition-keys", "", 2, "Maximum number of generated partition keys")
 	rootCmd.Flags().IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 4, "Maximum number of generated clustering keys")
 	rootCmd.Flags().IntVarP(&maxColumns, "max-columns", "", 16, "Maximum number of generated columns")
+	rootCmd.Flags().StringVarP(&datasetSize, "dataset-size", "", "large", "Specify the type of dataset size to use, small|large")
 }
 
 func printSetup() error {

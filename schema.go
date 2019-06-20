@@ -20,6 +20,12 @@ type SchemaConfig struct {
 	MaxPartitionKeys   int
 	MaxClusteringKeys  int
 	MaxColumns         int
+	MaxUDTParts        int
+	MaxTupleParts      int
+	MaxBlobLength      int
+	MaxStringLength    int
+	MinBlobLength      int
+	MinStringLength    int
 }
 
 type Keyspace struct {
@@ -178,9 +184,13 @@ type Schema struct {
 }
 
 type PartitionRange struct {
-	Min  int `default:0`
-	Max  int `default:100`
-	Rand *rand.Rand
+	Min             int `default:0`
+	Max             int `default:100`
+	Rand            *rand.Rand
+	MaxBlobLength   int
+	MinBlobLength   int
+	MaxStringLength int
+	MinStringLength int
 }
 
 func (s *Schema) GetDropSchema() []string {
@@ -189,7 +199,7 @@ func (s *Schema) GetDropSchema() []string {
 	}
 }
 
-func GenSchema(sc SchemaConfig) *Schema {
+func GenSchema(sc *SchemaConfig) *Schema {
 	builder := NewSchemaBuilder()
 	keyspace := Keyspace{
 		Name: "ks1",
@@ -208,7 +218,7 @@ func GenSchema(sc SchemaConfig) *Schema {
 	var columns []ColumnDef
 	numColumns := rand.Intn(sc.MaxColumns)
 	for i := 0; i < numColumns; i++ {
-		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns)})
+		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns, sc)})
 	}
 	var indexes []IndexDef
 	if numColumns > 0 {

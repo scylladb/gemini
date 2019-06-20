@@ -26,6 +26,7 @@ until docker logs ${TEST_NAME} | grep "Starting listening for CQL clients" > /de
 $GEMINI_CMD \
 	--duration=10m \
 	--fail-fast \
+	--dataset-size=small \
 	--test-cluster=${TEST_IP} \
 	--oracle-cluster=${ORACLE_IP} \
 	"$@"
