@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Data sizes are configurable though a CLI argument `--dataset-size` and the currently
+  supported values are "small" and "large".
 - CLI toggle `--cql-features` added to let the user select which type of CQL features
   to use. The current levels are `basic`, `normal` and `all`. The `basic` level have only
   regular columns and no indexes nor materialized views. `normal` adds these two constructs
