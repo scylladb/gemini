@@ -2,12 +2,13 @@ package gemini
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/pkg/errors"
 	"github.com/scylladb/gocqlx/qb"
 )
 
@@ -109,9 +110,23 @@ type Table struct {
 	Indexes            []IndexDef          `json:"indexes"`
 	MaterializedViews  []MaterializedView  `json:"materialized_views"`
 	KnownIssues        map[string]bool     `json:"known_issues"`
+
+	// mu protects the table during schema changes
+	mu sync.RWMutex
+}
+
+func (t *Table) Lock() {
+	t.mu.Lock()
+}
+
+func (t *Table) Unlock() {
+	t.mu.Unlock()
 }
 
 func (t *Table) GetCreateTable(ks Keyspace) string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	var (
 		partitionKeys  []string
 		clusteringKeys []string
@@ -143,6 +158,9 @@ func (t *Table) GetCreateTable(ks Keyspace) string {
 }
 
 func (t *Table) GetCreateTypes(keyspace Keyspace) []string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	var stmts []string
 	for _, column := range t.Columns {
 		switch c := column.Type.(type) {
@@ -156,6 +174,93 @@ func (t *Table) GetCreateTypes(keyspace Keyspace) []string {
 		}
 	}
 	return stmts
+}
+
+type AlterTableBuilder struct {
+	stmt string
+}
+
+func (atb *AlterTableBuilder) ToCql() (string, []string) {
+	return atb.stmt, nil
+}
+
+func (t *Table) addColumn(keyspace string, sc *SchemaConfig) ([]*Stmt, func(), error) {
+	var stmts []*Stmt
+	column := ColumnDef{Name: genColumnName("col", len(t.Columns)+1), Type: genColumnType(len(t.Columns)+1, sc)}
+	if c, ok := column.Type.(UDTType); ok {
+		createType := "CREATE TYPE %s.%s (%s);"
+		var typs []string
+		for name, typ := range c.Types {
+			typs = append(typs, name+" "+typ.CQLDef())
+		}
+		stmt := fmt.Sprintf(createType, keyspace, c.TypeName, strings.Join(typs, ","))
+		stmts = append(stmts, &Stmt{
+			Query: &AlterTableBuilder{
+				stmt: stmt,
+			},
+			Values: func() []interface{} {
+				return nil
+			},
+		})
+	}
+	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " ADD " + column.Name + " " + column.Type.CQLDef()
+	stmts = append(stmts, &Stmt{
+		Query: &AlterTableBuilder{
+			stmt: stmt,
+		},
+		Values: func() []interface{} {
+			return nil
+		},
+	})
+	return stmts, func() {
+		t.Columns = append(t.Columns, column)
+	}, nil
+}
+
+func (t *Table) alterColumn(keyspace string) ([]*Stmt, func(), error) {
+	var stmts []*Stmt
+	idx := rand.Intn(len(t.Columns))
+	column := t.Columns[idx]
+	oldType, isSimpleType := column.Type.(SimpleType)
+	if !isSimpleType {
+		return nil, func() {}, errors.Errorf("complex type=%s cannot be altered", column.Name)
+	}
+	if compatTypes, ok := compatibleColumnTypes[oldType]; ok {
+		newType := compatTypes[rand.Intn(len(compatTypes))]
+		newColumn := ColumnDef{Name: column.Name, Type: newType}
+		stmt := "ALTER TABLE " + keyspace + "." + t.Name + " ALTER " + column.Name + " TYPE " + column.Type.CQLDef()
+		stmts = append(stmts, &Stmt{
+			Query: &AlterTableBuilder{
+				stmt: stmt,
+			},
+			Values: func() []interface{} {
+				return nil
+			},
+		})
+		fmt.Println(stmt)
+		return stmts, func() {
+			t.Columns[idx] = newColumn
+		}, nil
+	}
+	return nil, func() {}, errors.Errorf("simple type=%s has no compatible types so it cannot be altered", column.Name)
+}
+
+func (t *Table) dropColumn(keyspace string) ([]*Stmt, func(), error) {
+	var stmts []*Stmt
+	idx := rand.Intn(len(t.Columns))
+	column := t.Columns[idx]
+	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " DROP " + column.Name
+	stmts = append(stmts, &Stmt{
+		Query: &AlterTableBuilder{
+			stmt: stmt,
+		},
+		Values: func() []interface{} {
+			return nil
+		},
+	})
+	return stmts, func() {
+		t.Columns = append(t.Columns[:idx], t.Columns[idx+1:]...)
+	}, nil
 }
 
 type MaterializedView struct {
@@ -173,6 +278,9 @@ type Stmt struct {
 func (s *Stmt) PrettyCQL() string {
 	var replaced int
 	query, _ := s.Query.ToCql()
+	if len(s.Values()) == 0 {
+		return query
+	}
 	values := s.Values()
 	for _, typ := range s.Types {
 		query, replaced = typ.CQLPretty(query, values)
@@ -376,6 +484,9 @@ func (s *Schema) GetCreateSchema() []string {
 }
 
 func (s *Schema) GenInsertStmt(t *Table, p *PartitionRange) (*Stmt, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	var (
 		typs []Type
 	)
@@ -411,6 +522,9 @@ func (s *Schema) GenInsertStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 }
 
 func (s *Schema) GenInsertJsonStmt(t *Table, p *PartitionRange) (*Stmt, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	values := make(map[string]interface{})
 	values = t.PartitionKeys.ToJSONMap(values, p)
 	values = t.ClusteringKeys.ToJSONMap(values, p)
@@ -432,6 +546,9 @@ func (s *Schema) GenInsertJsonStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 }
 
 func (s *Schema) GenDeleteRows(t *Table, p *PartitionRange) (*Stmt, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	var (
 		values []interface{}
 		typs   []Type
@@ -457,7 +574,21 @@ func (s *Schema) GenDeleteRows(t *Table, p *PartitionRange) (*Stmt, error) {
 	}, nil
 }
 
+func (s *Schema) GenDDLStmt(t *Table, p *PartitionRange, sc *SchemaConfig) ([]*Stmt, func(), error) {
+	switch n := p.Rand.Intn(3); n {
+	//case 0: // Alter column not supported in Cassandra from 3.0.11
+	//	return t.alterColumn(s.Keyspace.Name)
+	case 1: // Delete column
+		return t.dropColumn(s.Keyspace.Name)
+	default: // Alter column
+		return t.addColumn(s.Keyspace.Name, sc)
+	}
+}
+
 func (s *Schema) GenMutateStmt(t *Table, p *PartitionRange, deletes bool) (*Stmt, error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if !deletes {
 		return s.GenInsertStmt(t, p)
 	}
@@ -500,6 +631,9 @@ func (s *Schema) GenCheckStmt(t *Table, p *PartitionRange) *Stmt {
 }
 
 func (s *Schema) genSinglePartitionQuery(t *Table, p *PartitionRange) *Stmt {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
@@ -525,6 +659,9 @@ func (s *Schema) genSinglePartitionQuery(t *Table, p *PartitionRange) *Stmt {
 }
 
 func (s *Schema) genMultiplePartitionQuery(t *Table, p *PartitionRange) *Stmt {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	var (
 		values []interface{}
 		typs   []Type
@@ -558,6 +695,9 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, p *PartitionRange) *Stmt {
 }
 
 func (s *Schema) genClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	var (
 		values []interface{}
 		typs   []Type
@@ -599,6 +739,9 @@ func (s *Schema) genClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
 }
 
 func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	var (
 		values []interface{}
 		typs   []Type
@@ -646,6 +789,9 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, p *Partition
 }
 
 func (s *Schema) genSingleIndexQuery(t *Table, p *PartitionRange) *Stmt {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	var (
 		values []interface{}
 		typs   []Type

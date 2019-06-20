@@ -42,8 +42,50 @@ const (
 
 // TODO: Add support for time when gocql bug is fixed.
 var (
-	pkTypes = []SimpleType{TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT /*TYPE_TIME,*/, TYPE_TIMESTAMP, TYPE_TIMEUUID, TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT}
-	types   = append(append([]SimpleType{}, pkTypes...), TYPE_BOOLEAN, TYPE_DURATION)
+	pkTypes               = []SimpleType{TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT /*TYPE_TIME,*/, TYPE_TIMESTAMP, TYPE_TIMEUUID, TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT}
+	types                 = append(append([]SimpleType{}, pkTypes...), TYPE_BOOLEAN, TYPE_DURATION)
+	compatibleColumnTypes = map[SimpleType][]SimpleType{
+		TYPE_ASCII: {
+			TYPE_TEXT,
+			TYPE_BLOB,
+		},
+		TYPE_BIGINT: {
+			TYPE_BLOB,
+		},
+		TYPE_BOOLEAN: {
+			TYPE_BLOB,
+		},
+		TYPE_DECIMAL: {
+			TYPE_BLOB,
+		},
+		TYPE_FLOAT: {
+			TYPE_BLOB,
+		},
+		TYPE_INET: {
+			TYPE_BLOB,
+		},
+		TYPE_INT: {
+			TYPE_VARINT,
+			TYPE_BLOB,
+		},
+		TYPE_TIMESTAMP: {
+			TYPE_BLOB,
+		},
+		TYPE_TIMEUUID: {
+			TYPE_UUID,
+			TYPE_BLOB,
+		},
+		TYPE_UUID: {
+			TYPE_BLOB,
+		},
+		TYPE_VARCHAR: {
+			TYPE_TEXT,
+			TYPE_BLOB,
+		},
+		TYPE_VARINT: {
+			TYPE_BLOB,
+		},
+	}
 )
 
 type SimpleType string

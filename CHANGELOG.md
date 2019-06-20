@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- DDL statements are now emitted with low frequency if the `--cql-features` is set to at
+  least `"all"` level.
 - Data sizes are configurable though a CLI argument `--dataset-size` and the currently
   supported values are "small" and "large".
 - CLI toggle `--cql-features` added to let the user select which type of CQL features
