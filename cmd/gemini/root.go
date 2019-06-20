@@ -11,10 +11,8 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
 	"sync"
-	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -80,7 +78,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, *sync.WaitGroup, *gemini.Schema, *gemini.Table, store.Store, gemini.PartitionRange, chan Status, string, *os.File, time.Duration)
+type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, *gemini.Table, store.Store, gemini.PartitionRange, chan Status, string, *os.File, time.Duration)
 
 func (r *Status) Merge(sum *Status) Status {
 	sum.WriteOps += r.WriteOps
@@ -274,14 +272,20 @@ func getCompactionStrategy(cs string) *gemini.CompactionStrategy {
 
 func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *os.File) {
 	defer out.Sync()
-	c := make(chan Status)
+	c := make(chan Status, 10000)
 	minRange := 0
 	maxRange := pkNumberPerThread
 
 	// Wait group for the worker goroutines.
 	var workers sync.WaitGroup
-	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	workerCtx, _ := context.WithCancel(context.Background())
 	workers.Add(len(schema.Tables) * concurrency)
+
+	// Wait group for the finished goroutine.
+	var finished sync.WaitGroup
+	finished.Add(1)
+
+	pump := createPump(10000, duration+warmup)
 
 	for _, table := range schema.Tables {
 		for i := 0; i < concurrency; i++ {
@@ -290,68 +294,43 @@ func runJob(f testJob, schema *gemini.Schema, s store.Store, mode string, out *o
 				Max:  maxRange + i*maxRange,
 				Rand: rand.New(rand.NewSource(int64(seed))),
 			}
-			go f(workerCtx, &workers, schema, table, s, p, c, mode, out, warmup)
+			go f(workerCtx, pump.ch, &workers, schema, table, s, p, c, mode, out, warmup)
 		}
 	}
 
-	// Gracefully terminate
-	var gracefulStop = make(chan os.Signal)
-	signal.Notify(gracefulStop, syscall.SIGTERM, syscall.SIGINT)
-
-	// Wait group for the reporter goroutine.
-	var reporter sync.WaitGroup
-	reporter.Add(1)
-	reporterCtx, cancelReporter := context.WithCancel(context.Background())
-	go func(d time.Duration) {
-		defer reporter.Done()
-		var testRes Status
-		timer := time.NewTimer(d)
+	go func() {
 		var sp *spinner.Spinner = nil
 		if interactive() {
-			spinnerCharSet := []string{"|", "/", "-", "\\"}
-			sp = spinner.New(spinnerCharSet, 1*time.Second)
-			sp.Color("black")
-			sp.Start()
-			defer sp.Stop()
+			sp = createSpinner()
 		}
-		for {
-			select {
-			case <-gracefulStop:
-				stop(cancelWorkers, c, out, testRes)
-				fmt.Println("Test run aborted. Exiting.")
-			case <-timer.C:
-				stop(cancelWorkers, c, out, testRes)
-				fmt.Println("Test run completed. Exiting.")
-				return
-			case <-reporterCtx.Done():
-				return
-			case res := <-c:
-				testRes = res.Merge(&testRes)
-				if sp != nil {
-					sp.Suffix = fmt.Sprintf(" Running Gemini... %v", testRes)
-				}
-				if testRes.ReadErrors > 0 || testRes.WriteErrors > 0 {
-					if failFast {
-						fmt.Println("Errors detected. Exiting.")
-						stop(cancelWorkers, c, out, testRes)
-						return
-					}
-					testRes.PrintResult(out)
+		pump.Start(createPumpCallback(c, &workers, sp))
+		res := sampleResults(pump, c, sp)
+		res.PrintResult(out)
+		finished.Done()
+	}()
+
+	finished.Wait()
+}
+
+func sampleResults(p *Pump, c chan Status, sp *spinner.Spinner) Status {
+	var testRes Status
+	done := false
+	for res := range c {
+		testRes = res.Merge(&testRes)
+		if sp != nil {
+			sp.Suffix = fmt.Sprintf(" Running Gemini... %v", testRes)
+		}
+		if testRes.ReadErrors > 0 || testRes.WriteErrors > 0 {
+			if failFast {
+				if !done {
+					done = true
+					fmt.Println("Errors detected. Exiting.")
+					p.Stop()
 				}
 			}
 		}
-	}(duration + warmup)
-
-	workers.Wait()
-	close(c)
-	cancelReporter()
-	reporter.Wait()
-}
-
-func stop(cancel context.CancelFunc, c chan Status, out io.Writer, res Status) {
-	cancel()
-	res = drain(c, res)
-	res.PrintResult(out)
+	}
+	return testRes
 }
 
 func mutationJob(ctx context.Context, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File, deletes bool) {
@@ -400,7 +379,16 @@ func validationJob(ctx context.Context, schema *gemini.Schema, table *gemini.Tab
 	}
 }
 
-func Job(ctx context.Context, wg *sync.WaitGroup, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, c chan Status, mode string, out *os.File, warmup time.Duration) {
+type heartBeat struct {
+	sleep time.Duration
+}
+
+func (hb heartBeat) await() {
+	if hb.sleep > 0 {
+		time.Sleep(hb.sleep)
+	}
+}
+func Job(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, table *gemini.Table, s store.Store, p gemini.PartitionRange, c chan Status, mode string, out *os.File, warmup time.Duration) {
 	defer wg.Done()
 	testStatus := Status{}
 	var i int
@@ -421,12 +409,8 @@ warmup:
 		}
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
+	for hb := range pump {
+		hb.await()
 		switch mode {
 		case writeMode:
 			mutationJob(ctx, schema, table, s, p, &testStatus, out, true)
@@ -450,7 +434,9 @@ warmup:
 		}
 		i++
 	}
-
+	if verbose {
+		fmt.Println("pump closed")
+	}
 	c <- testStatus
 }
 
@@ -510,9 +496,22 @@ func printSetup() error {
 	return nil
 }
 
-func drain(ch chan Status, testRes Status) Status {
-	for res := range ch {
-		testRes = res.Merge(&testRes)
+func createSpinner() *spinner.Spinner {
+	spinnerCharSet := []string{"|", "/", "-", "\\"}
+	sp := spinner.New(spinnerCharSet, 1*time.Second)
+	_ = sp.Color("black")
+	sp.Start()
+	return sp
+}
+
+func newHeartBeat() heartBeat {
+	r := rand.Intn(10)
+	switch r {
+	case 0:
+		return heartBeat{
+			sleep: 10 * time.Millisecond,
+		}
+	default:
+		return heartBeat{}
 	}
-	return testRes
 }
