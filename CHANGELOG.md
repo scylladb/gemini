@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.2.0] - 2019-06-20
 
 - DDL statements are now emitted with low frequency if the `--cql-features` is set to at
   least `"all"` level.
