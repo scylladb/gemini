@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- CLI toggle `--cql-features` added to let the user select which type of CQL features
+  to use. The current levels are `basic`, `normal` and `all`. The `basic` level have only
+  regular columns and no indexes nor materialized views. `normal` adds these two constructs
+  and `all` currently the same as `normal` but will be used to differentiate more advanced
+  features in the future.
+
 ## [1.1.0] - 2019-06-11
 
 - Exponential backoff retry policy added with 5 retries between 1 and 10 seconds.
