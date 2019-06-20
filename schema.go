@@ -2,16 +2,22 @@ package gemini
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
 	"github.com/scylladb/gocqlx/qb"
 )
 
+type CQLFeature int
+
 const (
+	CQL_FEATURE_BASIC CQLFeature = iota + 1
+	CQL_FEATURE_NORMAL
+	CQL_FEATURE_ALL
+
 	KnownIssuesJsonWithTuples = "https://github.com/scylladb/scylla/issues/3708"
 )
 
@@ -26,6 +32,7 @@ type SchemaConfig struct {
 	MaxStringLength    int
 	MinBlobLength      int
 	MinStringLength    int
+	CQLFeature         CQLFeature
 }
 
 type Keyspace struct {
@@ -221,6 +228,38 @@ func GenSchema(sc *SchemaConfig) *Schema {
 		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns, sc)})
 	}
 	var indexes []IndexDef
+	if sc.CQLFeature > CQL_FEATURE_BASIC {
+		indexes = createIndexes(numColumns, columns)
+	}
+
+	var mvs []MaterializedView
+	if sc.CQLFeature > CQL_FEATURE_BASIC {
+		mvs = createMaterializedViews(partitionKeys, clusteringKeys, columns)
+	}
+
+	table := Table{
+		Name:              "table1",
+		PartitionKeys:     partitionKeys,
+		ClusteringKeys:    clusteringKeys,
+		Columns:           columns,
+		MaterializedViews: mvs,
+		Indexes:           indexes,
+		KnownIssues: map[string]bool{
+			KnownIssuesJsonWithTuples: true,
+		},
+	}
+	if sc.CompactionStrategy == nil {
+		table.CompactionStrategy = randomCompactionStrategy()
+	} else {
+		table.CompactionStrategy = &(*sc.CompactionStrategy)
+	}
+
+	builder.Table(&table)
+	return builder.Build()
+}
+
+func createIndexes(numColumns int, columns []ColumnDef) []IndexDef {
+	var indexes []IndexDef
 	if numColumns > 0 {
 		numIndexes := rand.Intn(numColumns)
 		for i := 0; i < numIndexes; i++ {
@@ -229,6 +268,10 @@ func GenSchema(sc *SchemaConfig) *Schema {
 			}
 		}
 	}
+	return indexes
+}
+
+func createMaterializedViews(partitionKeys []ColumnDef, clusteringKeys []ColumnDef, columns []ColumnDef) []MaterializedView {
 	validMVColumn := func() (ColumnDef, error) {
 		validCols := make([]ColumnDef, 0, len(columns))
 		for _, col := range columns {
@@ -267,26 +310,7 @@ func GenSchema(sc *SchemaConfig) *Schema {
 		}
 		mvs = append(mvs, mv)
 	}
-
-	table := Table{
-		Name:              "table1",
-		PartitionKeys:     partitionKeys,
-		ClusteringKeys:    clusteringKeys,
-		Columns:           columns,
-		MaterializedViews: mvs,
-		Indexes:           indexes,
-		KnownIssues: map[string]bool{
-			KnownIssuesJsonWithTuples: true,
-		},
-	}
-	if sc.CompactionStrategy == nil {
-		table.CompactionStrategy = randomCompactionStrategy()
-	} else {
-		table.CompactionStrategy = &(*sc.CompactionStrategy)
-	}
-
-	builder.Table(&table)
-	return builder.Build()
+	return mvs
 }
 
 func randomCompactionStrategy() *CompactionStrategy {

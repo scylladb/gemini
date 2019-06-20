@@ -48,6 +48,7 @@ var (
 	maxClusteringKeys  int
 	maxColumns         int
 	datasetSize        string
+	cqlFeatures        string
 )
 
 const (
@@ -242,6 +243,7 @@ func createSchemaConfig() *gemini.SchemaConfig {
 			MaxTupleParts:      2,
 			MaxBlobLength:      20,
 			MaxStringLength:    20,
+			CQLFeature:         defaultConfig.CQLFeature,
 		}
 	default:
 		return defaultConfig
@@ -268,6 +270,7 @@ func createDefaultSchemaConfig() *gemini.SchemaConfig {
 		MinBlobLength:      MinBlobLength,
 		MaxStringLength:    MaxStringLength,
 		MinStringLength:    MinStringLength,
+		CQLFeature:         getCQLFeature(cqlFeatures),
 	}
 }
 
@@ -305,6 +308,17 @@ func getCompactionStrategy(cs string) *gemini.CompactionStrategy {
 			return nil
 		}
 		return compactionStrategy
+	}
+}
+
+func getCQLFeature(feature string) gemini.CQLFeature {
+	switch strings.ToLower(feature) {
+	case "all":
+		return gemini.CQL_FEATURE_ALL
+	case "normal":
+		return gemini.CQL_FEATURE_NORMAL
+	default:
+		return gemini.CQL_FEATURE_BASIC
 	}
 }
 
@@ -517,6 +531,7 @@ func init() {
 	rootCmd.Flags().IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 4, "Maximum number of generated clustering keys")
 	rootCmd.Flags().IntVarP(&maxColumns, "max-columns", "", 16, "Maximum number of generated columns")
 	rootCmd.Flags().StringVarP(&datasetSize, "dataset-size", "", "large", "Specify the type of dataset size to use, small|large")
+	rootCmd.Flags().StringVarP(&cqlFeatures, "cql-features", "", "basic", "Specify the type of cql features to use, basic|normal|large")
 }
 
 func printSetup() error {
