@@ -7,6 +7,8 @@ import (
 	"sort"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -41,7 +43,12 @@ type Store interface {
 	Close() error
 }
 
-func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster *gocql.ClusterConfig) Store {
+type Config struct {
+	MaxRetriesMutate      int
+	MaxRetriesMutateSleep time.Duration
+}
+
+func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster *gocql.ClusterConfig, cfg Config, logger *zap.Logger) Store {
 	ops := promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gemini_cql_requests",
 		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
@@ -49,16 +56,22 @@ func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster 
 	)
 	return &delegatingStore{
 		testStore: &cqlStore{
-			session: newSession(testCluster),
-			schema:  schema,
-			system:  "test",
-			ops:     ops,
+			session:               newSession(testCluster),
+			schema:                schema,
+			system:                "test",
+			ops:                   ops,
+			maxRetriesMutate:      cfg.MaxRetriesMutate,
+			maxRetriesMutateSleep: cfg.MaxRetriesMutateSleep,
+			logger:                logger,
 		},
 		oracleStore: &cqlStore{
-			session: newSession(oracleCluster),
-			schema:  schema,
-			system:  "oracle",
-			ops:     ops,
+			session:               newSession(oracleCluster),
+			schema:                schema,
+			system:                "oracle",
+			ops:                   ops,
+			maxRetriesMutate:      cfg.MaxRetriesMutate,
+			maxRetriesMutateSleep: cfg.MaxRetriesMutateSleep,
+			logger:                logger,
 		},
 	}
 }

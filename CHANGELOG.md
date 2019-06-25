@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Log levels introduced and configured via CLI arg `level`. Common values such as 
+  `info`, `debug` and `error` are supported.
+- Mutations are now retried at a considerably greater number of times than reads.
+  The number of retries and the time between them are configure via `--max-mutation-retries`
+  and `--max-mutation-retries-backoff`.
+
 ## [1.2.0] - 2019-06-20
 
 - DDL statements are now emitted with low frequency if the `--cql-features` is set to at
