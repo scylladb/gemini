@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -11,31 +10,57 @@ import (
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/gocqlx/qb"
 	"go.uber.org/multierr"
+	"go.uber.org/zap"
 )
 
 type cqlStore struct {
-	session *gocql.Session
-	schema  *gemini.Schema
-	system  string
-	ops     *prometheus.CounterVec
+	session               *gocql.Session
+	schema                *gemini.Schema
+	system                string
+	maxRetriesMutate      int
+	maxRetriesMutateSleep time.Duration
+
+	ops    *prometheus.CounterVec
+	logger *zap.Logger
 }
 
 func (cs *cqlStore) name() string {
 	return cs.system
 }
 
-func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time, values ...interface{}) error {
+func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time, values ...interface{}) (err error) {
+	var i int
+	for i = 0; i < cs.maxRetriesMutate; i++ {
+		err = cs.doMutate(ctx, builder, ts, values...)
+		if err == nil {
+			break
+		}
+		time.Sleep(cs.maxRetriesMutateSleep)
+	}
+	if err != nil {
+		if w := cs.logger.Check(zap.InfoLevel, "failed to apply mutation"); w != nil {
+			w.Write(zap.Int("attempts", i), zap.Error(err))
+		}
+		return
+	}
+
+	cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
+	return
+}
+
+func (cs *cqlStore) doMutate(ctx context.Context, builder qb.Builder, ts time.Time, values ...interface{}) error {
 	query, _ := builder.ToCql()
-	var tsUsec int64 = ts.UnixNano() / 1000
+	tsUsec := ts.UnixNano() / 1000
 	if err := cs.session.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec).Exec(); err != nil {
 		if err == context.DeadlineExceeded {
-			fmt.Printf("system=%s has exceeded it's dealine for mutation query='%s', error=%s", cs.system, query, err)
+			if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for mutation query"); w != nil {
+				w.Write(zap.String("system", cs.system), zap.String("query", query), zap.Error(err))
+			}
 		}
 		if !ignore(err) {
-			return errors.Errorf("%v [cluster = %s, query = '%s']", err, cs.system, query)
+			return errors.Wrapf(err, "[cluster = %s, query = '%s']", cs.system, query)
 		}
 	}
-	cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
 	return nil
 }
 
@@ -46,7 +71,9 @@ func (cs *cqlStore) load(ctx context.Context, builder qb.Builder, values []inter
 	defer func() {
 		if e := iter.Close(); err != nil {
 			if e == context.DeadlineExceeded {
-				fmt.Printf("system=%s has exceeded it's dealine for load query='%s', error=%s", cs.system, query, e)
+				if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for load query"); w != nil {
+					w.Write(zap.String("system", cs.system), zap.String("query", query), zap.Error(err))
+				}
 			}
 			if !ignore(e) {
 				err = multierr.Append(err, errors.Errorf("system failed: %s", e.Error()))

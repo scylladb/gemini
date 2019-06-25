@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/signal"
 	"sync"
@@ -9,7 +8,7 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
-
+	"go.uber.org/zap"
 	"golang.org/x/net/context"
 )
 
@@ -40,7 +39,8 @@ func (p *Pump) Stop() {
 	p.cancel()
 }
 
-func createPump(sz int, d time.Duration) *Pump {
+func createPump(sz int, d time.Duration, logger *zap.Logger) *Pump {
+	logger = logger.Named("pump")
 	// Gracefully terminate
 	var gracefulStop = make(chan os.Signal)
 	signal.Notify(gracefulStop, syscall.SIGTERM, syscall.SIGINT)
@@ -59,11 +59,11 @@ func createPump(sz int, d time.Duration) *Pump {
 			select {
 			case <-gracefulStop:
 				pump.Stop()
-				fmt.Println("Test run aborted. Exiting.")
+				logger.Info("Test run aborted. Exiting.")
 				return
 			case <-timer.C:
 				pump.Stop()
-				fmt.Println("Test run completed. Exiting.")
+				logger.Info("Test run completed. Exiting.")
 				return
 			}
 		}

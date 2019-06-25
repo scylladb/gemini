@@ -23,32 +23,37 @@ import (
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/gemini/store"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"golang.org/x/net/context"
 )
 
 var (
-	testClusterHost    []string
-	oracleClusterHost  []string
-	schemaFile         string
-	outFileArg         string
-	concurrency        int
-	pkNumberPerThread  int
-	seed               int
-	dropSchema         bool
-	verbose            bool
-	mode               string
-	failFast           bool
-	nonInteractive     bool
-	duration           time.Duration
-	bind               string
-	warmup             time.Duration
-	compactionStrategy string
-	consistency        string
-	maxPartitionKeys   int
-	maxClusteringKeys  int
-	maxColumns         int
-	datasetSize        string
-	cqlFeatures        string
+	testClusterHost       []string
+	oracleClusterHost     []string
+	schemaFile            string
+	outFileArg            string
+	concurrency           int
+	pkNumberPerThread     int
+	seed                  int
+	dropSchema            bool
+	verbose               bool
+	mode                  string
+	failFast              bool
+	nonInteractive        bool
+	duration              time.Duration
+	bind                  string
+	warmup                time.Duration
+	compactionStrategy    string
+	consistency           string
+	maxPartitionKeys      int
+	maxClusteringKeys     int
+	maxColumns            int
+	datasetSize           string
+	cqlFeatures           string
+	level                 string
+	maxRetriesMutate      int
+	maxRetriesMutateSleep time.Duration
 )
 
 const (
@@ -80,7 +85,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, *gemini.SchemaConfig, *gemini.Table, store.Store, gemini.PartitionRange, chan Status, string, *os.File, time.Duration)
+type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, *gemini.SchemaConfig, *gemini.Table, store.Store, gemini.PartitionRange, chan Status, string, time.Duration, *zap.Logger)
 
 func (r *Status) Merge(sum *Status) Status {
 	sum.WriteOps += r.WriteOps
@@ -155,10 +160,12 @@ func (cb createBuilder) ToCql() (stmt string, names []string) {
 }
 
 func run(cmd *cobra.Command, args []string) {
+	logger := createLogger(level)
+	defer logger.Sync()
 
 	cons, err := gocql.ParseConsistencyWrapper(consistency)
 	if err != nil {
-		fmt.Printf("Unable parse consistency, error=%s. Falling back on Quorum\n", err)
+		logger.Error("Unable parse consistency, error=%s. Falling back on Quorum", zap.Error(err))
 		cons = gocql.Quorum
 	}
 
@@ -171,7 +178,7 @@ func run(cmd *cobra.Command, args []string) {
 		pkNumberPerThread = math.MaxInt32 / concurrency
 	}
 	if err := printSetup(); err != nil {
-		fmt.Println(err)
+		logger.Error("unable to print setup", zap.Error(err))
 		return
 	}
 
@@ -179,20 +186,20 @@ func run(cmd *cobra.Command, args []string) {
 	if outFileArg != "" {
 		of, err := os.Create(outFileArg)
 		if err != nil {
-			fmt.Printf("Unable to open output file %s, error=%s\n", outFileArg, err)
+			logger.Error("Unable to open output file", zap.String("file", outFileArg), zap.Error(err))
 			return
 		}
 		outFile = of
 	}
 	defer outFile.Sync()
 
-	schemaConfig := createSchemaConfig()
+	schemaConfig := createSchemaConfig(logger)
 	var schema *gemini.Schema
 	if len(schemaFile) > 0 {
 		var err error
 		schema, err = readSchema(schemaFile)
 		if err != nil {
-			fmt.Printf("cannot create schema: %v", err)
+			logger.Error("cannot create schema", zap.Error(err))
 			return
 		}
 	} else {
@@ -203,35 +210,49 @@ func run(cmd *cobra.Command, args []string) {
 	fmt.Printf("Schema: %v\n", string(jsonSchema))
 
 	testCluster, oracleCluster := createClusters(cons)
-	store := store.New(schema, testCluster, oracleCluster)
+	storeConfig := store.Config{
+		MaxRetriesMutate:      maxRetriesMutate,
+		MaxRetriesMutateSleep: maxRetriesMutateSleep,
+	}
+	store := store.New(schema, testCluster, oracleCluster, storeConfig, logger)
 	defer store.Close()
 
 	if dropSchema && mode != readMode {
 		for _, stmt := range schema.GetDropSchema() {
-			if verbose {
-				fmt.Println(stmt)
-			}
+			logger.Debug(stmt)
 			if err := store.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
-				fmt.Printf("%v", err)
+				logger.Error("unable to drop schema", zap.Error(err))
 				return
 			}
 		}
 	}
 	for _, stmt := range schema.GetCreateSchema() {
-		if verbose {
-			fmt.Println(stmt)
-		}
+		logger.Debug(stmt)
 		if err := store.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
-			fmt.Printf("%v", err)
+			logger.Error("unable to create schema", zap.Error(err))
 			return
 		}
 	}
 
-	runJob(Job, schema, schemaConfig, store, mode, outFile)
+	runJob(Job, schema, schemaConfig, store, mode, outFile, logger)
 }
 
-func createSchemaConfig() *gemini.SchemaConfig {
-	defaultConfig := createDefaultSchemaConfig()
+func createLogger(level string) *zap.Logger {
+	lvl := zap.NewAtomicLevel()
+	if err := lvl.UnmarshalText([]byte(level)); err != nil {
+		lvl.SetLevel(zap.InfoLevel)
+	}
+	encoderCfg := zap.NewDevelopmentEncoderConfig()
+	logger := zap.New(zapcore.NewCore(
+		zapcore.NewJSONEncoder(encoderCfg),
+		zapcore.Lock(os.Stdout),
+		lvl,
+	))
+	return logger
+}
+
+func createSchemaConfig(logger *zap.Logger) *gemini.SchemaConfig {
+	defaultConfig := createDefaultSchemaConfig(logger)
 	switch strings.ToLower(datasetSize) {
 	case "small":
 		return &gemini.SchemaConfig{
@@ -250,7 +271,7 @@ func createSchemaConfig() *gemini.SchemaConfig {
 	}
 }
 
-func createDefaultSchemaConfig() *gemini.SchemaConfig {
+func createDefaultSchemaConfig(logger *zap.Logger) *gemini.SchemaConfig {
 	const (
 		MaxBlobLength   = 1e4
 		MinBlobLength   = 0
@@ -260,7 +281,7 @@ func createDefaultSchemaConfig() *gemini.SchemaConfig {
 		MaxUDTParts     = 20
 	)
 	return &gemini.SchemaConfig{
-		CompactionStrategy: getCompactionStrategy(compactionStrategy),
+		CompactionStrategy: getCompactionStrategy(compactionStrategy, logger),
 		MaxPartitionKeys:   maxPartitionKeys,
 		MaxClusteringKeys:  maxClusteringKeys,
 		MaxColumns:         maxColumns,
@@ -291,7 +312,7 @@ func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql
 	return testCluster, oracleCluster
 }
 
-func getCompactionStrategy(cs string) *gemini.CompactionStrategy {
+func getCompactionStrategy(cs string, logger *zap.Logger) *gemini.CompactionStrategy {
 	switch cs {
 	case "stcs":
 		return gemini.NewSizeTieredCompactionStrategy()
@@ -304,7 +325,7 @@ func getCompactionStrategy(cs string) *gemini.CompactionStrategy {
 	default:
 		compactionStrategy := &gemini.CompactionStrategy{}
 		if err := json.Unmarshal([]byte(strings.ReplaceAll(cs, "'", "\"")), compactionStrategy); err != nil {
-			fmt.Printf("unable to parse compaction strategy '%s', err=%s\n", cs, err)
+			logger.Error("unable to parse compaction strategy", zap.String("strategy", cs), zap.Error(err))
 			return nil
 		}
 		return compactionStrategy
@@ -322,8 +343,9 @@ func getCQLFeature(feature string) gemini.CQLFeature {
 	}
 }
 
-func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig, s store.Store, mode string, out *os.File) {
+func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig, s store.Store, mode string, out *os.File, logger *zap.Logger) {
 	defer out.Sync()
+	logger = logger.Named("run_job")
 	c := make(chan Status, 10000)
 	minRange := 0
 	maxRange := pkNumberPerThread
@@ -337,7 +359,7 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig,
 	var finished sync.WaitGroup
 	finished.Add(1)
 
-	pump := createPump(10000, duration+warmup)
+	pump := createPump(10000, duration+warmup, logger)
 
 	for _, table := range schema.Tables {
 		for i := 0; i < concurrency; i++ {
@@ -350,7 +372,7 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig,
 				MaxStringLength: schemaConfig.MaxStringLength,
 				MinStringLength: schemaConfig.MinStringLength,
 			}
-			go f(workerCtx, pump.ch, &workers, schema, schemaConfig, table, s, p, c, mode, out, warmup)
+			go f(workerCtx, pump.ch, &workers, schema, schemaConfig, table, s, p, c, mode, warmup, logger)
 		}
 	}
 
@@ -360,7 +382,7 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig,
 			sp = createSpinner()
 		}
 		pump.Start(createPumpCallback(c, &workers, sp))
-		res := sampleResults(pump, c, sp)
+		res := sampleResults(pump, c, sp, logger)
 		res.PrintResult(out)
 		finished.Done()
 	}()
@@ -368,7 +390,8 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig,
 	finished.Wait()
 }
 
-func sampleResults(p *Pump, c chan Status, sp *spinner.Spinner) Status {
+func sampleResults(p *Pump, c chan Status, sp *spinner.Spinner, logger *zap.Logger) Status {
+	logger = logger.Named("sample_results")
 	var testRes Status
 	done := false
 	for res := range c {
@@ -380,7 +403,7 @@ func sampleResults(p *Pump, c chan Status, sp *spinner.Spinner) Status {
 			if failFast {
 				if !done {
 					done = true
-					fmt.Println("Errors detected. Exiting.")
+					logger.Warn("Errors detected. Exiting.")
 					p.Stop()
 				}
 			}
@@ -389,18 +412,16 @@ func sampleResults(p *Pump, c chan Status, sp *spinner.Spinner) Status {
 	return testRes
 }
 
-func ddlJob(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status) {
+func ddlJob(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, logger *zap.Logger) {
 	if sc.CQLFeature != gemini.CQL_FEATURE_ALL {
-		if verbose {
-			fmt.Println("ddl statements disabled")
-		}
+		logger.Debug("ddl statements disabled")
 		return
 	}
 	table.Lock()
 	defer table.Unlock()
 	ddlStmts, postStmtHook, err := schema.GenDDLStmt(table, &p, sc)
 	if err != nil {
-		fmt.Printf("Failed! Mutation statement generation failed: '%v'\n", err)
+		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		testStatus.WriteErrors++
 		return
 	}
@@ -413,8 +434,8 @@ func ddlJob(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig,
 	}()
 	for _, ddlStmt := range ddlStmts {
 		ddlQuery := ddlStmt.Query
-		if verbose {
-			fmt.Println(ddlStmt.PrettyCQL())
+		if w := logger.Check(zap.DebugLevel, "ddl statement"); w != nil {
+			w.Write(zap.String("pretty_cql", ddlStmt.PrettyCQL()))
 		}
 		if err := s.Mutate(ctx, ddlQuery); err != nil {
 			e := JobError{
@@ -430,17 +451,17 @@ func ddlJob(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig,
 	}
 }
 
-func mutationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File, deletes bool) {
+func mutationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, deletes bool, logger *zap.Logger) {
 	mutateStmt, err := schema.GenMutateStmt(table, &p, deletes)
 	if err != nil {
-		fmt.Printf("Failed! Mutation statement generation failed: '%v'\n", err)
+		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		testStatus.WriteErrors++
 		return
 	}
 	mutateQuery := mutateStmt.Query
 	mutateValues := mutateStmt.Values()
-	if verbose {
-		fmt.Println(mutateStmt.PrettyCQL())
+	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
+		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
 	}
 	if err := s.Mutate(ctx, mutateQuery, mutateValues...); err != nil {
 		e := JobError{
@@ -455,12 +476,12 @@ func mutationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaCon
 	}
 }
 
-func validationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, out *os.File) {
+func validationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, logger *zap.Logger) {
 	checkStmt := schema.GenCheckStmt(table, &p)
 	checkQuery := checkStmt.Query
 	checkValues := checkStmt.Values()
-	if verbose {
-		fmt.Println(checkStmt.PrettyCQL())
+	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
+		w.Write(zap.String("pretty_cql", checkStmt.PrettyCQL()))
 	}
 	if err := s.Check(ctx, table, checkQuery, checkValues...); err != nil {
 		// De-duplication needed?
@@ -485,8 +506,13 @@ func (hb heartBeat) await() {
 		time.Sleep(hb.sleep)
 	}
 }
-func Job(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, c chan Status, mode string, out *os.File, warmup time.Duration) {
+func Job(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	defer wg.Done()
+
+	mutationLogger := logger.Named("mutation_job")
+	validationLogger := logger.Named("validation_job")
+	ddlLogger := logger.Named("ddl_job")
+
 	testStatus := Status{}
 	var i int
 	warmupTimer := time.NewTimer(warmup)
@@ -498,7 +524,7 @@ warmup:
 		case <-warmupTimer.C:
 			break warmup
 		default:
-			mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, out, false)
+			mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, false, mutationLogger)
 			if i%1000 == 0 {
 				c <- testStatus
 				testStatus = Status{}
@@ -510,19 +536,19 @@ warmup:
 		hb.await()
 		switch mode {
 		case writeMode:
-			mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, out, true)
+			mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, true, mutationLogger)
 		case readMode:
-			validationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, out)
+			validationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, validationLogger)
 		default:
 			ind := p.Rand.Intn(1000000)
 			if ind%2 == 0 {
 				if ind%100000 == 0 {
-					ddlJob(ctx, schema, schemaConfig, table, s, p, &testStatus)
+					ddlJob(ctx, schema, schemaConfig, table, s, p, &testStatus, ddlLogger)
 				} else {
-					mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, out, true)
+					mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, true, mutationLogger)
 				}
 			} else {
-				validationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, out)
+				validationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, validationLogger)
 			}
 		}
 
@@ -535,9 +561,7 @@ warmup:
 		}
 		i++
 	}
-	if verbose {
-		fmt.Println("pump closed")
-	}
+	logger.Debug("pump closed")
 	c <- testStatus
 }
 
@@ -577,6 +601,9 @@ func init() {
 	rootCmd.Flags().IntVarP(&maxColumns, "max-columns", "", 16, "Maximum number of generated columns")
 	rootCmd.Flags().StringVarP(&datasetSize, "dataset-size", "", "large", "Specify the type of dataset size to use, small|large")
 	rootCmd.Flags().StringVarP(&cqlFeatures, "cql-features", "", "basic", "Specify the type of cql features to use, basic|normal|large")
+	rootCmd.Flags().StringVarP(&level, "level", "", "info", "Specify the logging level, debug|info|warn|error|dpanic|panic|fatal")
+	rootCmd.Flags().IntVarP(&maxRetriesMutate, "max-mutation-retries", "", 2, "Maximum number of attempts to apply a mutation")
+	rootCmd.Flags().DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond, "Duration between attempts to apply a mutation for example 10ms or 1s")
 }
 
 func printSetup() error {
