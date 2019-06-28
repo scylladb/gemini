@@ -8,7 +8,6 @@ import (
 	"io"
 	"io/ioutil"
 	"math"
-	"math/rand"
 	"net/http"
 	"os"
 	"strings"
@@ -25,6 +24,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/exp/rand"
 	"golang.org/x/net/context"
 )
 
@@ -33,9 +33,9 @@ var (
 	oracleClusterHost     []string
 	schemaFile            string
 	outFileArg            string
-	concurrency           int
+	concurrency           uint64
 	pkNumberPerThread     int
-	seed                  int
+	seed                  uint64
 	dropSchema            bool
 	verbose               bool
 	mode                  string
@@ -85,7 +85,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, *gemini.SchemaConfig, *gemini.Table, store.Store, gemini.PartitionRange, chan Status, string, time.Duration, *zap.Logger)
+type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, *gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, <-chan gemini.Value, chan Status, string, time.Duration, *zap.Logger)
 
 func (r *Status) Merge(sum *Status) Status {
 	sum.WriteOps += r.WriteOps
@@ -174,8 +174,8 @@ func run(cmd *cobra.Command, args []string) {
 		_ = http.ListenAndServe(bind, nil)
 	}()
 
-	if pkNumberPerThread <= 0 || pkNumberPerThread > (math.MaxInt32/concurrency) {
-		pkNumberPerThread = math.MaxInt32 / concurrency
+	if pkNumberPerThread <= 0 || uint64(pkNumberPerThread) > (math.MaxInt32/concurrency) {
+		pkNumberPerThread = int(math.MaxInt32 / concurrency)
 	}
 	if err := printSetup(); err != nil {
 		logger.Error("unable to print setup", zap.Error(err))
@@ -282,7 +282,7 @@ func createDefaultSchemaConfig(logger *zap.Logger) *gemini.SchemaConfig {
 	)
 	return &gemini.SchemaConfig{
 		CompactionStrategy: getCompactionStrategy(compactionStrategy, logger),
-		MaxPartitionKeys:   maxPartitionKeys,
+		MaxPartitionKeys:   3,
 		MaxClusteringKeys:  maxClusteringKeys,
 		MaxColumns:         maxColumns,
 		MaxUDTParts:        MaxUDTParts,
@@ -347,13 +347,11 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig,
 	defer out.Sync()
 	logger = logger.Named("run_job")
 	c := make(chan Status, 10000)
-	minRange := 0
-	maxRange := pkNumberPerThread
 
 	// Wait group for the worker goroutines.
 	var workers sync.WaitGroup
 	workerCtx, _ := context.WithCancel(context.Background())
-	workers.Add(len(schema.Tables) * concurrency)
+	workers.Add(len(schema.Tables) * int(concurrency))
 
 	// Wait group for the finished goroutine.
 	var finished sync.WaitGroup
@@ -361,18 +359,26 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig,
 
 	pump := createPump(10000, duration+warmup, logger)
 
+	partitionRangeConfig := gemini.PartitionRangeConfig{
+		MaxBlobLength:   schemaConfig.MaxBlobLength,
+		MinBlobLength:   schemaConfig.MinBlobLength,
+		MaxStringLength: schemaConfig.MaxStringLength,
+		MinStringLength: schemaConfig.MinStringLength,
+	}
+
+	var gs []*gemini.Generators
 	for _, table := range schema.Tables {
-		for i := 0; i < concurrency; i++ {
-			p := gemini.PartitionRange{
-				Min:             minRange + i*maxRange,
-				Max:             maxRange + i*maxRange,
-				Rand:            rand.New(rand.NewSource(int64(seed))),
-				MaxBlobLength:   schemaConfig.MaxBlobLength,
-				MinBlobLength:   schemaConfig.MinBlobLength,
-				MaxStringLength: schemaConfig.MaxStringLength,
-				MinStringLength: schemaConfig.MinStringLength,
-			}
-			go f(workerCtx, pump.ch, &workers, schema, schemaConfig, table, s, p, c, mode, warmup, logger)
+		gCfg := &gemini.GeneratorsConfig{
+			Table:      table,
+			Partitions: &partitionRangeConfig,
+			Size:       concurrency,
+			Seed:       seed,
+		}
+		g := gemini.NewGenerator(gCfg)
+		gs = append(gs, g)
+		for i := 0; i < int(concurrency); i++ {
+			r := rand.New(rand.NewSource(seed))
+			go f(workerCtx, pump.ch, &workers, schema, schemaConfig, table, s, r, partitionRangeConfig, g.Get(i), c, mode, warmup, logger)
 		}
 	}
 
@@ -384,6 +390,9 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig,
 		pump.Start(createPumpCallback(c, &workers, sp))
 		res := sampleResults(pump, c, sp, logger)
 		res.PrintResult(out)
+		for _, g := range gs {
+			g.Stop()
+		}
 		finished.Done()
 	}()
 
@@ -412,14 +421,14 @@ func sampleResults(p *Pump, c chan Status, sp *spinner.Spinner, logger *zap.Logg
 	return testRes
 }
 
-func ddlJob(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, logger *zap.Logger) {
+func ddlJob(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, values <-chan gemini.Value, testStatus *Status, logger *zap.Logger) {
 	if sc.CQLFeature != gemini.CQL_FEATURE_ALL {
 		logger.Debug("ddl statements disabled")
 		return
 	}
 	table.Lock()
 	defer table.Unlock()
-	ddlStmts, postStmtHook, err := schema.GenDDLStmt(table, &p, sc)
+	ddlStmts, postStmtHook, err := schema.GenDDLStmt(table, r, p, sc)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		testStatus.WriteErrors++
@@ -451,8 +460,8 @@ func ddlJob(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig,
 	}
 }
 
-func mutationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, deletes bool, logger *zap.Logger) {
-	mutateStmt, err := schema.GenMutateStmt(table, &p, deletes)
+func mutationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, partitionValues <-chan gemini.Value, testStatus *Status, deletes bool, logger *zap.Logger) {
+	mutateStmt, err := schema.GenMutateStmt(table, partitionValues, r, p, deletes)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		testStatus.WriteErrors++
@@ -476,8 +485,8 @@ func mutationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaCon
 	}
 }
 
-func validationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, testStatus *Status, logger *zap.Logger) {
-	checkStmt := schema.GenCheckStmt(table, &p)
+func validationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, partitionValues <-chan gemini.Value, testStatus *Status, logger *zap.Logger) {
+	checkStmt := schema.GenCheckStmt(table, partitionValues, r, p)
 	checkQuery := checkStmt.Query
 	checkValues := checkStmt.Values()
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
@@ -506,7 +515,7 @@ func (hb heartBeat) await() {
 		time.Sleep(hb.sleep)
 	}
 }
-func Job(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig, table *gemini.Table, s store.Store, p gemini.PartitionRange, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
+func Job(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, values <-chan gemini.Value, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	defer wg.Done()
 
 	mutationLogger := logger.Named("mutation_job")
@@ -524,7 +533,7 @@ warmup:
 		case <-warmupTimer.C:
 			break warmup
 		default:
-			mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, false, mutationLogger)
+			mutationJob(ctx, schema, schemaConfig, table, s, r, p, values, &testStatus, false, mutationLogger)
 			if i%1000 == 0 {
 				c <- testStatus
 				testStatus = Status{}
@@ -536,19 +545,19 @@ warmup:
 		hb.await()
 		switch mode {
 		case writeMode:
-			mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, true, mutationLogger)
+			mutationJob(ctx, schema, schemaConfig, table, s, r, p, values, &testStatus, true, mutationLogger)
 		case readMode:
-			validationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, validationLogger)
+			validationJob(ctx, schema, schemaConfig, table, s, r, p, values, &testStatus, validationLogger)
 		default:
-			ind := p.Rand.Intn(1000000)
+			ind := r.Intn(1000000)
 			if ind%2 == 0 {
 				if ind%100000 == 0 {
-					ddlJob(ctx, schema, schemaConfig, table, s, p, &testStatus, ddlLogger)
+					ddlJob(ctx, schema, schemaConfig, table, s, r, p, values, &testStatus, ddlLogger)
 				} else {
-					mutationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, true, mutationLogger)
+					mutationJob(ctx, schema, schemaConfig, table, s, r, p, values, &testStatus, true, mutationLogger)
 				}
 			} else {
-				validationJob(ctx, schema, schemaConfig, table, s, p, &testStatus, validationLogger)
+				validationJob(ctx, schema, schemaConfig, table, s, r, p, values, &testStatus, validationLogger)
 			}
 		}
 
@@ -583,9 +592,9 @@ func init() {
 	rootCmd.MarkFlagRequired("oracle-cluster")
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", mixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
-	rootCmd.Flags().IntVarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
+	rootCmd.Flags().Uint64VarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
 	rootCmd.Flags().IntVarP(&pkNumberPerThread, "max-pk-per-thread", "p", 0, "Maximum number of partition keys per thread")
-	rootCmd.Flags().IntVarP(&seed, "seed", "s", 1, "PRNG seed value")
+	rootCmd.Flags().Uint64VarP(&seed, "seed", "s", 1, "PRNG seed value")
 	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
 	rootCmd.Flags().BoolVarP(&failFast, "fail-fast", "f", false, "Stop on the first failure")
@@ -609,7 +618,7 @@ func init() {
 func printSetup() error {
 	tw := new(tabwriter.Writer)
 	tw.Init(os.Stdout, 0, 8, 2, '\t', tabwriter.AlignRight)
-	rand.Seed(int64(seed))
+	rand.Seed(seed)
 	fmt.Fprintf(tw, "Seed:\t%d\n", seed)
 	fmt.Fprintf(tw, "Maximum duration:\t%s\n", duration)
 	fmt.Fprintf(tw, "Warmup duration:\t%s\n", warmup)

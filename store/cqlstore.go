@@ -51,6 +51,17 @@ func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time
 func (cs *cqlStore) doMutate(ctx context.Context, builder qb.Builder, ts time.Time, values ...interface{}) error {
 	query, _ := builder.ToCql()
 	tsUsec := ts.UnixNano() / 1000
+	/*
+		q := cs.session.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec)
+			key, _ := q.GetRoutingKey()
+			if len(values) >= 2 {
+				v := values[:2]
+				s := strings.TrimRight(strings.Repeat("%v,", 2), ",")
+				format := fmt.Sprintf("{\nvalues: []interface{}{%s},\nwant: createOne(\"%s\"),\n},\n", s, hex.EncodeToString(key))
+				fmt.Printf(format, v...)
+			}
+			if err := q.Exec(); err != nil {
+	*/
 	if err := cs.session.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec).Exec(); err != nil {
 		if err == context.DeadlineExceeded {
 			if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for mutation query"); w != nil {
