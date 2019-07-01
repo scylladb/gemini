@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
 - Partitioning bewteen workers are now handled by a `generator` that generates 
   random partition keys and dispatches them to the relevant worker. This construct
