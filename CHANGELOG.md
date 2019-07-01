@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Partitioning bewteen workers are now handled by a `generator` that generates 
+  random partition keys and dispatches them to the relevant worker. This construct
+  also provides a channel for `"old"` values to be used downstream by validators.
+  The reason for this is that if the validators read newly created partition keys
+  then the chances of finding data in the database is near to zero unless we load
+  it up with a truly huge data set.
 - Log levels introduced and configured via CLI arg `level`. Common values such as 
   `info`, `debug` and `error` are supported.
 - Mutations are now retried at a considerably greater number of times than reads.
