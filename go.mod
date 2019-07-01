@@ -21,8 +21,10 @@ require (
 	go.uber.org/atomic v1.4.0 // indirect
 	go.uber.org/multierr v1.1.0
 	go.uber.org/zap v1.10.0
-	golang.org/x/net v0.0.0-20190313082753-5c2c250b6a70
+	golang.org/x/exp v0.0.0-20190510132918-efd6b22b2522
+	golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3
 	gopkg.in/inf.v0 v0.9.1
+	honnef.co/go/tools v0.0.0-2019.2.1 // indirect
 )
 
 replace github.com/gocql/gocql => github.com/scylladb/gocql v1.1.0

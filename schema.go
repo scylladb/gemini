@@ -3,13 +3,14 @@ package gemini
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/scylladb/gocqlx/qb"
+	"golang.org/x/exp/rand"
 )
 
 type CQLFeature int
@@ -50,9 +51,9 @@ type Type interface {
 	CQLDef() string
 	CQLHolder() string
 	CQLPretty(string, []interface{}) (string, int)
-	GenValue(*PartitionRange) []interface{}
-	GenValueRange(p *PartitionRange) ([]interface{}, []interface{})
+	GenValue(*rand.Rand, PartitionRangeConfig) []interface{}
 	Indexable() bool
+	CQLType() gocql.TypeInfo
 }
 
 type IndexDef struct {
@@ -70,20 +71,20 @@ func (c Columns) Names() []string {
 	return names
 }
 
-func (cs Columns) ToJSONMap(values map[string]interface{}, p *PartitionRange) map[string]interface{} {
+func (cs Columns) ToJSONMap(values map[string]interface{}, r *rand.Rand, p PartitionRangeConfig) map[string]interface{} {
 	for _, k := range cs {
 		switch t := k.Type.(type) {
 		case SimpleType:
 			if t != TYPE_BLOB {
-				values[k.Name] = t.GenValue(p)[0]
+				values[k.Name] = t.GenValue(r, p)[0]
 				continue
 			}
-			v, ok := t.GenValue(p)[0].(string)
+			v, ok := t.GenValue(r, p)[0].(string)
 			if ok {
 				values[k.Name] = "0x" + v
 			}
 		case TupleType:
-			vv := t.GenValue(p)
+			vv := t.GenValue(r, p)
 			for i, val := range vv {
 				if t.Types[i] == TYPE_BLOB {
 					v, ok := val.(string)
@@ -298,10 +299,7 @@ type Schema struct {
 	Tables   []*Table `json:"tables"`
 }
 
-type PartitionRange struct {
-	Min             int `default:0`
-	Max             int `default:100`
-	Rand            *rand.Rand
+type PartitionRangeConfig struct {
 	MaxBlobLength   int
 	MinBlobLength   int
 	MaxStringLength int
@@ -483,7 +481,7 @@ func (s *Schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *Schema) GenInsertStmt(t *Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenInsertStmt(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -491,15 +489,23 @@ func (s *Schema) GenInsertStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 		typs []Type
 	)
 	builder := qb.Insert(s.Keyspace.Name + "." + t.Name)
-	values := make([]interface{}, 0)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Columns(pk.Name)
-		values = appendValue(pk.Type, p, values)
 		typs = append(typs, pk.Type)
 	}
+
+	vals, ok := <-newPartitionValues
+	if !ok {
+		return nil, nil
+	}
+	values := make([]interface{}, len(vals))
+	copy(values, vals)
+	defer func() {
+		oldPartitionValues <- vals
+	}()
 	for _, ck := range t.ClusteringKeys {
 		builder = builder.Columns(ck.Name)
-		values = appendValue(ck.Type, p, values)
+		values = appendValue(ck.Type, r, p, values)
 		typs = append(typs, ck.Type)
 	}
 	for _, cdef := range t.Columns {
@@ -509,7 +515,7 @@ func (s *Schema) GenInsertStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 		default:
 			builder = builder.Columns(cdef.Name)
 		}
-		values = appendValue(cdef.Type, p, values)
+		values = appendValue(cdef.Type, r, p, values)
 		typs = append(typs, cdef.Type)
 	}
 	return &Stmt{
@@ -521,14 +527,48 @@ func (s *Schema) GenInsertStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 	}, nil
 }
 
-func (s *Schema) GenInsertJsonStmt(t *Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenInsertJsonStmt(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
+	vals, ok := <-newPartitionValues
+	if !ok {
+		return nil, nil
+	}
+	vs := make([]interface{}, len(vals))
+	copy(vs, vals)
 	values := make(map[string]interface{})
-	values = t.PartitionKeys.ToJSONMap(values, p)
-	values = t.ClusteringKeys.ToJSONMap(values, p)
-	values = t.Columns.ToJSONMap(values, p)
+	for i, pk := range t.PartitionKeys {
+		switch t := pk.Type.(type) {
+		case SimpleType:
+			if t != TYPE_BLOB {
+				values[pk.Name] = vs[i]
+				continue
+			}
+			v, ok := vs[i].(string)
+			if ok {
+				values[pk.Name] = "0x" + v
+			}
+		case TupleType:
+			tupVals := make([]interface{}, len(t.Types))
+			for j := 0; j < len(t.Types); j++ {
+				if t.Types[j] == TYPE_BLOB {
+					v, ok := vs[i+j].(string)
+					if ok {
+						v = "0x" + v
+					}
+					vs[i+j] = v
+				}
+				tupVals[i] = vs[i+j]
+				i++
+			}
+			values[pk.Name] = tupVals
+		default:
+			panic(fmt.Sprintf("unknown type: %s", t.Name()))
+		}
+	}
+	values = t.ClusteringKeys.ToJSONMap(values, r, p)
+	values = t.Columns.ToJSONMap(values, r, p)
 
 	jsonString, err := json.Marshal(values)
 	if err != nil {
@@ -545,24 +585,33 @@ func (s *Schema) GenInsertJsonStmt(t *Table, p *PartitionRange) (*Stmt, error) {
 	}, nil
 }
 
-func (s *Schema) GenDeleteRows(t *Table, p *PartitionRange) (*Stmt, error) {
+func (s *Schema) GenDeleteRows(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	var (
-		values []interface{}
-		typs   []Type
+		typs []Type
 	)
 	builder := qb.Delete(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
-		values = appendValue(pk.Type, p, values)
 		typs = append(typs, pk.Type)
 	}
+
+	vals, ok := <-newPartitionValues
+	if !ok {
+		return nil, nil
+	}
+	values := make([]interface{}, len(vals))
+	copy(values, vals)
+	defer func() {
+		oldPartitionValues <- vals
+	}()
 	if len(t.ClusteringKeys) > 0 {
 		ck := t.ClusteringKeys[0]
 		builder = builder.Where(qb.GtOrEq(ck.Name)).Where(qb.LtOrEq(ck.Name))
-		values = appendValueRange(ck.Type, p, values)
+		values = appendValue(ck.Type, r, p, values)
+		values = appendValue(ck.Type, r, p, values)
 		typs = append(typs, ck.Type, ck.Type)
 	}
 	return &Stmt{
@@ -574,8 +623,8 @@ func (s *Schema) GenDeleteRows(t *Table, p *PartitionRange) (*Stmt, error) {
 	}, nil
 }
 
-func (s *Schema) GenDDLStmt(t *Table, p *PartitionRange, sc *SchemaConfig) ([]*Stmt, func(), error) {
-	switch n := p.Rand.Intn(3); n {
+func (s *Schema) GenDDLStmt(t *Table, r *rand.Rand, p PartitionRangeConfig, sc *SchemaConfig) ([]*Stmt, func(), error) {
+	switch n := r.Intn(3); n {
 	//case 0: // Alter column not supported in Cassandra from 3.0.11
 	//	return t.alterColumn(s.Keyspace.Name)
 	case 1: // Delete column
@@ -585,69 +634,73 @@ func (s *Schema) GenDDLStmt(t *Table, p *PartitionRange, sc *SchemaConfig) ([]*S
 	}
 }
 
-func (s *Schema) GenMutateStmt(t *Table, p *PartitionRange, deletes bool) (*Stmt, error) {
+func (s *Schema) GenMutateStmt(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig, deletes bool) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	if !deletes {
-		return s.GenInsertStmt(t, p)
+		return s.GenInsertStmt(t, newPartitionValues, oldPartitionValues, r, p)
 	}
-	switch n := p.Rand.Intn(1000); n {
+	switch n := rand.Intn(1000); n {
 	case 10, 100:
-		return s.GenDeleteRows(t, p)
+		return s.GenDeleteRows(t, newPartitionValues, oldPartitionValues, r, p)
 	default:
-		switch n := p.Rand.Intn(2); n {
+		switch n := rand.Intn(2); n {
 		case 0:
 			if t.KnownIssues[KnownIssuesJsonWithTuples] {
-				return s.GenInsertStmt(t, p)
+				return s.GenInsertStmt(t, newPartitionValues, oldPartitionValues, r, p)
 			}
-			return s.GenInsertJsonStmt(t, p)
+			return s.GenInsertJsonStmt(t, newPartitionValues, oldPartitionValues, r, p)
 		default:
-			return s.GenInsertStmt(t, p)
+			return s.GenInsertStmt(t, newPartitionValues, oldPartitionValues, r, p)
 		}
 	}
 }
 
-func (s *Schema) GenCheckStmt(t *Table, p *PartitionRange) *Stmt {
+func (s *Schema) GenCheckStmt(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	var n int
 	if len(t.Indexes) > 0 {
-		n = p.Rand.Intn(5)
+		n = r.Intn(5)
 	} else {
-		n = p.Rand.Intn(4)
+		n = r.Intn(4)
 	}
 	switch n {
 	case 0:
-		return s.genSinglePartitionQuery(t, p)
+		return s.genSinglePartitionQuery(t, partitionValues, r, p)
 	case 1:
-		return s.genMultiplePartitionQuery(t, p)
+		return s.genMultiplePartitionQuery(t, partitionValues, r, p)
 	case 2:
-		return s.genClusteringRangeQuery(t, p)
+		return s.genClusteringRangeQuery(t, partitionValues, r, p)
 	case 3:
-		return s.genMultiplePartitionClusteringRangeQuery(t, p)
+		return s.genMultiplePartitionClusteringRangeQuery(t, partitionValues, r, p)
 	case 4:
-		return s.genSingleIndexQuery(t, p)
+		return s.genSingleIndexQuery(t, partitionValues, r, p)
 	}
 	return nil
 }
 
-func (s *Schema) genSinglePartitionQuery(t *Table, p *PartitionRange) *Stmt {
+func (s *Schema) genSinglePartitionQuery(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
-	if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
-		view := p.Rand.Intn(len(t.MaterializedViews))
-		tableName = t.MaterializedViews[view].Name
-		partitionKeys = t.MaterializedViews[view].PartitionKeys
-	}
+	// TODO: Support materialized views
+	/*
+		if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
+			view := r.Intn(len(t.MaterializedViews))
+			tableName = t.MaterializedViews[view].Name
+			partitionKeys = t.MaterializedViews[view].PartitionKeys
+		}*/
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
-	values := make([]interface{}, 0)
 	typs := make([]Type, 0, 10)
 	for _, pk := range partitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
-		values = appendValue(pk.Type, p, values)
 		typs = append(typs, pk.Type)
+	}
+	values, ok := <-partitionValues
+	if !ok {
+		return nil
 	}
 	return &Stmt{
 		Query: builder,
@@ -658,7 +711,7 @@ func (s *Schema) genSinglePartitionQuery(t *Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *Schema) genMultiplePartitionQuery(t *Table, p *PartitionRange) *Stmt {
+func (s *Schema) genMultiplePartitionQuery(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -668,20 +721,27 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, p *PartitionRange) *Stmt {
 	)
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
-	if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
-		view := p.Rand.Intn(len(t.MaterializedViews))
-		tableName = t.MaterializedViews[view].Name
-		partitionKeys = t.MaterializedViews[view].PartitionKeys
-	}
-	pkNum := p.Rand.Intn(len(partitionKeys))
+	// TODO: Support materialized views
+	/*
+		if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
+			view := r.Intn(len(t.MaterializedViews))
+			tableName = t.MaterializedViews[view].Name
+			partitionKeys = t.MaterializedViews[view].PartitionKeys
+		}
+	*/
+	pkNum := r.Intn(len(partitionKeys))
 	if pkNum == 0 {
 		pkNum = 1
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
-	for _, pk := range partitionKeys {
+	for i, pk := range partitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, pkNum))
-		for i := 0; i < pkNum; i++ {
-			values = appendValue(pk.Type, p, values)
+		for j := 0; j < pkNum; j++ {
+			vs, ok := <-partitionValues
+			if !ok {
+				return nil
+			}
+			values = append(values, vs[i])
 			typs = append(typs, pk.Type)
 		}
 	}
@@ -694,40 +754,45 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *Schema) genClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
+func (s *Schema) genClusteringRangeQuery(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	var (
-		values []interface{}
-		typs   []Type
+		typs []Type
 	)
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	clusteringKeys := t.ClusteringKeys
-	if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
-		view := p.Rand.Intn(len(t.MaterializedViews))
-		tableName = t.MaterializedViews[view].Name
-		partitionKeys = t.MaterializedViews[view].PartitionKeys
-		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
-	}
+	// TODO: Support materialized views
+	/*
+		if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
+			view := p.Rand.Intn(len(t.MaterializedViews))
+			tableName = t.MaterializedViews[view].Name
+			partitionKeys = t.MaterializedViews[view].PartitionKeys
+			clusteringKeys = t.MaterializedViews[view].ClusteringKeys
+		}*/
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
+	values, ok := <-partitionValues
+	if !ok {
+		return nil
+	}
 	for _, pk := range partitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
-		values = appendValue(pk.Type, p, values)
 		typs = append(typs, pk.Type)
 	}
 	maxClusteringRels := 0
 	if len(clusteringKeys) > 1 {
-		maxClusteringRels = p.Rand.Intn(len(clusteringKeys) - 1)
+		maxClusteringRels = r.Intn(len(clusteringKeys) - 1)
 		for i := 0; i < maxClusteringRels; i++ {
 			builder = builder.Where(qb.Eq(clusteringKeys[i].Name))
-			values = appendValue(clusteringKeys[i].Type, p, values)
+			values = appendValue(clusteringKeys[i].Type, r, p, values)
 			typs = append(typs, clusteringKeys[i].Type)
 		}
 	}
 	builder = builder.Where(qb.Gt(clusteringKeys[maxClusteringRels].Name)).Where(qb.Lt(clusteringKeys[maxClusteringRels].Name))
-	values = appendValueRange(t.ClusteringKeys[maxClusteringRels].Type, p, values)
+	values = appendValue(t.ClusteringKeys[maxClusteringRels].Type, r, p, values)
+	values = appendValue(t.ClusteringKeys[maxClusteringRels].Type, r, p, values)
 	typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	return &Stmt{
 		Query: builder,
@@ -738,7 +803,7 @@ func (s *Schema) genClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
 	}
 }
 
-func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, p *PartitionRange) *Stmt {
+func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -749,35 +814,42 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, p *Partition
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	clusteringKeys := t.ClusteringKeys
-	if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
-		view := p.Rand.Intn(len(t.MaterializedViews))
-		tableName = t.MaterializedViews[view].Name
-		partitionKeys = t.MaterializedViews[view].PartitionKeys
-		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
-	}
-	pkNum := p.Rand.Intn(len(partitionKeys))
+	// TODO: Support materialized views
+	/*
+		if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
+			view := r.Intn(len(t.MaterializedViews))
+			tableName = t.MaterializedViews[view].Name
+			partitionKeys = t.MaterializedViews[view].PartitionKeys
+			clusteringKeys = t.MaterializedViews[view].ClusteringKeys
+		}*/
+	pkNum := r.Intn(len(partitionKeys))
 	if pkNum == 0 {
 		pkNum = 1
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
-	for _, pk := range partitionKeys {
+	for i, pk := range partitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, pkNum))
-		for i := 0; i < pkNum; i++ {
-			values = appendValue(pk.Type, p, values)
+		for j := 0; j < pkNum; j++ {
+			vs, ok := <-partitionValues
+			if !ok {
+				return nil
+			}
+			values = append(values, vs[i])
 			typs = append(typs, pk.Type)
 		}
 	}
 	maxClusteringRels := 0
 	if len(clusteringKeys) > 1 {
-		maxClusteringRels = p.Rand.Intn(len(clusteringKeys) - 1)
+		maxClusteringRels = r.Intn(len(clusteringKeys) - 1)
 		for i := 0; i < maxClusteringRels; i++ {
 			builder = builder.Where(qb.Eq(clusteringKeys[i].Name))
-			values = appendValue(clusteringKeys[i].Type, p, values)
+			values = appendValue(clusteringKeys[i].Type, r, p, values)
 			typs = append(typs, clusteringKeys[i].Type)
 		}
 	}
 	builder = builder.Where(qb.Gt(clusteringKeys[maxClusteringRels].Name)).Where(qb.Lt(clusteringKeys[maxClusteringRels].Name))
-	values = appendValueRange(clusteringKeys[maxClusteringRels].Type, p, values)
+	values = appendValue(clusteringKeys[maxClusteringRels].Type, r, p, values)
+	values = appendValue(clusteringKeys[maxClusteringRels].Type, r, p, values)
 	typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	return &Stmt{
 		Query: builder,
@@ -788,13 +860,12 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, p *Partition
 	}
 }
 
-func (s *Schema) genSingleIndexQuery(t *Table, p *PartitionRange) *Stmt {
+func (s *Schema) genSingleIndexQuery(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	var (
-		values []interface{}
-		typs   []Type
+		typs []Type
 	)
 
 	if len(t.Indexes) == 0 {
@@ -807,18 +878,21 @@ func (s *Schema) genSingleIndexQuery(t *Table, p *PartitionRange) *Stmt {
 		pkNum = 1
 	}
 	*/
+	values, ok := <-partitionValues
+	if !ok {
+		return nil
+	}
 	pkNum := len(t.PartitionKeys)
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 	partitionKeys := t.PartitionKeys
 	for i := 0; i < pkNum; i++ {
 		pk := partitionKeys[i]
 		builder = builder.Where(qb.Eq(pk.Name))
-		values = appendValue(pk.Type, p, values)
 		typs = append(typs, pk.Type)
 	}
-	idx := p.Rand.Intn(len(t.Indexes))
+	idx := r.Intn(len(t.Indexes))
 	builder = builder.Where(qb.Eq(t.Indexes[idx].Column))
-	values = appendValue(t.Columns[idx].Type, p, values)
+	values = appendValue(t.Columns[idx].Type, r, p, values)
 	typs = append(typs, t.Columns[idx].Type)
 	return &Stmt{
 		Query: builder,

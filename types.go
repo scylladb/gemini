@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"math/rand"
 	"net"
 	"reflect"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
+	"golang.org/x/exp/rand"
 	"gopkg.in/inf.v0"
 )
 
@@ -141,6 +141,83 @@ func (st SimpleType) CQLPretty(query string, value []interface{}) (string, int) 
 	return strings.Replace(query, "?", replacement, 1), 1
 }
 
+var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
+	gocql.TypeAscii:     gocql.NewNativeType(protoVersion4, gocql.TypeAscii, ""),
+	gocql.TypeBigInt:    gocql.NewNativeType(protoVersion4, gocql.TypeBigInt, ""),
+	gocql.TypeBlob:      gocql.NewNativeType(protoVersion4, gocql.TypeBlob, ""),
+	gocql.TypeBoolean:   gocql.NewNativeType(protoVersion4, gocql.TypeBoolean, ""),
+	gocql.TypeDate:      gocql.NewNativeType(protoVersion4, gocql.TypeDate, ""),
+	gocql.TypeDecimal:   gocql.NewNativeType(protoVersion4, gocql.TypeDecimal, ""),
+	gocql.TypeDouble:    gocql.NewNativeType(protoVersion4, gocql.TypeDouble, ""),
+	gocql.TypeDuration:  gocql.NewNativeType(protoVersion4, gocql.TypeDuration, ""),
+	gocql.TypeFloat:     gocql.NewNativeType(protoVersion4, gocql.TypeFloat, ""),
+	gocql.TypeInet:      gocql.NewNativeType(protoVersion4, gocql.TypeInet, ""),
+	gocql.TypeInt:       gocql.NewNativeType(protoVersion4, gocql.TypeInt, ""),
+	gocql.TypeSmallInt:  gocql.NewNativeType(protoVersion4, gocql.TypeSmallInt, ""),
+	gocql.TypeText:      gocql.NewNativeType(protoVersion4, gocql.TypeText, ""),
+	gocql.TypeTime:      gocql.NewNativeType(protoVersion4, gocql.TypeTime, ""),
+	gocql.TypeTimestamp: gocql.NewNativeType(protoVersion4, gocql.TypeTimestamp, ""),
+	gocql.TypeTimeUUID:  gocql.NewNativeType(protoVersion4, gocql.TypeTimeUUID, ""),
+	gocql.TypeTinyInt:   gocql.NewNativeType(protoVersion4, gocql.TypeTinyInt, ""),
+	gocql.TypeUUID:      gocql.NewNativeType(protoVersion4, gocql.TypeUUID, ""),
+	gocql.TypeVarchar:   gocql.NewNativeType(protoVersion4, gocql.TypeVarchar, ""),
+	gocql.TypeVarint:    gocql.NewNativeType(protoVersion4, gocql.TypeVarint, ""),
+
+	// Complex types
+	gocql.TypeList:  gocql.NewNativeType(protoVersion4, gocql.TypeList, ""),
+	gocql.TypeMap:   gocql.NewNativeType(protoVersion4, gocql.TypeMap, ""),
+	gocql.TypeSet:   gocql.NewNativeType(protoVersion4, gocql.TypeSet, ""),
+	gocql.TypeTuple: gocql.NewNativeType(protoVersion4, gocql.TypeTuple, ""),
+	gocql.TypeUDT:   gocql.NewNativeType(protoVersion4, gocql.TypeUDT, ""),
+}
+
+func (st SimpleType) CQLType() gocql.TypeInfo {
+	switch st {
+	case TYPE_ASCII:
+		return goCQLTypeMap[gocql.TypeAscii]
+	case TYPE_TEXT:
+		return goCQLTypeMap[gocql.TypeText]
+	case TYPE_VARCHAR:
+		return goCQLTypeMap[gocql.TypeVarchar]
+	case TYPE_BLOB:
+		return goCQLTypeMap[gocql.TypeBlob]
+	case TYPE_BIGINT:
+		return goCQLTypeMap[gocql.TypeBigInt]
+	case TYPE_BOOLEAN:
+		return goCQLTypeMap[gocql.TypeBoolean]
+	case TYPE_DATE:
+		return goCQLTypeMap[gocql.TypeDate]
+	case TYPE_TIME:
+		return goCQLTypeMap[gocql.TypeTime]
+	case TYPE_TIMESTAMP:
+		return goCQLTypeMap[gocql.TypeTimestamp]
+	case TYPE_DECIMAL:
+		return goCQLTypeMap[gocql.TypeDecimal]
+	case TYPE_DOUBLE:
+		return goCQLTypeMap[gocql.TypeDouble]
+	case TYPE_DURATION:
+		return goCQLTypeMap[gocql.TypeDuration]
+	case TYPE_FLOAT:
+		return goCQLTypeMap[gocql.TypeFloat]
+	case TYPE_INET:
+		return goCQLTypeMap[gocql.TypeInet]
+	case TYPE_INT:
+		return goCQLTypeMap[gocql.TypeInt]
+	case TYPE_SMALLINT:
+		return goCQLTypeMap[gocql.TypeSmallInt]
+	case TYPE_TIMEUUID:
+		return goCQLTypeMap[gocql.TypeTimeUUID]
+	case TYPE_UUID:
+		return goCQLTypeMap[gocql.TypeUUID]
+	case TYPE_TINYINT:
+		return goCQLTypeMap[gocql.TypeTinyInt]
+	case TYPE_VARINT:
+		return goCQLTypeMap[gocql.TypeVarint]
+	default:
+		panic(fmt.Sprintf("gocql type not supported %s", st))
+	}
+}
+
 func (st SimpleType) Indexable() bool {
 	if st == TYPE_DURATION {
 		return false
@@ -148,44 +225,44 @@ func (st SimpleType) Indexable() bool {
 	return true
 }
 
-func (st SimpleType) GenValue(p *PartitionRange) []interface{} {
+func (st SimpleType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
 	var val interface{}
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
-		ln := p.Rand.Intn(p.MaxStringLength) + p.MinStringLength
-		val = randStringWithTime(p.Rand, ln, randTime(p.Rand))
+		ln := r.Intn(p.MaxStringLength) + p.MinStringLength
+		val = randStringWithTime(r, ln, randTime(r))
 	case TYPE_BLOB:
-		ln := p.Rand.Intn(p.MaxBlobLength) + p.MinBlobLength
-		val = hex.EncodeToString([]byte(randStringWithTime(p.Rand, ln, randTime(p.Rand))))
+		ln := r.Intn(p.MaxBlobLength) + p.MinBlobLength
+		val = hex.EncodeToString([]byte(randStringWithTime(r, ln, randTime(r))))
 	case TYPE_BIGINT:
-		val = p.Rand.Int63()
+		val = r.Int63()
 	case TYPE_BOOLEAN:
-		val = p.Rand.Int()%2 == 0
+		val = r.Int()%2 == 0
 	case TYPE_DATE:
-		val = randDate(p.Rand)
+		val = randDate(r)
 	case TYPE_TIME, TYPE_TIMESTAMP:
-		val = randTime(p.Rand)
+		val = randTime(r)
 	case TYPE_DECIMAL:
-		val = inf.NewDec(randInt64Range(p.Rand, int64(p.Min), int64(p.Max)), 3)
+		val = inf.NewDec(r.Int63(), 3)
 	case TYPE_DOUBLE:
-		val = randFloat64Range(p.Rand, float64(p.Min), float64(p.Max))
+		val = r.Float64()
 	case TYPE_DURATION:
-		val = (time.Minute * time.Duration(randIntRange(p.Rand, p.Min, p.Max))).String()
+		val = (time.Minute * time.Duration(r.Intn(100))).String()
 	case TYPE_FLOAT:
-		val = randFloat32Range(p.Rand, float32(p.Min), float32(p.Max))
+		val = r.Float32()
 	case TYPE_INET:
-		val = net.ParseIP(randIpV4Address(p.Rand, p.Rand.Intn(255), 2))
+		val = net.ParseIP(randIpV4Address(r, r.Intn(255), 2))
 	case TYPE_INT:
-		val = randIntRange(p.Rand, p.Min, p.Max)
+		val = r.Int31()
 	case TYPE_SMALLINT:
-		val = int16(randIntRange(p.Rand, p.Min, p.Max))
+		val = int16(r.Int31())
 	case TYPE_TIMEUUID, TYPE_UUID:
-		r := gocql.UUIDFromTime(randTime(p.Rand))
+		r := gocql.UUIDFromTime(randTime(r))
 		val = r.String()
 	case TYPE_TINYINT:
-		val = int8(randIntRange(p.Rand, p.Min, p.Max))
+		val = int8(r.Int31())
 	case TYPE_VARINT:
-		val = big.NewInt(randInt64Range(p.Rand, int64(p.Min), int64(p.Max)))
+		val = big.NewInt(r.Int63())
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", st))
 	}
@@ -194,95 +271,13 @@ func (st SimpleType) GenValue(p *PartitionRange) []interface{} {
 	}
 }
 
-func (st SimpleType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}) {
-	var (
-		left  interface{}
-		right interface{}
-	)
-	switch st {
-	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
-		startTime := randTime(p.Rand)
-		start := randIntRange(p.Rand, p.Min, p.Max)
-		end := start + randIntRange(p.Rand, p.Min, p.Max)
-		left = nonEmptyRandStringWithTime(p.Rand, start, startTime)
-		right = nonEmptyRandStringWithTime(p.Rand, end, randTimeNewer(p.Rand, startTime))
-	case TYPE_BLOB:
-		startTime := randTime(p.Rand)
-		start := randIntRange(p.Rand, p.Min, p.Max)
-		end := start + randIntRange(p.Rand, p.Min, p.Max)
-		left = hex.EncodeToString(nonEmptyRandBlobWithTime(p.Rand, start, startTime))
-		right = hex.EncodeToString(nonEmptyRandBlobWithTime(p.Rand, end, randTimeNewer(p.Rand, startTime)))
-	case TYPE_BIGINT:
-		start := randInt64Range(p.Rand, int64(p.Min), int64(p.Max))
-		end := start + randInt64Range(p.Rand, int64(p.Min), int64(p.Max))
-		left = start
-		right = end
-	case TYPE_DATE, TYPE_TIME, TYPE_TIMESTAMP:
-		start := randTime(p.Rand)
-		end := randTimeNewer(p.Rand, start)
-		left = start
-		right = end
-	case TYPE_DECIMAL:
-		start := randInt64Range(p.Rand, int64(p.Min), int64(p.Max))
-		end := start + randInt64Range(p.Rand, int64(p.Min), int64(p.Max))
-		left = inf.NewDec(start, 3)
-		right = inf.NewDec(end, 3)
-	case TYPE_DOUBLE:
-		start := randFloat64Range(p.Rand, float64(p.Min), float64(p.Max))
-		end := start + randFloat64Range(p.Rand, float64(p.Min), float64(p.Max))
-		left = start
-		right = end
-	case TYPE_DURATION:
-		start := time.Minute * time.Duration(randIntRange(p.Rand, p.Min, p.Max))
-		end := start + time.Minute*time.Duration(randIntRange(p.Rand, p.Min, p.Max))
-		left = start
-		right = end
-	case TYPE_FLOAT:
-		start := randFloat32Range(p.Rand, float32(p.Min), float32(p.Max))
-		end := start + randFloat32Range(p.Rand, float32(p.Min), float32(p.Max))
-		left = start
-		right = end
-	case TYPE_INET:
-		start := randIpV4Address(p.Rand, 0, 3)
-		end := randIpV4Address(p.Rand, 255, 3)
-		left = net.ParseIP(start)
-		right = net.ParseIP(end)
-	case TYPE_INT:
-		start := randIntRange(p.Rand, p.Min, p.Max)
-		end := start + randIntRange(p.Rand, p.Min, p.Max)
-		left = start
-		right = end
-	case TYPE_SMALLINT:
-		start := int16(randIntRange(p.Rand, p.Min, p.Max))
-		end := start + int16(randIntRange(p.Rand, p.Min, p.Max))
-		left = start
-		right = end
-	case TYPE_TIMEUUID, TYPE_UUID:
-		start := randTime(p.Rand)
-		end := randTimeNewer(p.Rand, start)
-		left = gocql.UUIDFromTime(start).String()
-		right = gocql.UUIDFromTime(end).String()
-	case TYPE_TINYINT:
-		start := int8(randIntRange(p.Rand, p.Min, p.Max))
-		end := start + int8(randIntRange(p.Rand, p.Min, p.Max))
-		left = start
-		right = end
-	case TYPE_VARINT:
-		end := &big.Int{}
-		start := big.NewInt(randInt64Range(p.Rand, int64(p.Min), int64(p.Max)))
-		end.Set(start)
-		end = end.Add(start, big.NewInt(randInt64Range(p.Rand, int64(p.Min), int64(p.Max))))
-		left = start
-		right = end
-	default:
-		panic(fmt.Sprintf("generate value range: not supported type %s", st))
-	}
-	return []interface{}{left}, []interface{}{right}
-}
-
 type TupleType struct {
 	Types  []SimpleType `json:"types"`
 	Frozen bool         `json:"frozen"`
+}
+
+func (st TupleType) CQLType() gocql.TypeInfo {
+	return goCQLTypeMap[gocql.TypeTuple]
 }
 
 func (tt TupleType) Name() string {
@@ -329,29 +324,22 @@ func (st TupleType) Indexable() bool {
 	return true
 }
 
-func (tt TupleType) GenValue(p *PartitionRange) []interface{} {
+func (tt TupleType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
 	vals := make([]interface{}, 0, len(tt.Types))
 	for _, t := range tt.Types {
-		vals = append(vals, t.GenValue(p)...)
+		vals = append(vals, t.GenValue(r, p)...)
 	}
 	return vals
-}
-
-func (tt TupleType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}) {
-	left := make([]interface{}, 0, len(tt.Types))
-	right := make([]interface{}, 0, len(tt.Types))
-	for _, t := range tt.Types {
-		ttLeft, ttRight := t.GenValueRange(p)
-		left = append(left, ttLeft...)
-		right = append(right, ttRight...)
-	}
-	return left, right
 }
 
 type UDTType struct {
 	Types    map[string]SimpleType `json:"types"`
 	TypeName string                `json:"type_name"`
 	Frozen   bool                  `json:"frozen"`
+}
+
+func (st UDTType) CQLType() gocql.TypeInfo {
+	return goCQLTypeMap[gocql.TypeUDT]
 }
 
 func (tt UDTType) Name() string {
@@ -395,29 +383,27 @@ func (tt UDTType) Indexable() bool {
 	return true
 }
 
-func (tt UDTType) GenValue(p *PartitionRange) []interface{} {
+func (tt UDTType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
 	vals := make(map[string]interface{})
 	for name, typ := range tt.Types {
-		vals[name] = typ.GenValue(p)[0]
+		vals[name] = typ.GenValue(r, p)[0]
 	}
 	return []interface{}{vals}
-}
-
-func (tt UDTType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}) {
-	left := make(map[string]interface{})
-	right := make(map[string]interface{})
-	for name, t := range tt.Types {
-		ttLeft, ttRight := t.GenValueRange(p)
-		left[name] = ttLeft[0]
-		right[name] = ttRight[0]
-	}
-	return []interface{}{left}, []interface{}{right}
 }
 
 type BagType struct {
 	Kind   string     `json:"kind"` // We need to differentiate between sets and lists
 	Type   SimpleType `json:"type"`
 	Frozen bool       `json:"frozen"`
+}
+
+func (st BagType) CQLType() gocql.TypeInfo {
+	switch st.Kind {
+	case "set":
+		return goCQLTypeMap[gocql.TypeSet]
+	default:
+		return goCQLTypeMap[gocql.TypeList]
+	}
 }
 
 func (ct BagType) Name() string {
@@ -457,25 +443,13 @@ func (ct BagType) CQLPretty(query string, value []interface{}) (string, int) {
 	panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
 }
 
-func (ct BagType) GenValue(p *PartitionRange) []interface{} {
-	count := p.Rand.Intn(9) + 1
+func (ct BagType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+	count := r.Intn(9) + 1
 	vals := make([]interface{}, count, count)
 	for i := 0; i < count; i++ {
-		vals[i] = ct.Type.GenValue(p)[0]
+		vals[i] = ct.Type.GenValue(r, p)[0]
 	}
 	return []interface{}{vals}
-}
-
-func (ct BagType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}) {
-	count := p.Rand.Intn(9) + 1
-	left := make([]interface{}, 0, len(ct.Type))
-	right := make([]interface{}, 0, len(ct.Type))
-	for i := 0; i < count; i++ {
-		ttLeft, ttRight := ct.Type.GenValueRange(p)
-		left = append(left, ttLeft...)
-		right = append(right, ttRight...)
-	}
-	return []interface{}{left}, []interface{}{right}
 }
 
 func (ct BagType) Indexable() bool {
@@ -486,6 +460,10 @@ type MapType struct {
 	KeyType   SimpleType `json:"key_type"`
 	ValueType SimpleType `json:"value_type"`
 	Frozen    bool       `json:"frozen"`
+}
+
+func (st MapType) CQLType() gocql.TypeInfo {
+	return goCQLTypeMap[gocql.TypeMap]
 }
 
 func (mt MapType) Name() string {
@@ -515,26 +493,13 @@ func (mt MapType) CQLPretty(query string, value []interface{}) (string, int) {
 	panic(fmt.Sprintf("map cql pretty, unknown type %v", mt))
 }
 
-func (mt MapType) GenValue(p *PartitionRange) []interface{} {
-	count := p.Rand.Intn(9) + 1
+func (mt MapType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+	count := r.Intn(9) + 1
 	vals := make(map[interface{}]interface{})
 	for i := 0; i < count; i++ {
-		vals[mt.KeyType.GenValue(p)[0]] = mt.ValueType.GenValue(p)[0]
+		vals[mt.KeyType.GenValue(r, p)[0]] = mt.ValueType.GenValue(r, p)[0]
 	}
 	return []interface{}{vals}
-}
-
-func (mt MapType) GenValueRange(p *PartitionRange) ([]interface{}, []interface{}) {
-	count := p.Rand.Intn(9) + 1
-	left := make(map[interface{}]interface{})
-	right := make(map[interface{}]interface{})
-	for i := 0; i < count; i++ {
-		leftKey, rightKey := mt.KeyType.GenValueRange(p)
-		leftVal, rightVal := mt.KeyType.GenValueRange(p)
-		left[leftKey[0]] = leftVal[0]
-		right[rightKey[0]] = rightVal[0]
-	}
-	return []interface{}{left}, []interface{}{right}
 }
 
 func (mt MapType) CQLDef() string {

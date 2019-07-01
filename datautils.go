@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
-	"math/rand"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/segmentio/ksuid"
+	"golang.org/x/exp/rand"
 )
 
 func randIntRange(rnd *rand.Rand, min int, max int) int {
@@ -129,13 +129,14 @@ func randIpV4Address(rnd *rand.Rand, v, pos int) string {
 	return strings.Join(blocks, ".")
 }
 
-func appendValue(columnType Type, p *PartitionRange, values []interface{}) []interface{} {
-	return append(values, columnType.GenValue(p)...)
+func appendValue(columnType Type, r *rand.Rand, p PartitionRangeConfig, values []interface{}) []interface{} {
+	return append(values, columnType.GenValue(r, p)...)
 }
 
-func appendValueRange(columnType Type, p *PartitionRange, values []interface{}) []interface{} {
-	left, right := columnType.GenValueRange(p)
-	values = append(values, left...)
-	values = append(values, right...)
+/*
+func appendValueRange(columnType Type, r *rand.Rand, p PartitionRangeConfig, values []interface{}) []interface{} {
+	values = append(values, columnType.GenValue(r, p)...)
+	values = append(values, columnType.GenValue(r, p)...)
 	return values
 }
+*/
