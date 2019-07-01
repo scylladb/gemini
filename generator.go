@@ -8,7 +8,8 @@ import (
 type Value []interface{}
 
 type source struct {
-	values chan Value
+	newValues chan Value
+	oldValues chan Value
 }
 
 type Generators struct {
@@ -31,7 +32,8 @@ func NewGenerator(config *GeneratorsConfig) *Generators {
 	generators := make([]*source, config.Size)
 	for i := uint64(0); i < config.Size; i++ {
 		generators[i] = &source{
-			values: make(chan Value, 10000),
+			newValues: make(chan Value, 10000),
+			oldValues: make(chan Value, 20000),
 		}
 	}
 	gs := &Generators{
@@ -49,8 +51,12 @@ func (gs Generators) Stop() {
 	gs.done <- struct{}{}
 }
 
-func (gs Generators) Get(idx int) <-chan Value {
-	return gs.generators[idx].values
+func (gs Generators) GetNew(idx int) <-chan Value {
+	return gs.generators[idx].newValues
+}
+
+func (gs Generators) GetOld(idx int) chan Value {
+	return gs.generators[idx].oldValues
 }
 
 func (gs *Generators) start() {
@@ -69,7 +75,7 @@ func (gs *Generators) start() {
 				b, _ := routingKeyCreator.CreateRoutingKey(gs.table, values)
 				hash := uint64(murmur.Murmur3H1(b))
 				g := gs.generators[hash%gs.size]
-				g.values <- Value(values)
+				g.newValues <- Value(values)
 			}
 		}
 	}()

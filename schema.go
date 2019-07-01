@@ -481,7 +481,7 @@ func (s *Schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *Schema) GenInsertStmt(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) GenInsertStmt(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -494,11 +494,15 @@ func (s *Schema) GenInsertStmt(t *Table, partitionValues <-chan Value, r *rand.R
 		typs = append(typs, pk.Type)
 	}
 
-	values, ok := <-partitionValues
+	vals, ok := <-newPartitionValues
 	if !ok {
 		return nil, nil
 	}
-
+	values := make([]interface{}, len(vals))
+	copy(values, vals)
+	defer func() {
+		oldPartitionValues <- vals
+	}()
 	for _, ck := range t.ClusteringKeys {
 		builder = builder.Columns(ck.Name)
 		values = appendValue(ck.Type, r, p, values)
@@ -523,14 +527,16 @@ func (s *Schema) GenInsertStmt(t *Table, partitionValues <-chan Value, r *rand.R
 	}, nil
 }
 
-func (s *Schema) GenInsertJsonStmt(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) GenInsertJsonStmt(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	vs, ok := <-partitionValues
+	vals, ok := <-newPartitionValues
 	if !ok {
 		return nil, nil
 	}
+	vs := make([]interface{}, len(vals))
+	copy(vs, vals)
 	values := make(map[string]interface{})
 	for i, pk := range t.PartitionKeys {
 		switch t := pk.Type.(type) {
@@ -579,13 +585,12 @@ func (s *Schema) GenInsertJsonStmt(t *Table, partitionValues <-chan Value, r *ra
 	}, nil
 }
 
-func (s *Schema) GenDeleteRows(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) GenDeleteRows(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	var (
-		values []interface{}
-		typs   []Type
+		typs []Type
 	)
 	builder := qb.Delete(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
@@ -593,11 +598,15 @@ func (s *Schema) GenDeleteRows(t *Table, partitionValues <-chan Value, r *rand.R
 		typs = append(typs, pk.Type)
 	}
 
-	values, ok := <-partitionValues
+	vals, ok := <-newPartitionValues
 	if !ok {
 		return nil, nil
 	}
-
+	values := make([]interface{}, len(vals))
+	copy(values, vals)
+	defer func() {
+		oldPartitionValues <- vals
+	}()
 	if len(t.ClusteringKeys) > 0 {
 		ck := t.ClusteringKeys[0]
 		builder = builder.Where(qb.GtOrEq(ck.Name)).Where(qb.LtOrEq(ck.Name))
@@ -625,25 +634,25 @@ func (s *Schema) GenDDLStmt(t *Table, r *rand.Rand, p PartitionRangeConfig, sc *
 	}
 }
 
-func (s *Schema) GenMutateStmt(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig, deletes bool) (*Stmt, error) {
+func (s *Schema) GenMutateStmt(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig, deletes bool) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	if !deletes {
-		return s.GenInsertStmt(t, partitionValues, r, p)
+		return s.GenInsertStmt(t, newPartitionValues, oldPartitionValues, r, p)
 	}
 	switch n := rand.Intn(1000); n {
 	case 10, 100:
-		return s.GenDeleteRows(t, partitionValues, r, p)
+		return s.GenDeleteRows(t, newPartitionValues, oldPartitionValues, r, p)
 	default:
 		switch n := rand.Intn(2); n {
 		case 0:
 			if t.KnownIssues[KnownIssuesJsonWithTuples] {
-				return s.GenInsertStmt(t, partitionValues, r, p)
+				return s.GenInsertStmt(t, newPartitionValues, oldPartitionValues, r, p)
 			}
-			return s.GenInsertJsonStmt(t, partitionValues, r, p)
+			return s.GenInsertJsonStmt(t, newPartitionValues, oldPartitionValues, r, p)
 		default:
-			return s.GenInsertStmt(t, partitionValues, r, p)
+			return s.GenInsertStmt(t, newPartitionValues, oldPartitionValues, r, p)
 		}
 	}
 }
