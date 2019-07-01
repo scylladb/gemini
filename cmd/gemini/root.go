@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math"
 	"net/http"
 	"os"
 	"strings"
@@ -34,7 +33,6 @@ var (
 	schemaFile            string
 	outFileArg            string
 	concurrency           uint64
-	pkNumberPerThread     int
 	seed                  uint64
 	dropSchema            bool
 	verbose               bool
@@ -174,9 +172,6 @@ func run(cmd *cobra.Command, args []string) {
 		_ = http.ListenAndServe(bind, nil)
 	}()
 
-	if pkNumberPerThread <= 0 || uint64(pkNumberPerThread) > (math.MaxInt32/concurrency) {
-		pkNumberPerThread = int(math.MaxInt32 / concurrency)
-	}
 	if err := printSetup(); err != nil {
 		logger.Error("unable to print setup", zap.Error(err))
 		return
@@ -593,7 +588,6 @@ func init() {
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", mixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	rootCmd.Flags().Uint64VarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
-	rootCmd.Flags().IntVarP(&pkNumberPerThread, "max-pk-per-thread", "p", 0, "Maximum number of partition keys per thread")
 	rootCmd.Flags().Uint64VarP(&seed, "seed", "s", 1, "PRNG seed value")
 	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
@@ -623,7 +617,6 @@ func printSetup() error {
 	fmt.Fprintf(tw, "Maximum duration:\t%s\n", duration)
 	fmt.Fprintf(tw, "Warmup duration:\t%s\n", warmup)
 	fmt.Fprintf(tw, "Concurrency:\t%d\n", concurrency)
-	fmt.Fprintf(tw, "Number of partitions per thread:\t%d\n", pkNumberPerThread)
 	fmt.Fprintf(tw, "Test cluster:\t%s\n", testClusterHost)
 	fmt.Fprintf(tw, "Oracle cluster:\t%s\n", oracleClusterHost)
 	if outFileArg == "" {
