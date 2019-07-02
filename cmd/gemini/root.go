@@ -52,6 +52,8 @@ var (
 	level                 string
 	maxRetriesMutate      int
 	maxRetriesMutateSleep time.Duration
+	pkBufferSize          uint64
+	pkBufferReuseSize     uint64
 )
 
 const (
@@ -368,8 +370,8 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig,
 			Partitions:       &partitionRangeConfig,
 			Size:             concurrency,
 			Seed:             seed,
-			PkBufferSize:     10000,
-			PkUsedBufferSize: 100000,
+			PkBufferSize:     pkBufferSize,
+			PkUsedBufferSize: pkBufferReuseSize,
 		}
 		g := gemini.NewGenerator(gCfg)
 		gs = append(gs, g)
@@ -627,6 +629,8 @@ func init() {
 	rootCmd.Flags().StringVarP(&level, "level", "", "info", "Specify the logging level, debug|info|warn|error|dpanic|panic|fatal")
 	rootCmd.Flags().IntVarP(&maxRetriesMutate, "max-mutation-retries", "", 2, "Maximum number of attempts to apply a mutation")
 	rootCmd.Flags().DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond, "Duration between attempts to apply a mutation for example 10ms or 1s")
+	rootCmd.Flags().Uint64VarP(&pkBufferSize, "partition-key-buffer-size", "c", 1000, "Number of buffered partition keys")
+	rootCmd.Flags().Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "c", 2000, "Number of reused buffered partition keys")
 }
 
 func printSetup() error {
