@@ -501,7 +501,7 @@ func (s *Schema) GenInsertStmt(t *Table, newPartitionValues <-chan Value, oldPar
 	values := make([]interface{}, len(vals))
 	copy(values, vals)
 	defer func() {
-		oldPartitionValues <- vals
+		sendIfPossible(oldPartitionValues, vals)
 	}()
 	for _, ck := range t.ClusteringKeys {
 		builder = builder.Columns(ck.Name)
@@ -531,7 +531,7 @@ func (s *Schema) GenInsertJsonStmt(t *Table, newPartitionValues <-chan Value, ol
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	vals, ok := <-newPartitionValues
+	vals, ok := recvIfPossible(newPartitionValues)
 	if !ok {
 		return nil, nil
 	}
@@ -605,7 +605,7 @@ func (s *Schema) GenDeleteRows(t *Table, newPartitionValues <-chan Value, oldPar
 	values := make([]interface{}, len(vals))
 	copy(values, vals)
 	defer func() {
-		oldPartitionValues <- vals
+		sendIfPossible(oldPartitionValues, vals)
 	}()
 	if len(t.ClusteringKeys) > 0 {
 		ck := t.ClusteringKeys[0]
@@ -698,7 +698,7 @@ func (s *Schema) genSinglePartitionQuery(t *Table, partitionValues <-chan Value,
 		builder = builder.Where(qb.Eq(pk.Name))
 		typs = append(typs, pk.Type)
 	}
-	values, ok := <-partitionValues
+	values, ok := recvIfPossible(partitionValues)
 	if !ok {
 		return nil
 	}
@@ -737,7 +737,7 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, partitionValues <-chan Valu
 	for i, pk := range partitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, pkNum))
 		for j := 0; j < pkNum; j++ {
-			vs, ok := <-partitionValues
+			vs, ok := recvIfPossible(partitionValues)
 			if !ok {
 				return nil
 			}
@@ -773,8 +773,9 @@ func (s *Schema) genClusteringRangeQuery(t *Table, partitionValues <-chan Value,
 			clusteringKeys = t.MaterializedViews[view].ClusteringKeys
 		}*/
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
-	values, ok := <-partitionValues
+	values, ok := recvIfPossible(partitionValues)
 	if !ok {
+		// Done or no values available...
 		return nil
 	}
 	for _, pk := range partitionKeys {
@@ -830,7 +831,7 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, partitionVal
 	for i, pk := range partitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, pkNum))
 		for j := 0; j < pkNum; j++ {
-			vs, ok := <-partitionValues
+			vs, ok := recvIfPossible(partitionValues)
 			if !ok {
 				return nil
 			}
@@ -878,7 +879,7 @@ func (s *Schema) genSingleIndexQuery(t *Table, partitionValues <-chan Value, r *
 		pkNum = 1
 	}
 	*/
-	values, ok := <-partitionValues
+	values, ok := recvIfPossible(partitionValues)
 	if !ok {
 		return nil
 	}
