@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The size of the partition key buffers can be configured on the commandline through
+  `partition-key-buffer-size` and `partition-key-buffer-reuse-size`.
+
 ## 1.3.0
 
 - Partitioning bewteen workers are now handled by a `generator` that generates 
