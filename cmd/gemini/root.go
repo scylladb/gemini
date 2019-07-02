@@ -364,10 +364,12 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig,
 	var gs []*gemini.Generators
 	for _, table := range schema.Tables {
 		gCfg := &gemini.GeneratorsConfig{
-			Table:      table,
-			Partitions: &partitionRangeConfig,
-			Size:       concurrency,
-			Seed:       seed,
+			Table:            table,
+			Partitions:       &partitionRangeConfig,
+			Size:             concurrency,
+			Seed:             seed,
+			PkBufferSize:     10000,
+			PkUsedBufferSize: 100000,
 		}
 		g := gemini.NewGenerator(gCfg)
 		gs = append(gs, g)
@@ -429,6 +431,12 @@ func ddlJob(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig,
 		testStatus.WriteErrors++
 		return
 	}
+	if ddlStmts == nil {
+		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
+			w.Write(zap.String("job", "ddl"))
+		}
+		return
+	}
 	defer postStmtHook()
 	defer func() {
 		if verbose {
@@ -462,6 +470,12 @@ func mutationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaCon
 		testStatus.WriteErrors++
 		return
 	}
+	if mutateStmt == nil {
+		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
+			w.Write(zap.String("job", "mutation"))
+		}
+		return
+	}
 	mutateQuery := mutateStmt.Query
 	mutateValues := mutateStmt.Values()
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
@@ -482,6 +496,12 @@ func mutationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaCon
 
 func validationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, partitionValues <-chan gemini.Value, testStatus *Status, logger *zap.Logger) {
 	checkStmt := schema.GenCheckStmt(table, partitionValues, r, p)
+	if checkStmt == nil {
+		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
+			w.Write(zap.String("job", "validation"))
+		}
+		return
+	}
 	checkQuery := checkStmt.Query
 	checkValues := checkStmt.Values()
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {

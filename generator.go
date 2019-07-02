@@ -1,6 +1,8 @@
 package gemini
 
 import (
+	"fmt"
+
 	"github.com/scylladb/gemini/murmur"
 	"golang.org/x/exp/rand"
 )
@@ -22,18 +24,20 @@ type Generators struct {
 }
 
 type GeneratorsConfig struct {
-	Table      *Table
-	Partitions *PartitionRangeConfig
-	Size       uint64
-	Seed       uint64
+	Table            *Table
+	Partitions       *PartitionRangeConfig
+	Size             uint64
+	Seed             uint64
+	PkBufferSize     uint64
+	PkUsedBufferSize uint64
 }
 
 func NewGenerator(config *GeneratorsConfig) *Generators {
 	generators := make([]*source, config.Size)
 	for i := uint64(0); i < config.Size; i++ {
 		generators[i] = &source{
-			newValues: make(chan Value, 10000),
-			oldValues: make(chan Value, 20000),
+			newValues: make(chan Value, config.PkBufferSize),
+			oldValues: make(chan Value, config.PkUsedBufferSize),
 		}
 	}
 	gs := &Generators{
@@ -79,4 +83,21 @@ func (gs *Generators) start() {
 			}
 		}
 	}()
+}
+
+func sendIfPossible(values chan Value, value Value) {
+	select {
+	case values <- value:
+	default:
+		fmt.Println("Skipped returning an partition key")
+	}
+}
+
+func recvIfPossible(values <-chan Value) (Value, bool) {
+	select {
+	case values, ok := <-values:
+		return values, ok
+	default:
+		return nil, false
+	}
 }

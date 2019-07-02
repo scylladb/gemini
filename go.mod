@@ -23,6 +23,7 @@ require (
 	go.uber.org/zap v1.10.0
 	golang.org/x/exp v0.0.0-20190510132918-efd6b22b2522
 	golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3
+	golang.org/x/tools v0.0.0-20190621195816-6e04913cbbac
 	gopkg.in/inf.v0 v0.9.1
 	honnef.co/go/tools v0.0.0-2019.2.1 // indirect
 )
