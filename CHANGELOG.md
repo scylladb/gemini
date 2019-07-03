@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.4
 
 - Shutdown is no longer waiting for the warmup phase to complete.
 - Partition keys can now be any supported type.
