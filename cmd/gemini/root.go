@@ -85,7 +85,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, *gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, <-chan gemini.Value, chan gemini.Value, chan Status, string, time.Duration, *zap.Logger)
+type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, <-chan gemini.Value, chan gemini.Value, chan Status, string, time.Duration, *zap.Logger)
 
 func (r *Status) Merge(sum *Status) Status {
 	sum.WriteOps += r.WriteOps
@@ -248,11 +248,11 @@ func createLogger(level string) *zap.Logger {
 	return logger
 }
 
-func createSchemaConfig(logger *zap.Logger) *gemini.SchemaConfig {
+func createSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 	defaultConfig := createDefaultSchemaConfig(logger)
 	switch strings.ToLower(datasetSize) {
 	case "small":
-		return &gemini.SchemaConfig{
+		return gemini.SchemaConfig{
 			CompactionStrategy: defaultConfig.CompactionStrategy,
 			MaxPartitionKeys:   defaultConfig.MaxPartitionKeys,
 			MaxClusteringKeys:  defaultConfig.MaxClusteringKeys,
@@ -268,7 +268,7 @@ func createSchemaConfig(logger *zap.Logger) *gemini.SchemaConfig {
 	}
 }
 
-func createDefaultSchemaConfig(logger *zap.Logger) *gemini.SchemaConfig {
+func createDefaultSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 	const (
 		MaxBlobLength   = 1e4
 		MinBlobLength   = 0
@@ -277,7 +277,7 @@ func createDefaultSchemaConfig(logger *zap.Logger) *gemini.SchemaConfig {
 		MaxTupleParts   = 20
 		MaxUDTParts     = 20
 	)
-	return &gemini.SchemaConfig{
+	return gemini.SchemaConfig{
 		CompactionStrategy: getCompactionStrategy(compactionStrategy, logger),
 		MaxPartitionKeys:   3,
 		MaxClusteringKeys:  maxClusteringKeys,
@@ -340,7 +340,7 @@ func getCQLFeature(feature string) gemini.CQLFeature {
 	}
 }
 
-func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig, s store.Store, mode string, out *os.File, logger *zap.Logger) {
+func runJob(f testJob, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, mode string, out *os.File, logger *zap.Logger) {
 	defer out.Sync()
 	logger = logger.Named("run_job")
 	c := make(chan Status, 10000)
@@ -367,7 +367,7 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig,
 	for _, table := range schema.Tables {
 		gCfg := &gemini.GeneratorsConfig{
 			Table:            table,
-			Partitions:       &partitionRangeConfig,
+			Partitions:       partitionRangeConfig,
 			Size:             concurrency,
 			Seed:             seed,
 			PkBufferSize:     pkBufferSize,
@@ -532,9 +532,10 @@ func (hb heartBeat) await() {
 		time.Sleep(hb.sleep)
 	}
 }
-func Job(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaConfig *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, newValues <-chan gemini.Value, oldValues chan gemini.Value, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
+func Job(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, newValues <-chan gemini.Value, oldValues chan gemini.Value, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	defer wg.Done()
 
+	schemaConfig := &schemaCfg
 	mutationLogger := logger.Named("mutation_job")
 	validationLogger := logger.Named("validation_job")
 	ddlLogger := logger.Named("ddl_job")

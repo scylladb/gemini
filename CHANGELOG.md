@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Partition keys can now be any supported type.
 - The size of the partition key buffers can be configured on the commandline through
   `partition-key-buffer-size` and `partition-key-buffer-reuse-size`.
 
