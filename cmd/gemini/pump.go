@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"sync"
@@ -9,24 +10,29 @@ import (
 
 	"github.com/briandowns/spinner"
 	"go.uber.org/zap"
-	"golang.org/x/net/context"
 )
 
 type Pump struct {
-	ch     chan heartBeat
-	ctx    context.Context
-	cancel context.CancelFunc
+	ch       chan heartBeat
+	done     chan struct{}
+	graceful chan os.Signal
+	logger   *zap.Logger
 }
 
-func (p *Pump) Start(postFunc func()) {
+func (p *Pump) Start(d time.Duration, postFunc func()) {
 	go func() {
+		defer p.cleanup(postFunc)
+		timer := time.NewTimer(d)
 		for {
 			select {
-			case <-p.ctx.Done():
-				close(p.ch)
-				for range p.ch {
-				}
-				postFunc()
+			case <-p.done:
+				p.logger.Info("Test run stopped. Exiting.")
+				return
+			case <-p.graceful:
+				p.logger.Info("Test run aborted. Exiting.")
+				return
+			case <-timer.C:
+				p.logger.Info("Test run completed. Exiting.")
 				return
 			default:
 				p.ch <- newHeartBeat()
@@ -36,46 +42,37 @@ func (p *Pump) Start(postFunc func()) {
 }
 
 func (p *Pump) Stop() {
-	p.cancel()
+	p.logger.Debug("pump asked to stop")
+	p.done <- struct{}{}
 }
 
-func createPump(sz int, d time.Duration, logger *zap.Logger) *Pump {
-	logger = logger.Named("pump")
-	// Gracefully terminate
-	var gracefulStop = make(chan os.Signal)
-	signal.Notify(gracefulStop, syscall.SIGTERM, syscall.SIGINT)
-
-	// Create the actual pump
-	pumpCh := make(chan heartBeat, sz)
-	pumpCtx, pumpCancel := context.WithCancel(context.Background())
-	pump := &Pump{
-		ch:     pumpCh,
-		ctx:    pumpCtx,
-		cancel: pumpCancel,
+func (p *Pump) cleanup(postFunc func()) {
+	close(p.ch)
+	for range p.ch {
 	}
-	go func(d time.Duration) {
-		timer := time.NewTimer(d)
-		for {
-			select {
-			case <-gracefulStop:
-				pump.Stop()
-				logger.Info("Test run aborted. Exiting.")
-				return
-			case <-timer.C:
-				pump.Stop()
-				logger.Info("Test run completed. Exiting.")
-				return
-			}
-		}
-	}(duration + warmup)
+	p.logger.Debug("pump channel drained")
+	postFunc()
+}
+
+func createPump(sz int, logger *zap.Logger) *Pump {
+	logger = logger.Named("pump")
+	var graceful = make(chan os.Signal, 1)
+	signal.Notify(graceful, syscall.SIGTERM, syscall.SIGINT)
+	pump := &Pump{
+		ch:       make(chan heartBeat, sz),
+		done:     make(chan struct{}, 1),
+		graceful: graceful,
+		logger:   logger,
+	}
 	return pump
 }
 
-func createPumpCallback(c chan Status, wg *sync.WaitGroup, sp *spinner.Spinner) func() {
+func createPumpCallback(cancel context.CancelFunc, c chan Status, wg *sync.WaitGroup, sp *spinner.Spinner) func() {
 	return func() {
 		if sp != nil {
 			sp.Stop()
 		}
+		cancel()
 		wg.Wait()
 		close(c)
 	}

@@ -347,14 +347,14 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, 
 
 	// Wait group for the worker goroutines.
 	var workers sync.WaitGroup
-	workerCtx, _ := context.WithCancel(context.Background())
+	workerCtx, workerCancel := context.WithCancel(context.Background())
 	workers.Add(len(schema.Tables) * int(concurrency))
 
 	// Wait group for the finished goroutine.
 	var finished sync.WaitGroup
 	finished.Add(1)
 
-	pump := createPump(10000, duration+warmup, logger)
+	pump := createPump(10000, logger)
 
 	partitionRangeConfig := gemini.PartitionRangeConfig{
 		MaxBlobLength:   schemaConfig.MaxBlobLength,
@@ -386,7 +386,7 @@ func runJob(f testJob, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, 
 		if interactive() {
 			sp = createSpinner()
 		}
-		pump.Start(createPumpCallback(c, &workers, sp))
+		pump.Start(duration+warmup, createPumpCallback(workerCancel, c, &workers, sp))
 		res := sampleResults(pump, c, sp, logger)
 		res.PrintResult(out)
 		for _, g := range gs {
@@ -546,8 +546,13 @@ func Job(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema 
 warmup:
 	for {
 		select {
-		case <-ctx.Done():
-			return
+		case _, ok := <-pump:
+			if !ok {
+				logger.Debug("job terminated")
+				return
+			}
+		}
+		select {
 		case <-warmupTimer.C:
 			break warmup
 		default:
