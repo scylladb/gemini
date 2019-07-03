@@ -15,6 +15,7 @@ docker-compose --log-level WARNING -f scripts/docker-compose.yml up -d
 
 ORACLE_IP=$(docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' ${ORACLE_NAME})
 TEST_IP=$(docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' ${TEST_NAME})
+SEED=$(date +%s%N)
 
 GOBIN="$(dirname ${GEMINI_CMD})" go install ./... || quit $? "Compilation failed"
 
@@ -26,6 +27,7 @@ until docker logs ${TEST_NAME} | grep "Starting listening for CQL clients" > /de
 $GEMINI_CMD \
 	--duration=10m \
 	--fail-fast \
+	--seed=${SEED} \
 	--dataset-size=small \
 	--test-cluster=${TEST_IP} \
 	--oracle-cluster=${ORACLE_IP} \

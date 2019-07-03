@@ -609,8 +609,7 @@ func genMapType(sc *SchemaConfig) MapType {
 }
 
 func genPrimaryKeyColumnType() Type {
-	n := rand.Intn(len(pkTypes))
-	return types[n]
+	return pkTypes[rand.Intn(len(pkTypes))]
 }
 
 func genIndexName(prefix string, idx int) string {

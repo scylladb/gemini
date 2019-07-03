@@ -312,7 +312,7 @@ func (s *Schema) GetDropSchema() []string {
 	}
 }
 
-func GenSchema(sc *SchemaConfig) *Schema {
+func GenSchema(sc SchemaConfig) *Schema {
 	builder := NewSchemaBuilder()
 	keyspace := Keyspace{
 		Name: "ks1",
@@ -321,7 +321,7 @@ func GenSchema(sc *SchemaConfig) *Schema {
 	var partitionKeys []ColumnDef
 	numPartitionKeys := rand.Intn(sc.MaxPartitionKeys-1) + 1
 	for i := 0; i < numPartitionKeys; i++ {
-		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: TYPE_INT})
+		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: genPrimaryKeyColumnType()})
 	}
 	var clusteringKeys []ColumnDef
 	numClusteringKeys := rand.Intn(sc.MaxClusteringKeys)
@@ -331,7 +331,7 @@ func GenSchema(sc *SchemaConfig) *Schema {
 	var columns []ColumnDef
 	numColumns := rand.Intn(sc.MaxColumns)
 	for i := 0; i < numColumns; i++ {
-		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns, sc)})
+		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns, &sc)})
 	}
 	var indexes []IndexDef
 	if sc.CQLFeature > CQL_FEATURE_BASIC {
@@ -782,19 +782,18 @@ func (s *Schema) genClusteringRangeQuery(t *Table, partitionValues <-chan Value,
 		builder = builder.Where(qb.Eq(pk.Name))
 		typs = append(typs, pk.Type)
 	}
-	maxClusteringRels := 0
-	if len(clusteringKeys) > 1 {
-		maxClusteringRels = r.Intn(len(clusteringKeys) - 1)
+	if len(clusteringKeys) > 0 {
+		maxClusteringRels := r.Intn(len(clusteringKeys))
 		for i := 0; i < maxClusteringRels; i++ {
 			builder = builder.Where(qb.Eq(clusteringKeys[i].Name))
 			values = appendValue(clusteringKeys[i].Type, r, p, values)
 			typs = append(typs, clusteringKeys[i].Type)
 		}
+		builder = builder.Where(qb.Gt(clusteringKeys[maxClusteringRels].Name)).Where(qb.Lt(clusteringKeys[maxClusteringRels].Name))
+		values = appendValue(t.ClusteringKeys[maxClusteringRels].Type, r, p, values)
+		values = appendValue(t.ClusteringKeys[maxClusteringRels].Type, r, p, values)
+		typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	}
-	builder = builder.Where(qb.Gt(clusteringKeys[maxClusteringRels].Name)).Where(qb.Lt(clusteringKeys[maxClusteringRels].Name))
-	values = appendValue(t.ClusteringKeys[maxClusteringRels].Type, r, p, values)
-	values = appendValue(t.ClusteringKeys[maxClusteringRels].Type, r, p, values)
-	typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	return &Stmt{
 		Query: builder,
 		Values: func() []interface{} {
@@ -839,19 +838,18 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, partitionVal
 			typs = append(typs, pk.Type)
 		}
 	}
-	maxClusteringRels := 0
-	if len(clusteringKeys) > 1 {
-		maxClusteringRels = r.Intn(len(clusteringKeys) - 1)
+	if len(clusteringKeys) > 0 {
+		maxClusteringRels := r.Intn(len(clusteringKeys))
 		for i := 0; i < maxClusteringRels; i++ {
 			builder = builder.Where(qb.Eq(clusteringKeys[i].Name))
 			values = appendValue(clusteringKeys[i].Type, r, p, values)
 			typs = append(typs, clusteringKeys[i].Type)
 		}
+		builder = builder.Where(qb.Gt(clusteringKeys[maxClusteringRels].Name)).Where(qb.Lt(clusteringKeys[maxClusteringRels].Name))
+		values = appendValue(clusteringKeys[maxClusteringRels].Type, r, p, values)
+		values = appendValue(clusteringKeys[maxClusteringRels].Type, r, p, values)
+		typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	}
-	builder = builder.Where(qb.Gt(clusteringKeys[maxClusteringRels].Name)).Where(qb.Lt(clusteringKeys[maxClusteringRels].Name))
-	values = appendValue(clusteringKeys[maxClusteringRels].Type, r, p, values)
-	values = appendValue(clusteringKeys[maxClusteringRels].Type, r, p, values)
-	typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	return &Stmt{
 		Query: builder,
 		Values: func() []interface{} {
