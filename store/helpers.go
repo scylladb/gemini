@@ -38,6 +38,18 @@ func lt(mi, mj map[string]interface{}) bool {
 	case int:
 		mjs, _ := mj["pk0"].(int)
 		return mis < mjs
+	case int8:
+		mjs, _ := mj["pk0"].(int8)
+		return mis < mjs
+	case int16:
+		mjs, _ := mj["pk0"].(int16)
+		return mis < mjs
+	case int32:
+		mjs, _ := mj["pk0"].(int32)
+		return mis < mjs
+	case int64:
+		mjs, _ := mj["pk0"].(int64)
+		return mis < mjs
 	case gocql.UUID:
 		mjs, _ := mj["pk0"].(gocql.UUID)
 		return mis.String() < mjs.String()
@@ -45,7 +57,9 @@ func lt(mi, mj map[string]interface{}) bool {
 		mjs, _ := mj["pk0"].(time.Time)
 		return mis.UnixNano() < mjs.UnixNano()
 	default:
-		panic(fmt.Sprintf("unhandled type %T!\n", mis))
+		msg := fmt.Sprintf("unhandled type %T\n", mis)
+		time.Sleep(time.Second)
+		panic(msg)
 	}
 }
 
