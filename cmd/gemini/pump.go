@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -17,6 +15,16 @@ type Pump struct {
 	done     chan struct{}
 	graceful chan os.Signal
 	logger   *zap.Logger
+}
+
+type heartBeat struct {
+	sleep time.Duration
+}
+
+func (hb heartBeat) await() {
+	if hb.sleep > 0 {
+		time.Sleep(hb.sleep)
+	}
 }
 
 func (p *Pump) Start(d time.Duration, postFunc func()) {
@@ -67,13 +75,10 @@ func createPump(sz int, logger *zap.Logger) *Pump {
 	return pump
 }
 
-func createPumpCallback(cancel context.CancelFunc, c chan Status, wg *sync.WaitGroup, sp *spinner.Spinner) func() {
+func createPumpCallback(result chan Status, sp *spinner.Spinner) func() {
 	return func() {
 		if sp != nil {
 			sp.Stop()
 		}
-		cancel()
-		wg.Wait()
-		close(c)
 	}
 }

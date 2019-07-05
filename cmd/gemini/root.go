@@ -5,9 +5,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"strings"
 	"sync"
@@ -16,7 +16,6 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/gemini/store"
@@ -62,14 +61,6 @@ const (
 	mixedMode = "mixed"
 )
 
-type Status struct {
-	WriteOps    int        `json:"write_ops"`
-	WriteErrors int        `json:"write_errors"`
-	ReadOps     int        `json:"read_ops"`
-	ReadErrors  int        `json:"read_errors"`
-	Errors      []JobError `json:"errors,omitempty"`
-}
-
 type JobError struct {
 	Timestamp time.Time `json:"timestamp"`
 	Message   string    `json:"message"`
@@ -85,50 +76,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, <-chan gemini.Value, chan gemini.Value, chan Status, string, time.Duration, *zap.Logger)
-
-func (r *Status) Merge(sum *Status) Status {
-	sum.WriteOps += r.WriteOps
-	sum.WriteErrors += r.WriteErrors
-	sum.ReadOps += r.ReadOps
-	sum.ReadErrors += r.ReadErrors
-	sum.Errors = append(sum.Errors, r.Errors...)
-	return *sum
-}
-
-func (r *Status) PrintResult(w io.Writer) {
-	if err := r.PrintResultAsJSON(w); err != nil {
-		// In case there has been it has been a long run we want to display it anyway...
-		fmt.Printf("Unable to print result as json, using plain text to stdout, error=%s\n", err)
-		fmt.Printf("Gemini version: %s\n", version)
-		fmt.Printf("Results:\n")
-		fmt.Printf("\twrite ops:    %v\n", r.WriteOps)
-		fmt.Printf("\tread ops:     %v\n", r.ReadOps)
-		fmt.Printf("\twrite errors: %v\n", r.WriteErrors)
-		fmt.Printf("\tread errors:  %v\n", r.ReadErrors)
-		for i, err := range r.Errors {
-			fmt.Printf("Error %d: %s\n", i, err)
-		}
-	}
-}
-
-func (r *Status) PrintResultAsJSON(w io.Writer) error {
-	result := map[string]interface{}{
-		"result":         r,
-		"gemini_version": version,
-	}
-	encoder := json.NewEncoder(w)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent(" ", " ")
-	if err := encoder.Encode(result); err != nil {
-		return errors.Wrap(err, "unable to create json from result")
-	}
-	return nil
-}
-
-func (r Status) String() string {
-	return fmt.Sprintf("write ops: %v | read ops: %v | write errors: %v | read errors: %v", r.WriteOps, r.ReadOps, r.WriteErrors, r.ReadErrors)
-}
+type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Source, chan Status, string, time.Duration, *zap.Logger)
 
 func readSchema(confFile string) (*gemini.Schema, error) {
 	byteValue, err := ioutil.ReadFile(confFile)
@@ -231,7 +179,52 @@ func run(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	runJob(Job, schema, schemaConfig, store, mode, outFile, logger)
+	done := &sync.WaitGroup{}
+	done.Add(1)
+	result := make(chan Status, 10000)
+	pump := createPump(10000, logger)
+	generators := createGenerators(schema, schemaConfig, concurrency)
+	go func() {
+		defer done.Done()
+		var sp *spinner.Spinner = nil
+		if interactive() {
+			sp = createSpinner()
+		}
+		pump.Start(duration+warmup, createPumpCallback(result, sp))
+		res := sampleStatus(pump, result, sp, logger)
+		res.PrintResult(outFile)
+		for _, g := range generators {
+			g.Stop()
+		}
+	}()
+
+	launch(schema, schemaConfig, store, pump, generators, result, logger)
+	close(result)
+	done.Wait()
+}
+
+func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generators, result chan Status, logger *zap.Logger) {
+	done := &sync.WaitGroup{}
+	done.Add(1)
+	if warmup > 0 {
+		job(done, WarmupJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+	}
+	done.Wait()
+	logger.Info("Warmup done")
+	done.Add(1)
+	//job(Job, schema, schemaConfig, store, mode, outFile, logger)
+	switch mode {
+	case writeMode:
+		go job(done, MutationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+	case readMode:
+		go job(done, ValidationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+	default:
+		done.Add(1)
+		go job(done, MutationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+		go job(done, ValidationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+	}
+	done.Wait()
+	logger.Info("All jobs complete")
 }
 
 func createLogger(level string) *zap.Logger {
@@ -246,50 +239,6 @@ func createLogger(level string) *zap.Logger {
 		lvl,
 	))
 	return logger
-}
-
-func createSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
-	defaultConfig := createDefaultSchemaConfig(logger)
-	switch strings.ToLower(datasetSize) {
-	case "small":
-		return gemini.SchemaConfig{
-			CompactionStrategy: defaultConfig.CompactionStrategy,
-			MaxPartitionKeys:   defaultConfig.MaxPartitionKeys,
-			MaxClusteringKeys:  defaultConfig.MaxClusteringKeys,
-			MaxColumns:         defaultConfig.MaxColumns,
-			MaxUDTParts:        2,
-			MaxTupleParts:      2,
-			MaxBlobLength:      20,
-			MaxStringLength:    20,
-			CQLFeature:         defaultConfig.CQLFeature,
-		}
-	default:
-		return defaultConfig
-	}
-}
-
-func createDefaultSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
-	const (
-		MaxBlobLength   = 1e4
-		MinBlobLength   = 0
-		MaxStringLength = 1000
-		MinStringLength = 0
-		MaxTupleParts   = 20
-		MaxUDTParts     = 20
-	)
-	return gemini.SchemaConfig{
-		CompactionStrategy: getCompactionStrategy(compactionStrategy, logger),
-		MaxPartitionKeys:   3,
-		MaxClusteringKeys:  maxClusteringKeys,
-		MaxColumns:         maxColumns,
-		MaxUDTParts:        MaxUDTParts,
-		MaxTupleParts:      MaxTupleParts,
-		MaxBlobLength:      MaxBlobLength,
-		MinBlobLength:      MinBlobLength,
-		MaxStringLength:    MaxStringLength,
-		MinStringLength:    MinStringLength,
-		CQLFeature:         getCQLFeature(cqlFeatures),
-	}
 }
 
 func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
@@ -338,263 +287,6 @@ func getCQLFeature(feature string) gemini.CQLFeature {
 	default:
 		return gemini.CQL_FEATURE_BASIC
 	}
-}
-
-func runJob(f testJob, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, mode string, out *os.File, logger *zap.Logger) {
-	defer out.Sync()
-	logger = logger.Named("run_job")
-	c := make(chan Status, 10000)
-
-	// Wait group for the worker goroutines.
-	var workers sync.WaitGroup
-	workerCtx, workerCancel := context.WithCancel(context.Background())
-	workers.Add(len(schema.Tables) * int(concurrency))
-
-	// Wait group for the finished goroutine.
-	var finished sync.WaitGroup
-	finished.Add(1)
-
-	pump := createPump(10000, logger)
-
-	partitionRangeConfig := gemini.PartitionRangeConfig{
-		MaxBlobLength:   schemaConfig.MaxBlobLength,
-		MinBlobLength:   schemaConfig.MinBlobLength,
-		MaxStringLength: schemaConfig.MaxStringLength,
-		MinStringLength: schemaConfig.MinStringLength,
-	}
-
-	var gs []*gemini.Generators
-	for _, table := range schema.Tables {
-		gCfg := &gemini.GeneratorsConfig{
-			Table:            table,
-			Partitions:       partitionRangeConfig,
-			Size:             concurrency,
-			Seed:             seed,
-			PkBufferSize:     pkBufferSize,
-			PkUsedBufferSize: pkBufferReuseSize,
-		}
-		g := gemini.NewGenerator(gCfg)
-		gs = append(gs, g)
-		for i := 0; i < int(concurrency); i++ {
-			r := rand.New(rand.NewSource(seed))
-			go f(workerCtx, pump.ch, &workers, schema, schemaConfig, table, s, r, partitionRangeConfig, g.GetNew(i), g.GetOld(i), c, mode, warmup, logger)
-		}
-	}
-
-	go func() {
-		var sp *spinner.Spinner = nil
-		if interactive() {
-			sp = createSpinner()
-		}
-		pump.Start(duration+warmup, createPumpCallback(workerCancel, c, &workers, sp))
-		res := sampleResults(pump, c, sp, logger)
-		res.PrintResult(out)
-		for _, g := range gs {
-			g.Stop()
-		}
-		finished.Done()
-	}()
-
-	finished.Wait()
-}
-
-func sampleResults(p *Pump, c chan Status, sp *spinner.Spinner, logger *zap.Logger) Status {
-	logger = logger.Named("sample_results")
-	var testRes Status
-	done := false
-	for res := range c {
-		testRes = res.Merge(&testRes)
-		if sp != nil {
-			sp.Suffix = fmt.Sprintf(" Running Gemini... %v", testRes)
-		}
-		if testRes.ReadErrors > 0 || testRes.WriteErrors > 0 {
-			if failFast {
-				if !done {
-					done = true
-					logger.Warn("Errors detected. Exiting.")
-					p.Stop()
-				}
-			}
-		}
-	}
-	return testRes
-}
-
-func ddlJob(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, testStatus *Status, logger *zap.Logger) {
-	if sc.CQLFeature != gemini.CQL_FEATURE_ALL {
-		logger.Debug("ddl statements disabled")
-		return
-	}
-	table.Lock()
-	defer table.Unlock()
-	ddlStmts, postStmtHook, err := schema.GenDDLStmt(table, r, p, sc)
-	if err != nil {
-		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
-		testStatus.WriteErrors++
-		return
-	}
-	if ddlStmts == nil {
-		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
-			w.Write(zap.String("job", "ddl"))
-		}
-		return
-	}
-	defer postStmtHook()
-	defer func() {
-		if verbose {
-			jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
-			fmt.Printf("Schema: %v\n", string(jsonSchema))
-		}
-	}()
-	for _, ddlStmt := range ddlStmts {
-		ddlQuery := ddlStmt.Query
-		if w := logger.Check(zap.DebugLevel, "ddl statement"); w != nil {
-			w.Write(zap.String("pretty_cql", ddlStmt.PrettyCQL()))
-		}
-		if err := s.Mutate(ctx, ddlQuery); err != nil {
-			e := JobError{
-				Timestamp: time.Now(),
-				Message:   "DDL failed: " + err.Error(),
-				Query:     ddlStmt.PrettyCQL(),
-			}
-			testStatus.Errors = append(testStatus.Errors, e)
-			testStatus.WriteErrors++
-		} else {
-			testStatus.WriteOps++
-		}
-	}
-}
-
-func mutationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, newPartitionValues <-chan gemini.Value, oldPartitionValues chan gemini.Value, testStatus *Status, deletes bool, logger *zap.Logger) {
-	mutateStmt, err := schema.GenMutateStmt(table, newPartitionValues, oldPartitionValues, r, p, deletes)
-	if err != nil {
-		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
-		testStatus.WriteErrors++
-		return
-	}
-	if mutateStmt == nil {
-		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
-			w.Write(zap.String("job", "mutation"))
-		}
-		return
-	}
-	mutateQuery := mutateStmt.Query
-	mutateValues := mutateStmt.Values()
-	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
-		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
-	}
-	if err := s.Mutate(ctx, mutateQuery, mutateValues...); err != nil {
-		e := JobError{
-			Timestamp: time.Now(),
-			Message:   "Mutation failed: " + err.Error(),
-			Query:     mutateStmt.PrettyCQL(),
-		}
-		testStatus.Errors = append(testStatus.Errors, e)
-		testStatus.WriteErrors++
-	} else {
-		testStatus.WriteOps++
-	}
-}
-
-func validationJob(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, partitionValues <-chan gemini.Value, testStatus *Status, logger *zap.Logger) {
-	checkStmt := schema.GenCheckStmt(table, partitionValues, r, p)
-	if checkStmt == nil {
-		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
-			w.Write(zap.String("job", "validation"))
-		}
-		return
-	}
-	checkQuery := checkStmt.Query
-	checkValues := checkStmt.Values()
-	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
-		w.Write(zap.String("pretty_cql", checkStmt.PrettyCQL()))
-	}
-	if err := s.Check(ctx, table, checkQuery, checkValues...); err != nil {
-		// De-duplication needed?
-		e := JobError{
-			Timestamp: time.Now(),
-			Message:   "Validation failed: " + err.Error(),
-			Query:     checkStmt.PrettyCQL(),
-		}
-		testStatus.Errors = append(testStatus.Errors, e)
-		testStatus.ReadErrors++
-	} else {
-		testStatus.ReadOps++
-	}
-}
-
-type heartBeat struct {
-	sleep time.Duration
-}
-
-func (hb heartBeat) await() {
-	if hb.sleep > 0 {
-		time.Sleep(hb.sleep)
-	}
-}
-func Job(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, newValues <-chan gemini.Value, oldValues chan gemini.Value, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
-	defer wg.Done()
-
-	schemaConfig := &schemaCfg
-	mutationLogger := logger.Named("mutation_job")
-	validationLogger := logger.Named("validation_job")
-	ddlLogger := logger.Named("ddl_job")
-
-	testStatus := Status{}
-	var i int
-	warmupTimer := time.NewTimer(warmup)
-warmup:
-	for {
-		select {
-		case _, ok := <-pump:
-			if !ok {
-				logger.Debug("job terminated")
-				return
-			}
-		}
-		select {
-		case <-warmupTimer.C:
-			break warmup
-		default:
-			mutationJob(ctx, schema, schemaConfig, table, s, r, p, newValues, oldValues, &testStatus, false, mutationLogger)
-			if i%1000 == 0 {
-				c <- testStatus
-				testStatus = Status{}
-			}
-		}
-	}
-
-	for hb := range pump {
-		hb.await()
-		switch mode {
-		case writeMode:
-			mutationJob(ctx, schema, schemaConfig, table, s, r, p, newValues, oldValues, &testStatus, true, mutationLogger)
-		case readMode:
-			validationJob(ctx, schema, schemaConfig, table, s, r, p, oldValues, &testStatus, validationLogger)
-		default:
-			ind := r.Intn(1000000)
-			if ind%2 == 0 {
-				if ind%100000 == 0 {
-					ddlJob(ctx, schema, schemaConfig, table, s, r, p, &testStatus, ddlLogger)
-				} else {
-					mutationJob(ctx, schema, schemaConfig, table, s, r, p, newValues, oldValues, &testStatus, true, mutationLogger)
-				}
-			} else {
-				validationJob(ctx, schema, schemaConfig, table, s, r, p, oldValues, &testStatus, validationLogger)
-			}
-		}
-
-		if i%1000 == 0 {
-			c <- testStatus
-			testStatus = Status{}
-		}
-		if failFast && (testStatus.ReadErrors > 0 || testStatus.WriteErrors > 0) {
-			break
-		}
-		i++
-	}
-	logger.Debug("pump closed")
-	c <- testStatus
 }
 
 var rootCmd = &cobra.Command{
@@ -656,14 +348,6 @@ func printSetup() error {
 	}
 	tw.Flush()
 	return nil
-}
-
-func createSpinner() *spinner.Spinner {
-	spinnerCharSet := []string{"|", "/", "-", "\\"}
-	sp := spinner.New(spinnerCharSet, 1*time.Second)
-	_ = sp.Color("black")
-	sp.Start()
-	return sp
 }
 
 func newHeartBeat() heartBeat {

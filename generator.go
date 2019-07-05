@@ -1,24 +1,71 @@
 package gemini
 
 import (
+	"fmt"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/scylladb/gemini/murmur"
 	"golang.org/x/exp/rand"
 )
 
-type Value []interface{}
+type Source struct {
+	newValues    chan Value
+	oldValues    chan Value
+	valueCounter *prometheus.CounterVec
+	bucket       string
+}
 
-type source struct {
-	newValues chan Value
-	oldValues chan Value
+func (s *Source) Get() (Value, bool) {
+	var (
+		v  Value
+		ok bool
+	)
+	select {
+	case v, ok = <-s.newValues:
+		if !ok {
+			return nil, false
+		}
+	}
+
+	// Make a copy to allow callers to work with the slice directly
+	// Argument could be made that this is callers responsibility
+	// but we are also sending the value on down to another user of
+	// the "old" values.
+	values := make([]interface{}, len(v))
+	copy(values, v)
+	select {
+	case s.oldValues <- v:
+	default:
+		// If the channel is full i.e.
+		// the validators are slower or not started yet
+		// then we just drop the value.
+	}
+
+	s.valueCounter.WithLabelValues("new", s.bucket).Inc()
+
+	return values, true
+}
+
+func (s *Source) GetOld() (Value, bool) {
+	v, ok := <-s.oldValues
+	s.valueCounter.WithLabelValues("old", s.bucket).Inc()
+	return v, ok
+}
+
+func (s *Source) stop() {
+	fmt.Println("Closing source")
+	close(s.newValues)
 }
 
 type Generators struct {
-	generators       []*source
+	generators       []*Source
 	size             uint64
 	table            *Table
 	partitionsConfig PartitionRangeConfig
 	seed             uint64
 	done             chan struct{}
+	counter          prometheus.Counter
 }
 
 type GeneratorsConfig struct {
@@ -31,11 +78,22 @@ type GeneratorsConfig struct {
 }
 
 func NewGenerator(config *GeneratorsConfig) *Generators {
-	generators := make([]*source, config.Size)
+	valueGenerationCounter := promauto.NewCounter(prometheus.CounterOpts{
+		Name: "gemini_partition_key_value_creation",
+		Help: "How many partition keys are created",
+	})
+	valueCounter := promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "gemini_partition_key_value_consumption",
+		Help: "How many partition keys are consumed, both new ald reused 'old'",
+	}, []string{"generation", "bucket"},
+	)
+	generators := make([]*Source, config.Size)
 	for i := uint64(0); i < config.Size; i++ {
-		generators[i] = &source{
-			newValues: make(chan Value, config.PkBufferSize),
-			oldValues: make(chan Value, config.PkUsedBufferSize),
+		generators[i] = &Source{
+			newValues:    make(chan Value, config.PkBufferSize),
+			oldValues:    make(chan Value, config.PkUsedBufferSize),
+			bucket:       fmt.Sprintf("bucket_%d", i),
+			valueCounter: valueCounter,
 		}
 	}
 	gs := &Generators{
@@ -45,6 +103,7 @@ func NewGenerator(config *GeneratorsConfig) *Generators {
 		partitionsConfig: config.Partitions,
 		seed:             config.Seed,
 		done:             make(chan struct{}, 1),
+		counter:          valueGenerationCounter,
 	}
 	gs.start()
 	return gs
@@ -54,12 +113,8 @@ func (gs Generators) Stop() {
 	gs.done <- struct{}{}
 }
 
-func (gs Generators) GetNew(idx int) <-chan Value {
-	return gs.generators[idx].newValues
-}
-
-func (gs Generators) GetOld(idx int) chan Value {
-	return gs.generators[idx].oldValues
+func (gs Generators) Get(idx int) *Source {
+	return gs.generators[idx]
 }
 
 func (gs *Generators) start() {
@@ -69,6 +124,9 @@ func (gs *Generators) start() {
 		for {
 			select {
 			case <-gs.done:
+				for _, s := range gs.generators {
+					s.stop()
+				}
 				return
 			default:
 				var values []interface{}
@@ -77,25 +135,10 @@ func (gs *Generators) start() {
 				}
 				b, _ := routingKeyCreator.CreateRoutingKey(gs.table, values)
 				hash := uint64(murmur.Murmur3H1(b))
-				g := gs.generators[hash%gs.size]
-				g.newValues <- Value(values)
+				source := gs.generators[hash%gs.size]
+				source.newValues <- Value(values)
+				gs.counter.Inc()
 			}
 		}
 	}()
-}
-
-func sendIfPossible(values chan Value, value Value) {
-	select {
-	case values <- value:
-	default:
-	}
-}
-
-func recvIfPossible(values <-chan Value) (Value, bool) {
-	select {
-	case values, ok := <-values:
-		return values, ok
-	default:
-		return nil, false
-	}
 }
