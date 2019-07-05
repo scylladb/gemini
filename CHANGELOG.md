@@ -1,5 +1,9 @@
 # Changelog
 
+# Unreleased
+
+- Fix for invalid materialized view ddl statement.
+
 # 1.4.0
 
 - A `source` concept is used to coordinate the creation, consumption and reuse of

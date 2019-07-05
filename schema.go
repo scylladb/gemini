@@ -341,7 +341,7 @@ func GenSchema(sc SchemaConfig) *Schema {
 	}
 
 	var mvs []MaterializedView
-	if sc.CQLFeature > CQL_FEATURE_BASIC {
+	if sc.CQLFeature > CQL_FEATURE_BASIC && numClusteringKeys > 0 {
 		mvs = createMaterializedViews(partitionKeys, clusteringKeys, columns)
 	}
 
@@ -465,19 +465,11 @@ func (s *Schema) GetCreateSchema() []string {
 			} else {
 				createMaterializedView = "CREATE MATERIALIZED VIEW %s.%s AS SELECT * FROM %s.%s WHERE %s PRIMARY KEY ((%s)"
 			}
-			if len(mvClusteringKeys) > 0 {
-				createMaterializedView = createMaterializedView + ",%s)"
-				stmts = append(stmts, fmt.Sprintf(createMaterializedView,
-					s.Keyspace.Name, mv.Name, s.Keyspace.Name, t.Name,
-					strings.Join(mvPrimaryKeysNotNull, " AND "),
-					strings.Join(mvPartitionKeys, ","), strings.Join(t.ClusteringKeys.Names(), ",")))
-			} else {
-				createMaterializedView = createMaterializedView + ")"
-				stmts = append(stmts, fmt.Sprintf(createMaterializedView,
-					s.Keyspace.Name, mv.Name, s.Keyspace.Name, t.Name,
-					strings.Join(mvPrimaryKeysNotNull, " AND "),
-					strings.Join(mvPartitionKeys, ",")))
-			}
+			createMaterializedView = createMaterializedView + ",%s)"
+			stmts = append(stmts, fmt.Sprintf(createMaterializedView,
+				s.Keyspace.Name, mv.Name, s.Keyspace.Name, t.Name,
+				strings.Join(mvPrimaryKeysNotNull, " AND "),
+				strings.Join(mvPartitionKeys, ","), strings.Join(t.ClusteringKeys.Names(), ",")))
 		}
 	}
 	return stmts
