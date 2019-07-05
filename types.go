@@ -38,10 +38,19 @@ const (
 	TYPE_UUID      = SimpleType("uuid")
 	TYPE_VARCHAR   = SimpleType("varchar")
 	TYPE_VARINT    = SimpleType("varint")
+
+	protoDirectionMask = 0x80
+	protoVersionMask   = 0x7F
+	protoVersion1      = 0x01
+	protoVersion2      = 0x02
+	protoVersion3      = 0x03
+	protoVersion4      = 0x04
+	protoVersion5      = 0x05
 )
 
 // TODO: Add support for time when gocql bug is fixed.
 var (
+	partitionKeyTypes     = []SimpleType{TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT, TYPE_VARINT}
 	pkTypes               = []SimpleType{TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT /*TYPE_TIME,*/, TYPE_TIMESTAMP, TYPE_TIMEUUID, TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT}
 	types                 = append(append([]SimpleType{}, pkTypes...), TYPE_BOOLEAN, TYPE_DURATION)
 	compatibleColumnTypes = map[SimpleType][]SimpleType{
@@ -606,6 +615,10 @@ func genMapType(sc *SchemaConfig) MapType {
 		ValueType: genSimpleType(sc),
 		Frozen:    rand.Uint32()%2 == 0,
 	}
+}
+
+func genPartitionKeyColumnType() Type {
+	return partitionKeyTypes[rand.Intn(len(partitionKeyTypes))]
 }
 
 func genPrimaryKeyColumnType() Type {

@@ -23,6 +23,8 @@ const (
 	KnownIssuesJsonWithTuples = "https://github.com/scylladb/scylla/issues/3708"
 )
 
+type Value []interface{}
+
 type SchemaConfig struct {
 	CompactionStrategy *CompactionStrategy
 	MaxPartitionKeys   int
@@ -321,7 +323,7 @@ func GenSchema(sc SchemaConfig) *Schema {
 	var partitionKeys []ColumnDef
 	numPartitionKeys := rand.Intn(sc.MaxPartitionKeys-1) + 1
 	for i := 0; i < numPartitionKeys; i++ {
-		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: genPrimaryKeyColumnType()})
+		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: genPartitionKeyColumnType()})
 	}
 	var clusteringKeys []ColumnDef
 	numClusteringKeys := rand.Intn(sc.MaxClusteringKeys)
@@ -481,7 +483,7 @@ func (s *Schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *Schema) GenInsertStmt(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) GenInsertStmt(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -494,15 +496,10 @@ func (s *Schema) GenInsertStmt(t *Table, newPartitionValues <-chan Value, oldPar
 		typs = append(typs, pk.Type)
 	}
 
-	vals, ok := <-newPartitionValues
+	values, ok := source.Get()
 	if !ok {
 		return nil, nil
 	}
-	values := make([]interface{}, len(vals))
-	copy(values, vals)
-	defer func() {
-		sendIfPossible(oldPartitionValues, vals)
-	}()
 	for _, ck := range t.ClusteringKeys {
 		builder = builder.Columns(ck.Name)
 		values = appendValue(ck.Type, r, p, values)
@@ -527,11 +524,11 @@ func (s *Schema) GenInsertStmt(t *Table, newPartitionValues <-chan Value, oldPar
 	}, nil
 }
 
-func (s *Schema) GenInsertJsonStmt(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) GenInsertJsonStmt(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	vals, ok := recvIfPossible(newPartitionValues)
+	vals, ok := source.Get()
 	if !ok {
 		return nil, nil
 	}
@@ -585,7 +582,7 @@ func (s *Schema) GenInsertJsonStmt(t *Table, newPartitionValues <-chan Value, ol
 	}, nil
 }
 
-func (s *Schema) GenDeleteRows(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) GenDeleteRows(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -598,15 +595,10 @@ func (s *Schema) GenDeleteRows(t *Table, newPartitionValues <-chan Value, oldPar
 		typs = append(typs, pk.Type)
 	}
 
-	vals, ok := <-newPartitionValues
+	values, ok := source.Get()
 	if !ok {
 		return nil, nil
 	}
-	values := make([]interface{}, len(vals))
-	copy(values, vals)
-	defer func() {
-		sendIfPossible(oldPartitionValues, vals)
-	}()
 	if len(t.ClusteringKeys) > 0 {
 		ck := t.ClusteringKeys[0]
 		builder = builder.Where(qb.GtOrEq(ck.Name)).Where(qb.LtOrEq(ck.Name))
@@ -634,30 +626,30 @@ func (s *Schema) GenDDLStmt(t *Table, r *rand.Rand, p PartitionRangeConfig, sc *
 	}
 }
 
-func (s *Schema) GenMutateStmt(t *Table, newPartitionValues <-chan Value, oldPartitionValues chan Value, r *rand.Rand, p PartitionRangeConfig, deletes bool) (*Stmt, error) {
+func (s *Schema) GenMutateStmt(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig, deletes bool) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	if !deletes {
-		return s.GenInsertStmt(t, newPartitionValues, oldPartitionValues, r, p)
+		return s.GenInsertStmt(t, source, r, p)
 	}
 	switch n := rand.Intn(1000); n {
 	case 10, 100:
-		return s.GenDeleteRows(t, newPartitionValues, oldPartitionValues, r, p)
+		return s.GenDeleteRows(t, source, r, p)
 	default:
 		switch n := rand.Intn(2); n {
 		case 0:
 			if t.KnownIssues[KnownIssuesJsonWithTuples] {
-				return s.GenInsertStmt(t, newPartitionValues, oldPartitionValues, r, p)
+				return s.GenInsertStmt(t, source, r, p)
 			}
-			return s.GenInsertJsonStmt(t, newPartitionValues, oldPartitionValues, r, p)
+			return s.GenInsertJsonStmt(t, source, r, p)
 		default:
-			return s.GenInsertStmt(t, newPartitionValues, oldPartitionValues, r, p)
+			return s.GenInsertStmt(t, source, r, p)
 		}
 	}
 }
 
-func (s *Schema) GenCheckStmt(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) GenCheckStmt(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	var n int
 	if len(t.Indexes) > 0 {
 		n = r.Intn(5)
@@ -666,20 +658,20 @@ func (s *Schema) GenCheckStmt(t *Table, partitionValues <-chan Value, r *rand.Ra
 	}
 	switch n {
 	case 0:
-		return s.genSinglePartitionQuery(t, partitionValues, r, p)
+		return s.genSinglePartitionQuery(t, source, r, p)
 	case 1:
-		return s.genMultiplePartitionQuery(t, partitionValues, r, p)
+		return s.genMultiplePartitionQuery(t, source, r, p)
 	case 2:
-		return s.genClusteringRangeQuery(t, partitionValues, r, p)
+		return s.genClusteringRangeQuery(t, source, r, p)
 	case 3:
-		return s.genMultiplePartitionClusteringRangeQuery(t, partitionValues, r, p)
+		return s.genMultiplePartitionClusteringRangeQuery(t, source, r, p)
 	case 4:
-		return s.genSingleIndexQuery(t, partitionValues, r, p)
+		return s.genSingleIndexQuery(t, source, r, p)
 	}
 	return nil
 }
 
-func (s *Schema) genSinglePartitionQuery(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genSinglePartitionQuery(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -698,7 +690,7 @@ func (s *Schema) genSinglePartitionQuery(t *Table, partitionValues <-chan Value,
 		builder = builder.Where(qb.Eq(pk.Name))
 		typs = append(typs, pk.Type)
 	}
-	values, ok := recvIfPossible(partitionValues)
+	values, ok := source.GetOld()
 	if !ok {
 		return nil
 	}
@@ -711,7 +703,7 @@ func (s *Schema) genSinglePartitionQuery(t *Table, partitionValues <-chan Value,
 	}
 }
 
-func (s *Schema) genMultiplePartitionQuery(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genMultiplePartitionQuery(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -737,7 +729,7 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, partitionValues <-chan Valu
 	for i, pk := range partitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, pkNum))
 		for j := 0; j < pkNum; j++ {
-			vs, ok := recvIfPossible(partitionValues)
+			vs, ok := source.GetOld()
 			if !ok {
 				return nil
 			}
@@ -754,7 +746,7 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, partitionValues <-chan Valu
 	}
 }
 
-func (s *Schema) genClusteringRangeQuery(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genClusteringRangeQuery(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -773,7 +765,7 @@ func (s *Schema) genClusteringRangeQuery(t *Table, partitionValues <-chan Value,
 			clusteringKeys = t.MaterializedViews[view].ClusteringKeys
 		}*/
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
-	values, ok := recvIfPossible(partitionValues)
+	values, ok := source.GetOld()
 	if !ok {
 		// Done or no values available...
 		return nil
@@ -803,7 +795,7 @@ func (s *Schema) genClusteringRangeQuery(t *Table, partitionValues <-chan Value,
 	}
 }
 
-func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -830,7 +822,7 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, partitionVal
 	for i, pk := range partitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, pkNum))
 		for j := 0; j < pkNum; j++ {
-			vs, ok := recvIfPossible(partitionValues)
+			vs, ok := source.GetOld()
 			if !ok {
 				return nil
 			}
@@ -859,7 +851,7 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, partitionVal
 	}
 }
 
-func (s *Schema) genSingleIndexQuery(t *Table, partitionValues <-chan Value, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genSingleIndexQuery(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -877,7 +869,7 @@ func (s *Schema) genSingleIndexQuery(t *Table, partitionValues <-chan Value, r *
 		pkNum = 1
 	}
 	*/
-	values, ok := recvIfPossible(partitionValues)
+	values, ok := source.GetOld()
 	if !ok {
 		return nil
 	}

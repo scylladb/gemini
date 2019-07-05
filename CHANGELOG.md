@@ -1,5 +1,16 @@
 # Changelog
 
+# Unreleased
+
+- A `source` concept is used to coordinate the creation, consumption and reuse of
+  partition keys.
+- Two new CLI args are introduced to control the buffer sizes of the new and reusable
+  partition keys `partition-key-buffer-size` and `partition-key-buffer-reuse-size`.
+- The CLI arg `concurrency` now means the total number of actors per job type. 
+  You may need to scale down your settings for this argument since for example a
+  mixed mode execution will run with twice as many goroutines. Experimentation is
+  encouraged since a high number will also yield much greater throughput.
+
 ## 1.3.4
 
 - Shutdown is no longer waiting for the warmup phase to complete.
