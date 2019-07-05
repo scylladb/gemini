@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -56,6 +57,9 @@ func lt(mi, mj map[string]interface{}) bool {
 	case time.Time:
 		mjs, _ := mj["pk0"].(time.Time)
 		return mis.UnixNano() < mjs.UnixNano()
+	case *big.Int:
+		mjs, _ := mj["pk0"].(*big.Int)
+		return mis.Cmp(mjs) > 0
 	default:
 		msg := fmt.Sprintf("unhandled type %T\n", mis)
 		time.Sleep(time.Second)
