@@ -260,7 +260,7 @@ func (st SimpleType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{
 	case TYPE_FLOAT:
 		val = r.Float32()
 	case TYPE_INET:
-		val = net.ParseIP(randIpV4Address(r, r.Intn(255), 2))
+		val = net.ParseIP(randIpV4Address(r, r.Intn(255), 2)).String()
 	case TYPE_INT:
 		val = r.Int31()
 	case TYPE_SMALLINT:
