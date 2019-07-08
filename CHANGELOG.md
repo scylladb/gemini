@@ -2,6 +2,7 @@
 
 # Unreleased
 
+- Index queries reapplied with low frequency for certain types.
 - Fix for invalid materialized view ddl statement.
 
 # 1.4.0

@@ -59,8 +59,9 @@ type Type interface {
 }
 
 type IndexDef struct {
-	Name   string `json:"name"`
-	Column string `json:"column"`
+	Name      string `json:"name"`
+	Column    string `json:"column"`
+	ColumnIdx int    `json:"column_idx"`
 }
 
 type Columns []ColumnDef
@@ -367,13 +368,23 @@ func GenSchema(sc SchemaConfig) *Schema {
 }
 
 func createIndexes(numColumns int, columns []ColumnDef) []IndexDef {
-	var indexes []IndexDef
-	if numColumns > 0 {
-		numIndexes := rand.Intn(numColumns)
-		for i := 0; i < numIndexes; i++ {
-			if columns[i].Type.Indexable() {
-				indexes = append(indexes, IndexDef{Name: genIndexName("col", i), Column: columns[i].Name})
-			}
+	if numColumns <= 0 {
+		return nil
+	}
+	numIndexes := rand.Intn(numColumns)
+	if numIndexes == 0 {
+		// Always try to create at least 1 index
+		numIndexes = 1
+	}
+	createdCount := 0
+	indexes := make([]IndexDef, 0, numIndexes)
+	for i, col := range columns {
+		if col.Type.Indexable() && typeIn(col, typesForIndex) {
+			indexes = append(indexes, IndexDef{Name: genIndexName("col", i), Column: col.Name, ColumnIdx: i})
+			createdCount++
+		}
+		if createdCount == numIndexes {
+			break
 		}
 	}
 	return indexes
@@ -658,7 +669,14 @@ func (s *Schema) GenCheckStmt(t *Table, source *Source, r *rand.Rand, p Partitio
 	case 3:
 		return s.genMultiplePartitionClusteringRangeQuery(t, source, r, p)
 	case 4:
-		return s.genSingleIndexQuery(t, source, r, p)
+		// Reducing the probability to hit these since they often take a long time to run
+		n := r.Intn(5)
+		switch n {
+		case 0:
+			return s.genSingleIndexQuery(t, source, r, p)
+		default:
+			return s.genSinglePartitionQuery(t, source, r, p)
+		}
 	}
 	return nil
 }
@@ -848,7 +866,8 @@ func (s *Schema) genSingleIndexQuery(t *Table, source *Source, r *rand.Rand, p P
 	defer t.mu.RUnlock()
 
 	var (
-		typs []Type
+		values []interface{}
+		typs   []Type
 	)
 
 	if len(t.Indexes) == 0 {
@@ -861,22 +880,12 @@ func (s *Schema) genSingleIndexQuery(t *Table, source *Source, r *rand.Rand, p P
 		pkNum = 1
 	}
 	*/
-	values, ok := source.GetOld()
-	if !ok {
-		return nil
-	}
-	pkNum := len(t.PartitionKeys)
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
-	partitionKeys := t.PartitionKeys
-	for i := 0; i < pkNum; i++ {
-		pk := partitionKeys[i]
-		builder = builder.Where(qb.Eq(pk.Name))
-		typs = append(typs, pk.Type)
+	for _, idx := range t.Indexes {
+		builder = builder.Where(qb.Eq(idx.Column))
+		values = appendValue(t.Columns[idx.ColumnIdx].Type, r, p, values)
+		typs = append(typs, t.Columns[idx.ColumnIdx].Type)
 	}
-	idx := r.Intn(len(t.Indexes))
-	builder = builder.Where(qb.Eq(t.Indexes[idx].Column))
-	values = appendValue(t.Columns[idx].Type, r, p, values)
-	typs = append(typs, t.Columns[idx].Type)
 	return &Stmt{
 		Query: builder,
 		Values: func() []interface{} {
