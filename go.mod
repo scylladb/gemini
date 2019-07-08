@@ -23,9 +23,8 @@ require (
 	go.uber.org/zap v1.10.0
 	golang.org/x/exp v0.0.0-20190510132918-efd6b22b2522
 	golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3
-	golang.org/x/tools v0.0.0-20190621195816-6e04913cbbac
+	golang.org/x/sys v0.0.0-20190412213103-97732733099d // indirect
 	gopkg.in/inf.v0 v0.9.1
-	honnef.co/go/tools v0.0.0-2019.2.1 // indirect
 )
 
-replace github.com/gocql/gocql => github.com/scylladb/gocql v1.1.0
+replace github.com/gocql/gocql => github.com/scylladb/gocql v1.2.0

@@ -1,5 +1,9 @@
 # Changelog
 
+# Unreleased 
+
+- Upgraded driver to 1.2.0
+
 # v1.4.1
 
 - Bug in shutdown handling that caused deadlock is fixed.
