@@ -42,8 +42,7 @@ func (p *Pump) Start(d time.Duration, postFunc func()) {
 			case <-timer.C:
 				p.logger.Info("Test run completed. Exiting.")
 				return
-			default:
-				p.ch <- newHeartBeat()
+			case p.ch <- newHeartBeat():
 			}
 		}
 	}()
