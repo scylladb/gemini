@@ -1,7 +1,8 @@
 # Changelog
 
-# Unreleased
+# v1.4.1
 
+- Bug in shutdown handling that caused deadlock is fixed.
 - Index queries reapplied with low frequency for certain types.
 - Fix for invalid materialized view ddl statement.
 
