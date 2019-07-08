@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/briandowns/spinner"
 	"github.com/pkg/errors"
@@ -62,9 +63,9 @@ func (r Status) String() string {
 }
 
 func sampleStatus(p *Pump, c chan Status, sp *spinner.Spinner, logger *zap.Logger) Status {
+	failfastDone := sync.Once{}
 	logger = logger.Named("sample_results")
 	var testRes Status
-	done := false
 	for res := range c {
 		testRes = res.Merge(&testRes)
 		if sp != nil {
@@ -72,11 +73,10 @@ func sampleStatus(p *Pump, c chan Status, sp *spinner.Spinner, logger *zap.Logge
 		}
 		if testRes.ReadErrors > 0 || testRes.WriteErrors > 0 {
 			if failFast {
-				if !done {
-					done = true
+				failfastDone.Do(func() {
 					logger.Warn("Errors detected. Exiting.")
 					p.Stop()
-				}
+				})
 			}
 		}
 	}
