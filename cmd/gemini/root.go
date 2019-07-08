@@ -211,8 +211,8 @@ func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store
 	}
 	done.Wait()
 	logger.Info("Warmup done")
+	done = &sync.WaitGroup{}
 	done.Add(1)
-	//job(Job, schema, schemaConfig, store, mode, outFile, logger)
 	switch mode {
 	case writeMode:
 		go job(done, MutationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
