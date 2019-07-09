@@ -14,6 +14,7 @@ type Source struct {
 	oldValues    chan Value
 	valueCounter *prometheus.CounterVec
 	bucket       string
+	meter        prometheus.Gauge
 }
 
 func (s *Source) Get() (Value, bool) {
@@ -42,6 +43,7 @@ func (s *Source) Get() (Value, bool) {
 		// then we just drop the value.
 	}
 
+	s.meter.Dec()
 	s.valueCounter.WithLabelValues("new", s.bucket).Inc()
 
 	return values, true
@@ -54,7 +56,6 @@ func (s *Source) GetOld() (Value, bool) {
 }
 
 func (s *Source) stop() {
-	fmt.Println("Closing source")
 	close(s.newValues)
 }
 
@@ -65,7 +66,6 @@ type Generators struct {
 	partitionsConfig PartitionRangeConfig
 	seed             uint64
 	done             chan struct{}
-	counter          prometheus.Counter
 }
 
 type GeneratorsConfig struct {
@@ -78,10 +78,6 @@ type GeneratorsConfig struct {
 }
 
 func NewGenerator(config *GeneratorsConfig) *Generators {
-	valueGenerationCounter := promauto.NewCounter(prometheus.CounterOpts{
-		Name: "gemini_partition_key_value_creation",
-		Help: "How many partition keys are created",
-	})
 	valueCounter := promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gemini_partition_key_value_consumption",
 		Help: "How many partition keys are consumed, both new ald reused 'old'",
@@ -94,6 +90,10 @@ func NewGenerator(config *GeneratorsConfig) *Generators {
 			oldValues:    make(chan Value, config.PkUsedBufferSize),
 			bucket:       fmt.Sprintf("bucket_%d", i),
 			valueCounter: valueCounter,
+			meter: promauto.NewGauge(prometheus.GaugeOpts{
+				Name: fmt.Sprintf("gemini_partition_key_source_meter_bucket_%d", i),
+				Help: "How many values the source has in it's buffer",
+			}),
 		}
 	}
 	gs := &Generators{
@@ -103,7 +103,6 @@ func NewGenerator(config *GeneratorsConfig) *Generators {
 		partitionsConfig: config.Partitions,
 		seed:             config.Seed,
 		done:             make(chan struct{}, 1),
-		counter:          valueGenerationCounter,
 	}
 	gs.start()
 	return gs
@@ -138,7 +137,7 @@ func (gs *Generators) start() {
 				source := gs.generators[hash%gs.size]
 				select {
 				case source.newValues <- Value(values):
-					gs.counter.Inc()
+					source.meter.Inc()
 				default:
 					// Ignore, the source is full
 				}
