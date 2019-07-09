@@ -10,11 +10,12 @@ import (
 )
 
 type Source struct {
-	newValues    chan Value
-	oldValues    chan Value
-	valueCounter *prometheus.CounterVec
-	bucket       string
-	meter        prometheus.Gauge
+	newValues      chan Value
+	oldValues      chan Value
+	valueCounter   *prometheus.CounterVec
+	bucket         string
+	newValuesMeter prometheus.Gauge
+	oldValuesMeter prometheus.Gauge
 }
 
 func (s *Source) Get() (Value, bool) {
@@ -37,26 +38,35 @@ func (s *Source) Get() (Value, bool) {
 	copy(values, v)
 	select {
 	case s.oldValues <- v:
+		s.oldValuesMeter.Inc()
 	default:
 		// If the channel is full i.e.
 		// the validators are slower or not started yet
 		// then we just drop the value.
 	}
 
-	s.meter.Dec()
+	s.newValuesMeter.Dec()
 	s.valueCounter.WithLabelValues("new", s.bucket).Inc()
 
 	return values, true
 }
 
 func (s *Source) GetOld() (Value, bool) {
-	v, ok := <-s.oldValues
-	s.valueCounter.WithLabelValues("old", s.bucket).Inc()
-	return v, ok
+	select {
+	case v, ok := <-s.oldValues:
+		if ok {
+			s.oldValuesMeter.Dec()
+		}
+		s.valueCounter.WithLabelValues("old", s.bucket).Inc()
+		return v, ok
+	default:
+	}
+	return nil, false
 }
 
 func (s *Source) stop() {
 	close(s.newValues)
+	close(s.oldValues)
 }
 
 type Generators struct {
@@ -90,9 +100,13 @@ func NewGenerator(config *GeneratorsConfig) *Generators {
 			oldValues:    make(chan Value, config.PkUsedBufferSize),
 			bucket:       fmt.Sprintf("bucket_%d", i),
 			valueCounter: valueCounter,
-			meter: promauto.NewGauge(prometheus.GaugeOpts{
-				Name: fmt.Sprintf("gemini_partition_key_source_meter_bucket_%d", i),
-				Help: "How many values the source has in it's buffer",
+			newValuesMeter: promauto.NewGauge(prometheus.GaugeOpts{
+				Name: fmt.Sprintf("gemini_partition_key_source_new_bucket_%d", i),
+				Help: "How many values the source has in it's new buffer",
+			}),
+			oldValuesMeter: promauto.NewGauge(prometheus.GaugeOpts{
+				Name: fmt.Sprintf("gemini_partition_key_source_old_bucket_%d", i),
+				Help: "How many values the source has in it's old buffer",
 			}),
 		}
 	}
@@ -137,7 +151,7 @@ func (gs *Generators) start() {
 				source := gs.generators[hash%gs.size]
 				select {
 				case source.newValues <- Value(values):
-					source.meter.Inc()
+					source.newValuesMeter.Inc()
 				default:
 					// Ignore, the source is full
 				}
