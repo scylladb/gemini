@@ -2,6 +2,7 @@
 
 # Unreleased 
 
+- Primary key generation no longer blocks if the targeted source is full.
 - Upgraded driver to 1.2.0
 
 # v1.4.1
