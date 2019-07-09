@@ -204,14 +204,14 @@ func run(cmd *cobra.Command, args []string) {
 }
 
 func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generators, result chan Status, logger *zap.Logger) {
-	done := &sync.WaitGroup{}
-	done.Add(1)
 	if warmup > 0 {
+		done := &sync.WaitGroup{}
+		done.Add(1)
 		job(done, WarmupJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+		done.Wait()
+		logger.Info("Warmup done")
 	}
-	done.Wait()
-	logger.Info("Warmup done")
-	done = &sync.WaitGroup{}
+	done := &sync.WaitGroup{}
 	done.Add(1)
 	switch mode {
 	case writeMode:
