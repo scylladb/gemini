@@ -136,8 +136,12 @@ func (gs *Generators) start() {
 				b, _ := routingKeyCreator.CreateRoutingKey(gs.table, values)
 				hash := uint64(murmur.Murmur3H1(b))
 				source := gs.generators[hash%gs.size]
-				source.newValues <- Value(values)
-				gs.counter.Inc()
+				select {
+				case source.newValues <- Value(values):
+					gs.counter.Inc()
+				default:
+					// Ignore, the source is full
+				}
 			}
 		}
 	}()
