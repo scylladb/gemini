@@ -1,7 +1,8 @@
 # Changelog
 
-# Unreleased 
+# 1.4.2 
 
+- Reused primary keys does no longer block the caller if none are available.
 - Primary key generation no longer blocks if the targeted source is full.
 - Upgraded driver to 1.2.0
 
