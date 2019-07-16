@@ -50,6 +50,10 @@ const (
 
 // TODO: Add support for time when gocql bug is fixed.
 var (
+	typesMapKeyBlacklist = map[SimpleType]struct{}{
+		TYPE_BLOB:     {},
+		TYPE_DURATION: {},
+	}
 	typesForIndex         = []SimpleType{TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT, TYPE_VARINT}
 	partitionKeyTypes     = []SimpleType{TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT, TYPE_VARINT}
 	pkTypes               = []SimpleType{TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT /*TYPE_TIME,*/, TYPE_TIMESTAMP, TYPE_TIMEUUID, TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT}
@@ -604,10 +608,9 @@ func genBagType(kind string, sc *SchemaConfig) BagType {
 }
 
 func genMapType(sc *SchemaConfig) MapType {
-	var t SimpleType
+	t := genSimpleType(sc)
 	for {
-		t = genSimpleType(sc)
-		if t != TYPE_DURATION {
+		if _, ok := typesMapKeyBlacklist[t]; !ok {
 			break
 		}
 	}
