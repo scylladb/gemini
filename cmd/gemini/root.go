@@ -192,7 +192,7 @@ func run(cmd *cobra.Command, args []string) {
 		}
 		pump.Start(duration+warmup, createPumpCallback(result, sp))
 		res := sampleStatus(pump, result, sp, logger)
-		res.PrintResult(outFile)
+		res.PrintResult(outFile, schema)
 		for _, g := range generators {
 			g.Stop()
 		}
