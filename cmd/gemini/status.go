@@ -8,6 +8,7 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/pkg/errors"
+	"github.com/scylladb/gemini"
 	"go.uber.org/zap"
 )
 
@@ -28,8 +29,8 @@ func (r *Status) Merge(sum *Status) Status {
 	return *sum
 }
 
-func (r *Status) PrintResult(w io.Writer) {
-	if err := r.PrintResultAsJSON(w); err != nil {
+func (r *Status) PrintResult(w io.Writer, schema *gemini.Schema) {
+	if err := r.PrintResultAsJSON(w, schema); err != nil {
 		// In case there has been it has been a long run we want to display it anyway...
 		fmt.Printf("Unable to print result as json, using plain text to stdout, error=%s\n", err)
 		fmt.Printf("Gemini version: %s\n", version)
@@ -41,17 +42,20 @@ func (r *Status) PrintResult(w io.Writer) {
 		for i, err := range r.Errors {
 			fmt.Printf("Error %d: %s\n", i, err)
 		}
+		jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
+		fmt.Printf("Schema: %v\n", string(jsonSchema))
 	}
 }
 
-func (r *Status) PrintResultAsJSON(w io.Writer) error {
+func (r *Status) PrintResultAsJSON(w io.Writer, schema *gemini.Schema) error {
 	result := map[string]interface{}{
 		"result":         r,
 		"gemini_version": version,
+		"schema":         schema,
 	}
 	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
-	encoder.SetIndent(" ", " ")
+	encoder.SetIndent(" ", "    ")
 	if err := encoder.Encode(result); err != nil {
 		return errors.Wrap(err, "unable to create json from result")
 	}
