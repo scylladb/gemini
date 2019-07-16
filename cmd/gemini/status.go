@@ -66,6 +66,10 @@ func (r Status) String() string {
 	return fmt.Sprintf("write ops: %v | read ops: %v | write errors: %v | read errors: %v", r.WriteOps, r.ReadOps, r.WriteErrors, r.ReadErrors)
 }
 
+func (r Status) HasErrors() bool {
+	return r.WriteErrors > 0 || r.ReadErrors > 0
+}
+
 func sampleStatus(p *Pump, c chan Status, sp *spinner.Spinner, logger *zap.Logger) Status {
 	failfastDone := sync.Once{}
 	logger = logger.Named("sample_results")
