@@ -16,6 +16,7 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/gocql/gocql"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/gemini/store"
@@ -107,7 +108,7 @@ func (cb createBuilder) ToCql() (stmt string, names []string) {
 	return cb.stmt, nil
 }
 
-func run(cmd *cobra.Command, args []string) {
+func run(cmd *cobra.Command, args []string) error {
 	logger := createLogger(level)
 	defer logger.Sync()
 
@@ -123,16 +124,14 @@ func run(cmd *cobra.Command, args []string) {
 	}()
 
 	if err := printSetup(); err != nil {
-		logger.Error("unable to print setup", zap.Error(err))
-		return
+		return errors.Wrapf(err, "unable to print setup")
 	}
 
 	outFile := os.Stdout
 	if outFileArg != "" {
 		of, err := os.Create(outFileArg)
 		if err != nil {
-			logger.Error("Unable to open output file", zap.String("file", outFileArg), zap.Error(err))
-			return
+			return errors.Wrapf(err, "Unable to open output file %s", outFileArg)
 		}
 		outFile = of
 	}
@@ -144,8 +143,7 @@ func run(cmd *cobra.Command, args []string) {
 		var err error
 		schema, err = readSchema(schemaFile)
 		if err != nil {
-			logger.Error("cannot create schema", zap.Error(err))
-			return
+			return errors.Wrap(err, "cannot create schema")
 		}
 	} else {
 		schema = gemini.GenSchema(schemaConfig)
@@ -166,22 +164,21 @@ func run(cmd *cobra.Command, args []string) {
 		for _, stmt := range schema.GetDropSchema() {
 			logger.Debug(stmt)
 			if err := store.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
-				logger.Error("unable to drop schema", zap.Error(err))
-				return
+				return errors.Wrap(err, "unable to drop schema")
 			}
 		}
 	}
 	for _, stmt := range schema.GetCreateSchema() {
 		logger.Debug(stmt)
 		if err := store.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
-			logger.Error("unable to create schema", zap.Error(err))
-			return
+			return errors.Wrap(err, "unable to create schema")
 		}
 	}
 
 	done := &sync.WaitGroup{}
 	done.Add(1)
 	result := make(chan Status, 10000)
+	endResult := make(chan Status, 1)
 	pump := createPump(10000, logger)
 	generators := createGenerators(schema, schemaConfig, concurrency)
 	go func() {
@@ -191,8 +188,7 @@ func run(cmd *cobra.Command, args []string) {
 			sp = createSpinner()
 		}
 		pump.Start(duration+warmup, createPumpCallback(result, sp))
-		res := sampleStatus(pump, result, sp, logger)
-		res.PrintResult(outFile, schema)
+		endResult <- sampleStatus(pump, result, sp, logger)
 		for _, g := range generators {
 			g.Stop()
 		}
@@ -201,6 +197,12 @@ func run(cmd *cobra.Command, args []string) {
 	launch(schema, schemaConfig, store, pump, generators, result, logger)
 	close(result)
 	done.Wait()
+	res := <-endResult
+	res.PrintResult(outFile, schema)
+	if res.HasErrors() {
+		return errors.Errorf("gemini encountered errors, exiting with non zero status")
+	}
+	return nil
 }
 
 func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generators, result chan Status, logger *zap.Logger) {
@@ -290,12 +292,10 @@ func getCQLFeature(feature string) gemini.CQLFeature {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "gemini",
-	Short: "Gemini is an automatic random testing tool for Scylla.",
-	Run:   run,
-}
-
-func Execute() {
+	Use:          "gemini",
+	Short:        "Gemini is an automatic random testing tool for Scylla.",
+	RunE:         run,
+	SilenceUsage: true,
 }
 
 func init() {
