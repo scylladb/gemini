@@ -6,6 +6,82 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
+func TestSchemaConfigValidate(t *testing.T) {
+
+	tests := map[string]struct {
+		config *SchemaConfig
+		want   error
+	}{
+		"empty": {
+			config: &SchemaConfig{},
+			want:   SchemaConfigInvalidPK,
+		},
+		"valid": {
+			config: &SchemaConfig{
+				MaxPartitionKeys:  3,
+				MinPartitionKeys:  2,
+				MaxClusteringKeys: 3,
+				MinClusteringKeys: 2,
+				MaxColumns:        3,
+				MinColumns:        2,
+			},
+			want: nil,
+		},
+		"min_pk_gt_than_max_pk": {
+			config: &SchemaConfig{
+				MaxPartitionKeys: 2,
+				MinPartitionKeys: 3,
+			},
+			want: SchemaConfigInvalidPK,
+		},
+		"ck_missing": {
+			config: &SchemaConfig{
+				MaxPartitionKeys: 3,
+				MinPartitionKeys: 2,
+			},
+			want: SchemaConfigInvalidCK,
+		},
+		"min_ck_gt_than_max_ck": {
+			config: &SchemaConfig{
+				MaxPartitionKeys:  3,
+				MinPartitionKeys:  2,
+				MaxClusteringKeys: 2,
+				MinClusteringKeys: 3,
+			},
+			want: SchemaConfigInvalidCK,
+		},
+		"columns_missing": {
+			config: &SchemaConfig{
+				MaxPartitionKeys:  3,
+				MinPartitionKeys:  2,
+				MaxClusteringKeys: 3,
+				MinClusteringKeys: 2,
+			},
+			want: SchemaConfigInvalidCols,
+		},
+		"min_cols_gt_than_max_cols": {
+			config: &SchemaConfig{
+				MaxPartitionKeys:  3,
+				MinPartitionKeys:  2,
+				MaxClusteringKeys: 3,
+				MinClusteringKeys: 2,
+				MaxColumns:        2,
+				MinColumns:        3,
+			},
+			want: SchemaConfigInvalidCols,
+		},
+	}
+	cmp.AllowUnexported()
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := test.config.Valid()
+			if got != test.want {
+				t.Fatalf("expected '%s', got '%s'", test.want, got)
+			}
+		})
+	}
+}
+
 func TestGetCreateSchema(t *testing.T) {
 	ks := Keyspace{Name: "ks1"}
 	tests := map[string]struct {
