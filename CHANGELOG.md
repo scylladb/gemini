@@ -1,6 +1,6 @@
 # Changelog
 
-# Unreleased
+# 1.4.3
 
 - Bugfix that makes sure that when a job terminates early, the result status is
   properly sent to the collector.
