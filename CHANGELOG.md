@@ -1,5 +1,10 @@
 # Changelog
 
+# Unreleased
+
+- Bugfix that makes sure that when a job terminates early, the result status is
+  properly sent to the collector.
+
 # 1.4.2 
 
 - Reused primary keys does no longer block the caller if none are available.

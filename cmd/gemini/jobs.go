@@ -34,6 +34,7 @@ func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup,
 			testStatus = Status{}
 		}
 		if failFast && (testStatus.ReadErrors > 0 || testStatus.WriteErrors > 0) {
+			c <- testStatus
 			break
 		}
 		i++
@@ -57,6 +58,7 @@ func ValidationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGrou
 			testStatus = Status{}
 		}
 		if failFast && (testStatus.ReadErrors > 0 || testStatus.WriteErrors > 0) {
+			c <- testStatus
 			break
 		}
 		i++
@@ -76,6 +78,7 @@ func WarmupJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, s
 		case _, ok := <-pump:
 			if !ok {
 				logger.Info("warmup job terminated")
+				c <- testStatus
 				return
 			}
 		}
