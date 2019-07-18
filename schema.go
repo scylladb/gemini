@@ -28,8 +28,11 @@ type Value []interface{}
 type SchemaConfig struct {
 	CompactionStrategy *CompactionStrategy
 	MaxPartitionKeys   int
+	MinPartitionKeys   int
 	MaxClusteringKeys  int
+	MinClusteringKeys  int
 	MaxColumns         int
+	MinColumns         int
 	MaxUDTParts        int
 	MaxTupleParts      int
 	MaxBlobLength      int
@@ -37,6 +40,49 @@ type SchemaConfig struct {
 	MinBlobLength      int
 	MinStringLength    int
 	CQLFeature         CQLFeature
+}
+
+var (
+	SchemaConfigInvalidPK   = errors.New("max number of partition keys must be bigger than min number of partition keys")
+	SchemaConfigInvalidCK   = errors.New("max number of clustering keys must be bigger than min number of clustering keys")
+	SchemaConfigInvalidCols = errors.New("max number of columns must be bigger than min number of columns")
+)
+
+func (sc *SchemaConfig) Valid() error {
+	if sc.MaxPartitionKeys <= sc.MinPartitionKeys {
+		return SchemaConfigInvalidPK
+	}
+	if sc.MaxClusteringKeys <= sc.MinClusteringKeys {
+		return SchemaConfigInvalidCK
+	}
+	if sc.MaxColumns <= sc.MinClusteringKeys {
+		return SchemaConfigInvalidCols
+	}
+	return nil
+}
+
+func (sc *SchemaConfig) GetMaxPartitionKeys() int {
+	return sc.MaxPartitionKeys
+}
+
+func (sc *SchemaConfig) GetMinPartitionKeys() int {
+	return sc.MinPartitionKeys
+}
+
+func (sc *SchemaConfig) GetMaxClusteringKeys() int {
+	return sc.MaxClusteringKeys
+}
+
+func (sc *SchemaConfig) GetMinClusteringKeys() int {
+	return sc.MinClusteringKeys
+}
+
+func (sc *SchemaConfig) GetMaxColumns() int {
+	return sc.MaxColumns
+}
+
+func (sc *SchemaConfig) GetMinColumns() int {
+	return sc.MinColumns
 }
 
 type Keyspace struct {
@@ -322,17 +368,17 @@ func GenSchema(sc SchemaConfig) *Schema {
 	}
 	builder.Keyspace(keyspace)
 	var partitionKeys []ColumnDef
-	numPartitionKeys := rand.Intn(sc.MaxPartitionKeys-1) + 1
+	numPartitionKeys := rand.Intn(sc.GetMaxPartitionKeys()-sc.GetMinPartitionKeys()) + sc.GetMinPartitionKeys()
 	for i := 0; i < numPartitionKeys; i++ {
 		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: genPartitionKeyColumnType()})
 	}
 	var clusteringKeys []ColumnDef
-	numClusteringKeys := rand.Intn(sc.MaxClusteringKeys)
+	numClusteringKeys := rand.Intn(sc.GetMaxClusteringKeys()-sc.GetMinClusteringKeys()) + sc.GetMinClusteringKeys()
 	for i := 0; i < numClusteringKeys; i++ {
 		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genPrimaryKeyColumnType()})
 	}
 	var columns []ColumnDef
-	numColumns := rand.Intn(sc.MaxColumns)
+	numColumns := rand.Intn(sc.GetMaxColumns()-sc.GetMinColumns()) + sc.GetMinColumns()
 	for i := 0; i < numColumns; i++ {
 		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns, &sc)})
 	}
