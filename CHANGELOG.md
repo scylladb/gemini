@@ -4,6 +4,8 @@
 
 - Bugfix that makes sure that when a job terminates early, the result status is
   properly sent to the collector.
+- Gemini ensures that material views can be created in the default case by simply
+  creating enough keys and columns.
 
 # 1.4.2 
 
