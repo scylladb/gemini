@@ -613,6 +613,7 @@ func genMapType(sc *SchemaConfig) MapType {
 		if _, ok := typesMapKeyBlacklist[t]; !ok {
 			break
 		}
+		t = genSimpleType(sc)
 	}
 	return MapType{
 		KeyType:   t,

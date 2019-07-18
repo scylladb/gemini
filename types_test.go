@@ -213,8 +213,14 @@ func TestCQLPretty(t *testing.T) {
 
 func TestMarshalUnmarshal(t *testing.T) {
 	sc := &SchemaConfig{
-		MaxTupleParts: 2,
-		MaxUDTParts:   2,
+		MaxPartitionKeys:  3,
+		MinPartitionKeys:  2,
+		MaxClusteringKeys: 3,
+		MinClusteringKeys: 2,
+		MaxColumns:        3,
+		MinColumns:        2,
+		MaxTupleParts:     2,
+		MaxUDTParts:       2,
 	}
 	columns := Columns{
 		{
