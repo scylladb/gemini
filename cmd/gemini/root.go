@@ -45,8 +45,11 @@ var (
 	compactionStrategy    string
 	consistency           string
 	maxPartitionKeys      int
+	minPartitionKeys      int
 	maxClusteringKeys     int
+	minClusteringKeys     int
 	maxColumns            int
+	minColumns            int
 	datasetSize           string
 	cqlFeatures           string
 	level                 string
@@ -138,6 +141,9 @@ func run(cmd *cobra.Command, args []string) error {
 	defer outFile.Sync()
 
 	schemaConfig := createSchemaConfig(logger)
+	if err := schemaConfig.Valid(); err != nil {
+		return errors.Wrap(err, "invalid schema configuration")
+	}
 	var schema *gemini.Schema
 	if len(schemaFile) > 0 {
 		var err error
@@ -319,9 +325,12 @@ func init() {
 	rootCmd.Flags().DurationVarP(&warmup, "warmup", "", 30*time.Second, "Specify the warmup perid as a duration for example 30s or 10h")
 	rootCmd.Flags().StringVarP(&compactionStrategy, "compaction-strategy", "", "", "Specify the desired CS as either the coded short hand stcs|twcs|lcs to get the default for each type or provide the entire specification in the form {'class':'....'}")
 	rootCmd.Flags().StringVarP(&consistency, "consistency", "", "QUORUM", "Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE")
-	rootCmd.Flags().IntVarP(&maxPartitionKeys, "max-partition-keys", "", 2, "Maximum number of generated partition keys")
+	rootCmd.Flags().IntVarP(&maxPartitionKeys, "max-partition-keys", "", 6, "Maximum number of generated partition keys")
+	rootCmd.Flags().IntVarP(&minPartitionKeys, "min-partition-keys", "", 2, "Minimum number of generated partition keys")
 	rootCmd.Flags().IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 4, "Maximum number of generated clustering keys")
+	rootCmd.Flags().IntVarP(&minClusteringKeys, "min-clustering-keys", "", 2, "Minimum number of generated clustering keys")
 	rootCmd.Flags().IntVarP(&maxColumns, "max-columns", "", 16, "Maximum number of generated columns")
+	rootCmd.Flags().IntVarP(&maxColumns, "min-columns", "", 8, "Minimum number of generated columns")
 	rootCmd.Flags().StringVarP(&datasetSize, "dataset-size", "", "large", "Specify the type of dataset size to use, small|large")
 	rootCmd.Flags().StringVarP(&cqlFeatures, "cql-features", "", "basic", "Specify the type of cql features to use, basic|normal|large")
 	rootCmd.Flags().StringVarP(&level, "level", "", "info", "Specify the logging level, debug|info|warn|error|dpanic|panic|fatal")
