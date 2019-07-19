@@ -69,23 +69,28 @@ func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster 
 			schema:                schema,
 			system:                "oracle",
 			ops:                   ops,
-			maxRetriesMutate:      cfg.MaxRetriesMutate,
+			maxRetriesMutate:      cfg.MaxRetriesMutate + 10,
 			maxRetriesMutateSleep: cfg.MaxRetriesMutateSleep,
 			logger:                logger,
 		},
+		logger: logger.Named("delegating_store"),
 	}
 }
 
 type delegatingStore struct {
 	oracleStore storeLoader
 	testStore   storeLoader
+	logger      *zap.Logger
 }
 
-func (ds delegatingStore) Mutate(ctx context.Context, builder qb.Builder, values ...interface{}) (err error) {
+func (ds delegatingStore) Mutate(ctx context.Context, builder qb.Builder, values ...interface{}) error {
 	ts := time.Now()
-	err = multierr.Append(err, mutate(ctx, ds.testStore, ts, builder, values...))
-	err = multierr.Append(err, mutate(ctx, ds.oracleStore, ts, builder, values...))
-	return
+	if err := mutate(ctx, ds.oracleStore, ts, builder, values...); err != nil {
+		// Oracle failed, transition cannot take place
+		ds.logger.Info("oracle failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(err))
+		return nil
+	}
+	return mutate(ctx, ds.testStore, ts, builder, values...)
 }
 
 func mutate(ctx context.Context, s storeLoader, ts time.Time, builder qb.Builder, values ...interface{}) error {
