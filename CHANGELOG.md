@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.4.4
+
+- Mutations on Test are only applied if they first succeeded on the Oracle.
+
 # 1.4.3
 
 - Bugfix that makes sure that when a job terminates early, the result status is
