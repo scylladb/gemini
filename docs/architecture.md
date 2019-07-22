@@ -55,9 +55,9 @@ in use but the idea is to introduce some jitter into the execution flow.
 
 The application generates partition ids through a `Generator` that creates a steady flow of partition
 key components for the desired [concurrency](architecture.md#Concurrency).
-Each goroutine is connected to a `source` that continuously emits new partition ids in the form of
-a `[]interface{}`. These keys are created in the same way as the the driver does to ensure that each
-goroutine only processes partition keys from it's designated bucket.
+Each goroutine is connected to a `source` that the generator controls. This source continuously emits
+new partition ids in the form of a `[]interface{}`. These keys are created in the same way as the the
+driver does to ensure that each goroutine only processes partition keys from it's designated bucket.
 These partition keys These values are copied into another list that keeps the old partition ids for
 later reuse. The idea of reusing the partition keys is that probability of hitting the same partition
 key kan be so small that we never actually read any data at all in the validation jobs if just generate
@@ -67,3 +67,36 @@ deleted the key but at least the resulting "empty set" makes sense in then.
 
 ___NB___:There are probably issues with this approach and we may want to refine this further.
 
+## Important data structures
+
+There are a number of core data structures that has a more central place in Gemini's design.
+
+* Schema
+  
+  Gemini has a top level data structure named `Schema`. This structure a loose wrapper around a keyspace
+and a list of tables. It furthermore contains exported methods for generating a schema and it's
+corresponding CQL DDL statements allowing for creating the tables in the database. It also holds the
+methods for creating queries of all kinds which are used in the main Gemini program.
+
+* Table
+  
+  Tables are conceptually very similar to regular CQL tables. Their base elements are partition keys,
+  clustering keys and columns. They also may contain materialized views and indexes depending on user
+  preferences.
+
+* Columns
+
+  Columns are a list of ColumnDef and it represents a set of columns such as partition keys or
+  clustering keys.
+
+* ColumnDef
+
+  A ColumnDef is essentially a Type with a name and defines a column in the table.
+
+* Type
+
+  There are two type of types (pun intended) and they are `SimpleType` such as `int`, `decimal` etc
+  There are complex types which each is a new Type such as `MapType` that is composed of simple types.
+  Each type is responsible for generating the actual data that is inserted into the database.
+  For example: the [generator](architecture.md#Partition Keys) is delegating the actual data
+  construction to the instantiated types of the table it is working on.
