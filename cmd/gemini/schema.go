@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/scylladb/gemini"
+	"github.com/scylladb/gemini/replication"
 	"go.uber.org/zap"
 )
 
@@ -12,18 +13,19 @@ func createSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 	switch strings.ToLower(datasetSize) {
 	case "small":
 		return gemini.SchemaConfig{
-			CompactionStrategy: defaultConfig.CompactionStrategy,
-			MaxPartitionKeys:   defaultConfig.MaxPartitionKeys,
-			MinPartitionKeys:   defaultConfig.MinPartitionKeys,
-			MaxClusteringKeys:  defaultConfig.MaxClusteringKeys,
-			MinClusteringKeys:  defaultConfig.MinClusteringKeys,
-			MaxColumns:         defaultConfig.MaxColumns,
-			MinColumns:         defaultConfig.MinColumns,
-			MaxUDTParts:        2,
-			MaxTupleParts:      2,
-			MaxBlobLength:      20,
-			MaxStringLength:    20,
-			CQLFeature:         defaultConfig.CQLFeature,
+			CompactionStrategy:  defaultConfig.CompactionStrategy,
+			ReplicationStrategy: defaultConfig.ReplicationStrategy,
+			MaxPartitionKeys:    defaultConfig.MaxPartitionKeys,
+			MinPartitionKeys:    defaultConfig.MinPartitionKeys,
+			MaxClusteringKeys:   defaultConfig.MaxClusteringKeys,
+			MinClusteringKeys:   defaultConfig.MinClusteringKeys,
+			MaxColumns:          defaultConfig.MaxColumns,
+			MinColumns:          defaultConfig.MinColumns,
+			MaxUDTParts:         2,
+			MaxTupleParts:       2,
+			MaxBlobLength:       20,
+			MaxStringLength:     20,
+			CQLFeature:          defaultConfig.CQLFeature,
 		}
 	default:
 		return defaultConfig
@@ -40,19 +42,20 @@ func createDefaultSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 		MaxUDTParts     = 20
 	)
 	return gemini.SchemaConfig{
-		CompactionStrategy: getCompactionStrategy(compactionStrategy, logger),
-		MaxPartitionKeys:   maxPartitionKeys,
-		MinPartitionKeys:   minPartitionKeys,
-		MaxClusteringKeys:  maxClusteringKeys,
-		MinClusteringKeys:  minClusteringKeys,
-		MaxColumns:         maxColumns,
-		MinColumns:         minColumns,
-		MaxUDTParts:        MaxUDTParts,
-		MaxTupleParts:      MaxTupleParts,
-		MaxBlobLength:      MaxBlobLength,
-		MinBlobLength:      MinBlobLength,
-		MaxStringLength:    MaxStringLength,
-		MinStringLength:    MinStringLength,
-		CQLFeature:         getCQLFeature(cqlFeatures),
+		CompactionStrategy:  getCompactionStrategy(compactionStrategy, logger),
+		ReplicationStrategy: getReplicationStrategy(replicationStrategy, replication.NewSimpleStrategy(), logger),
+		MaxPartitionKeys:    maxPartitionKeys,
+		MinPartitionKeys:    minPartitionKeys,
+		MaxClusteringKeys:   maxClusteringKeys,
+		MinClusteringKeys:   minClusteringKeys,
+		MaxColumns:          maxColumns,
+		MinColumns:          minColumns,
+		MaxUDTParts:         MaxUDTParts,
+		MaxTupleParts:       MaxTupleParts,
+		MaxBlobLength:       MaxBlobLength,
+		MinBlobLength:       MinBlobLength,
+		MaxStringLength:     MaxStringLength,
+		MinStringLength:     MinStringLength,
+		CQLFeature:          getCQLFeature(cqlFeatures),
 	}
 }

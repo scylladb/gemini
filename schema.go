@@ -9,6 +9,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
+	"github.com/scylladb/gemini/replication"
 	"github.com/scylladb/gocqlx/qb"
 	"golang.org/x/exp/rand"
 )
@@ -26,20 +27,21 @@ const (
 type Value []interface{}
 
 type SchemaConfig struct {
-	CompactionStrategy *CompactionStrategy
-	MaxPartitionKeys   int
-	MinPartitionKeys   int
-	MaxClusteringKeys  int
-	MinClusteringKeys  int
-	MaxColumns         int
-	MinColumns         int
-	MaxUDTParts        int
-	MaxTupleParts      int
-	MaxBlobLength      int
-	MaxStringLength    int
-	MinBlobLength      int
-	MinStringLength    int
-	CQLFeature         CQLFeature
+	CompactionStrategy  *CompactionStrategy
+	ReplicationStrategy *replication.Replication
+	MaxPartitionKeys    int
+	MinPartitionKeys    int
+	MaxClusteringKeys   int
+	MinClusteringKeys   int
+	MaxColumns          int
+	MinColumns          int
+	MaxUDTParts         int
+	MaxTupleParts       int
+	MaxBlobLength       int
+	MaxStringLength     int
+	MinBlobLength       int
+	MinStringLength     int
+	CQLFeature          CQLFeature
 }
 
 var (
@@ -86,7 +88,8 @@ func (sc *SchemaConfig) GetMinColumns() int {
 }
 
 type Keyspace struct {
-	Name string `json:"name"`
+	Name        string                   `json:"name"`
+	Replication *replication.Replication `json:"replication"`
 }
 
 type ColumnDef struct {
@@ -364,7 +367,8 @@ func (s *Schema) GetDropSchema() []string {
 func GenSchema(sc SchemaConfig) *Schema {
 	builder := NewSchemaBuilder()
 	keyspace := Keyspace{
-		Name: "ks1",
+		Name:        "ks1",
+		Replication: sc.ReplicationStrategy,
 	}
 	builder.Keyspace(keyspace)
 	var partitionKeys []ColumnDef
@@ -490,7 +494,7 @@ func randomCompactionStrategy() *CompactionStrategy {
 }
 
 func (s *Schema) GetCreateSchema() []string {
-	createKeyspace := fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = {'class': 'SimpleStrategy', 'replication_factor': 1}", s.Keyspace.Name)
+	createKeyspace := fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = %s", s.Keyspace.Name, s.Keyspace.Replication.ToCQL())
 
 	stmts := []string{createKeyspace}
 
