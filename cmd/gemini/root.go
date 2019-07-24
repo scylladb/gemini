@@ -261,6 +261,9 @@ func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql
 	testCluster.Timeout = 5 * time.Second
 	testCluster.RetryPolicy = retryPolicy
 	testCluster.Consistency = consistency
+	if len(oracleClusterHost) == 0 {
+		return testCluster, nil
+	}
 	oracleCluster := gocql.NewCluster(oracleClusterHost...)
 	oracleCluster.Timeout = 5 * time.Second
 	oracleCluster.RetryPolicy = retryPolicy
@@ -327,8 +330,7 @@ func init() {
 	rootCmd.Version = version + ", commit " + commit + ", date " + date
 	rootCmd.Flags().StringSliceVarP(&testClusterHost, "test-cluster", "t", []string{}, "Host names or IPs of the test cluster that is system under test")
 	rootCmd.MarkFlagRequired("test-cluster")
-	rootCmd.Flags().StringSliceVarP(&oracleClusterHost, "oracle-cluster", "o", []string{}, "Host names or IPs of the oracle cluster that provides correct answers")
-	rootCmd.MarkFlagRequired("oracle-cluster")
+	rootCmd.Flags().StringSliceVarP(&oracleClusterHost, "oracle-cluster", "o", []string{}, "Host names or IPs of the oracle cluster that provides correct answers. If omitted no oracle will be used")
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", mixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	rootCmd.Flags().Uint64VarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")

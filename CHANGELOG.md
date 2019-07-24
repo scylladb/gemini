@@ -2,6 +2,8 @@
 
 # Unreleased 
 
+- Added the possibility to run without any validations against the Oracle. Simply do not
+  supply a host for the Oracle and Gemini will assume you want to only run against Test.
 - Replication strategy is now configurable via the CLI argument `--replication-strategy`.
 
 # 1.4.4
