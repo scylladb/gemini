@@ -1,5 +1,9 @@
 # Changelog
 
+# Unreleased 
+
+- Replication strategy is now configurable via the CLI argument `--replication-strategy`.
+
 # 1.4.4
 
 - Mutations on Test are only applied if they first succeeded on the Oracle.
