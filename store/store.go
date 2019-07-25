@@ -54,6 +54,26 @@ func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster 
 		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
 	}, []string{"system", "method"},
 	)
+
+	var oracleStore storeLoader
+	var validations bool
+	if oracleCluster != nil {
+		oracleStore = &cqlStore{
+			session:               newSession(oracleCluster),
+			schema:                schema,
+			system:                "oracle",
+			ops:                   ops,
+			maxRetriesMutate:      cfg.MaxRetriesMutate + 10,
+			maxRetriesMutateSleep: cfg.MaxRetriesMutateSleep,
+			logger:                logger,
+		}
+		validations = true
+	} else {
+		oracleStore = &noOpStore{
+			system: "oracle",
+		}
+	}
+
 	return &delegatingStore{
 		testStore: &cqlStore{
 			session:               newSession(testCluster),
@@ -64,22 +84,40 @@ func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster 
 			maxRetriesMutateSleep: cfg.MaxRetriesMutateSleep,
 			logger:                logger,
 		},
-		oracleStore: &cqlStore{
-			session:               newSession(oracleCluster),
-			schema:                schema,
-			system:                "oracle",
-			ops:                   ops,
-			maxRetriesMutate:      cfg.MaxRetriesMutate + 10,
-			maxRetriesMutateSleep: cfg.MaxRetriesMutateSleep,
-			logger:                logger,
-		},
-		logger: logger.Named("delegating_store"),
+		oracleStore: oracleStore,
+		validations: validations,
+		logger:      logger.Named("delegating_store"),
 	}
+}
+
+type noOpStore struct {
+	system string
+}
+
+func (n *noOpStore) mutate(context.Context, qb.Builder, time.Time, ...interface{}) error {
+	return nil
+}
+
+func (n *noOpStore) load(context.Context, qb.Builder, []interface{}) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (n *noOpStore) Close() error {
+	return nil
+}
+
+func (n *noOpStore) name() string {
+	return n.system
+}
+
+func (n *noOpStore) close() error {
+	return nil
 }
 
 type delegatingStore struct {
 	oracleStore storeLoader
 	testStore   storeLoader
+	validations bool
 	logger      *zap.Logger
 }
 
@@ -109,7 +147,9 @@ func (ds delegatingStore) Check(ctx context.Context, table *gemini.Table, builde
 	if err != nil {
 		return errors.Wrapf(err, "unable to load check data from the oracle store")
 	}
-
+	if !ds.validations {
+		return nil
+	}
 	if len(testRows) != len(oracleRows) {
 		testSet := strset.New(pks(table, testRows)...)
 		oracleSet := strset.New(pks(table, oracleRows)...)
