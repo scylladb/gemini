@@ -14,6 +14,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"gonum.org/v1/gonum/stat/distuv"
+
 	"github.com/briandowns/spinner"
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
@@ -29,36 +31,37 @@ import (
 )
 
 var (
-	testClusterHost       []string
-	oracleClusterHost     []string
-	schemaFile            string
-	outFileArg            string
-	concurrency           uint64
-	seed                  uint64
-	dropSchema            bool
-	verbose               bool
-	mode                  string
-	failFast              bool
-	nonInteractive        bool
-	duration              time.Duration
-	bind                  string
-	warmup                time.Duration
-	compactionStrategy    string
-	replicationStrategy   string
-	consistency           string
-	maxPartitionKeys      int
-	minPartitionKeys      int
-	maxClusteringKeys     int
-	minClusteringKeys     int
-	maxColumns            int
-	minColumns            int
-	datasetSize           string
-	cqlFeatures           string
-	level                 string
-	maxRetriesMutate      int
-	maxRetriesMutateSleep time.Duration
-	pkBufferSize          uint64
-	pkBufferReuseSize     uint64
+	testClusterHost          []string
+	oracleClusterHost        []string
+	schemaFile               string
+	outFileArg               string
+	concurrency              uint64
+	seed                     uint64
+	dropSchema               bool
+	verbose                  bool
+	mode                     string
+	failFast                 bool
+	nonInteractive           bool
+	duration                 time.Duration
+	bind                     string
+	warmup                   time.Duration
+	compactionStrategy       string
+	replicationStrategy      string
+	consistency              string
+	maxPartitionKeys         int
+	minPartitionKeys         int
+	maxClusteringKeys        int
+	minClusteringKeys        int
+	maxColumns               int
+	minColumns               int
+	datasetSize              string
+	cqlFeatures              string
+	level                    string
+	maxRetriesMutate         int
+	maxRetriesMutateSleep    time.Duration
+	pkBufferReuseSize        uint64
+	distributionSize         uint64
+	partitionKeyDistribution string
 )
 
 const (
@@ -188,7 +191,7 @@ func run(cmd *cobra.Command, args []string) error {
 	result := make(chan Status, 10000)
 	endResult := make(chan Status, 1)
 	pump := createPump(10000, logger)
-	generators := createGenerators(schema, schemaConfig, concurrency)
+	generators := createGenerators(schema, schemaConfig, createDistributionFunc(partitionKeyDistribution, distributionSize, seed), concurrency, distributionSize, logger)
 	go func() {
 		defer done.Done()
 		var sp *spinner.Spinner = nil
@@ -197,9 +200,6 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 		pump.Start(duration+warmup, createPumpCallback(result, sp))
 		endResult <- sampleStatus(pump, result, sp, logger)
-		for _, g := range generators {
-			g.Stop()
-		}
 	}()
 
 	launch(schema, schemaConfig, store, pump, generators, result, logger)
@@ -211,6 +211,34 @@ func run(cmd *cobra.Command, args []string) error {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")
 	}
 	return nil
+}
+
+const (
+	mu = 0.341
+)
+
+func createDistributionFunc(distribution string, size, seed uint64) gemini.DistributionFunc {
+	switch strings.ToLower(distribution) {
+	case "exponential", "zipf":
+		dist := rand.NewZipf(rand.New(rand.NewSource(seed)), 1.1, 1.1, size-1)
+		return func() uint64 {
+			return dist.Uint64()
+		}
+	case "normal":
+		dist := distuv.Normal{
+			Src:   rand.NewSource(seed),
+			Mu:    float64(size) / 2,
+			Sigma: mu * float64(size),
+		}
+		return func() uint64 {
+			return uint64(dist.Rand())
+		}
+	default:
+		rnd := rand.New(rand.NewSource(seed))
+		return func() uint64 {
+			return rnd.Uint64n(size)
+		}
+	}
 }
 
 func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generators, result chan Status, logger *zap.Logger) {
@@ -357,8 +385,9 @@ func init() {
 	rootCmd.Flags().StringVarP(&level, "level", "", "info", "Specify the logging level, debug|info|warn|error|dpanic|panic|fatal")
 	rootCmd.Flags().IntVarP(&maxRetriesMutate, "max-mutation-retries", "", 2, "Maximum number of attempts to apply a mutation")
 	rootCmd.Flags().DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond, "Duration between attempts to apply a mutation for example 10ms or 1s")
-	rootCmd.Flags().Uint64VarP(&pkBufferSize, "partition-key-buffer-size", "", 1000, "Number of buffered partition keys")
 	rootCmd.Flags().Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 2000, "Number of reused buffered partition keys")
+	rootCmd.Flags().Uint64VarP(&distributionSize, "distribution-size", "", 1000000, "Number of partition keys each worker creates")
+	rootCmd.Flags().StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform", "Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|exponential")
 }
 
 func printSetup() error {

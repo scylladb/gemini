@@ -1,161 +1,133 @@
 package gemini
 
 import (
-	"fmt"
+	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.uber.org/zap"
+
 	"github.com/scylladb/gemini/murmur"
+	"github.com/scylladb/go-set/u64set"
 	"golang.org/x/exp/rand"
 )
 
+type DistributionFunc func() uint64
+
 type Source struct {
-	newValues      chan Value
-	oldValues      chan Value
-	valueCounter   *prometheus.CounterVec
-	bucket         string
-	newValuesMeter prometheus.Gauge
-	oldValuesMeter prometheus.Gauge
+	values    []Value
+	idxFunc   func() uint64
+	oldValues chan Value
 }
 
 func (s *Source) Get() (Value, bool) {
-	var (
-		v  Value
-		ok bool
-	)
-	select {
-	case v, ok = <-s.newValues:
-		if !ok {
-			return nil, false
-		}
-	}
-
-	// Make a copy to allow callers to work with the slice directly
-	// Argument could be made that this is callers responsibility
-	// but we are also sending the value on down to another user of
-	// the "old" values.
+	v := s.pick()
 	values := make([]interface{}, len(v))
+	// Make a copy to allow callers to work with the slice directly
 	copy(values, v)
 	select {
 	case s.oldValues <- v:
-		s.oldValuesMeter.Inc()
 	default:
-		// If the channel is full i.e.
-		// the validators are slower or not started yet
-		// then we just drop the value.
+		// Old source is full, just drop the value
 	}
-
-	s.newValuesMeter.Dec()
-	s.valueCounter.WithLabelValues("new", s.bucket).Inc()
-
 	return values, true
 }
 
 func (s *Source) GetOld() (Value, bool) {
 	select {
 	case v, ok := <-s.oldValues:
-		if ok {
-			s.oldValuesMeter.Dec()
-		}
-		s.valueCounter.WithLabelValues("old", s.bucket).Inc()
 		return v, ok
 	default:
+		// There are no old values so we generate a new
+		return s.pick(), true
 	}
-	return nil, false
 }
 
-func (s *Source) stop() {
-	close(s.newValues)
-	close(s.oldValues)
+func (s *Source) pick() Value {
+	return s.values[s.idxFunc()]
 }
 
 type Generators struct {
 	generators       []*Source
 	size             uint64
+	distributionSize uint64
 	table            *Table
 	partitionsConfig PartitionRangeConfig
 	seed             uint64
-	done             chan struct{}
+	logger           *zap.Logger
 }
 
 type GeneratorsConfig struct {
-	Table            *Table
 	Partitions       PartitionRangeConfig
+	DistributionSize uint64
+	DistributionFunc DistributionFunc
 	Size             uint64
 	Seed             uint64
-	PkBufferSize     uint64
 	PkUsedBufferSize uint64
 }
 
-func NewGenerator(config *GeneratorsConfig) *Generators {
-	valueCounter := promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "gemini_partition_key_value_consumption",
-		Help: "How many partition keys are consumed, both new ald reused 'old'",
-	}, []string{"generation", "bucket"},
-	)
+func NewGenerator(table *Table, config *GeneratorsConfig, logger *zap.Logger) *Generators {
 	generators := make([]*Source, config.Size)
 	for i := uint64(0); i < config.Size; i++ {
 		generators[i] = &Source{
-			newValues:    make(chan Value, config.PkBufferSize),
-			oldValues:    make(chan Value, config.PkUsedBufferSize),
-			bucket:       fmt.Sprintf("bucket_%d", i),
-			valueCounter: valueCounter,
-			newValuesMeter: promauto.NewGauge(prometheus.GaugeOpts{
-				Name: fmt.Sprintf("gemini_partition_key_source_new_bucket_%d", i),
-				Help: "How many values the source has in it's new buffer",
-			}),
-			oldValuesMeter: promauto.NewGauge(prometheus.GaugeOpts{
-				Name: fmt.Sprintf("gemini_partition_key_source_old_bucket_%d", i),
-				Help: "How many values the source has in it's old buffer",
-			}),
+			// TODO: Take from config
+			values:    make([]Value, 0, config.DistributionSize),
+			idxFunc:   config.DistributionFunc,
+			oldValues: make(chan Value, config.PkUsedBufferSize),
 		}
 	}
 	gs := &Generators{
 		generators:       generators,
 		size:             config.Size,
-		table:            config.Table,
+		distributionSize: config.DistributionSize,
+		table:            table,
 		partitionsConfig: config.Partitions,
 		seed:             config.Seed,
-		done:             make(chan struct{}, 1),
+		logger:           logger,
 	}
-	gs.start()
+	gs.create()
 	return gs
-}
-
-func (gs Generators) Stop() {
-	gs.done <- struct{}{}
 }
 
 func (gs Generators) Get(idx int) *Source {
 	return gs.generators[idx]
 }
 
-func (gs *Generators) start() {
-	go func() {
-		routingKeyCreator := &RoutingKeyCreator{}
-		r := rand.New(rand.NewSource(gs.seed))
-		for {
-			select {
-			case <-gs.done:
-				for _, s := range gs.generators {
-					s.stop()
-				}
-				return
-			default:
-				var values []interface{}
-				for _, pk := range gs.table.PartitionKeys {
-					values = append(values, pk.Type.GenValue(r, gs.partitionsConfig)...)
-				}
-				b, _ := routingKeyCreator.CreateRoutingKey(gs.table, values)
-				hash := uint64(murmur.Murmur3H1(b))
-				source := gs.generators[hash%gs.size]
-				select {
-				case source.newValues <- Value(values):
-					source.newValuesMeter.Inc()
-				default:
-					// Ignore, the source is full
-				}
-			}
+func (gs *Generators) create() {
+	gs.logger.Info("generating partition keys, this can take a while", zap.Uint64("distribution_size", gs.distributionSize))
+	start := time.Now()
+	routingKeyCreator := &RoutingKeyCreator{}
+	r := rand.New(rand.NewSource(gs.seed))
+	fullSources := u64set.New()
+	for {
+		values := gs.createPartitionKeyValues(r)
+		hash := hash(routingKeyCreator, gs.table, values)
+		idx := hash % gs.size
+		source := gs.generators[idx]
+		if fullSources.Has(idx) {
+			continue
 		}
-	}()
+		if uint64(len(source.values)) < gs.distributionSize {
+			source.values = append(source.values, Value(values))
+		}
+		if uint64(len(source.values)) == gs.distributionSize {
+			gs.logger.Debug("partial generation", zap.Uint64("source", idx), zap.Int("size", len(source.values)))
+			fullSources.Add(idx)
+		}
+		if fullSources.Size() == len(gs.generators) {
+			gs.logger.Info("finished generating partition ids", zap.Duration("duration", time.Since(start)))
+			break
+		}
+	}
+}
+
+func (gs *Generators) createPartitionKeyValues(r *rand.Rand) []interface{} {
+	var values []interface{}
+	for _, pk := range gs.table.PartitionKeys {
+		values = append(values, pk.Type.GenValue(r, gs.partitionsConfig)...)
+	}
+	return values
+}
+
+func hash(rkc *RoutingKeyCreator, t *Table, values []interface{}) uint64 {
+	b, _ := rkc.CreateRoutingKey(t, values)
+	return uint64(murmur.Murmur3H1(b))
 }

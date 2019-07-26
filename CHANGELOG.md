@@ -2,6 +2,9 @@
 
 # Unreleased 
 
+- Partition keys can now be drawn from various distributions such as ___"zipf"___,
+  ___"uniform"___ and ___"normal"___.
+- The CLI argument `partition-key-buffer-size` is removed since it carries no meaning any more.
 - Added the possibility to run without any validations against the Oracle. Simply do not
   supply a host for the Oracle and Gemini will assume you want to only run against Test.
 - Replication strategy is now configurable via the CLI argument `--replication-strategy`.
