@@ -32,5 +32,6 @@ $GEMINI_CMD \
 	--seed=${SEED} \
 	--dataset-size=small \
 	--test-cluster=${TEST_IP} \
+	--oracle-cluster=${ORACLE_IP} \
 	"$@"
 exit $?
