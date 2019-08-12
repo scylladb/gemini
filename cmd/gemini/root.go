@@ -62,6 +62,8 @@ var (
 	pkBufferReuseSize        uint64
 	distributionSize         uint64
 	partitionKeyDistribution string
+	normalDistMean           float64
+	normalDistSigma          float64
 )
 
 const (
@@ -135,6 +137,11 @@ func run(cmd *cobra.Command, args []string) error {
 		return errors.Wrapf(err, "unable to print setup")
 	}
 
+	distFunc, err := createDistributionFunc(partitionKeyDistribution, distributionSize, seed, stdDistMean, oneStdDev)
+	if err != nil {
+		return err
+	}
+
 	outFile := os.Stdout
 	if outFileArg != "" {
 		of, err := os.Create(outFileArg)
@@ -191,7 +198,7 @@ func run(cmd *cobra.Command, args []string) error {
 	result := make(chan Status, 10000)
 	endResult := make(chan Status, 1)
 	pump := createPump(10000, logger)
-	generators := createGenerators(schema, schemaConfig, createDistributionFunc(partitionKeyDistribution, distributionSize, seed), concurrency, distributionSize, logger)
+	generators := createGenerators(schema, schemaConfig, distFunc, concurrency, distributionSize, logger)
 	go func() {
 		defer done.Done()
 		var sp *spinner.Spinner = nil
@@ -214,30 +221,33 @@ func run(cmd *cobra.Command, args []string) error {
 }
 
 const (
-	mu = 0.341
+	stdDistMean = 0.5
+	oneStdDev   = 0.341
 )
 
-func createDistributionFunc(distribution string, size, seed uint64) gemini.DistributionFunc {
+func createDistributionFunc(distribution string, size, seed uint64, mu, sigma float64) (gemini.DistributionFunc, error) {
 	switch strings.ToLower(distribution) {
-	case "exponential", "zipf":
+	case "zipf":
 		dist := rand.NewZipf(rand.New(rand.NewSource(seed)), 1.1, 1.1, size-1)
 		return func() uint64 {
 			return dist.Uint64()
-		}
+		}, nil
 	case "normal":
 		dist := distuv.Normal{
 			Src:   rand.NewSource(seed),
-			Mu:    float64(size) / 2,
-			Sigma: mu * float64(size),
+			Mu:    mu,
+			Sigma: sigma,
 		}
 		return func() uint64 {
-			return uint64(dist.Rand())
-		}
-	default:
+			return uint64(dist.Rand()) * size
+		}, nil
+	case "uniform":
 		rnd := rand.New(rand.NewSource(seed))
 		return func() uint64 {
 			return rnd.Uint64n(size)
-		}
+		}, nil
+	default:
+		return nil, errors.Errorf("unsupported distribution: %s", distribution)
 	}
 }
 
@@ -388,6 +398,8 @@ func init() {
 	rootCmd.Flags().Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 2000, "Number of reused buffered partition keys")
 	rootCmd.Flags().Uint64VarP(&distributionSize, "distribution-size", "", 1000000, "Number of partition keys each worker creates")
 	rootCmd.Flags().StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform", "Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|exponential")
+	rootCmd.Flags().Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution")
+	rootCmd.Flags().Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, defaults to one standard deviation ~0.341")
 }
 
 func printSetup() error {

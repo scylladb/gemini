@@ -27,7 +27,6 @@ until docker logs ${TEST_NAME} | grep "Starting listening for CQL clients" > /de
 
 $GEMINI_CMD \
 	--duration=10m \
-	--partition-key-distribution=exponential \
 	--fail-fast \
 	--seed=${SEED} \
 	--dataset-size=small \
