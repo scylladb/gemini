@@ -64,6 +64,7 @@ var (
 	partitionKeyDistribution string
 	normalDistMean           float64
 	normalDistSigma          float64
+	tracingOutFile           string
 )
 
 const (
@@ -136,19 +137,14 @@ func run(cmd *cobra.Command, args []string) error {
 	if err := printSetup(); err != nil {
 		return errors.Wrapf(err, "unable to print setup")
 	}
-
 	distFunc, err := createDistributionFunc(partitionKeyDistribution, distributionSize, seed, stdDistMean, oneStdDev)
 	if err != nil {
 		return err
 	}
 
-	outFile := os.Stdout
-	if outFileArg != "" {
-		of, err := os.Create(outFileArg)
-		if err != nil {
-			return errors.Wrapf(err, "Unable to open output file %s", outFileArg)
-		}
-		outFile = of
+	outFile, err := createFile(outFileArg, os.Stdout)
+	if err != nil {
+		return err
 	}
 	defer outFile.Sync()
 
@@ -175,7 +171,23 @@ func run(cmd *cobra.Command, args []string) error {
 		MaxRetriesMutate:      maxRetriesMutate,
 		MaxRetriesMutateSleep: maxRetriesMutateSleep,
 	}
-	store := store.New(schema, testCluster, oracleCluster, storeConfig, logger)
+	var tracingFile *os.File
+	if tracingOutFile != "" {
+		switch tracingOutFile {
+		case "stderr":
+			tracingFile = os.Stderr
+		case "stdout":
+			tracingFile = os.Stdout
+		default:
+			tf, err := createFile(tracingOutFile, os.Stdout)
+			if err != nil {
+				return err
+			}
+			tracingFile = tf
+			defer tracingFile.Sync()
+		}
+	}
+	store := store.New(schema, testCluster, oracleCluster, storeConfig, tracingFile, logger)
 	defer store.Close()
 
 	if dropSchema && mode != readMode {
@@ -218,6 +230,17 @@ func run(cmd *cobra.Command, args []string) error {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")
 	}
 	return nil
+}
+
+func createFile(fname string, def *os.File) (*os.File, error) {
+	if fname != "" {
+		f, err := os.Create(fname)
+		if err != nil {
+			return nil, errors.Wrapf(err, "Unable to open output file %s", fname)
+		}
+		return f, nil
+	}
+	return def, nil
 }
 
 const (
@@ -400,6 +423,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform", "Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|exponential")
 	rootCmd.Flags().Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution")
 	rootCmd.Flags().Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, defaults to one standard deviation ~0.341")
+	rootCmd.Flags().StringVarP(&tracingOutFile, "tracing-outfile", "", "", "Specify the file to which tracing information gets written. Two magic names are available, 'stdout' and 'stderr'. By default tracing is disabled.")
 }
 
 func printSetup() error {
