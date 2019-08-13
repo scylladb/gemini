@@ -1,8 +1,11 @@
 package main
 
-import "github.com/scylladb/gemini"
+import (
+	"github.com/scylladb/gemini"
+	"go.uber.org/zap"
+)
 
-func createGenerators(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, actors uint64) []*gemini.Generators {
+func createGenerators(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, distributionFunc gemini.DistributionFunc, actors, distributionSize uint64, logger *zap.Logger) []*gemini.Generators {
 	partitionRangeConfig := gemini.PartitionRangeConfig{
 		MaxBlobLength:   schemaConfig.MaxBlobLength,
 		MinBlobLength:   schemaConfig.MinBlobLength,
@@ -13,14 +16,14 @@ func createGenerators(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, a
 	var gs []*gemini.Generators
 	for _, table := range schema.Tables {
 		gCfg := &gemini.GeneratorsConfig{
-			Table:            table,
 			Partitions:       partitionRangeConfig,
 			Size:             actors,
+			DistributionSize: distributionSize,
+			DistributionFunc: distributionFunc,
 			Seed:             seed,
-			PkBufferSize:     pkBufferSize,
 			PkUsedBufferSize: pkBufferReuseSize,
 		}
-		g := gemini.NewGenerator(gCfg)
+		g := gemini.NewGenerator(table, gCfg, logger.Named("generator"))
 		gs = append(gs, g)
 	}
 	return gs

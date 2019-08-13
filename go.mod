@@ -24,6 +24,7 @@ require (
 	golang.org/x/exp v0.0.0-20190510132918-efd6b22b2522
 	golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3
 	golang.org/x/sys v0.0.0-20190412213103-97732733099d // indirect
+	gonum.org/v1/gonum v0.0.0-20190724133715-a8659125a966
 	gopkg.in/inf.v0 v0.9.1
 )
 
