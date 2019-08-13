@@ -68,7 +68,6 @@ func NewGenerator(table *Table, config *GeneratorsConfig, logger *zap.Logger) *G
 	generators := make([]*Source, config.Size)
 	for i := uint64(0); i < config.Size; i++ {
 		generators[i] = &Source{
-			// TODO: Take from config
 			values:    make([]Value, 0, config.DistributionSize),
 			idxFunc:   config.DistributionFunc,
 			oldValues: make(chan Value, config.PkUsedBufferSize),
