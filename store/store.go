@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/big"
 	"sort"
 	"time"
@@ -48,7 +49,7 @@ type Config struct {
 	MaxRetriesMutateSleep time.Duration
 }
 
-func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster *gocql.ClusterConfig, cfg Config, logger *zap.Logger) Store {
+func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut io.Writer, logger *zap.Logger) Store {
 	ops := promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gemini_cql_requests",
 		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
@@ -59,7 +60,7 @@ func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster 
 	var validations bool
 	if oracleCluster != nil {
 		oracleStore = &cqlStore{
-			session:               newSession(oracleCluster),
+			session:               newSession(oracleCluster, traceOut),
 			schema:                schema,
 			system:                "oracle",
 			ops:                   ops,
@@ -76,7 +77,7 @@ func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster 
 
 	return &delegatingStore{
 		testStore: &cqlStore{
-			session:               newSession(testCluster),
+			session:               newSession(testCluster, traceOut),
 			schema:                schema,
 			system:                "test",
 			ops:                   ops,
