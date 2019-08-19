@@ -183,6 +183,11 @@ func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig
 	}
 	mutateQuery := mutateStmt.Query
 	mutateValues := mutateStmt.Values()
+	defer func() {
+		v := make(gemini.Value, len(table.PartitionKeys))
+		copy(v, mutateValues)
+		source.GiveOld(v)
+	}()
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
 		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
 	}

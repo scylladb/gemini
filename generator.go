@@ -19,16 +19,7 @@ type Source struct {
 }
 
 func (s *Source) Get() (Value, bool) {
-	v := s.pick()
-	values := make([]interface{}, len(v))
-	// Make a copy to allow callers to work with the slice directly
-	copy(values, v)
-	select {
-	case s.oldValues <- v:
-	default:
-		// Old source is full, just drop the value
-	}
-	return values, true
+	return s.pick(), true
 }
 
 func (s *Source) GetOld() (Value, bool) {
@@ -38,6 +29,14 @@ func (s *Source) GetOld() (Value, bool) {
 	default:
 		// There are no old values so we generate a new
 		return s.pick(), true
+	}
+}
+
+func (s *Source) GiveOld(v Value) {
+	select {
+	case s.oldValues <- v:
+	default:
+		// Old source is full, just drop the value
 	}
 }
 
