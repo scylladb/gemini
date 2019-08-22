@@ -1,38 +1,55 @@
 package gemini
 
 import (
+	"sync"
 	"time"
-
-	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/murmur"
 	"github.com/scylladb/go-set/u64set"
+	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
 )
 
 type DistributionFunc func() uint64
 
 type Source struct {
-	values    []Value
+	values    []ValueWithToken
 	idxFunc   func() uint64
-	oldValues chan Value
+	oldValues chan ValueWithToken
+	inFlight  syncU64set
 }
 
-func (s *Source) Get() (Value, bool) {
-	return s.pick(), true
+//Get returns a new value and ensures that it's corresponding token
+//is not already in-flight.
+func (s *Source) Get() (ValueWithToken, bool) {
+	for {
+		v := s.pick()
+		if s.inFlight.addIfNotPresent(v.Token) {
+			return v, true
+		}
+	}
 }
 
-func (s *Source) GetOld() (Value, bool) {
+//GetOld returns a previously used value and token or a new if
+//the old queue is empty.
+func (s *Source) GetOld() (ValueWithToken, bool) {
 	select {
 	case v, ok := <-s.oldValues:
 		return v, ok
 	default:
 		// There are no old values so we generate a new
-		return s.pick(), true
+		return s.Get()
 	}
 }
 
-func (s *Source) GiveOld(v Value) {
+// GiveOld returns the supplied value for later reuse unless the value
+//is empty in which case it removes the corresponding token from the
+// in-flight tracking.
+func (s *Source) GiveOld(v ValueWithToken) {
+	if len(v.Value) == 0 {
+		s.inFlight.delete(v.Token)
+		return
+	}
 	select {
 	case s.oldValues <- v:
 	default:
@@ -40,7 +57,7 @@ func (s *Source) GiveOld(v Value) {
 	}
 }
 
-func (s *Source) pick() Value {
+func (s *Source) pick() ValueWithToken {
 	return s.values[s.idxFunc()]
 }
 
@@ -67,9 +84,10 @@ func NewGenerator(table *Table, config *GeneratorsConfig, logger *zap.Logger) *G
 	generators := make([]*Source, config.Size)
 	for i := uint64(0); i < config.Size; i++ {
 		generators[i] = &Source{
-			values:    make([]Value, 0, config.DistributionSize),
+			values:    make([]ValueWithToken, 0, config.DistributionSize),
 			idxFunc:   config.DistributionFunc,
-			oldValues: make(chan Value, config.PkUsedBufferSize),
+			oldValues: make(chan ValueWithToken, config.PkUsedBufferSize),
+			inFlight:  syncU64set{pks: u64set.New()},
 		}
 	}
 	gs := &Generators{
@@ -89,6 +107,11 @@ func (gs Generators) Get(idx int) *Source {
 	return gs.generators[idx]
 }
 
+type ValueWithToken struct {
+	Token uint64
+	Value Value
+}
+
 func (gs *Generators) create() {
 	gs.logger.Info("generating partition keys, this can take a while", zap.Uint64("distribution_size", gs.distributionSize))
 	start := time.Now()
@@ -104,7 +127,7 @@ func (gs *Generators) create() {
 			continue
 		}
 		if uint64(len(source.values)) < gs.distributionSize {
-			source.values = append(source.values, Value(values))
+			source.values = append(source.values, ValueWithToken{Token: hash, Value: values})
 		}
 		if uint64(len(source.values)) == gs.distributionSize {
 			gs.logger.Debug("partial generation", zap.Uint64("source", idx), zap.Int("size", len(source.values)))
@@ -128,4 +151,26 @@ func (gs *Generators) createPartitionKeyValues(r *rand.Rand) []interface{} {
 func hash(rkc *RoutingKeyCreator, t *Table, values []interface{}) uint64 {
 	b, _ := rkc.CreateRoutingKey(t, values)
 	return uint64(murmur.Murmur3H1(b))
+}
+
+type syncU64set struct {
+	pks *u64set.Set
+	mu  sync.Mutex
+}
+
+func (s *syncU64set) delete(v uint64) bool {
+	s.mu.Lock()
+	_, found := s.pks.Pop2()
+	s.mu.Unlock()
+	return found
+}
+
+func (s *syncU64set) addIfNotPresent(v uint64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pks.Has(v) {
+		return false
+	}
+	s.pks.Add(v)
+	return true
 }

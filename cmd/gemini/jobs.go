@@ -182,11 +182,11 @@ func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig
 		return
 	}
 	mutateQuery := mutateStmt.Query
-	mutateValues := mutateStmt.Values()
+	token, mutateValues := mutateStmt.Values()
 	defer func() {
 		v := make(gemini.Value, len(table.PartitionKeys))
 		copy(v, mutateValues)
-		source.GiveOld(v)
+		source.GiveOld(gemini.ValueWithToken{Token: token, Value: v})
 	}()
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
 		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
@@ -213,7 +213,11 @@ func validation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConf
 		return
 	}
 	checkQuery := checkStmt.Query
-	checkValues := checkStmt.Values()
+	token, checkValues := checkStmt.Values()
+	defer func() {
+		// Signal done with this pk...
+		source.GiveOld(gemini.ValueWithToken{Token: token})
+	}()
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
 		w.Write(zap.String("pretty_cql", checkStmt.PrettyCQL()))
 	}
