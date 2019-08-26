@@ -251,8 +251,8 @@ func (t *Table) addColumn(keyspace string, sc *SchemaConfig) ([]*Stmt, func(), e
 			Query: &AlterTableBuilder{
 				stmt: stmt,
 			},
-			Values: func() []interface{} {
-				return nil
+			Values: func() (uint64, []interface{}) {
+				return 0, nil
 			},
 		})
 	}
@@ -261,8 +261,8 @@ func (t *Table) addColumn(keyspace string, sc *SchemaConfig) ([]*Stmt, func(), e
 		Query: &AlterTableBuilder{
 			stmt: stmt,
 		},
-		Values: func() []interface{} {
-			return nil
+		Values: func() (uint64, []interface{}) {
+			return 0, nil
 		},
 	})
 	return stmts, func() {
@@ -286,8 +286,8 @@ func (t *Table) alterColumn(keyspace string) ([]*Stmt, func(), error) {
 			Query: &AlterTableBuilder{
 				stmt: stmt,
 			},
-			Values: func() []interface{} {
-				return nil
+			Values: func() (uint64, []interface{}) {
+				return 0, nil
 			},
 		})
 		fmt.Println(stmt)
@@ -307,8 +307,8 @@ func (t *Table) dropColumn(keyspace string) ([]*Stmt, func(), error) {
 		Query: &AlterTableBuilder{
 			stmt: stmt,
 		},
-		Values: func() []interface{} {
-			return nil
+		Values: func() (uint64, []interface{}) {
+			return 0, nil
 		},
 	})
 	return stmts, func() {
@@ -324,17 +324,17 @@ type MaterializedView struct {
 
 type Stmt struct {
 	Query  qb.Builder
-	Values func() []interface{}
+	Values func() (uint64, []interface{})
 	Types  []Type
 }
 
 func (s *Stmt) PrettyCQL() string {
 	var replaced int
 	query, _ := s.Query.ToCql()
-	if len(s.Values()) == 0 {
+	_, values := s.Values()
+	if len(values) == 0 {
 		return query
 	}
-	values := s.Values()
 	for _, typ := range s.Types {
 		query, replaced = typ.CQLPretty(query, values)
 		if len(values) >= replaced {
@@ -549,10 +549,11 @@ func (s *Schema) GenInsertStmt(t *Table, source *Source, r *rand.Rand, p Partiti
 		typs = append(typs, pk.Type)
 	}
 
-	values, ok := source.Get()
+	valuesWithToken, ok := source.Get()
 	if !ok {
 		return nil, nil
 	}
+	values := valuesWithToken.Value
 	for _, ck := range t.ClusteringKeys {
 		builder = builder.Columns(ck.Name)
 		values = appendValue(ck.Type, r, p, values)
@@ -570,8 +571,8 @@ func (s *Schema) GenInsertStmt(t *Table, source *Source, r *rand.Rand, p Partiti
 	}
 	return &Stmt{
 		Query: builder,
-		Values: func() []interface{} {
-			return values
+		Values: func() (uint64, []interface{}) {
+			return valuesWithToken.Token, values
 		},
 		Types: typs,
 	}, nil
@@ -585,8 +586,8 @@ func (s *Schema) GenInsertJsonStmt(t *Table, source *Source, r *rand.Rand, p Par
 	if !ok {
 		return nil, nil
 	}
-	vs := make([]interface{}, len(vals))
-	copy(vs, vals)
+	vs := make([]interface{}, len(vals.Value))
+	copy(vs, vals.Value)
 	values := make(map[string]interface{})
 	for i, pk := range t.PartitionKeys {
 		switch t := pk.Type.(type) {
@@ -628,8 +629,8 @@ func (s *Schema) GenInsertJsonStmt(t *Table, source *Source, r *rand.Rand, p Par
 	builder := qb.Insert(s.Keyspace.Name + "." + t.Name).Json()
 	return &Stmt{
 		Query: builder,
-		Values: func() []interface{} {
-			return []interface{}{string(jsonString)}
+		Values: func() (uint64, []interface{}) {
+			return vals.Token, []interface{}{string(jsonString)}
 		},
 		Types: []Type{TYPE_TEXT},
 	}, nil
@@ -648,10 +649,11 @@ func (s *Schema) GenDeleteRows(t *Table, source *Source, r *rand.Rand, p Partiti
 		typs = append(typs, pk.Type)
 	}
 
-	values, ok := source.Get()
+	vs, ok := source.Get()
 	if !ok {
 		return nil, nil
 	}
+	values := vs.Value
 	if len(t.ClusteringKeys) > 0 {
 		ck := t.ClusteringKeys[0]
 		builder = builder.Where(qb.GtOrEq(ck.Name)).Where(qb.LtOrEq(ck.Name))
@@ -661,8 +663,8 @@ func (s *Schema) GenDeleteRows(t *Table, source *Source, r *rand.Rand, p Partiti
 	}
 	return &Stmt{
 		Query: builder,
-		Values: func() []interface{} {
-			return values
+		Values: func() (uint64, []interface{}) {
+			return vs.Token, values
 		},
 		Types: typs,
 	}, nil
@@ -756,8 +758,8 @@ func (s *Schema) genSinglePartitionQuery(t *Table, source *Source, r *rand.Rand,
 	}
 	return &Stmt{
 		Query: builder,
-		Values: func() []interface{} {
-			return values
+		Values: func() (uint64, []interface{}) {
+			return values.Token, values.Value
 		},
 		Types: typs,
 	}
@@ -793,14 +795,14 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, source *Source, r *rand.Ran
 			if !ok {
 				return nil
 			}
-			values = append(values, vs[i])
+			values = append(values, vs.Value[i])
 			typs = append(typs, pk.Type)
 		}
 	}
 	return &Stmt{
 		Query: builder,
-		Values: func() []interface{} {
-			return values
+		Values: func() (uint64, []interface{}) {
+			return 0, values
 		},
 		Types: typs,
 	}
@@ -825,11 +827,12 @@ func (s *Schema) genClusteringRangeQuery(t *Table, source *Source, r *rand.Rand,
 			clusteringKeys = t.MaterializedViews[view].ClusteringKeys
 		}*/
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
-	values, ok := source.GetOld()
+	vs, ok := source.GetOld()
 	if !ok {
 		// Done or no values available...
 		return nil
 	}
+	values := vs.Value
 	for _, pk := range partitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
 		typs = append(typs, pk.Type)
@@ -848,8 +851,8 @@ func (s *Schema) genClusteringRangeQuery(t *Table, source *Source, r *rand.Rand,
 	}
 	return &Stmt{
 		Query: builder,
-		Values: func() []interface{} {
-			return values
+		Values: func() (uint64, []interface{}) {
+			return 0, values
 		},
 		Types: typs,
 	}
@@ -886,7 +889,7 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, source *Sour
 			if !ok {
 				return nil
 			}
-			values = append(values, vs[i])
+			values = append(values, vs.Value[i])
 			typs = append(typs, pk.Type)
 		}
 	}
@@ -904,8 +907,8 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, source *Sour
 	}
 	return &Stmt{
 		Query: builder,
-		Values: func() []interface{} {
-			return values
+		Values: func() (uint64, []interface{}) {
+			return 0, values
 		},
 		Types: typs,
 	}
@@ -938,8 +941,8 @@ func (s *Schema) genSingleIndexQuery(t *Table, source *Source, r *rand.Rand, p P
 	}
 	return &Stmt{
 		Query: builder,
-		Values: func() []interface{} {
-			return values
+		Values: func() (uint64, []interface{}) {
+			return 0, values
 		},
 		Types: typs,
 	}

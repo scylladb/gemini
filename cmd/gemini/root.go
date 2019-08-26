@@ -14,8 +14,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"gonum.org/v1/gonum/stat/distuv"
-
 	"github.com/briandowns/spinner"
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
@@ -28,6 +26,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/rand"
 	"golang.org/x/net/context"
+	"gonum.org/v1/gonum/stat/distuv"
 )
 
 var (
