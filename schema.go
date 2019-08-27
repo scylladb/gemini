@@ -352,6 +352,8 @@ type Schema struct {
 }
 
 type PartitionRangeConfig struct {
+	Left            uint64
+	Right           uint64
 	MaxBlobLength   int
 	MinBlobLength   int
 	MaxStringLength int
@@ -536,7 +538,7 @@ func (s *Schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *Schema) GenInsertStmt(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) GenInsertStmt(t *Table, source *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -578,7 +580,7 @@ func (s *Schema) GenInsertStmt(t *Table, source *Source, r *rand.Rand, p Partiti
 	}, nil
 }
 
-func (s *Schema) GenInsertJsonStmt(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) GenInsertJsonStmt(t *Table, source *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -636,7 +638,7 @@ func (s *Schema) GenInsertJsonStmt(t *Table, source *Source, r *rand.Rand, p Par
 	}, nil
 }
 
-func (s *Schema) GenDeleteRows(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) GenDeleteRows(t *Table, source *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -681,7 +683,7 @@ func (s *Schema) GenDDLStmt(t *Table, r *rand.Rand, p PartitionRangeConfig, sc *
 	}
 }
 
-func (s *Schema) GenMutateStmt(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig, deletes bool) (*Stmt, error) {
+func (s *Schema) GenMutateStmt(t *Table, source *Generator, r *rand.Rand, p PartitionRangeConfig, deletes bool) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -704,7 +706,7 @@ func (s *Schema) GenMutateStmt(t *Table, source *Source, r *rand.Rand, p Partiti
 	}
 }
 
-func (s *Schema) GenCheckStmt(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) GenCheckStmt(t *Table, source *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	var n int
 	if len(t.Indexes) > 0 {
 		n = r.Intn(5)
@@ -733,7 +735,7 @@ func (s *Schema) GenCheckStmt(t *Table, source *Source, r *rand.Rand, p Partitio
 	return nil
 }
 
-func (s *Schema) genSinglePartitionQuery(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genSinglePartitionQuery(t *Table, source *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -756,6 +758,9 @@ func (s *Schema) genSinglePartitionQuery(t *Table, source *Source, r *rand.Rand,
 	if !ok {
 		return nil
 	}
+	if len(values.Value) != len(t.PartitionKeys) {
+		fmt.Printf("values=%d, pk=%d\n", len(values.Value), len(t.PartitionKeys))
+	}
 	return &Stmt{
 		Query: builder,
 		Values: func() (uint64, []interface{}) {
@@ -765,7 +770,7 @@ func (s *Schema) genSinglePartitionQuery(t *Table, source *Source, r *rand.Rand,
 	}
 }
 
-func (s *Schema) genMultiplePartitionQuery(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genMultiplePartitionQuery(t *Table, source *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -808,7 +813,7 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, source *Source, r *rand.Ran
 	}
 }
 
-func (s *Schema) genClusteringRangeQuery(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genClusteringRangeQuery(t *Table, source *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -858,7 +863,7 @@ func (s *Schema) genClusteringRangeQuery(t *Table, source *Source, r *rand.Rand,
 	}
 }
 
-func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, source *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -914,7 +919,7 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, source *Sour
 	}
 }
 
-func (s *Schema) genSingleIndexQuery(t *Table, source *Source, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genSingleIndexQuery(t *Table, source *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 

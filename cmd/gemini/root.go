@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -87,7 +88,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Source, chan Status, string, time.Duration, *zap.Logger)
+type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Generator, chan Status, string, time.Duration, *zap.Logger)
 
 func readSchema(confFile string) (*gemini.Schema, error) {
 	byteValue, err := ioutil.ReadFile(confFile)
@@ -211,6 +212,11 @@ func run(cmd *cobra.Command, args []string) error {
 	pump := createPump(10000, logger)
 	generators := createGenerators(schema, schemaConfig, distFunc, concurrency, distributionSize, logger)
 	go func() {
+		defer func() {
+			for _, g := range generators {
+				g.Stop()
+			}
+		}()
 		defer done.Done()
 		var sp *spinner.Spinner = nil
 		if interactive() {
@@ -243,8 +249,12 @@ func createFile(fname string, def *os.File) (*os.File, error) {
 }
 
 const (
-	stdDistMean = 0.5
-	oneStdDev   = 0.341
+	/*
+		stdDistMean = 0.5
+		oneStdDev   = 0.341
+	*/
+	stdDistMean = math.MaxUint64 / 2
+	oneStdDev   = 0.341 * math.MaxUint64
 )
 
 func createDistributionFunc(distribution string, size, seed uint64, mu, sigma float64) (gemini.DistributionFunc, error) {
@@ -273,7 +283,7 @@ func createDistributionFunc(distribution string, size, seed uint64, mu, sigma fl
 	}
 }
 
-func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generators, result chan Status, logger *zap.Logger) {
+func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
 	if warmup > 0 {
 		done := &sync.WaitGroup{}
 		done.Add(1)
@@ -418,8 +428,8 @@ func init() {
 	rootCmd.Flags().IntVarP(&maxRetriesMutate, "max-mutation-retries", "", 2, "Maximum number of attempts to apply a mutation")
 	rootCmd.Flags().DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond, "Duration between attempts to apply a mutation for example 10ms or 1s")
 	rootCmd.Flags().Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 2000, "Number of reused buffered partition keys")
-	rootCmd.Flags().Uint64VarP(&distributionSize, "distribution-size", "", 1000000, "Number of partition keys each worker creates")
-	rootCmd.Flags().StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform", "Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|exponential")
+	rootCmd.Flags().Uint64VarP(&distributionSize, "distribution-size", "", math.MaxUint64, "Number of partition keys each worker creates")
+	rootCmd.Flags().StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform", "Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
 	rootCmd.Flags().Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution")
 	rootCmd.Flags().Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, defaults to one standard deviation ~0.341")
 	rootCmd.Flags().StringVarP(&tracingOutFile, "tracing-outfile", "", "", "Specify the file to which tracing information gets written. Two magic names are available, 'stdout' and 'stderr'. By default tracing is disabled.")

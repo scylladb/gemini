@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 
 // MutationJob continuously applies mutations against the database
 // for as long as the pump is active.
-func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Source, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
+func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	defer wg.Done()
 	schemaConfig := &schemaCfg
 	logger = logger.Named("mutation_job")
@@ -29,7 +30,7 @@ func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup,
 		} else {
 			mutation(ctx, schema, schemaConfig, table, s, r, p, source, &testStatus, true, logger)
 		}
-		if i%1000 == 0 {
+		if i%100 == 0 {
 			c <- testStatus
 			testStatus = Status{}
 		}
@@ -43,7 +44,7 @@ func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup,
 
 // ValidationJob continuously applies validations against the database
 // for as long as the pump is active.
-func ValidationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Source, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
+func ValidationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	defer wg.Done()
 	schemaConfig := &schemaCfg
 	logger = logger.Named("validation_job")
@@ -53,7 +54,7 @@ func ValidationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGrou
 	for hb := range pump {
 		hb.await()
 		validation(ctx, schema, schemaConfig, table, s, r, p, source, &testStatus, logger)
-		if i%1000 == 0 {
+		if i%100 == 0 {
 			c <- testStatus
 			testStatus = Status{}
 		}
@@ -67,7 +68,7 @@ func ValidationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGrou
 
 // WarmupJob continuously applies mutations against the database
 // for as long as the pump is active or the supplied duration expires.
-func WarmupJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Source, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
+func WarmupJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	defer wg.Done()
 	schemaConfig := &schemaCfg
 	testStatus := Status{}
@@ -96,7 +97,7 @@ func WarmupJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, s
 	}
 }
 
-func job(done *sync.WaitGroup, f testJob, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generators, result chan Status, logger *zap.Logger) {
+func job(done *sync.WaitGroup, f testJob, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
 	defer done.Done()
 	var finished sync.WaitGroup
 	finished.Add(1)
@@ -106,17 +107,21 @@ func job(done *sync.WaitGroup, f testJob, actors uint64, schema *gemini.Schema, 
 	workerCtx, _ := context.WithCancel(context.Background())
 	workers.Add(len(schema.Tables) * int(actors))
 
-	partitionRangeConfig := gemini.PartitionRangeConfig{
-		MaxBlobLength:   schemaConfig.MaxBlobLength,
-		MinBlobLength:   schemaConfig.MinBlobLength,
-		MaxStringLength: schemaConfig.MaxStringLength,
-		MinStringLength: schemaConfig.MinStringLength,
-	}
-
 	for j, table := range schema.Tables {
+		g := generators[j]
+		delta := math.MaxUint64 % actors
 		for i := 0; i < int(actors); i++ {
+			start := uint64(i)
+			partitionRangeConfig := gemini.PartitionRangeConfig{
+				Left:            start * delta,
+				Right:           start*delta + delta,
+				MaxBlobLength:   schemaConfig.MaxBlobLength,
+				MinBlobLength:   schemaConfig.MinBlobLength,
+				MaxStringLength: schemaConfig.MaxStringLength,
+				MinStringLength: schemaConfig.MinStringLength,
+			}
 			r := rand.New(rand.NewSource(seed))
-			go f(workerCtx, pump.ch, &workers, schema, schemaConfig, table, s, r, partitionRangeConfig, generators[j].Get(i), result, mode, warmup, logger)
+			go f(workerCtx, pump.ch, &workers, schema, schemaConfig, table, s, r, partitionRangeConfig, g, result, mode, warmup, logger)
 		}
 	}
 
@@ -168,7 +173,7 @@ func ddl(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, ta
 	}
 }
 
-func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Source, testStatus *Status, deletes bool, logger *zap.Logger) {
+func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Generator, testStatus *Status, deletes bool, logger *zap.Logger) {
 	mutateStmt, err := schema.GenMutateStmt(table, source, r, p, deletes)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
@@ -204,7 +209,7 @@ func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig
 	}
 }
 
-func validation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Source, testStatus *Status, logger *zap.Logger) {
+func validation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Generator, testStatus *Status, logger *zap.Logger) {
 	checkStmt := schema.GenCheckStmt(table, source, r, p)
 	if checkStmt == nil {
 		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {

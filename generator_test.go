@@ -14,7 +14,7 @@ func TestGenerator(t *testing.T) {
 		PartitionKeys: createPkColumns(1, "pk"),
 	}
 	var current uint64
-	cfg := &GeneratorsConfig{
+	cfg := &GeneratorConfig{
 		Partitions: PartitionRangeConfig{
 			MaxStringLength: 10,
 			MinStringLength: 0,

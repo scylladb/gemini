@@ -5,7 +5,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func createGenerators(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, distributionFunc gemini.DistributionFunc, actors, distributionSize uint64, logger *zap.Logger) []*gemini.Generators {
+func createGenerators(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, distributionFunc gemini.DistributionFunc, actors, distributionSize uint64, logger *zap.Logger) []*gemini.Generator {
 	partitionRangeConfig := gemini.PartitionRangeConfig{
 		MaxBlobLength:   schemaConfig.MaxBlobLength,
 		MinBlobLength:   schemaConfig.MinBlobLength,
@@ -13,9 +13,9 @@ func createGenerators(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, d
 		MinStringLength: schemaConfig.MinStringLength,
 	}
 
-	var gs []*gemini.Generators
+	var gs []*gemini.Generator
 	for _, table := range schema.Tables {
-		gCfg := &gemini.GeneratorsConfig{
+		gCfg := &gemini.GeneratorConfig{
 			Partitions:       partitionRangeConfig,
 			Size:             actors,
 			DistributionSize: distributionSize,
