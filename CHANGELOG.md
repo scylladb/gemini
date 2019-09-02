@@ -2,6 +2,7 @@
 
 # Unreleased 
 
+- Lazy partition key generation reintroduced to avoid out of memory issues. 
 - Fix overlapping operations on the same partition key ([#198](https://github.com/scylladb/gemini/issues/198)).
 - Partition keys can now be drawn from various distributions such as ___"zipf"___,
   ___"uniform"___ and ___"normal"___. The CLI argument `--partition-key-distribution` is used
