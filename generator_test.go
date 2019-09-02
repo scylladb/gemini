@@ -1,7 +1,6 @@
 package gemini
 
 import (
-	"reflect"
 	"sync/atomic"
 	"testing"
 
@@ -21,7 +20,7 @@ func TestGenerator(t *testing.T) {
 			MaxBlobLength:   10,
 			MinBlobLength:   0,
 		},
-		Size:             1,
+		Size:             10000,
 		PkUsedBufferSize: 10000,
 		DistributionSize: 1000,
 		DistributionFunc: func() uint64 {
@@ -30,12 +29,11 @@ func TestGenerator(t *testing.T) {
 	}
 	logger, _ := zap.NewDevelopment()
 	generators := NewGenerator(table, cfg, logger)
-	source := generators.Get(0)
 	for i := uint64(0); i < cfg.DistributionSize; i++ {
 		atomic.StoreUint64(&current, i)
-		v, _ := source.Get()
-		n, _ := source.Get()
-		if !reflect.DeepEqual(v, n) {
+		v, _ := generators.Get()
+		n, _ := generators.Get()
+		if v.Token%generators.size != n.Token%generators.size {
 			t.Errorf("expected %v, got %v", v, n)
 		}
 	}

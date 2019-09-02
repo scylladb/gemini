@@ -28,6 +28,10 @@ func newSyncU64set() *syncU64set {
 //It shards the values over 256 buckets which should afford a
 //decent increase in concurrency support.
 func NewConcurrent() InFlight {
+	return newShardedSyncU64set()
+}
+
+func newShardedSyncU64set() *shardedSyncU64set {
 	s := &shardedSyncU64set{}
 	for i := range s.shards {
 		s.shards[i] = newSyncU64set()
