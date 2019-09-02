@@ -3,7 +3,7 @@ package gemini
 import (
 	"sync"
 
-	"github.com/scylladb/go-set/u64set"
+	"github.com/scylladb/gemini/inflight"
 
 	"github.com/scylladb/gemini/murmur"
 	"go.uber.org/zap"
@@ -14,7 +14,7 @@ type DistributionFunc func() uint64
 
 type Generator struct {
 	sources          []*Source
-	inFlight         *syncU64set
+	inFlight         inflight.InFlight
 	size             uint64
 	distributionSize uint64
 	table            *Table
@@ -46,7 +46,7 @@ func NewGenerator(table *Table, config *GeneratorConfig, logger *zap.Logger) *Ge
 	}
 	gs := &Generator{
 		sources:          sources,
-		inFlight:         &syncU64set{pks: u64set.New(), mu: &sync.RWMutex{}},
+		inFlight:         inflight.NewConcurrent(),
 		size:             config.Size,
 		distributionSize: config.DistributionSize,
 		table:            table,
@@ -64,7 +64,7 @@ func (g Generator) Get() (ValueWithToken, bool) {
 	source := g.sources[g.idxFunc()%g.size]
 	for {
 		v := source.pick()
-		if g.inFlight.addIfNotPresent(v.Token) {
+		if g.inFlight.AddIfNotPresent(v.Token) {
 			return v, true
 		}
 	}
@@ -87,7 +87,7 @@ type ValueWithToken struct {
 func (g *Generator) GiveOld(v ValueWithToken) {
 	source := g.sources[v.Token%g.size]
 	if len(v.Value) == 0 {
-		g.inFlight.delete(v.Token)
+		g.inFlight.Delete(v.Token)
 		return
 	}
 	source.giveOld(v)
