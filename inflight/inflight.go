@@ -62,10 +62,20 @@ type syncU64set struct {
 }
 
 func (s *syncU64set) Delete(v uint64) bool {
+	s.mu.RLock()
+	if !s.pks.Has(v) {
+		s.mu.RUnlock()
+		return false
+	}
+	s.mu.RUnlock()
 	s.mu.Lock()
-	_, found := s.pks.Pop2()
-	s.mu.Unlock()
-	return found
+	defer s.mu.Unlock()
+	if !s.pks.Has(v) {
+		// double check
+		return false
+	}
+	s.pks.Remove(v)
+	return true
 }
 
 func (s *syncU64set) AddIfNotPresent(v uint64) bool {
