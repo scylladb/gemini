@@ -758,9 +758,6 @@ func (s *Schema) genSinglePartitionQuery(t *Table, source *Generator, r *rand.Ra
 	if !ok {
 		return nil
 	}
-	if len(values.Value) != len(t.PartitionKeys) {
-		fmt.Printf("values=%d, pk=%d\n", len(values.Value), len(t.PartitionKeys))
-	}
 	return &Stmt{
 		Query: builder,
 		Values: func() (uint64, []interface{}) {

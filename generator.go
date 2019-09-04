@@ -70,8 +70,8 @@ func (g Generator) Get() (ValueWithToken, bool) {
 	}
 }
 
-//GetOld returns a previously used value and token or a new if
-//the old queue is empty.
+// GetOld returns a previously used value and token or a new if
+// the old queue is empty.
 func (g Generator) GetOld() (ValueWithToken, bool) {
 	return g.sources[g.idxFunc()%g.size].getOld()
 }
@@ -82,7 +82,7 @@ type ValueWithToken struct {
 }
 
 // GiveOld returns the supplied value for later reuse unless the value
-//is empty in which case it removes the corresponding token from the
+// is empty in which case it removes the corresponding token from the
 // in-flight tracking.
 func (g *Generator) GiveOld(v ValueWithToken) {
 	source := g.sources[v.Token%g.size]
@@ -116,14 +116,6 @@ func (g *Generator) start() {
 				g.logger.Info("stopping partition key generation loop")
 				return
 			default:
-				//time.Sleep(10 * time.Microsecond)
-				/*
-					for pos, s := range g.sources {
-						fmt.Printf("%d, values=%d, old=%d, ", pos, len(s.values), len(s.oldValues))
-					}
-					fmt.Println()
-				*/
-				// source is full, drop it this time
 			}
 		}
 	}()
