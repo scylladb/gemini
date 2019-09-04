@@ -70,7 +70,7 @@ func (r Status) HasErrors() bool {
 	return r.WriteErrors > 0 || r.ReadErrors > 0
 }
 
-func sampleStatus(p *Pump, c chan Status, sp *spinner.Spinner, logger *zap.Logger) Status {
+func sampleStatus(c chan Status, sp *spinner.Spinner, logger *zap.Logger) Status {
 	failfastDone := sync.Once{}
 	logger = logger.Named("sample_results")
 	var testRes Status
@@ -83,8 +83,8 @@ func sampleStatus(p *Pump, c chan Status, sp *spinner.Spinner, logger *zap.Logge
 			if failFast {
 				failfastDone.Do(func() {
 					logger.Warn("Errors detected. Exiting.")
-					p.Stop()
 				})
+				return testRes
 			}
 		}
 	}

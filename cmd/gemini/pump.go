@@ -7,12 +7,14 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
+	"github.com/scylladb/gemini"
 	"go.uber.org/zap"
+	"gopkg.in/tomb.v2"
 )
 
 type Pump struct {
 	ch       chan heartBeat
-	done     chan struct{}
+	t        *tomb.Tomb
 	graceful chan os.Signal
 	logger   *zap.Logger
 }
@@ -28,29 +30,26 @@ func (hb heartBeat) await() {
 }
 
 func (p *Pump) Start(d time.Duration, postFunc func()) {
-	go func() {
+	p.t.Go(func() error {
 		defer p.cleanup(postFunc)
 		timer := time.NewTimer(d)
 		for {
 			select {
-			case <-p.done:
+			case <-p.t.Dying():
 				p.logger.Info("Test run stopped. Exiting.")
-				return
+				return nil
 			case <-p.graceful:
 				p.logger.Info("Test run aborted. Exiting.")
-				return
+				p.t.Kill(nil)
+				return nil
 			case <-timer.C:
 				p.logger.Info("Test run completed. Exiting.")
-				return
+				p.t.Kill(nil)
+				return nil
 			case p.ch <- newHeartBeat():
 			}
 		}
-	}()
-}
-
-func (p *Pump) Stop() {
-	p.logger.Debug("pump asked to stop")
-	p.done <- struct{}{}
+	})
 }
 
 func (p *Pump) cleanup(postFunc func()) {
@@ -61,23 +60,26 @@ func (p *Pump) cleanup(postFunc func()) {
 	postFunc()
 }
 
-func createPump(sz int, logger *zap.Logger) *Pump {
+func createPump(t *tomb.Tomb, sz int, logger *zap.Logger) *Pump {
 	logger = logger.Named("pump")
 	var graceful = make(chan os.Signal, 1)
 	signal.Notify(graceful, syscall.SIGTERM, syscall.SIGINT)
 	pump := &Pump{
 		ch:       make(chan heartBeat, sz),
-		done:     make(chan struct{}, 1),
+		t:        t,
 		graceful: graceful,
 		logger:   logger,
 	}
 	return pump
 }
 
-func createPumpCallback(result chan Status, sp *spinner.Spinner) func() {
+func createPumpCallback(generators []*gemini.Generator, result chan Status, sp *spinner.Spinner) func() {
 	return func() {
 		if sp != nil {
 			sp.Stop()
+		}
+		for _, g := range generators {
+			g.Stop()
 		}
 	}
 }

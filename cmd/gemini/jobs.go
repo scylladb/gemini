@@ -4,22 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/gemini/store"
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
+	"gopkg.in/tomb.v2"
 )
 
 // MutationJob continuously applies mutations against the database
 // for as long as the pump is active.
-func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
-	defer wg.Done()
+func MutationJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	schemaConfig := &schemaCfg
 	logger = logger.Named("mutation_job")
 	testStatus := Status{}
+	defer func() {
+		// Send any remaining updates back
+		c <- testStatus
+	}()
 	var i int
 	for hb := range pump {
 		hb.await()
@@ -35,7 +38,7 @@ func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup,
 		}
 		if failFast && (testStatus.ReadErrors > 0 || testStatus.WriteErrors > 0) {
 			c <- testStatus
-			break
+			return
 		}
 		i++
 	}
@@ -43,12 +46,14 @@ func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup,
 
 // ValidationJob continuously applies validations against the database
 // for as long as the pump is active.
-func ValidationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
-	defer wg.Done()
+func ValidationJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	schemaConfig := &schemaCfg
 	logger = logger.Named("validation_job")
 
 	testStatus := Status{}
+	defer func() {
+		c <- testStatus
+	}()
 	var i int
 	for hb := range pump {
 		hb.await()
@@ -58,8 +63,7 @@ func ValidationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGrou
 			testStatus = Status{}
 		}
 		if failFast && (testStatus.ReadErrors > 0 || testStatus.WriteErrors > 0) {
-			c <- testStatus
-			break
+			return
 		}
 		i++
 	}
@@ -67,8 +71,7 @@ func ValidationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGrou
 
 // WarmupJob continuously applies mutations against the database
 // for as long as the pump is active or the supplied duration expires.
-func WarmupJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
-	defer wg.Done()
+func WarmupJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	schemaConfig := &schemaCfg
 	testStatus := Status{}
 	var i int
@@ -96,16 +99,8 @@ func WarmupJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, s
 	}
 }
 
-func job(done *sync.WaitGroup, f testJob, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
-	defer done.Done()
-	var finished sync.WaitGroup
-	finished.Add(1)
-
-	// Wait group for the worker goroutines.
-	var workers sync.WaitGroup
+func job(t *tomb.Tomb, f testJob, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
 	workerCtx, _ := context.WithCancel(context.Background())
-	workers.Add(len(schema.Tables) * int(actors))
-
 	partitionRangeConfig := gemini.PartitionRangeConfig{
 		MaxBlobLength:   schemaConfig.MaxBlobLength,
 		MinBlobLength:   schemaConfig.MinBlobLength,
@@ -117,11 +112,12 @@ func job(done *sync.WaitGroup, f testJob, actors uint64, schema *gemini.Schema, 
 		g := generators[j]
 		for i := 0; i < int(actors); i++ {
 			r := rand.New(rand.NewSource(seed))
-			go f(workerCtx, pump.ch, &workers, schema, schemaConfig, table, s, r, partitionRangeConfig, g, result, mode, warmup, logger)
+			t.Go(func() error {
+				f(workerCtx, pump.ch, schema, schemaConfig, table, s, r, partitionRangeConfig, g, result, mode, warmup, logger)
+				return nil
+			})
 		}
 	}
-
-	workers.Wait()
 }
 
 func ddl(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, testStatus *Status, logger *zap.Logger) {

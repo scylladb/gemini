@@ -11,7 +11,6 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"strings"
-	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -28,6 +27,7 @@ import (
 	"golang.org/x/exp/rand"
 	"golang.org/x/net/context"
 	"gonum.org/v1/gonum/stat/distuv"
+	"gopkg.in/tomb.v2"
 )
 
 var (
@@ -88,7 +88,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Generator, chan Status, string, time.Duration, *zap.Logger)
+type testJob func(context.Context, <-chan heartBeat, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Generator, chan Status, string, time.Duration, *zap.Logger)
 
 func readSchema(confFile string) (*gemini.Schema, error) {
 	byteValue, err := ioutil.ReadFile(confFile)
@@ -205,30 +205,25 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	done := &sync.WaitGroup{}
-	done.Add(1)
+	t := &tomb.Tomb{}
 	result := make(chan Status, 10000)
 	endResult := make(chan Status, 1)
-	pump := createPump(10000, logger)
+	pump := createPump(t, 10000, logger)
 	generators := createGenerators(schema, schemaConfig, distFunc, concurrency, distributionSize, logger)
-	go func() {
-		defer func() {
-			for _, g := range generators {
-				g.Stop()
-			}
-		}()
-		defer done.Done()
+	t.Go(func() error {
 		var sp *spinner.Spinner = nil
 		if interactive() {
 			sp = createSpinner()
 		}
-		pump.Start(duration+warmup, createPumpCallback(result, sp))
-		endResult <- sampleStatus(pump, result, sp, logger)
-	}()
+		pump.Start(duration+warmup, createPumpCallback(generators, result, sp))
+		endResult <- sampleStatus(result, sp, logger)
+		return nil
+	})
 
 	launch(schema, schemaConfig, store, pump, generators, result, logger)
 	close(result)
-	done.Wait()
+	logger.Info("result channel closed")
+	_ = t.Wait()
 	res := <-endResult
 	res.PrintResult(outFile, schema)
 	if res.HasErrors() {
@@ -280,27 +275,54 @@ func createDistributionFunc(distribution string, size, seed uint64, mu, sigma fl
 }
 
 func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
-	if warmup > 0 {
-		done := &sync.WaitGroup{}
-		done.Add(1)
-		job(done, WarmupJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
-		done.Wait()
-		logger.Info("Warmup done")
+	if doWarmup(schema, schemaConfig, store, pump, generators, result, logger) {
+		logger.Info("doWarmup terminates launch")
+		return
 	}
-	done := &sync.WaitGroup{}
-	done.Add(1)
+	t := &tomb.Tomb{}
 	switch mode {
 	case writeMode:
-		go job(done, MutationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, MutationJob)
 	case readMode:
-		go job(done, ValidationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, ValidationJob)
 	default:
-		done.Add(1)
-		go job(done, MutationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
-		go job(done, ValidationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, MutationJob, ValidationJob)
 	}
-	done.Wait()
+	_ = t.Wait()
 	logger.Info("All jobs complete")
+}
+
+func doWarmup(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) bool {
+	if warmup > 0 {
+		t := &tomb.Tomb{}
+		entombJobs(t, concurrency, schema, schemaConfig, s, pump, generators, result, logger, WarmupJob)
+		_ = t.Wait()
+		logger.Info("Warmup done")
+		select {
+		case <-pump.t.Dying():
+			logger.Info("Warmup dying")
+			return true
+		default:
+			logger.Info("Warmup not dying")
+		}
+	}
+	return false
+}
+
+func wrapJobInTombFunc(t *tomb.Tomb, f testJob, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) func() error {
+	return func() error {
+		job(t, f, concurrency, schema, schemaConfig, s, pump, generators, result, logger)
+		return nil
+	}
+}
+
+func entombJobs(t *tomb.Tomb, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger, fs ...testJob) {
+	t.Go(func() error {
+		for _, f := range fs {
+			t.Go(wrapJobInTombFunc(t, f, actors, schema, schemaConfig, s, pump, generators, result, logger))
+		}
+		return nil
+	})
 }
 
 func createLogger(level string) *zap.Logger {

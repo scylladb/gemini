@@ -1,13 +1,11 @@
 package gemini
 
 import (
-	"sync"
-
 	"github.com/scylladb/gemini/inflight"
-
 	"github.com/scylladb/gemini/murmur"
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
+	"gopkg.in/tomb.v2"
 )
 
 // TokenIndex represents the position of a token in the token ring.
@@ -32,7 +30,7 @@ type Generator struct {
 	partitionsConfig PartitionRangeConfig
 	seed             uint64
 	idxFunc          DistributionFunc
-	doneCh           chan struct{}
+	t                *tomb.Tomb
 	logger           *zap.Logger
 }
 
@@ -46,13 +44,13 @@ type GeneratorConfig struct {
 }
 
 func NewGenerator(table *Table, config *GeneratorConfig, logger *zap.Logger) *Generator {
+	t := &tomb.Tomb{}
 	sources := make([]*Source, config.Size)
 	for i := uint64(0); i < config.Size; i++ {
-		done := &sync.WaitGroup{}
-		done.Add(1)
 		sources[i] = &Source{
 			values:    make(chan ValueWithToken, config.PkUsedBufferSize),
 			oldValues: make(chan ValueWithToken, config.PkUsedBufferSize),
+			t:         t,
 		}
 	}
 	gs := &Generator{
@@ -64,7 +62,7 @@ func NewGenerator(table *Table, config *GeneratorConfig, logger *zap.Logger) *Ge
 		partitionsConfig: config.Partitions,
 		seed:             config.Seed,
 		idxFunc:          config.DistributionFunc,
-		doneCh:           make(chan struct{}, 1),
+		t:                t,
 		logger:           logger,
 	}
 	gs.start()
@@ -72,6 +70,11 @@ func NewGenerator(table *Table, config *GeneratorConfig, logger *zap.Logger) *Ge
 }
 
 func (g Generator) Get() (ValueWithToken, bool) {
+	select {
+	case <-g.t.Dying():
+		return emptyValueWithToken, false
+	default:
+	}
 	source := g.sources[uint64(g.idxFunc())%g.size]
 	for {
 		v := source.pick()
@@ -84,6 +87,11 @@ func (g Generator) Get() (ValueWithToken, bool) {
 // GetOld returns a previously used value and token or a new if
 // the old queue is empty.
 func (g Generator) GetOld() (ValueWithToken, bool) {
+	select {
+	case <-g.t.Dying():
+		return emptyValueWithToken, false
+	default:
+	}
 	return g.sources[uint64(g.idxFunc())%g.size].getOld()
 }
 
@@ -96,6 +104,11 @@ type ValueWithToken struct {
 // is empty in which case it removes the corresponding token from the
 // in-flight tracking.
 func (g *Generator) GiveOld(v ValueWithToken) {
+	select {
+	case <-g.t.Dying():
+		return
+	default:
+	}
 	source := g.sources[v.Token%g.size]
 	if len(v.Value) == 0 {
 		g.inFlight.Delete(v.Token)
@@ -105,14 +118,12 @@ func (g *Generator) GiveOld(v ValueWithToken) {
 }
 
 func (g *Generator) Stop() {
-	g.doneCh <- struct{}{}
-	for _, s := range g.sources {
-		close(s.oldValues)
-	}
+	g.t.Kill(nil)
+	_ = g.t.Wait()
 }
 
 func (g *Generator) start() {
-	go func() {
+	g.t.Go(func() error {
 		g.logger.Info("starting partition key generation loop")
 		routingKeyCreator := &RoutingKeyCreator{}
 		r := rand.New(rand.NewSource(g.seed))
@@ -123,13 +134,13 @@ func (g *Generator) start() {
 			source := g.sources[idx]
 			select {
 			case source.values <- ValueWithToken{Token: hash, Value: values}:
-			case <-g.doneCh:
+			case <-g.t.Dying():
 				g.logger.Info("stopping partition key generation loop")
-				return
+				return nil
 			default:
 			}
 		}
-	}()
+	})
 }
 
 func (g *Generator) createPartitionKeyValues(r *rand.Rand) []interface{} {

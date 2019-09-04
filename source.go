@@ -1,8 +1,11 @@
 package gemini
 
+import "gopkg.in/tomb.v2"
+
 type Source struct {
 	values    chan ValueWithToken
 	oldValues chan ValueWithToken
+	t         *tomb.Tomb
 }
 
 //get returns a new value and ensures that it's corresponding token
@@ -11,16 +14,16 @@ func (s *Source) get() (ValueWithToken, bool) {
 	return s.pick(), true
 }
 
+var emptyValueWithToken = ValueWithToken{}
+
 //getOld returns a previously used value and token or a new if
 //the old queue is empty.
 func (s *Source) getOld() (ValueWithToken, bool) {
 	select {
+	case <-s.t.Dying():
+		return emptyValueWithToken, false
 	case v, ok := <-s.oldValues:
 		return v, ok
-		/*default:
-		// There are no old values so we generate a new
-		return s.get()
-		*/
 	}
 }
 
