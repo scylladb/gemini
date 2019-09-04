@@ -260,9 +260,9 @@ const (
 func createDistributionFunc(distribution string, size, seed uint64, mu, sigma float64) (gemini.DistributionFunc, error) {
 	switch strings.ToLower(distribution) {
 	case "zipf":
-		dist := rand.NewZipf(rand.New(rand.NewSource(seed)), 1.1, 1.1, size-1)
-		return func() uint64 {
-			return dist.Uint64()
+		dist := rand.NewZipf(rand.New(rand.NewSource(seed)), 1.1, 1.1, size)
+		return func() gemini.TokenIndex {
+			return gemini.TokenIndex(dist.Uint64())
 		}, nil
 	case "normal":
 		dist := distuv.Normal{
@@ -270,13 +270,13 @@ func createDistributionFunc(distribution string, size, seed uint64, mu, sigma fl
 			Mu:    mu,
 			Sigma: sigma,
 		}
-		return func() uint64 {
-			return uint64(dist.Rand()) * size
+		return func() gemini.TokenIndex {
+			return gemini.TokenIndex(dist.Rand())
 		}, nil
 	case "uniform":
 		rnd := rand.New(rand.NewSource(seed))
-		return func() uint64 {
-			return rnd.Uint64n(size)
+		return func() gemini.TokenIndex {
+			return gemini.TokenIndex(rnd.Uint64n(size))
 		}, nil
 	default:
 		return nil, errors.Errorf("unsupported distribution: %s", distribution)
