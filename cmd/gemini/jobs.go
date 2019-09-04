@@ -30,7 +30,7 @@ func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup,
 		} else {
 			mutation(ctx, schema, schemaConfig, table, s, r, p, source, &testStatus, true, logger)
 		}
-		if i%100 == 0 {
+		if i%1000 == 0 {
 			c <- testStatus
 			testStatus = Status{}
 		}
@@ -54,7 +54,7 @@ func ValidationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGrou
 	for hb := range pump {
 		hb.await()
 		validation(ctx, schema, schemaConfig, table, s, r, p, source, &testStatus, logger)
-		if i%100 == 0 {
+		if i%1000 == 0 {
 			c <- testStatus
 			testStatus = Status{}
 		}
