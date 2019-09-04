@@ -11,8 +11,8 @@ type InFlight interface {
 	Delete(uint64) bool
 }
 
-//New creates a instance of a simple InFlight set.
-//It's internal data is protected by a simple sync.RWMutex.
+// New creates a instance of a simple InFlight set.
+// It's internal data is protected by a simple sync.RWMutex.
 func New() InFlight {
 	return newSyncU64set()
 }
@@ -24,9 +24,9 @@ func newSyncU64set() *syncU64set {
 	}
 }
 
-//NewConcurrent creates a instance of a sharded InFlight set.
-//It shards the values over 256 buckets which should afford a
-//decent increase in concurrency support.
+// NewConcurrent creates a instance of a sharded InFlight set.
+// It shards the values over 256 buckets which should afford a
+// decent increase in concurrency support.
 func NewConcurrent() InFlight {
 	return newShardedSyncU64set()
 }
@@ -39,8 +39,8 @@ func newShardedSyncU64set() *shardedSyncU64set {
 	return s
 }
 
-//shardedSyncU64set is a sharded InFlight implementation protected by a sync.RWLock
-//which should support greater concurrency.
+// shardedSyncU64set is a sharded InFlight implementation protected by a sync.RWLock
+// which should support greater concurrency.
 type shardedSyncU64set struct {
 	shards [256]*syncU64set
 }
@@ -55,7 +55,7 @@ func (s *shardedSyncU64set) AddIfNotPresent(v uint64) bool {
 	return ss.AddIfNotPresent(v)
 }
 
-//syncU64set is an InFlight implementation protected by a sync.RWLock
+// syncU64set is an InFlight implementation protected by a sync.RWLock
 type syncU64set struct {
 	pks *u64set.Set
 	mu  *sync.RWMutex
