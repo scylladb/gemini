@@ -352,8 +352,6 @@ type Schema struct {
 }
 
 type PartitionRangeConfig struct {
-	Left            uint64
-	Right           uint64
 	MaxBlobLength   int
 	MinBlobLength   int
 	MaxStringLength int

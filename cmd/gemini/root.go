@@ -249,10 +249,6 @@ func createFile(fname string, def *os.File) (*os.File, error) {
 }
 
 const (
-	/*
-		stdDistMean = 0.5
-		oneStdDev   = 0.341
-	*/
 	stdDistMean = math.MaxUint64 / 2
 	oneStdDev   = 0.341 * math.MaxUint64
 )

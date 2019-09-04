@@ -25,7 +25,7 @@ func (s *Source) getOld() (ValueWithToken, bool) {
 }
 
 // giveOld returns the supplied value for later reuse unless the value
-//is empty in which case it removes the corresponding token from the
+// is empty in which case it removes the corresponding token from the
 // in-flight tracking.
 func (s *Source) giveOld(v ValueWithToken) {
 	select {

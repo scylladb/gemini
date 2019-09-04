@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -107,19 +106,16 @@ func job(done *sync.WaitGroup, f testJob, actors uint64, schema *gemini.Schema, 
 	workerCtx, _ := context.WithCancel(context.Background())
 	workers.Add(len(schema.Tables) * int(actors))
 
+	partitionRangeConfig := gemini.PartitionRangeConfig{
+		MaxBlobLength:   schemaConfig.MaxBlobLength,
+		MinBlobLength:   schemaConfig.MinBlobLength,
+		MaxStringLength: schemaConfig.MaxStringLength,
+		MinStringLength: schemaConfig.MinStringLength,
+	}
+
 	for j, table := range schema.Tables {
 		g := generators[j]
-		delta := math.MaxUint64 % actors
 		for i := 0; i < int(actors); i++ {
-			start := uint64(i)
-			partitionRangeConfig := gemini.PartitionRangeConfig{
-				Left:            start * delta,
-				Right:           start*delta + delta,
-				MaxBlobLength:   schemaConfig.MaxBlobLength,
-				MinBlobLength:   schemaConfig.MinBlobLength,
-				MaxStringLength: schemaConfig.MaxStringLength,
-				MinStringLength: schemaConfig.MinStringLength,
-			}
 			r := rand.New(rand.NewSource(seed))
 			go f(workerCtx, pump.ch, &workers, schema, schemaConfig, table, s, r, partitionRangeConfig, g, result, mode, warmup, logger)
 		}
