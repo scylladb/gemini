@@ -8,7 +8,7 @@ import (
 
 type InFlight interface {
 	AddIfNotPresent(uint64) bool
-	Delete(uint64) bool
+	Delete(uint64)
 }
 
 // New creates a instance of a simple InFlight set.
@@ -45,9 +45,9 @@ type shardedSyncU64set struct {
 	shards [256]*syncU64set
 }
 
-func (s *shardedSyncU64set) Delete(v uint64) bool {
+func (s *shardedSyncU64set) Delete(v uint64) {
 	ss := s.shards[v%256]
-	return ss.Delete(v)
+	ss.Delete(v)
 }
 
 func (s *shardedSyncU64set) AddIfNotPresent(v uint64) bool {
@@ -61,21 +61,10 @@ type syncU64set struct {
 	mu  *sync.RWMutex
 }
 
-func (s *syncU64set) Delete(v uint64) bool {
-	s.mu.RLock()
-	if !s.pks.Has(v) {
-		s.mu.RUnlock()
-		return false
-	}
-	s.mu.RUnlock()
+func (s *syncU64set) Delete(v uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.pks.Has(v) {
-		// double check
-		return false
-	}
 	s.pks.Remove(v)
-	return true
 }
 
 func (s *syncU64set) AddIfNotPresent(v uint64) bool {
@@ -85,6 +74,10 @@ func (s *syncU64set) AddIfNotPresent(v uint64) bool {
 		return false
 	}
 	s.mu.RUnlock()
+	return s.addIfNotPresent(v)
+}
+
+func (s *syncU64set) addIfNotPresent(v uint64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.pks.Has(v) {

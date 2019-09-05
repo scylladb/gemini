@@ -23,11 +23,9 @@ func TestDelete(t *testing.T) {
 	flight := newSyncU64set()
 	flight.AddIfNotPresent(10)
 
-	if !flight.Delete(10) {
+	flight.Delete(10)
+	if flight.pks.Has(10) {
 		t.Error("did not delete the value")
-	}
-	if flight.Delete(10) {
-		t.Error("deleted the value twice")
 	}
 }
 
@@ -47,11 +45,9 @@ func TestDeleteSharded(t *testing.T) {
 	flight := newShardedSyncU64set()
 	flight.AddIfNotPresent(10)
 
-	if !flight.Delete(10) {
+	flight.Delete(10)
+	if flight.shards[10%256].pks.Has(10) {
 		t.Error("did not delete the value")
-	}
-	if flight.Delete(10) {
-		t.Error("deleted the value twice")
 	}
 }
 
@@ -62,7 +58,8 @@ func TestInflight(t *testing.T) {
 		return flight.AddIfNotPresent(v)
 	}
 	g := func(v uint64) interface{} {
-		return flight.Delete(v)
+		flight.Delete(v)
+		return !flight.pks.Has(v)
 	}
 
 	cfg := createQuickConfig()
@@ -78,7 +75,8 @@ func TestInflightSharded(t *testing.T) {
 		return flight.AddIfNotPresent(v)
 	}
 	g := func(v uint64) interface{} {
-		return flight.Delete(v)
+		flight.Delete(v)
+		return !flight.shards[v%256].pks.Has(v)
 	}
 
 	cfg := createQuickConfig()
