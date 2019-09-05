@@ -1,17 +1,26 @@
 package gemini
 
-import "gopkg.in/tomb.v2"
+import (
+	"github.com/scylladb/gemini/inflight"
+	"gopkg.in/tomb.v2"
+)
 
 type Partition struct {
 	values    chan ValueWithToken
 	oldValues chan ValueWithToken
+	inFlight  inflight.InFlight
 	t         *tomb.Tomb
 }
 
 // get returns a new value and ensures that it's corresponding token
 // is not already in-flight.
 func (s *Partition) get() (ValueWithToken, bool) {
-	return s.pick(), true
+	for {
+		v := s.pick()
+		if s.inFlight.AddIfNotPresent(v.Token) {
+			return v, true
+		}
+	}
 }
 
 var emptyValueWithToken = ValueWithToken{}
@@ -31,6 +40,10 @@ func (s *Partition) getOld() (ValueWithToken, bool) {
 // is empty in which case it removes the corresponding token from the
 // in-flight tracking.
 func (s *Partition) giveOld(v ValueWithToken) {
+	if len(v.Value) == 0 {
+		s.inFlight.Delete(v.Token)
+		return
+	}
 	select {
 	case s.oldValues <- v:
 	default:

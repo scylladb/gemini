@@ -23,7 +23,6 @@ type DistributionFunc func() TokenIndex
 
 type Generator struct {
 	partitions       []*Partition
-	inFlight         inflight.InFlight
 	partitionCount   uint64
 	table            *Table
 	partitionsConfig PartitionRangeConfig
@@ -48,12 +47,12 @@ func NewGenerator(table *Table, config *GeneratorConfig, logger *zap.Logger) *Ge
 		partitions[i] = &Partition{
 			values:    make(chan ValueWithToken, config.PkUsedBufferSize),
 			oldValues: make(chan ValueWithToken, config.PkUsedBufferSize),
+			inFlight:  inflight.New(),
 			t:         t,
 		}
 	}
 	gs := &Generator{
 		partitions:       partitions,
-		inFlight:         inflight.New(),
 		partitionCount:   config.PartitionsCount,
 		table:            table,
 		partitionsConfig: config.PartitionsRangeConfig,
@@ -73,12 +72,7 @@ func (g Generator) Get() (ValueWithToken, bool) {
 	default:
 	}
 	partition := g.partitions[uint64(g.idxFunc())%g.partitionCount]
-	for {
-		v := partition.pick()
-		if g.inFlight.AddIfNotPresent(v.Token) {
-			return v, true
-		}
-	}
+	return partition.get()
 }
 
 // GetOld returns a previously used value and token or a new if
@@ -107,10 +101,6 @@ func (g *Generator) GiveOld(v ValueWithToken) {
 	default:
 	}
 	partition := g.partitions[v.Token%g.partitionCount]
-	if len(v.Value) == 0 {
-		g.inFlight.Delete(v.Token)
-		return
-	}
 	partition.giveOld(v)
 }
 
