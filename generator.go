@@ -55,7 +55,7 @@ func NewGenerator(table *Table, config *GeneratorConfig, logger *zap.Logger) *Ge
 	}
 	gs := &Generator{
 		sources:          sources,
-		inFlight:         inflight.NewConcurrent(),
+		inFlight:         inflight.New(),
 		size:             config.Size,
 		distributionSize: config.DistributionSize,
 		table:            table,
