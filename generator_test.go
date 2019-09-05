@@ -14,7 +14,7 @@ func TestGenerator(t *testing.T) {
 	}
 	var current uint64
 	cfg := &GeneratorConfig{
-		Partitions: PartitionRangeConfig{
+		PartitionsRangeConfig: PartitionRangeConfig{
 			MaxStringLength: 10,
 			MinStringLength: 0,
 			MaxBlobLength:   10,
@@ -22,18 +22,18 @@ func TestGenerator(t *testing.T) {
 		},
 		Size:             10000,
 		PkUsedBufferSize: 10000,
-		DistributionSize: 1000,
-		DistributionFunc: func() uint64 {
-			return atomic.LoadUint64(&current)
+		PartitionsCount:  1000,
+		PartitionsDistributionFunc: func() TokenIndex {
+			return TokenIndex(atomic.LoadUint64(&current))
 		},
 	}
 	logger, _ := zap.NewDevelopment()
 	generators := NewGenerator(table, cfg, logger)
-	for i := uint64(0); i < cfg.DistributionSize; i++ {
+	for i := uint64(0); i < cfg.PartitionsCount; i++ {
 		atomic.StoreUint64(&current, i)
 		v, _ := generators.Get()
 		n, _ := generators.Get()
-		if v.Token%generators.size != n.Token%generators.size {
+		if v.Token%generators.partitionCount != n.Token%generators.partitionCount {
 			t.Errorf("expected %v, got %v", v, n)
 		}
 	}

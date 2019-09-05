@@ -16,12 +16,11 @@ func createGenerators(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, d
 	var gs []*gemini.Generator
 	for _, table := range schema.Tables {
 		gCfg := &gemini.GeneratorConfig{
-			Partitions:       partitionRangeConfig,
-			Size:             actors,
-			DistributionSize: distributionSize,
-			DistributionFunc: distributionFunc,
-			Seed:             seed,
-			PkUsedBufferSize: pkBufferReuseSize,
+			PartitionsRangeConfig:      partitionRangeConfig,
+			PartitionsCount:            distributionSize,
+			PartitionsDistributionFunc: distributionFunc,
+			Seed:                       seed,
+			PkUsedBufferSize:           pkBufferReuseSize,
 		}
 		g := gemini.NewGenerator(table, gCfg, logger.Named("generator"))
 		gs = append(gs, g)

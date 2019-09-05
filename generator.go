@@ -22,10 +22,9 @@ type TokenIndex uint64
 type DistributionFunc func() TokenIndex
 
 type Generator struct {
-	sources          []*Source
+	partitions       []*Partition
 	inFlight         inflight.InFlight
-	size             uint64
-	distributionSize uint64
+	partitionCount   uint64
 	table            *Table
 	partitionsConfig PartitionRangeConfig
 	seed             uint64
@@ -35,33 +34,31 @@ type Generator struct {
 }
 
 type GeneratorConfig struct {
-	Partitions       PartitionRangeConfig
-	DistributionSize uint64
-	DistributionFunc DistributionFunc
-	Size             uint64
-	Seed             uint64
-	PkUsedBufferSize uint64
+	PartitionsRangeConfig      PartitionRangeConfig
+	PartitionsCount            uint64
+	PartitionsDistributionFunc DistributionFunc
+	Seed                       uint64
+	PkUsedBufferSize           uint64
 }
 
 func NewGenerator(table *Table, config *GeneratorConfig, logger *zap.Logger) *Generator {
 	t := &tomb.Tomb{}
-	sources := make([]*Source, config.Size)
-	for i := uint64(0); i < config.Size; i++ {
-		sources[i] = &Source{
+	partitions := make([]*Partition, config.PartitionsCount)
+	for i := 0; i < len(partitions); i++ {
+		partitions[i] = &Partition{
 			values:    make(chan ValueWithToken, config.PkUsedBufferSize),
 			oldValues: make(chan ValueWithToken, config.PkUsedBufferSize),
 			t:         t,
 		}
 	}
 	gs := &Generator{
-		sources:          sources,
+		partitions:       partitions,
 		inFlight:         inflight.New(),
-		size:             config.Size,
-		distributionSize: config.DistributionSize,
+		partitionCount:   config.PartitionsCount,
 		table:            table,
-		partitionsConfig: config.Partitions,
+		partitionsConfig: config.PartitionsRangeConfig,
 		seed:             config.Seed,
-		idxFunc:          config.DistributionFunc,
+		idxFunc:          config.PartitionsDistributionFunc,
 		t:                t,
 		logger:           logger,
 	}
@@ -75,9 +72,9 @@ func (g Generator) Get() (ValueWithToken, bool) {
 		return emptyValueWithToken, false
 	default:
 	}
-	source := g.sources[uint64(g.idxFunc())%g.size]
+	partition := g.partitions[uint64(g.idxFunc())%g.partitionCount]
 	for {
-		v := source.pick()
+		v := partition.pick()
 		if g.inFlight.AddIfNotPresent(v.Token) {
 			return v, true
 		}
@@ -92,7 +89,7 @@ func (g Generator) GetOld() (ValueWithToken, bool) {
 		return emptyValueWithToken, false
 	default:
 	}
-	return g.sources[uint64(g.idxFunc())%g.size].getOld()
+	return g.partitions[uint64(g.idxFunc())%g.partitionCount].getOld()
 }
 
 type ValueWithToken struct {
@@ -109,12 +106,12 @@ func (g *Generator) GiveOld(v ValueWithToken) {
 		return
 	default:
 	}
-	source := g.sources[v.Token%g.size]
+	partition := g.partitions[v.Token%g.partitionCount]
 	if len(v.Value) == 0 {
 		g.inFlight.Delete(v.Token)
 		return
 	}
-	source.giveOld(v)
+	partition.giveOld(v)
 }
 
 func (g *Generator) Stop() {
@@ -127,15 +124,23 @@ func (g *Generator) start() {
 		g.logger.Info("starting partition key generation loop")
 		routingKeyCreator := &RoutingKeyCreator{}
 		r := rand.New(rand.NewSource(g.seed))
+		var (
+			cntCreated uint64
+			cntEmitted uint64
+		)
 		for {
 			values := g.createPartitionKeyValues(r)
 			hash := hash(routingKeyCreator, g.table, values)
-			idx := hash % g.size
-			source := g.sources[idx]
+			idx := hash % g.partitionCount
+			partition := g.partitions[idx]
+			cntCreated++
 			select {
-			case source.values <- ValueWithToken{Token: hash, Value: values}:
+			case partition.values <- ValueWithToken{Token: hash, Value: values}:
+				cntEmitted++
 			case <-g.t.Dying():
-				g.logger.Info("stopping partition key generation loop")
+				g.logger.Info("stopping partition key generation loop",
+					zap.Uint64("keys_created", cntCreated),
+					zap.Uint64("keys_emitted", cntEmitted))
 				return nil
 			default:
 			}

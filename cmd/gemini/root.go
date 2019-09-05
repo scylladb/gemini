@@ -60,7 +60,7 @@ var (
 	maxRetriesMutate         int
 	maxRetriesMutateSleep    time.Duration
 	pkBufferReuseSize        uint64
-	distributionSize         uint64
+	partitionCount           uint64
 	partitionKeyDistribution string
 	normalDistMean           float64
 	normalDistSigma          float64
@@ -137,7 +137,7 @@ func run(cmd *cobra.Command, args []string) error {
 	if err := printSetup(); err != nil {
 		return errors.Wrapf(err, "unable to print setup")
 	}
-	distFunc, err := createDistributionFunc(partitionKeyDistribution, distributionSize, seed, stdDistMean, oneStdDev)
+	distFunc, err := createDistributionFunc(partitionKeyDistribution, math.MaxUint64, seed, stdDistMean, oneStdDev)
 	if err != nil {
 		return err
 	}
@@ -209,7 +209,7 @@ func run(cmd *cobra.Command, args []string) error {
 	result := make(chan Status, 10000)
 	endResult := make(chan Status, 1)
 	pump := createPump(t, 10000, logger)
-	generators := createGenerators(schema, schemaConfig, distFunc, concurrency, distributionSize, logger)
+	generators := createGenerators(schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
 	t.Go(func() error {
 		var sp *spinner.Spinner = nil
 		if interactive() {
@@ -445,8 +445,8 @@ func init() {
 	rootCmd.Flags().StringVarP(&level, "level", "", "info", "Specify the logging level, debug|info|warn|error|dpanic|panic|fatal")
 	rootCmd.Flags().IntVarP(&maxRetriesMutate, "max-mutation-retries", "", 2, "Maximum number of attempts to apply a mutation")
 	rootCmd.Flags().DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond, "Duration between attempts to apply a mutation for example 10ms or 1s")
-	rootCmd.Flags().Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 2000, "Number of reused buffered partition keys")
-	rootCmd.Flags().Uint64VarP(&distributionSize, "distribution-size", "", math.MaxUint64, "Number of partition keys each worker creates")
+	rootCmd.Flags().Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 100, "Number of reused buffered partition keys")
+	rootCmd.Flags().Uint64VarP(&partitionCount, "token-range-slices", "", 10000, "Number of slices to divide the token space into")
 	rootCmd.Flags().StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform", "Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
 	rootCmd.Flags().Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution")
 	rootCmd.Flags().Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, defaults to one standard deviation ~0.341")
