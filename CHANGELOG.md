@@ -8,6 +8,9 @@
   partition keyspace should be divided into when applying the different distribution functions.
   The default value of this is set to an ad-hoc value of 10000 which should supply ample possibilities
   for varying selection of values according to the chosen probability distribution.
+
+# [1.5.0] - 2019-08-26
+
 - Fix overlapping operations on the same partition key ([#198](https://github.com/scylladb/gemini/issues/198)).
 - Partition keys can now be drawn from various distributions such as ___"zipf"___,
   ___"uniform"___ and ___"normal"___. The CLI argument `--partition-key-distribution` is used
@@ -167,6 +170,7 @@
 
 - Improve progress indicator ([#14](https://github.com/scylladb/gemini/issues/14)).
 
+[1.5.0]: https://github.com/scylladb/gemini/compare/v1.4.4...v1.5.0
 [1.1.0]: https://github.com/scylladb/gemini/compare/v1.1.0...v1.0.0
 [1.0.0]: https://github.com/scylladb/gemini/compare/v0.9.2...v1.0.0
 [0.9.2]: https://github.com/scylladb/gemini/compare/v0.9.1...v0.9.2
