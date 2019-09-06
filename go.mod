@@ -26,6 +26,7 @@ require (
 	golang.org/x/sys v0.0.0-20190412213103-97732733099d // indirect
 	gonum.org/v1/gonum v0.0.0-20190724133715-a8659125a966
 	gopkg.in/inf.v0 v0.9.1
+	gopkg.in/tomb.v2 v2.0.0-20161208151619-d5d1b5820637
 )
 
 replace github.com/gocql/gocql => github.com/scylladb/gocql v1.2.0

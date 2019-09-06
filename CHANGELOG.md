@@ -2,6 +2,11 @@
 
 # Unreleased 
 
+- Lazy partition key generation reintroduced to avoid out of memory issues. 
+  This brings in a new CLI arg `--token-range-slices` that defines how many slices the
+  partition keyspace should be divided into when applying the different distribution functions.
+  The default value of this is set to an ad-hoc value of 10000 which should supply ample possibilities
+  for varying selection of values according to the chosen probability distribution.
 - Fix overlapping operations on the same partition key ([#198](https://github.com/scylladb/gemini/issues/198)).
 - Partition keys can now be drawn from various distributions such as ___"zipf"___,
   ___"uniform"___ and ___"normal"___. The CLI argument `--partition-key-distribution` is used

@@ -6,11 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"strings"
-	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -27,6 +27,7 @@ import (
 	"golang.org/x/exp/rand"
 	"golang.org/x/net/context"
 	"gonum.org/v1/gonum/stat/distuv"
+	"gopkg.in/tomb.v2"
 )
 
 var (
@@ -59,7 +60,7 @@ var (
 	maxRetriesMutate         int
 	maxRetriesMutateSleep    time.Duration
 	pkBufferReuseSize        uint64
-	distributionSize         uint64
+	partitionCount           uint64
 	partitionKeyDistribution string
 	normalDistMean           float64
 	normalDistSigma          float64
@@ -87,7 +88,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, <-chan heartBeat, *sync.WaitGroup, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Source, chan Status, string, time.Duration, *zap.Logger)
+type testJob func(context.Context, <-chan heartBeat, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Generator, chan Status, string, time.Duration, *zap.Logger)
 
 func readSchema(confFile string) (*gemini.Schema, error) {
 	byteValue, err := ioutil.ReadFile(confFile)
@@ -136,7 +137,7 @@ func run(cmd *cobra.Command, args []string) error {
 	if err := printSetup(); err != nil {
 		return errors.Wrapf(err, "unable to print setup")
 	}
-	distFunc, err := createDistributionFunc(partitionKeyDistribution, distributionSize, seed, stdDistMean, oneStdDev)
+	distFunc, err := createDistributionFunc(partitionKeyDistribution, math.MaxUint64, seed, stdDistMean, oneStdDev)
 	if err != nil {
 		return err
 	}
@@ -204,25 +205,25 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	done := &sync.WaitGroup{}
-	done.Add(1)
+	t := &tomb.Tomb{}
 	result := make(chan Status, 10000)
 	endResult := make(chan Status, 1)
-	pump := createPump(10000, logger)
-	generators := createGenerators(schema, schemaConfig, distFunc, concurrency, distributionSize, logger)
-	go func() {
-		defer done.Done()
+	pump := createPump(t, 10000, logger)
+	generators := createGenerators(schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
+	t.Go(func() error {
 		var sp *spinner.Spinner = nil
 		if interactive() {
 			sp = createSpinner()
 		}
-		pump.Start(duration+warmup, createPumpCallback(result, sp))
-		endResult <- sampleStatus(pump, result, sp, logger)
-	}()
+		pump.Start(duration+warmup, createPumpCallback(generators, result, sp))
+		endResult <- sampleStatus(result, sp, logger)
+		return nil
+	})
 
 	launch(schema, schemaConfig, store, pump, generators, result, logger)
 	close(result)
-	done.Wait()
+	logger.Info("result channel closed")
+	_ = t.Wait()
 	res := <-endResult
 	res.PrintResult(outFile, schema)
 	if res.HasErrors() {
@@ -243,16 +244,16 @@ func createFile(fname string, def *os.File) (*os.File, error) {
 }
 
 const (
-	stdDistMean = 0.5
-	oneStdDev   = 0.341
+	stdDistMean = math.MaxUint64 / 2
+	oneStdDev   = 0.341 * math.MaxUint64
 )
 
 func createDistributionFunc(distribution string, size, seed uint64, mu, sigma float64) (gemini.DistributionFunc, error) {
 	switch strings.ToLower(distribution) {
 	case "zipf":
-		dist := rand.NewZipf(rand.New(rand.NewSource(seed)), 1.1, 1.1, size-1)
-		return func() uint64 {
-			return dist.Uint64()
+		dist := rand.NewZipf(rand.New(rand.NewSource(seed)), 1.1, 1.1, size)
+		return func() gemini.TokenIndex {
+			return gemini.TokenIndex(dist.Uint64())
 		}, nil
 	case "normal":
 		dist := distuv.Normal{
@@ -260,41 +261,68 @@ func createDistributionFunc(distribution string, size, seed uint64, mu, sigma fl
 			Mu:    mu,
 			Sigma: sigma,
 		}
-		return func() uint64 {
-			return uint64(dist.Rand()) * size
+		return func() gemini.TokenIndex {
+			return gemini.TokenIndex(dist.Rand())
 		}, nil
 	case "uniform":
 		rnd := rand.New(rand.NewSource(seed))
-		return func() uint64 {
-			return rnd.Uint64n(size)
+		return func() gemini.TokenIndex {
+			return gemini.TokenIndex(rnd.Uint64n(size))
 		}, nil
 	default:
 		return nil, errors.Errorf("unsupported distribution: %s", distribution)
 	}
 }
 
-func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generators, result chan Status, logger *zap.Logger) {
-	if warmup > 0 {
-		done := &sync.WaitGroup{}
-		done.Add(1)
-		job(done, WarmupJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
-		done.Wait()
-		logger.Info("Warmup done")
+func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
+	if doWarmup(schema, schemaConfig, store, pump, generators, result, logger) {
+		logger.Info("doWarmup terminates launch")
+		return
 	}
-	done := &sync.WaitGroup{}
-	done.Add(1)
+	t := &tomb.Tomb{}
 	switch mode {
 	case writeMode:
-		go job(done, MutationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, MutationJob)
 	case readMode:
-		go job(done, ValidationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, ValidationJob)
 	default:
-		done.Add(1)
-		go job(done, MutationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
-		go job(done, ValidationJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, MutationJob, ValidationJob)
 	}
-	done.Wait()
+	_ = t.Wait()
 	logger.Info("All jobs complete")
+}
+
+func doWarmup(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) bool {
+	if warmup > 0 {
+		t := &tomb.Tomb{}
+		entombJobs(t, concurrency, schema, schemaConfig, s, pump, generators, result, logger, WarmupJob)
+		_ = t.Wait()
+		logger.Info("Warmup done")
+		select {
+		case <-pump.t.Dying():
+			logger.Info("Warmup dying")
+			return true
+		default:
+			logger.Info("Warmup not dying")
+		}
+	}
+	return false
+}
+
+func wrapJobInTombFunc(t *tomb.Tomb, f testJob, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) func() error {
+	return func() error {
+		job(t, f, concurrency, schema, schemaConfig, s, pump, generators, result, logger)
+		return nil
+	}
+}
+
+func entombJobs(t *tomb.Tomb, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger, fs ...testJob) {
+	t.Go(func() error {
+		for _, f := range fs {
+			t.Go(wrapJobInTombFunc(t, f, actors, schema, schemaConfig, s, pump, generators, result, logger))
+		}
+		return nil
+	})
 }
 
 func createLogger(level string) *zap.Logger {
@@ -417,9 +445,9 @@ func init() {
 	rootCmd.Flags().StringVarP(&level, "level", "", "info", "Specify the logging level, debug|info|warn|error|dpanic|panic|fatal")
 	rootCmd.Flags().IntVarP(&maxRetriesMutate, "max-mutation-retries", "", 2, "Maximum number of attempts to apply a mutation")
 	rootCmd.Flags().DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond, "Duration between attempts to apply a mutation for example 10ms or 1s")
-	rootCmd.Flags().Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 2000, "Number of reused buffered partition keys")
-	rootCmd.Flags().Uint64VarP(&distributionSize, "distribution-size", "", 1000000, "Number of partition keys each worker creates")
-	rootCmd.Flags().StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform", "Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|exponential")
+	rootCmd.Flags().Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 100, "Number of reused buffered partition keys")
+	rootCmd.Flags().Uint64VarP(&partitionCount, "token-range-slices", "", 10000, "Number of slices to divide the token space into")
+	rootCmd.Flags().StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform", "Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
 	rootCmd.Flags().Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution")
 	rootCmd.Flags().Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, defaults to one standard deviation ~0.341")
 	rootCmd.Flags().StringVarP(&tracingOutFile, "tracing-outfile", "", "", "Specify the file to which tracing information gets written. Two magic names are available, 'stdout' and 'stderr'. By default tracing is disabled.")

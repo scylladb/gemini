@@ -4,22 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/gemini/store"
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
+	"gopkg.in/tomb.v2"
 )
 
 // MutationJob continuously applies mutations against the database
 // for as long as the pump is active.
-func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Source, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
-	defer wg.Done()
+func MutationJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, g *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	schemaConfig := &schemaCfg
 	logger = logger.Named("mutation_job")
 	testStatus := Status{}
+	defer func() {
+		// Send any remaining updates back
+		c <- testStatus
+	}()
 	var i int
 	for hb := range pump {
 		hb.await()
@@ -27,7 +30,7 @@ func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup,
 		if ind%100000 == 0 {
 			ddl(ctx, schema, schemaConfig, table, s, r, p, &testStatus, logger)
 		} else {
-			mutation(ctx, schema, schemaConfig, table, s, r, p, source, &testStatus, true, logger)
+			mutation(ctx, schema, schemaConfig, table, s, r, p, g, &testStatus, true, logger)
 		}
 		if i%1000 == 0 {
 			c <- testStatus
@@ -35,7 +38,7 @@ func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup,
 		}
 		if failFast && (testStatus.ReadErrors > 0 || testStatus.WriteErrors > 0) {
 			c <- testStatus
-			break
+			return
 		}
 		i++
 	}
@@ -43,23 +46,24 @@ func MutationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup,
 
 // ValidationJob continuously applies validations against the database
 // for as long as the pump is active.
-func ValidationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Source, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
-	defer wg.Done()
+func ValidationJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, g *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	schemaConfig := &schemaCfg
 	logger = logger.Named("validation_job")
 
 	testStatus := Status{}
+	defer func() {
+		c <- testStatus
+	}()
 	var i int
 	for hb := range pump {
 		hb.await()
-		validation(ctx, schema, schemaConfig, table, s, r, p, source, &testStatus, logger)
+		validation(ctx, schema, schemaConfig, table, s, r, p, g, &testStatus, logger)
 		if i%1000 == 0 {
 			c <- testStatus
 			testStatus = Status{}
 		}
 		if failFast && (testStatus.ReadErrors > 0 || testStatus.WriteErrors > 0) {
-			c <- testStatus
-			break
+			return
 		}
 		i++
 	}
@@ -67,8 +71,7 @@ func ValidationJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGrou
 
 // WarmupJob continuously applies mutations against the database
 // for as long as the pump is active or the supplied duration expires.
-func WarmupJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Source, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
-	defer wg.Done()
+func WarmupJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, g *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) {
 	schemaConfig := &schemaCfg
 	testStatus := Status{}
 	var i int
@@ -87,7 +90,7 @@ func WarmupJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, s
 			c <- testStatus
 			return
 		default:
-			mutation(ctx, schema, schemaConfig, table, s, r, p, source, &testStatus, false, logger)
+			mutation(ctx, schema, schemaConfig, table, s, r, p, g, &testStatus, false, logger)
 			if i%1000 == 0 {
 				c <- testStatus
 				testStatus = Status{}
@@ -96,16 +99,8 @@ func WarmupJob(ctx context.Context, pump <-chan heartBeat, wg *sync.WaitGroup, s
 	}
 }
 
-func job(done *sync.WaitGroup, f testJob, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generators, result chan Status, logger *zap.Logger) {
-	defer done.Done()
-	var finished sync.WaitGroup
-	finished.Add(1)
-
-	// Wait group for the worker goroutines.
-	var workers sync.WaitGroup
+func job(t *tomb.Tomb, f testJob, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
 	workerCtx, _ := context.WithCancel(context.Background())
-	workers.Add(len(schema.Tables) * int(actors))
-
 	partitionRangeConfig := gemini.PartitionRangeConfig{
 		MaxBlobLength:   schemaConfig.MaxBlobLength,
 		MinBlobLength:   schemaConfig.MinBlobLength,
@@ -114,13 +109,15 @@ func job(done *sync.WaitGroup, f testJob, actors uint64, schema *gemini.Schema, 
 	}
 
 	for j, table := range schema.Tables {
+		g := generators[j]
 		for i := 0; i < int(actors); i++ {
 			r := rand.New(rand.NewSource(seed))
-			go f(workerCtx, pump.ch, &workers, schema, schemaConfig, table, s, r, partitionRangeConfig, generators[j].Get(i), result, mode, warmup, logger)
+			t.Go(func() error {
+				f(workerCtx, pump.ch, schema, schemaConfig, table, s, r, partitionRangeConfig, g, result, mode, warmup, logger)
+				return nil
+			})
 		}
 	}
-
-	workers.Wait()
 }
 
 func ddl(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, testStatus *Status, logger *zap.Logger) {
@@ -168,8 +165,8 @@ func ddl(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, ta
 	}
 }
 
-func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Source, testStatus *Status, deletes bool, logger *zap.Logger) {
-	mutateStmt, err := schema.GenMutateStmt(table, source, r, p, deletes)
+func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, g *gemini.Generator, testStatus *Status, deletes bool, logger *zap.Logger) {
+	mutateStmt, err := schema.GenMutateStmt(table, g, r, p, deletes)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		testStatus.WriteErrors++
@@ -186,7 +183,7 @@ func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig
 	defer func() {
 		v := make(gemini.Value, len(table.PartitionKeys))
 		copy(v, mutateValues)
-		source.GiveOld(gemini.ValueWithToken{Token: token, Value: v})
+		g.GiveOld(gemini.ValueWithToken{Token: token, Value: v})
 	}()
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
 		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
@@ -204,8 +201,8 @@ func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig
 	}
 }
 
-func validation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, source *gemini.Source, testStatus *Status, logger *zap.Logger) {
-	checkStmt := schema.GenCheckStmt(table, source, r, p)
+func validation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, g *gemini.Generator, testStatus *Status, logger *zap.Logger) {
+	checkStmt := schema.GenCheckStmt(table, g, r, p)
 	if checkStmt == nil {
 		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
 			w.Write(zap.String("job", "validation"))
@@ -216,7 +213,7 @@ func validation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConf
 	token, checkValues := checkStmt.Values()
 	defer func() {
 		// Signal done with this pk...
-		source.GiveOld(gemini.ValueWithToken{Token: token})
+		g.GiveOld(gemini.ValueWithToken{Token: token})
 	}()
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
 		w.Write(zap.String("pretty_cql", checkStmt.PrettyCQL()))
