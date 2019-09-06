@@ -2,6 +2,7 @@
 
 # Unreleased 
 
+- Bumped driver version to v1.3.0-rc.1
 - Lazy partition key generation reintroduced to avoid out of memory issues. 
   This brings in a new CLI arg `--token-range-slices` that defines how many slices the
   partition keyspace should be divided into when applying the different distribution functions.
