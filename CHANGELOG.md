@@ -1,6 +1,6 @@
 # Changelog
 
-# Unreleased 
+# [1.6.0] - 2019-09-06
 
 - Bumped driver version to v1.3.0-rc.1
 - Lazy partition key generation reintroduced to avoid out of memory issues. 
@@ -170,6 +170,7 @@
 
 - Improve progress indicator ([#14](https://github.com/scylladb/gemini/issues/14)).
 
+[1.6.0]: https://github.com/scylladb/gemini/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/scylladb/gemini/compare/v1.4.4...v1.5.0
 [1.1.0]: https://github.com/scylladb/gemini/compare/v1.1.0...v1.0.0
 [1.0.0]: https://github.com/scylladb/gemini/compare/v0.9.2...v1.0.0
