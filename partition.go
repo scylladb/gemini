@@ -33,6 +33,8 @@ func (s *Partition) getOld() (ValueWithToken, bool) {
 		return emptyValueWithToken, false
 	case v, ok := <-s.oldValues:
 		return v, ok
+	default:
+		return s.get()
 	}
 }
 
