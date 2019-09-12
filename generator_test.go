@@ -20,7 +20,6 @@ func TestGenerator(t *testing.T) {
 			MaxBlobLength:   10,
 			MinBlobLength:   0,
 		},
-		Size:             10000,
 		PkUsedBufferSize: 10000,
 		PartitionsCount:  1000,
 		PartitionsDistributionFunc: func() TokenIndex {
