@@ -41,6 +41,7 @@ type SchemaConfig struct {
 	MaxStringLength     int
 	MinBlobLength       int
 	MinStringLength     int
+	UseCounters         bool
 	CQLFeature          CQLFeature
 }
 
@@ -381,38 +382,49 @@ func GenSchema(sc SchemaConfig) *Schema {
 	for i := 0; i < numClusteringKeys; i++ {
 		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genPrimaryKeyColumnType()})
 	}
-	var columns []ColumnDef
-	numColumns := rand.Intn(sc.GetMaxColumns()-sc.GetMinColumns()) + sc.GetMinColumns()
-	for i := 0; i < numColumns; i++ {
-		columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns, &sc)})
-	}
-	var indexes []IndexDef
-	if sc.CQLFeature > CQL_FEATURE_BASIC {
-		indexes = createIndexes(numColumns, columns)
-	}
-
-	var mvs []MaterializedView
-	if sc.CQLFeature > CQL_FEATURE_BASIC && numClusteringKeys > 0 {
-		mvs = createMaterializedViews(partitionKeys, clusteringKeys, columns)
-	}
-
 	table := Table{
-		Name:              "table1",
-		PartitionKeys:     partitionKeys,
-		ClusteringKeys:    clusteringKeys,
-		Columns:           columns,
-		MaterializedViews: mvs,
-		Indexes:           indexes,
+		Name:           "table1",
+		PartitionKeys:  partitionKeys,
+		ClusteringKeys: clusteringKeys,
 		KnownIssues: map[string]bool{
 			KnownIssuesJsonWithTuples: true,
 		},
 	}
-	if sc.CompactionStrategy == nil {
-		table.CompactionStrategy = randomCompactionStrategy()
+	if sc.UseCounters {
+		columns := []ColumnDef{
+			{
+				Name: genColumnName("col", 0),
+				Type: CounterType{
+					Value: 0,
+				},
+			},
+		}
+		table.Columns = columns
 	} else {
-		table.CompactionStrategy = &(*sc.CompactionStrategy)
-	}
+		var columns []ColumnDef
+		numColumns := rand.Intn(sc.GetMaxColumns()-sc.GetMinColumns()) + sc.GetMinColumns()
+		for i := 0; i < numColumns; i++ {
+			columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns, &sc)})
+		}
+		var indexes []IndexDef
+		if sc.CQLFeature > CQL_FEATURE_BASIC {
+			indexes = createIndexes(numColumns, columns)
+		}
 
+		var mvs []MaterializedView
+		if sc.CQLFeature > CQL_FEATURE_BASIC && numClusteringKeys > 0 {
+			mvs = createMaterializedViews(partitionKeys, clusteringKeys, columns)
+		}
+
+		table.Columns = columns
+		table.MaterializedViews = mvs
+		table.Indexes = indexes
+		if sc.CompactionStrategy == nil {
+			table.CompactionStrategy = randomCompactionStrategy()
+		} else {
+			table.CompactionStrategy = &(*sc.CompactionStrategy)
+		}
+	}
 	builder.Table(&table)
 	return builder.Build()
 }
@@ -540,6 +552,61 @@ func (s *Schema) GenInsertStmt(t *Table, g *Generator, r *rand.Rand, p Partition
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
+	if len(t.Columns) == 1 {
+		switch t.Columns[0].Type.(type) {
+		case CounterType:
+			return s.updateStmt(t, g, r, p)
+		}
+	}
+	return s.insertStmt(t, g, r, p)
+}
+
+func (s *Schema) updateStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+	var (
+		typs []Type
+	)
+	builder := qb.Update(s.Keyspace.Name + "." + t.Name)
+	for _, pk := range t.PartitionKeys {
+		builder = builder.Where(qb.Eq(pk.Name))
+		typs = append(typs, pk.Type)
+	}
+	valuesWithToken, ok := g.Get()
+	if !ok {
+		return nil, nil
+	}
+	values := valuesWithToken.Value
+	for _, ck := range t.ClusteringKeys {
+		builder = builder.Where(qb.Eq(ck.Name))
+		values = appendValue(ck.Type, r, p, values)
+		typs = append(typs, ck.Type)
+	}
+	var (
+		colValues Value
+		colTyps   []Type
+	)
+	for _, cdef := range t.Columns {
+		switch t := cdef.Type.(type) {
+		case TupleType:
+			builder = builder.SetTuple(cdef.Name, len(t.Types))
+		case CounterType:
+			builder = builder.SetLit(cdef.Name, cdef.Name+"+1")
+			continue
+		default:
+			builder = builder.Set(cdef.Name)
+		}
+		colValues = appendValue(cdef.Type, r, p, colValues)
+		colTyps = append(colTyps, cdef.Type)
+	}
+	return &Stmt{
+		Query: builder,
+		Values: func() (uint64, []interface{}) {
+			return valuesWithToken.Token, append(colValues, values...)
+		},
+		Types: append(colTyps, typs...),
+	}, nil
+}
+
+func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	var (
 		typs []Type
 	)
