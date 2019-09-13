@@ -222,7 +222,7 @@ func run(cmd *cobra.Command, args []string) error {
 
 	launch(schema, schemaConfig, store, pump, generators, result, logger)
 	close(result)
-	logger.Info("result channel closed")
+	logger.Debug("result channel closed")
 	_ = t.Wait()
 	res := <-endResult
 	res.PrintResult(outFile, schema)
@@ -276,7 +276,7 @@ func createDistributionFunc(distribution string, size, seed uint64, mu, sigma fl
 
 func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
 	if doWarmup(schema, schemaConfig, store, pump, generators, result, logger) {
-		logger.Info("doWarmup terminates launch")
+		logger.Debug("doWarmup terminates launch")
 		return
 	}
 	t := &tomb.Tomb{}
@@ -300,10 +300,13 @@ func doWarmup(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.S
 		logger.Info("Warmup done")
 		select {
 		case <-pump.t.Dying():
-			logger.Info("Warmup dying")
+			logger.Debug("Warmup dying")
+			return true
+		case <-pump.t.Dead():
+			logger.Debug("Warmup dead")
 			return true
 		default:
-			logger.Info("Warmup not dying")
+			logger.Debug("Warmup not dying")
 		}
 	}
 	return false

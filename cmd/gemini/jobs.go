@@ -80,7 +80,7 @@ func WarmupJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Schema
 		select {
 		case _, ok := <-pump:
 			if !ok {
-				logger.Info("warmup job terminated")
+				logger.Debug("warmup job terminated")
 				c <- testStatus
 				return
 			}
