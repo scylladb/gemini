@@ -25,6 +25,7 @@ func createSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 			MaxTupleParts:       2,
 			MaxBlobLength:       20,
 			MaxStringLength:     20,
+			UseCounters:         defaultConfig.UseCounters,
 			CQLFeature:          defaultConfig.CQLFeature,
 		}
 	default:
@@ -56,6 +57,7 @@ func createDefaultSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 		MinBlobLength:       MinBlobLength,
 		MaxStringLength:     MaxStringLength,
 		MinStringLength:     MinStringLength,
+		UseCounters:         useCounters,
 		CQLFeature:          getCQLFeature(cqlFeatures),
 	}
 }

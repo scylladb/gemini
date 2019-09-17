@@ -8,6 +8,7 @@ import (
 	"net"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -183,6 +184,9 @@ var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
 	gocql.TypeSet:   gocql.NewNativeType(protoVersion4, gocql.TypeSet, ""),
 	gocql.TypeTuple: gocql.NewNativeType(protoVersion4, gocql.TypeTuple, ""),
 	gocql.TypeUDT:   gocql.NewNativeType(protoVersion4, gocql.TypeUDT, ""),
+
+	// Special types
+	gocql.TypeCounter: gocql.NewNativeType(protoVersion4, gocql.TypeCounter, ""),
 }
 
 func (st SimpleType) CQLType() gocql.TypeInfo {
@@ -524,6 +528,38 @@ func (mt MapType) CQLDef() string {
 }
 
 func (mt MapType) Indexable() bool {
+	return false
+}
+
+type CounterType struct {
+	Value int64
+}
+
+func (ct CounterType) CQLType() gocql.TypeInfo {
+	return goCQLTypeMap[gocql.TypeMap]
+}
+
+func (ct CounterType) Name() string {
+	return "counter"
+}
+
+func (ct CounterType) CQLHolder() string {
+	return "?"
+}
+
+func (ct CounterType) CQLPretty(query string, value []interface{}) (string, int) {
+	return strings.Replace(query, "?", fmt.Sprintf("%d", value[0]), 1), 1
+}
+
+func (ct CounterType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+	return []interface{}{atomic.AddInt64(&ct.Value, 1)}
+}
+
+func (ct CounterType) CQLDef() string {
+	return "counter"
+}
+
+func (ct CounterType) Indexable() bool {
 	return false
 }
 
