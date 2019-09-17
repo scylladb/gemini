@@ -552,11 +552,8 @@ func (s *Schema) GenInsertStmt(t *Table, g *Generator, r *rand.Rand, p Partition
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	if len(t.Columns) == 1 {
-		switch t.Columns[0].Type.(type) {
-		case CounterType:
-			return s.updateStmt(t, g, r, p)
-		}
+	if isCounterTable(t) {
+		return s.updateStmt(t, g, r, p)
 	}
 	return s.insertStmt(t, g, r, p)
 }
@@ -649,6 +646,9 @@ func (s *Schema) GenInsertJsonStmt(t *Table, g *Generator, r *rand.Rand, p Parti
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
+	if isCounterTable(t) {
+		return nil, nil
+	}
 	vals, ok := g.Get()
 	if !ok {
 		return nil, nil
@@ -1042,4 +1042,14 @@ func (s *schemaBuilder) Build() *Schema {
 
 func NewSchemaBuilder() SchemaBuilder {
 	return &schemaBuilder{}
+}
+
+func isCounterTable(t *Table) bool {
+	if len(t.Columns) == 1 {
+		switch t.Columns[0].Type.(type) {
+		case CounterType:
+			return true
+		}
+	}
+	return false
 }
