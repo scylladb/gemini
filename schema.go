@@ -372,6 +372,12 @@ func GenSchema(sc SchemaConfig) *Schema {
 		Replication: sc.ReplicationStrategy,
 	}
 	builder.Keyspace(keyspace)
+	table := createTable(sc, "table1")
+	builder.Table(&table)
+	return builder.Build()
+}
+
+func createTable(sc SchemaConfig, tableName string) Table {
 	var partitionKeys []ColumnDef
 	numPartitionKeys := rand.Intn(sc.GetMaxPartitionKeys()-sc.GetMinPartitionKeys()) + sc.GetMinPartitionKeys()
 	for i := 0; i < numPartitionKeys; i++ {
@@ -383,7 +389,7 @@ func GenSchema(sc SchemaConfig) *Schema {
 		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genPrimaryKeyColumnType()})
 	}
 	table := Table{
-		Name:           "table1",
+		Name:           tableName,
 		PartitionKeys:  partitionKeys,
 		ClusteringKeys: clusteringKeys,
 		KnownIssues: map[string]bool{
@@ -425,8 +431,7 @@ func GenSchema(sc SchemaConfig) *Schema {
 			table.CompactionStrategy = &(*sc.CompactionStrategy)
 		}
 	}
-	builder.Table(&table)
-	return builder.Build()
+	return table
 }
 
 func createIndexes(numColumns int, columns []ColumnDef) []IndexDef {
