@@ -2,6 +2,8 @@
 
 Gemini has a large number of CLI arguments and this document is an attempt to document them.
 
+The complete [help output](cmdhelp.md) from `gemini -h` is a good reference.
+
 ## Mandatory arguments
 
 1. ___--oracle-cluster___, ___-o___: This parameter takes a comma separated list of hosts that are
