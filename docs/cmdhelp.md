@@ -9,7 +9,7 @@ Flags:
       --compaction-strategy string              Specify the desired CS as either the coded short hand stcs|twcs|lcs to get the default for each type or provide the entire specification in the form {'class':'....'}
   -c, --concurrency uint                        Number of threads per table to run concurrently (default 10)
       --consistency string                      Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE (default "QUORUM")
-      --cql-features string                     Specify the type of cql features to use, basic|normal|large (default "basic")
+      --cql-features string                     Specify the type of cql features to use, basic|normal|all (default "basic")
       --dataset-size string                     Specify the type of dataset size to use, small|large (default "large")
   -d, --drop-schema                             Drop schema before starting tests run
       --duration duration                        (default 30s)
