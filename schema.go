@@ -28,6 +28,7 @@ type Value []interface{}
 type SchemaConfig struct {
 	CompactionStrategy  *CompactionStrategy
 	ReplicationStrategy *replication.Replication
+	MaxTables           int
 	MaxPartitionKeys    int
 	MinPartitionKeys    int
 	MaxClusteringKeys   int
@@ -61,6 +62,10 @@ func (sc *SchemaConfig) Valid() error {
 		return SchemaConfigInvalidCols
 	}
 	return nil
+}
+
+func (sc *SchemaConfig) GetMaxTables() int {
+	return sc.MaxTables
 }
 
 func (sc *SchemaConfig) GetMaxPartitionKeys() int {
@@ -371,8 +376,11 @@ func GenSchema(sc SchemaConfig) *Schema {
 		Replication: sc.ReplicationStrategy,
 	}
 	builder.Keyspace(keyspace)
-	table := createTable(sc, "table1")
-	builder.Table(&table)
+	numTables := 1 + rand.Intn(sc.GetMaxTables())
+	for i := 0; i < numTables; i++ {
+		table := createTable(sc, fmt.Sprintf("table%d", i + 1))
+		builder.Table(&table)
+	}
 	return builder.Build()
 }
 
