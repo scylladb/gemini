@@ -15,6 +15,7 @@ func createSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 		return gemini.SchemaConfig{
 			CompactionStrategy:  defaultConfig.CompactionStrategy,
 			ReplicationStrategy: defaultConfig.ReplicationStrategy,
+			MaxTables:           defaultConfig.MaxTables,
 			MaxPartitionKeys:    defaultConfig.MaxPartitionKeys,
 			MinPartitionKeys:    defaultConfig.MinPartitionKeys,
 			MaxClusteringKeys:   defaultConfig.MaxClusteringKeys,
@@ -45,6 +46,7 @@ func createDefaultSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 	return gemini.SchemaConfig{
 		CompactionStrategy:  getCompactionStrategy(compactionStrategy, logger),
 		ReplicationStrategy: getReplicationStrategy(replicationStrategy, replication.NewSimpleStrategy(), logger),
+		MaxTables:           maxTables,
 		MaxPartitionKeys:    maxPartitionKeys,
 		MinPartitionKeys:    minPartitionKeys,
 		MaxClusteringKeys:   maxClusteringKeys,

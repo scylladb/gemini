@@ -3,7 +3,6 @@ package gemini
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -29,6 +28,7 @@ type Value []interface{}
 type SchemaConfig struct {
 	CompactionStrategy  *CompactionStrategy
 	ReplicationStrategy *replication.Replication
+	MaxTables           int
 	MaxPartitionKeys    int
 	MinPartitionKeys    int
 	MaxClusteringKeys   int
@@ -62,6 +62,10 @@ func (sc *SchemaConfig) Valid() error {
 		return SchemaConfigInvalidCols
 	}
 	return nil
+}
+
+func (sc *SchemaConfig) GetMaxTables() int {
+	return sc.MaxTables
 }
 
 func (sc *SchemaConfig) GetMaxPartitionKeys() int {
@@ -372,6 +376,15 @@ func GenSchema(sc SchemaConfig) *Schema {
 		Replication: sc.ReplicationStrategy,
 	}
 	builder.Keyspace(keyspace)
+	numTables := 1 + rand.Intn(sc.GetMaxTables())
+	for i := 0; i < numTables; i++ {
+		table := createTable(sc, fmt.Sprintf("table%d", i + 1))
+		builder.Table(&table)
+	}
+	return builder.Build()
+}
+
+func createTable(sc SchemaConfig, tableName string) Table {
 	var partitionKeys []ColumnDef
 	numPartitionKeys := rand.Intn(sc.GetMaxPartitionKeys()-sc.GetMinPartitionKeys()) + sc.GetMinPartitionKeys()
 	for i := 0; i < numPartitionKeys; i++ {
@@ -383,7 +396,7 @@ func GenSchema(sc SchemaConfig) *Schema {
 		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genPrimaryKeyColumnType()})
 	}
 	table := Table{
-		Name:           "table1",
+		Name:           tableName,
 		PartitionKeys:  partitionKeys,
 		ClusteringKeys: clusteringKeys,
 		KnownIssues: map[string]bool{
@@ -413,7 +426,7 @@ func GenSchema(sc SchemaConfig) *Schema {
 
 		var mvs []MaterializedView
 		if sc.CQLFeature > CQL_FEATURE_BASIC && numClusteringKeys > 0 {
-			mvs = createMaterializedViews(partitionKeys, clusteringKeys, columns)
+			mvs = createMaterializedViews(table, partitionKeys, clusteringKeys, columns)
 		}
 
 		table.Columns = columns
@@ -425,8 +438,7 @@ func GenSchema(sc SchemaConfig) *Schema {
 			table.CompactionStrategy = &(*sc.CompactionStrategy)
 		}
 	}
-	builder.Table(&table)
-	return builder.Build()
+	return table
 }
 
 func createIndexes(numColumns int, columns []ColumnDef) []IndexDef {
@@ -452,7 +464,7 @@ func createIndexes(numColumns int, columns []ColumnDef) []IndexDef {
 	return indexes
 }
 
-func createMaterializedViews(partitionKeys []ColumnDef, clusteringKeys []ColumnDef, columns []ColumnDef) []MaterializedView {
+func createMaterializedViews(table Table, partitionKeys []ColumnDef, clusteringKeys []ColumnDef, columns []ColumnDef) []MaterializedView {
 	validMVColumn := func() (ColumnDef, error) {
 		validCols := make([]ColumnDef, 0, len(columns))
 		for _, col := range columns {
@@ -485,7 +497,7 @@ func createMaterializedViews(partitionKeys []ColumnDef, clusteringKeys []ColumnD
 			col,
 		}
 		mv := MaterializedView{
-			Name:           "table1_mv_" + strconv.Itoa(i),
+			Name:           fmt.Sprintf("%s_mv_%d", table.Name, i),
 			PartitionKeys:  append(cols, partitionKeys...),
 			ClusteringKeys: clusteringKeys,
 		}

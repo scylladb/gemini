@@ -42,3 +42,5 @@ performed. Default is 30 seconds.
 
 10. ___--outfile___: Path to a file where Gemini should store it's result. If not provided then
 standard out is used.
+
+11. ___--max-tables___: Maximum number of tables in the generated schema.

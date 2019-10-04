@@ -1,5 +1,10 @@
 # Changelog
 
+# Unreleased
+
+- Add support for generating multiple tables in schema with the `--max-tables`
+  command line option.
+
 # [1.6.0] - 2019-09-06
 
 - Bumped driver version to v1.3.0-rc.1
