@@ -3,7 +3,6 @@ package gemini
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -419,7 +418,7 @@ func createTable(sc SchemaConfig, tableName string) Table {
 
 		var mvs []MaterializedView
 		if sc.CQLFeature > CQL_FEATURE_BASIC && numClusteringKeys > 0 {
-			mvs = createMaterializedViews(partitionKeys, clusteringKeys, columns)
+			mvs = createMaterializedViews(table, partitionKeys, clusteringKeys, columns)
 		}
 
 		table.Columns = columns
@@ -457,7 +456,7 @@ func createIndexes(numColumns int, columns []ColumnDef) []IndexDef {
 	return indexes
 }
 
-func createMaterializedViews(partitionKeys []ColumnDef, clusteringKeys []ColumnDef, columns []ColumnDef) []MaterializedView {
+func createMaterializedViews(table Table, partitionKeys []ColumnDef, clusteringKeys []ColumnDef, columns []ColumnDef) []MaterializedView {
 	validMVColumn := func() (ColumnDef, error) {
 		validCols := make([]ColumnDef, 0, len(columns))
 		for _, col := range columns {
@@ -490,7 +489,7 @@ func createMaterializedViews(partitionKeys []ColumnDef, clusteringKeys []ColumnD
 			col,
 		}
 		mv := MaterializedView{
-			Name:           "table1_mv_" + strconv.Itoa(i),
+			Name:           fmt.Sprintf("%s_mv_%d", table.Name, i),
 			PartitionKeys:  append(cols, partitionKeys...),
 			ClusteringKeys: clusteringKeys,
 		}
