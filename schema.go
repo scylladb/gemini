@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
@@ -26,23 +27,25 @@ const (
 type Value []interface{}
 
 type SchemaConfig struct {
-	CompactionStrategy  *CompactionStrategy
-	ReplicationStrategy *replication.Replication
-	MaxTables           int
-	MaxPartitionKeys    int
-	MinPartitionKeys    int
-	MaxClusteringKeys   int
-	MinClusteringKeys   int
-	MaxColumns          int
-	MinColumns          int
-	MaxUDTParts         int
-	MaxTupleParts       int
-	MaxBlobLength       int
-	MaxStringLength     int
-	MinBlobLength       int
-	MinStringLength     int
-	UseCounters         bool
-	CQLFeature          CQLFeature
+	CompactionStrategy               *CompactionStrategy
+	ReplicationStrategy              *replication.Replication
+	MaxTables                        int
+	MaxPartitionKeys                 int
+	MinPartitionKeys                 int
+	MaxClusteringKeys                int
+	MinClusteringKeys                int
+	MaxColumns                       int
+	MinColumns                       int
+	MaxUDTParts                      int
+	MaxTupleParts                    int
+	MaxBlobLength                    int
+	MaxStringLength                  int
+	MinBlobLength                    int
+	MinStringLength                  int
+	UseCounters                      bool
+	CQLFeature                       CQLFeature
+	AsyncObjectStabilizationAttempts int
+	AsyncObjectStabilizationDelay    time.Duration
 }
 
 var (

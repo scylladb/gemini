@@ -31,42 +31,44 @@ import (
 )
 
 var (
-	testClusterHost          []string
-	oracleClusterHost        []string
-	schemaFile               string
-	outFileArg               string
-	concurrency              uint64
-	seed                     uint64
-	dropSchema               bool
-	verbose                  bool
-	mode                     string
-	failFast                 bool
-	nonInteractive           bool
-	duration                 time.Duration
-	bind                     string
-	warmup                   time.Duration
-	compactionStrategy       string
-	replicationStrategy      string
-	consistency              string
-	maxTables                int
-	maxPartitionKeys         int
-	minPartitionKeys         int
-	maxClusteringKeys        int
-	minClusteringKeys        int
-	maxColumns               int
-	minColumns               int
-	datasetSize              string
-	cqlFeatures              string
-	level                    string
-	maxRetriesMutate         int
-	maxRetriesMutateSleep    time.Duration
-	pkBufferReuseSize        uint64
-	partitionCount           uint64
-	partitionKeyDistribution string
-	normalDistMean           float64
-	normalDistSigma          float64
-	tracingOutFile           string
-	useCounters              bool
+	testClusterHost                  []string
+	oracleClusterHost                []string
+	schemaFile                       string
+	outFileArg                       string
+	concurrency                      uint64
+	seed                             uint64
+	dropSchema                       bool
+	verbose                          bool
+	mode                             string
+	failFast                         bool
+	nonInteractive                   bool
+	duration                         time.Duration
+	bind                             string
+	warmup                           time.Duration
+	compactionStrategy               string
+	replicationStrategy              string
+	consistency                      string
+	maxTables                        int
+	maxPartitionKeys                 int
+	minPartitionKeys                 int
+	maxClusteringKeys                int
+	minClusteringKeys                int
+	maxColumns                       int
+	minColumns                       int
+	datasetSize                      string
+	cqlFeatures                      string
+	level                            string
+	maxRetriesMutate                 int
+	maxRetriesMutateSleep            time.Duration
+	pkBufferReuseSize                uint64
+	partitionCount                   uint64
+	partitionKeyDistribution         string
+	normalDistMean                   float64
+	normalDistSigma                  float64
+	tracingOutFile                   string
+	useCounters                      bool
+	asyncObjectStabilizationAttempts int
+	asyncObjectStabilizationDelay    time.Duration
 )
 
 const (
@@ -458,6 +460,8 @@ func init() {
 	rootCmd.Flags().Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, defaults to one standard deviation ~0.341")
 	rootCmd.Flags().StringVarP(&tracingOutFile, "tracing-outfile", "", "", "Specify the file to which tracing information gets written. Two magic names are available, 'stdout' and 'stderr'. By default tracing is disabled.")
 	rootCmd.Flags().BoolVarP(&useCounters, "use-counters", "", false, "Ensure that at least one table is a counter table")
+	rootCmd.Flags().IntVarP(&asyncObjectStabilizationAttempts, "async-objects-stabilization-attempts", "", 10, "Maximum number of attempts to validate result sets from MV and SI")
+	rootCmd.Flags().DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 10*time.Millisecond, "Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
 }
 
 func printSetup() error {
