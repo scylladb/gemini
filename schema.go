@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
@@ -26,23 +27,25 @@ const (
 type Value []interface{}
 
 type SchemaConfig struct {
-	CompactionStrategy  *CompactionStrategy
-	ReplicationStrategy *replication.Replication
-	MaxTables           int
-	MaxPartitionKeys    int
-	MinPartitionKeys    int
-	MaxClusteringKeys   int
-	MinClusteringKeys   int
-	MaxColumns          int
-	MinColumns          int
-	MaxUDTParts         int
-	MaxTupleParts       int
-	MaxBlobLength       int
-	MaxStringLength     int
-	MinBlobLength       int
-	MinStringLength     int
-	UseCounters         bool
-	CQLFeature          CQLFeature
+	CompactionStrategy               *CompactionStrategy
+	ReplicationStrategy              *replication.Replication
+	MaxTables                        int
+	MaxPartitionKeys                 int
+	MinPartitionKeys                 int
+	MaxClusteringKeys                int
+	MinClusteringKeys                int
+	MaxColumns                       int
+	MinColumns                       int
+	MaxUDTParts                      int
+	MaxTupleParts                    int
+	MaxBlobLength                    int
+	MaxStringLength                  int
+	MinBlobLength                    int
+	MinStringLength                  int
+	UseCounters                      bool
+	CQLFeature                       CQLFeature
+	AsyncObjectStabilizationAttempts int
+	AsyncObjectStabilizationDelay    time.Duration
 }
 
 var (
@@ -294,6 +297,7 @@ func (t *Table) alterColumn(keyspace string) ([]*Stmt, func(), error) {
 			Values: func() (uint64, []interface{}) {
 				return 0, nil
 			},
+			QueryType: AlterColumnStatementType,
 		})
 		fmt.Println(stmt)
 		return stmts, func() {
@@ -315,6 +319,7 @@ func (t *Table) dropColumn(keyspace string) ([]*Stmt, func(), error) {
 		Values: func() (uint64, []interface{}) {
 			return 0, nil
 		},
+		QueryType: DropColumnStatementType,
 	})
 	return stmts, func() {
 		t.Columns = append(t.Columns[:idx], t.Columns[idx+1:]...)
@@ -328,10 +333,28 @@ type MaterializedView struct {
 }
 
 type Stmt struct {
-	Query  qb.Builder
-	Values func() (uint64, []interface{})
-	Types  []Type
+	Query     qb.Builder
+	Values    func() (uint64, []interface{})
+	Types     []Type
+	QueryType StatementType
 }
+
+type StatementType uint8
+
+func (st StatementType) PossibleAsyncOperation() bool {
+	return st == SelectByIndexStatementType || st == SelectFromMaterializedViewStatementType
+}
+
+const (
+	SelectStatementType StatementType = iota
+	SelectRangeStatementType
+	SelectByIndexStatementType
+	SelectFromMaterializedViewStatementType
+	DeleteStatementType
+	InsertStatement
+	AlterColumnStatementType
+	DropColumnStatementType
+)
 
 func (s *Stmt) PrettyCQL() string {
 	var replaced int
@@ -378,7 +401,7 @@ func GenSchema(sc SchemaConfig) *Schema {
 	builder.Keyspace(keyspace)
 	numTables := 1 + rand.Intn(sc.GetMaxTables())
 	for i := 0; i < numTables; i++ {
-		table := createTable(sc, fmt.Sprintf("table%d", i + 1))
+		table := createTable(sc, fmt.Sprintf("table%d", i+1))
 		builder.Table(&table)
 	}
 	return builder.Build()
@@ -650,7 +673,8 @@ func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 		Values: func() (uint64, []interface{}) {
 			return valuesWithToken.Token, values
 		},
-		Types: typs,
+		Types:     typs,
+		QueryType: InsertStatement,
 	}, nil
 }
 
@@ -711,7 +735,8 @@ func (s *Schema) GenInsertJsonStmt(t *Table, g *Generator, r *rand.Rand, p Parti
 		Values: func() (uint64, []interface{}) {
 			return vals.Token, []interface{}{string(jsonString)}
 		},
-		Types: []Type{TYPE_TEXT},
+		Types:     []Type{TYPE_TEXT},
+		QueryType: InsertStatement,
 	}, nil
 }
 
@@ -745,7 +770,8 @@ func (s *Schema) GenDeleteRows(t *Table, g *Generator, r *rand.Rand, p Partition
 		Values: func() (uint64, []interface{}) {
 			return vs.Token, values
 		},
-		Types: typs,
+		Types:     typs,
+		QueryType: DeleteStatementType,
 	}, nil
 }
 
@@ -840,7 +866,8 @@ func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p
 		Values: func() (uint64, []interface{}) {
 			return values.Token, values.Value
 		},
-		Types: typs,
+		Types:     typs,
+		QueryType: SelectStatementType,
 	}
 }
 
@@ -883,7 +910,8 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, g *Generator, r *rand.Rand,
 		Values: func() (uint64, []interface{}) {
 			return 0, values
 		},
-		Types: typs,
+		Types:     typs,
+		QueryType: SelectStatementType,
 	}
 }
 
@@ -933,7 +961,8 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 		Values: func() (uint64, []interface{}) {
 			return 0, values
 		},
-		Types: typs,
+		Types:     typs,
+		QueryType: SelectRangeStatementType,
 	}
 }
 
@@ -989,7 +1018,8 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, g *Generator
 		Values: func() (uint64, []interface{}) {
 			return 0, values
 		},
-		Types: typs,
+		Types:     typs,
+		QueryType: SelectRangeStatementType,
 	}
 }
 
@@ -1023,7 +1053,8 @@ func (s *Schema) genSingleIndexQuery(t *Table, g *Generator, r *rand.Rand, p Par
 		Values: func() (uint64, []interface{}) {
 			return 0, values
 		},
-		Types: typs,
+		Types:     typs,
+		QueryType: SelectByIndexStatementType,
 	}
 }
 

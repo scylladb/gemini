@@ -201,7 +201,7 @@ func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig
 	}
 }
 
-func validation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, g *gemini.Generator, testStatus *Status, logger *zap.Logger) {
+func validation(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, g *gemini.Generator, testStatus *Status, logger *zap.Logger) {
 	checkStmt := schema.GenCheckStmt(table, g, r, p)
 	if checkStmt == nil {
 		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
@@ -219,6 +219,20 @@ func validation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConf
 		w.Write(zap.String("pretty_cql", checkStmt.PrettyCQL()))
 	}
 	if err := s.Check(ctx, table, checkQuery, checkValues...); err != nil {
+		if checkStmt.QueryType.PossibleAsyncOperation() {
+			maxAttempts := sc.AsyncObjectStabilizationAttempts
+			delay := sc.AsyncObjectStabilizationDelay
+			for attempts := 0; attempts < maxAttempts; attempts++ {
+				logger.Info("validation failed for possible async operation",
+					zap.Duration("trying_again_in", delay))
+				time.Sleep(delay)
+				// Should we sample all the errors?
+				if err = s.Check(ctx, table, checkQuery, checkValues...); err == nil {
+					// Result sets stabilized
+					return
+				}
+			}
+		}
 		// De-duplication needed?
 		e := JobError{
 			Timestamp: time.Now(),
