@@ -844,13 +844,11 @@ func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p
 
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
-	// TODO: Support materialized views
-	/*
-		if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
-			view := r.Intn(len(t.MaterializedViews))
-			tableName = t.MaterializedViews[view].Name
-			partitionKeys = t.MaterializedViews[view].PartitionKeys
-		}*/
+	if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
+		view := r.Intn(len(t.MaterializedViews))
+		tableName = t.MaterializedViews[view].Name
+		partitionKeys = t.MaterializedViews[view].PartitionKeys
+	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	typs := make([]Type, 0, 10)
 	for _, pk := range partitionKeys {
@@ -881,14 +879,11 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, g *Generator, r *rand.Rand,
 	)
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
-	// TODO: Support materialized views
-	/*
-		if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
-			view := r.Intn(len(t.MaterializedViews))
-			tableName = t.MaterializedViews[view].Name
-			partitionKeys = t.MaterializedViews[view].PartitionKeys
-		}
-	*/
+	if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
+		view := r.Intn(len(t.MaterializedViews))
+		tableName = t.MaterializedViews[view].Name
+		partitionKeys = t.MaterializedViews[view].PartitionKeys
+	}
 	pkNum := r.Intn(len(partitionKeys))
 	if pkNum == 0 {
 		pkNum = 1
@@ -925,14 +920,12 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	clusteringKeys := t.ClusteringKeys
-	// TODO: Support materialized views
-	/*
-		if len(t.MaterializedViews) > 0 && p.Rand.Int()%2 == 0 {
-			view := p.Rand.Intn(len(t.MaterializedViews))
-			tableName = t.MaterializedViews[view].Name
-			partitionKeys = t.MaterializedViews[view].PartitionKeys
-			clusteringKeys = t.MaterializedViews[view].ClusteringKeys
-		}*/
+	if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
+		view := r.Intn(len(t.MaterializedViews))
+		tableName = t.MaterializedViews[view].Name
+		partitionKeys = t.MaterializedViews[view].PartitionKeys
+		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
+	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	vs, ok := g.GetOld()
 	if !ok {
@@ -977,14 +970,12 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, g *Generator
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	clusteringKeys := t.ClusteringKeys
-	// TODO: Support materialized views
-	/*
-		if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
-			view := r.Intn(len(t.MaterializedViews))
-			tableName = t.MaterializedViews[view].Name
-			partitionKeys = t.MaterializedViews[view].PartitionKeys
-			clusteringKeys = t.MaterializedViews[view].ClusteringKeys
-		}*/
+	if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
+		view := r.Intn(len(t.MaterializedViews))
+		tableName = t.MaterializedViews[view].Name
+		partitionKeys = t.MaterializedViews[view].PartitionKeys
+		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
+	}
 	pkNum := r.Intn(len(partitionKeys))
 	if pkNum == 0 {
 		pkNum = 1
