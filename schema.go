@@ -884,20 +884,26 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, g *Generator, r *rand.Rand,
 		tableName = t.MaterializedViews[view].Name
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
 	}
-	pkNum := r.Intn(len(partitionKeys))
-	if pkNum == 0 {
-		pkNum = 1
+	numQueryPKs := r.Intn(len(partitionKeys))
+	if numQueryPKs == 0 {
+		numQueryPKs = 1
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	for i, pk := range partitionKeys {
-		builder = builder.Where(qb.InTuple(pk.Name, pkNum))
-		for j := 0; j < pkNum; j++ {
+		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
+		for j := 0; j < numQueryPKs; j++ {
 			vs, ok := g.GetOld()
 			if !ok {
 				return nil
 			}
-			values = append(values, vs.Value[i])
-			typs = append(typs, pk.Type)
+			numMVKeys := len(partitionKeys) - len(vs.Value)
+			if i < numMVKeys {
+				values = appendValue(pk.Type, r, p, values)
+				typs = append(typs, pk.Type)
+			} else {
+				values = append(values, vs.Value[i-numMVKeys])
+				typs = append(typs, pk.Type)
+			}
 		}
 	}
 	return &Stmt{
@@ -976,20 +982,26 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, g *Generator
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
 		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
 	}
-	pkNum := r.Intn(len(partitionKeys))
-	if pkNum == 0 {
-		pkNum = 1
+	numQueryPKs := r.Intn(len(partitionKeys))
+	if numQueryPKs == 0 {
+		numQueryPKs = 1
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	for i, pk := range partitionKeys {
-		builder = builder.Where(qb.InTuple(pk.Name, pkNum))
-		for j := 0; j < pkNum; j++ {
+		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
+		for j := 0; j < numQueryPKs; j++ {
 			vs, ok := g.GetOld()
 			if !ok {
 				return nil
 			}
-			values = append(values, vs.Value[i])
-			typs = append(typs, pk.Type)
+			numMVKeys := len(partitionKeys) - len(vs.Value)
+			if i < numMVKeys {
+				values = appendValue(pk.Type, r, p, values)
+				typs = append(typs, pk.Type)
+			} else {
+				values = append(values, vs.Value[i-numMVKeys])
+				typs = append(typs, pk.Type)
+			}
 		}
 	}
 	if len(clusteringKeys) > 0 {
