@@ -1,6 +1,6 @@
-# Gemini
+![Gemini](docs/images/gemini.png)
 
-Gemini is an is an automatic random testing suite for Scylla and Apache Cassandra.
+<p align="center"><i>An automatic random testing suite for Scylla and Apache Cassandra.</i></p>
 
 ## How does Gemini work?
 
