@@ -23,6 +23,14 @@ Enjoy!
 Execute `./gemini --help` to see the entire list of arguments available.
 Their explanation in some detail is available the [CLI arguments](cli-arguments.md).
 
+## Features
+
+* Random schema generation
+* Data generation using uniform, normal, and zipf distributions
+* Materialized views
+* Secondary indexes
+* Counters
+
 ## Contributing
 
 Gemini is already being used for testing Scylla releases, but there's still plenty to do.
