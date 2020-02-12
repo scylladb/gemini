@@ -406,7 +406,7 @@ func getReplicationStrategy(rs string, fallback *replication.Replication, logger
 		return replication.NewSimpleStrategy()
 	default:
 		replicationStrategy := &replication.Replication{}
-		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), rs); err != nil {
+		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), replicationStrategy); err != nil {
 			logger.Error("unable to parse replication strategy", zap.String("strategy", rs), zap.Error(err))
 			return fallback
 		}
