@@ -53,6 +53,7 @@ type storeLoader interface {
 }
 
 type Store interface {
+	Create(context.Context, qb.Builder, qb.Builder) error
 	Mutate(context.Context, qb.Builder, ...interface{}) error
 	Check(context.Context, *gemini.Table, qb.Builder, ...interface{}) error
 	Close() error
@@ -134,6 +135,17 @@ type delegatingStore struct {
 	testStore   storeLoader
 	validations bool
 	logger      *zap.Logger
+}
+
+func (ds delegatingStore) Create(ctx context.Context, testBuilder qb.Builder, oracleBuilder qb.Builder) error {
+	ts := time.Now()
+	if err := mutate(ctx, ds.oracleStore, ts, oracleBuilder, []interface{}{}); err != nil {
+		return errors.Wrap(err, "oracle failed store creation")
+	}
+	if err := mutate(ctx, ds.testStore, ts, testBuilder, []interface{}{}); err != nil {
+		return errors.Wrap(err, "test failed store creation")
+	}
+	return nil
 }
 
 func (ds delegatingStore) Mutate(ctx context.Context, builder qb.Builder, values ...interface{}) error {

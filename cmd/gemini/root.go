@@ -59,6 +59,7 @@ var (
 	warmup                           time.Duration
 	compactionStrategy               string
 	replicationStrategy              string
+	oracleReplicationStrategy        string
 	consistency                      string
 	maxTables                        int
 	maxPartitionKeys                 int
@@ -214,6 +215,12 @@ func run(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+
+	testKeyspace, oracleKeyspace := schema.GetCreateKeyspaces()
+	if err := store.Create(context.Background(), createBuilder{stmt: testKeyspace}, createBuilder{stmt: oracleKeyspace}); err != nil {
+		return errors.Wrap(err, "unable to create keyspace")
+	}
+
 	for _, stmt := range schema.GetCreateSchema() {
 		logger.Debug(stmt)
 		if err := store.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
@@ -452,6 +459,7 @@ func init() {
 	rootCmd.Flags().DurationVarP(&warmup, "warmup", "", 30*time.Second, "Specify the warmup perid as a duration for example 30s or 10h")
 	rootCmd.Flags().StringVarP(&compactionStrategy, "compaction-strategy", "", "", "Specify the desired CS as either the coded short hand stcs|twcs|lcs to get the default for each type or provide the entire specification in the form {'class':'....'}")
 	rootCmd.Flags().StringVarP(&replicationStrategy, "replication-strategy", "", "simple", "Specify the desired replication strategy as either the coded short hand simple|network to get the default for each type or provide the entire specification in the form {'class':'....'}")
+	rootCmd.Flags().StringVarP(&oracleReplicationStrategy, "oracle-replication-strategy", "", "simple", "Specify the desired replication strategy of the oracle cluster as either the coded short hand simple|network to get the default for each type or provide the entire specification in the form {'class':'....'}")
 	rootCmd.Flags().StringVarP(&consistency, "consistency", "", "QUORUM", "Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE")
 	rootCmd.Flags().IntVarP(&maxTables, "max-tables", "", 1, "Maximum number of generated tables")
 	rootCmd.Flags().IntVarP(&maxPartitionKeys, "max-partition-keys", "", 6, "Maximum number of generated partition keys")
