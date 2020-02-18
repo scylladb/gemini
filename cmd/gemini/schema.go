@@ -29,6 +29,7 @@ func createSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 		return gemini.SchemaConfig{
 			CompactionStrategy:               defaultConfig.CompactionStrategy,
 			ReplicationStrategy:              defaultConfig.ReplicationStrategy,
+			OracleReplicationStrategy:        defaultConfig.OracleReplicationStrategy,
 			MaxTables:                        defaultConfig.MaxTables,
 			MaxPartitionKeys:                 defaultConfig.MaxPartitionKeys,
 			MinPartitionKeys:                 defaultConfig.MinPartitionKeys,
@@ -59,9 +60,12 @@ func createDefaultSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 		MaxTupleParts   = 20
 		MaxUDTParts     = 20
 	)
+	rs := getReplicationStrategy(replicationStrategy, replication.NewSimpleStrategy(), logger)
+	ors := getReplicationStrategy(oracleReplicationStrategy, rs, logger)
 	return gemini.SchemaConfig{
 		CompactionStrategy:               getCompactionStrategy(compactionStrategy, logger),
-		ReplicationStrategy:              getReplicationStrategy(replicationStrategy, replication.NewSimpleStrategy(), logger),
+		ReplicationStrategy:              rs,
+		OracleReplicationStrategy:        ors,
 		MaxTables:                        maxTables,
 		MaxPartitionKeys:                 maxPartitionKeys,
 		MinPartitionKeys:                 minPartitionKeys,

@@ -43,6 +43,7 @@ type Value []interface{}
 type SchemaConfig struct {
 	CompactionStrategy               *CompactionStrategy
 	ReplicationStrategy              *replication.Replication
+	OracleReplicationStrategy        *replication.Replication
 	MaxTables                        int
 	MaxPartitionKeys                 int
 	MinPartitionKeys                 int
@@ -110,8 +111,9 @@ func (sc *SchemaConfig) GetMinColumns() int {
 }
 
 type Keyspace struct {
-	Name        string                   `json:"name"`
-	Replication *replication.Replication `json:"replication"`
+	Name              string                   `json:"name"`
+	Replication       *replication.Replication `json:"replication"`
+	OracleReplication *replication.Replication `json:"oracle_replication"`
 }
 
 type ColumnDef struct {
@@ -409,9 +411,11 @@ func (s *Schema) GetDropSchema() []string {
 func GenSchema(sc SchemaConfig) *Schema {
 	builder := NewSchemaBuilder()
 	keyspace := Keyspace{
-		Name:        "ks1",
-		Replication: sc.ReplicationStrategy,
+		Name:              "ks1",
+		Replication:       sc.ReplicationStrategy,
+		OracleReplication: sc.OracleReplicationStrategy,
 	}
+	fmt.Println(keyspace)
 	builder.Keyspace(keyspace)
 	numTables := 1 + rand.Intn(sc.GetMaxTables())
 	for i := 0; i < numTables; i++ {
@@ -554,10 +558,13 @@ func randomCompactionStrategy() *CompactionStrategy {
 	}
 }
 
-func (s *Schema) GetCreateSchema() []string {
-	createKeyspace := fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = %s", s.Keyspace.Name, s.Keyspace.Replication.ToCQL())
+func (s *Schema) GetCreateKeyspaces() (string, string) {
+	return fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = %s", s.Keyspace.Name, s.Keyspace.Replication.ToCQL()),
+		fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = %s", s.Keyspace.Name, s.Keyspace.OracleReplication.ToCQL())
+}
 
-	stmts := []string{createKeyspace}
+func (s *Schema) GetCreateSchema() []string {
+	var stmts []string
 
 	for _, t := range s.Tables {
 		createTypes := t.GetCreateTypes(s.Keyspace)
