@@ -33,6 +33,7 @@ import (
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/gemini/replication"
 	"github.com/scylladb/gemini/store"
+	"github.com/scylladb/gemini/tableopts"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -57,8 +58,8 @@ var (
 	duration                         time.Duration
 	bind                             string
 	warmup                           time.Duration
-	compactionStrategy               string
 	replicationStrategy              string
+	tableOptions                     []string
 	oracleReplicationStrategy        string
 	consistency                      string
 	maxTables                        int
@@ -385,24 +386,20 @@ func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql
 	return testCluster, oracleCluster
 }
 
-func getCompactionStrategy(cs string, logger *zap.Logger) *gemini.CompactionStrategy {
-	switch cs {
-	case "stcs":
-		return gemini.NewSizeTieredCompactionStrategy()
-	case "twcs":
-		return gemini.NewTimeWindowCompactionStrategy()
-	case "lcs":
-		return gemini.NewLeveledCompactionStrategy()
-	case "":
-		return nil
-	default:
-		compactionStrategy := &gemini.CompactionStrategy{}
-		if err := json.Unmarshal([]byte(strings.ReplaceAll(cs, "'", "\"")), compactionStrategy); err != nil {
-			logger.Error("unable to parse compaction strategy", zap.String("strategy", cs), zap.Error(err))
-			return nil
+func createTableOptions(tableOptionStrings []string, logger *zap.Logger) []tableopts.Option {
+	var tableOptions []tableopts.Option
+	for _, optionString := range tableOptionStrings {
+		o, err := tableopts.FromCQL(optionString)
+		if err != nil {
+			logger.Warn("invalid table option", zap.String("option", optionString), zap.Error(err))
+			fmt.Println("----------------------------------")
+			fmt.Println(optionString)
+			fmt.Println("----------------------------------")
+			continue
 		}
-		return compactionStrategy
+		tableOptions = append(tableOptions, o)
 	}
+	return tableOptions
 }
 
 func getReplicationStrategy(rs string, fallback *replication.Replication, logger *zap.Logger) *replication.Replication {
@@ -457,9 +454,9 @@ func init() {
 	rootCmd.Flags().StringVarP(&outFileArg, "outfile", "", "", "Specify the name of the file where the results should go")
 	rootCmd.Flags().StringVarP(&bind, "bind", "b", ":2112", "Specify the interface and port which to bind prometheus metrics on. Default is ':2112'")
 	rootCmd.Flags().DurationVarP(&warmup, "warmup", "", 30*time.Second, "Specify the warmup perid as a duration for example 30s or 10h")
-	rootCmd.Flags().StringVarP(&compactionStrategy, "compaction-strategy", "", "", "Specify the desired CS as either the coded short hand stcs|twcs|lcs to get the default for each type or provide the entire specification in the form {'class':'....'}")
 	rootCmd.Flags().StringVarP(&replicationStrategy, "replication-strategy", "", "simple", "Specify the desired replication strategy as either the coded short hand simple|network to get the default for each type or provide the entire specification in the form {'class':'....'}")
 	rootCmd.Flags().StringVarP(&oracleReplicationStrategy, "oracle-replication-strategy", "", "simple", "Specify the desired replication strategy of the oracle cluster as either the coded short hand simple|network to get the default for each type or provide the entire specification in the form {'class':'....'}")
+	rootCmd.Flags().StringArrayVarP(&tableOptions, "table-options", "", []string{}, "Repeatable argument to set table options to be added to the created tables")
 	rootCmd.Flags().StringVarP(&consistency, "consistency", "", "QUORUM", "Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE")
 	rootCmd.Flags().IntVarP(&maxTables, "max-tables", "", 1, "Maximum number of generated tables")
 	rootCmd.Flags().IntVarP(&maxPartitionKeys, "max-partition-keys", "", 6, "Maximum number of generated partition keys")

@@ -44,3 +44,6 @@ performed. Default is 30 seconds.
 standard out is used.
 
 11. ___--max-tables___: Maximum number of tables in the generated schema.
+
+12. __--table-options__: Repeatable argument to set table options for example: 
+_--table-options"compression = {'sstable_compression': 'LZ4Compressor'}"_

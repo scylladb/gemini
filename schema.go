@@ -24,6 +24,7 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/scylladb/gemini/replication"
+	"github.com/scylladb/gemini/tableopts"
 	"github.com/scylladb/gocqlx/qb"
 	"golang.org/x/exp/rand"
 )
@@ -41,9 +42,9 @@ const (
 type Value []interface{}
 
 type SchemaConfig struct {
-	CompactionStrategy               *CompactionStrategy
 	ReplicationStrategy              *replication.Replication
 	OracleReplicationStrategy        *replication.Replication
+	TableOptions                     []tableopts.Option
 	MaxTables                        int
 	MaxPartitionKeys                 int
 	MinPartitionKeys                 int
@@ -179,14 +180,14 @@ func (cs Columns) ToJSONMap(values map[string]interface{}, r *rand.Rand, p Parti
 }
 
 type Table struct {
-	Name               string              `json:"name"`
-	PartitionKeys      Columns             `json:"partition_keys"`
-	ClusteringKeys     Columns             `json:"clustering_keys"`
-	Columns            Columns             `json:"columns"`
-	CompactionStrategy *CompactionStrategy `json:"compaction_strategy"`
-	Indexes            []IndexDef          `json:"indexes"`
-	MaterializedViews  []MaterializedView  `json:"materialized_views"`
-	KnownIssues        map[string]bool     `json:"known_issues"`
+	Name              string             `json:"name"`
+	PartitionKeys     Columns            `json:"partition_keys"`
+	ClusteringKeys    Columns            `json:"clustering_keys"`
+	Columns           Columns            `json:"columns"`
+	Indexes           []IndexDef         `json:"indexes"`
+	MaterializedViews []MaterializedView `json:"materialized_views"`
+	KnownIssues       map[string]bool    `json:"known_issues"`
+	TableOptions      []string           `json:"table_options"`
 
 	// mu protects the table during schema changes
 	mu sync.RWMutex
@@ -228,8 +229,12 @@ func (t *Table) GetCreateTable(ks Keyspace) string {
 		stmt = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s), %s))", ks.Name, t.Name, strings.Join(columns, ","),
 			strings.Join(partitionKeys, ","), strings.Join(clusteringKeys, ","))
 	}
-	if t.CompactionStrategy != nil {
-		stmt = stmt + " WITH compaction = " + t.CompactionStrategy.ToCQL() + ";"
+	/*
+		if t.CompactionStrategy != nil {
+			stmt = stmt + " WITH compaction = " + t.CompactionStrategy.ToCQL() + ";"
+		}*/
+	if len(t.TableOptions) > 0 {
+		stmt = stmt + "WITH " + strings.Join(t.TableOptions, " AND ") + ";"
 	}
 	return stmt
 }
@@ -415,7 +420,6 @@ func GenSchema(sc SchemaConfig) *Schema {
 		Replication:       sc.ReplicationStrategy,
 		OracleReplication: sc.OracleReplicationStrategy,
 	}
-	fmt.Println(keyspace)
 	builder.Keyspace(keyspace)
 	numTables := 1 + rand.Intn(sc.GetMaxTables())
 	for i := 0; i < numTables; i++ {
@@ -443,6 +447,9 @@ func createTable(sc SchemaConfig, tableName string) Table {
 		KnownIssues: map[string]bool{
 			KnownIssuesJsonWithTuples: true,
 		},
+	}
+	for _, option := range sc.TableOptions {
+		table.TableOptions = append(table.TableOptions, option.ToCQL())
 	}
 	if sc.UseCounters {
 		columns := []ColumnDef{
@@ -473,11 +480,6 @@ func createTable(sc SchemaConfig, tableName string) Table {
 		table.Columns = columns
 		table.MaterializedViews = mvs
 		table.Indexes = indexes
-		if sc.CompactionStrategy == nil {
-			table.CompactionStrategy = randomCompactionStrategy()
-		} else {
-			table.CompactionStrategy = &(*sc.CompactionStrategy)
-		}
 	}
 	return table
 }
@@ -545,17 +547,6 @@ func createMaterializedViews(table Table, partitionKeys []ColumnDef, clusteringK
 		mvs = append(mvs, mv)
 	}
 	return mvs
-}
-
-func randomCompactionStrategy() *CompactionStrategy {
-	switch rand.Intn(3) {
-	case 0:
-		return NewLeveledCompactionStrategy()
-	case 1:
-		return NewTimeWindowCompactionStrategy()
-	default:
-		return NewSizeTieredCompactionStrategy()
-	}
 }
 
 func (s *Schema) GetCreateKeyspaces() (string, string) {
