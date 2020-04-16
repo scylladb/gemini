@@ -1,6 +1,10 @@
 # Changelog
 
-# Unreleased
+# [1.6.9]
+
+- Avoid DDL operations for a table with MV ([#198](https://github.com/scylladb/gemini/issues/198))
+
+# [1.6.1]
 
 - Add support for generating multiple tables in schema with the `--max-tables`
   command line option.
