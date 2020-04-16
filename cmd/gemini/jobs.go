@@ -140,6 +140,10 @@ func ddl(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, ta
 		return
 	}
 	table.Lock()
+	if len(table.MaterializedViews) > 0 {
+		// Scylla does not allow changing the DDL of a table with materialized views.
+		return
+	}
 	defer table.Unlock()
 	ddlStmts, postStmtHook, err := schema.GenDDLStmt(table, r, p, sc)
 	if err != nil {
