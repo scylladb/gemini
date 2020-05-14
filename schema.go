@@ -234,7 +234,7 @@ func (t *Table) GetCreateTable(ks Keyspace) string {
 			stmt = stmt + " WITH compaction = " + t.CompactionStrategy.ToCQL() + ";"
 		}*/
 	if len(t.TableOptions) > 0 {
-		stmt = stmt + "WITH " + strings.Join(t.TableOptions, " AND ") + ";"
+		stmt = stmt + " WITH " + strings.Join(t.TableOptions, " AND ") + ";"
 	}
 	return stmt
 }
