@@ -469,7 +469,7 @@ func createTable(sc SchemaConfig, tableName string) Table {
 		}
 		var indexes []IndexDef
 		if sc.CQLFeature > CQL_FEATURE_BASIC {
-			indexes = createIndexes(numColumns, columns)
+			indexes = createIndexes(tableName, numColumns, columns)
 		}
 
 		var mvs []MaterializedView
@@ -484,7 +484,7 @@ func createTable(sc SchemaConfig, tableName string) Table {
 	return table
 }
 
-func createIndexes(numColumns int, columns []ColumnDef) []IndexDef {
+func createIndexes(tableName string, numColumns int, columns []ColumnDef) []IndexDef {
 	if numColumns <= 0 {
 		return nil
 	}
@@ -497,7 +497,7 @@ func createIndexes(numColumns int, columns []ColumnDef) []IndexDef {
 	indexes := make([]IndexDef, 0, numIndexes)
 	for i, col := range columns {
 		if col.Type.Indexable() && typeIn(col, typesForIndex) {
-			indexes = append(indexes, IndexDef{Name: genIndexName("col", i), Column: col.Name, ColumnIdx: i})
+			indexes = append(indexes, IndexDef{Name: genIndexName(tableName+"_col", i), Column: col.Name, ColumnIdx: i})
 			createdCount++
 		}
 		if createdCount == numIndexes {
