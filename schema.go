@@ -320,7 +320,6 @@ func (t *Table) alterColumn(keyspace string) ([]*Stmt, func(), error) {
 			},
 			QueryType: AlterColumnStatementType,
 		})
-		fmt.Println(stmt)
 		return stmts, func() {
 			t.Columns[idx] = newColumn
 		}, nil

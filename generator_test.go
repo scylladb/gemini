@@ -15,6 +15,7 @@
 package gemini
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 
@@ -41,7 +42,7 @@ func TestGenerator(t *testing.T) {
 		},
 	}
 	logger, _ := zap.NewDevelopment()
-	generators := NewGenerator(table, cfg, logger)
+	generators := NewGenerator(context.Background(), table, cfg, logger)
 	for i := uint64(0); i < cfg.PartitionsCount; i++ {
 		atomic.StoreUint64(&current, i)
 		v, _ := generators.Get()

@@ -15,15 +15,37 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/briandowns/spinner"
 )
 
-func createSpinner() *spinner.Spinner {
+type spinningFeedback struct {
+	s *spinner.Spinner
+}
+
+func (sf *spinningFeedback) Set(format string, args ...interface{}) {
+	if sf.s != nil {
+		sf.s.Suffix = fmt.Sprintf(format, args...)
+	}
+}
+
+func (sf *spinningFeedback) Stop() {
+	if sf.s != nil {
+		sf.s.Stop()
+	}
+}
+
+func createSpinner(active bool) *spinningFeedback {
+	if !active {
+		return &spinningFeedback{}
+	}
 	spinnerCharSet := []string{"|", "/", "-", "\\"}
 	sp := spinner.New(spinnerCharSet, 1*time.Second)
 	_ = sp.Color("black")
 	sp.Start()
-	return sp
+	return &spinningFeedback{
+		s: sp,
+	}
 }

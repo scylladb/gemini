@@ -26,7 +26,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/briandowns/spinner"
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -39,8 +38,8 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/rand"
 	"golang.org/x/net/context"
+	"golang.org/x/sync/errgroup"
 	"gonum.org/v1/gonum/stat/distuv"
-	"gopkg.in/tomb.v2"
 )
 
 var (
@@ -106,7 +105,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, <-chan heartBeat, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Generator, chan Status, string, time.Duration, *zap.Logger)
+type testJob func(context.Context, <-chan heartBeat, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Generator, chan Status, string, time.Duration, *zap.Logger) error
 
 func readSchema(confFile string) (*gemini.Schema, error) {
 	byteValue, err := ioutil.ReadFile(confFile)
@@ -229,26 +228,33 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	t := &tomb.Tomb{}
 	result := make(chan Status, 10000)
-	endResult := make(chan Status, 1)
-	pump := createPump(t, 10000, logger)
-	generators := createGenerators(schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
-	t.Go(func() error {
-		var sp *spinner.Spinner = nil
-		if interactive() {
-			sp = createSpinner()
-		}
-		pump.Start(duration+warmup, createPumpCallback(generators, result, sp))
-		endResult <- sampleStatus(result, sp, logger)
-		return nil
+	ctx, done := context.WithTimeout(context.Background(), duration+warmup)
+	g, gCtx := errgroup.WithContext(ctx)
+	pump := createPump(10000, logger)
+	generators := createGenerators(gCtx, schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
+	sp := createSpinner(interactive())
+	g.Go(func() error {
+		return pump.Start(gCtx, done)
+	})
+	resCh := make(chan *Status, 1)
+	g.Go(func() error {
+		res, err := sampleStatus(gCtx, result, sp, logger)
+		sp.Stop()
+		resCh <- res
+		return err
+	})
+	time.AfterFunc(duration+warmup, func() {
+		logger.Info("Test run completed. Exiting.")
+		done()
 	})
 
-	launch(schema, schemaConfig, store, pump, generators, result, logger)
-	close(result)
+	launch(gCtx, schema, schemaConfig, store, pump, generators, result, logger)
+	if err := g.Wait(); err != nil {
+		logger.Debug("error detected", zap.Error(err))
+	}
 	logger.Debug("result channel closed")
-	_ = t.Wait()
-	res := <-endResult
+	res := <-resCh
 	res.PrintResult(outFile, schema)
 	if res.HasErrors() {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")
@@ -298,58 +304,33 @@ func createDistributionFunc(distribution string, size, seed uint64, mu, sigma fl
 	}
 }
 
-func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
-	if doWarmup(schema, schemaConfig, store, pump, generators, result, logger) {
-		logger.Debug("doWarmup terminates launch")
-		return
+func launch(ctx context.Context, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
+	if warmup > 0 {
+		g, gCtx := errgroup.WithContext(ctx)
+		g.Go(func() error {
+			return job(gCtx, WarmupJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+		})
+		if err := g.Wait(); err != nil && err != context.Canceled {
+			logger.Error("Warmup failed, terminates", zap.Error(err))
+			return
+		}
 	}
-	t := &tomb.Tomb{}
+
+	var testJobs []testJob
 	switch mode {
 	case writeMode:
-		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, MutationJob)
+		testJobs = append(testJobs, MutationJob)
 	case readMode:
-		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, ValidationJob)
+		testJobs = append(testJobs, ValidationJob)
 	default:
-		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, MutationJob, ValidationJob)
+		testJobs = append(testJobs, MutationJob, ValidationJob)
 	}
-	_ = t.Wait()
-	logger.Info("All jobs complete")
-}
-
-func doWarmup(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) bool {
-	if warmup > 0 {
-		t := &tomb.Tomb{}
-		entombJobs(t, concurrency, schema, schemaConfig, s, pump, generators, result, logger, WarmupJob)
-		_ = t.Wait()
-		logger.Info("Warmup done")
-		select {
-		case <-pump.t.Dying():
-			logger.Debug("Warmup dying")
-			return true
-		case <-pump.t.Dead():
-			logger.Debug("Warmup dead")
-			return true
-		default:
-			logger.Debug("Warmup not dying")
-		}
+	g, gCtx := errgroup.WithContext(ctx)
+	for _, testJob := range testJobs {
+		g.Go(func() error {
+			return job(gCtx, testJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+		})
 	}
-	return false
-}
-
-func wrapJobInTombFunc(t *tomb.Tomb, f testJob, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) func() error {
-	return func() error {
-		job(t, f, concurrency, schema, schemaConfig, s, pump, generators, result, logger)
-		return nil
-	}
-}
-
-func entombJobs(t *tomb.Tomb, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger, fs ...testJob) {
-	t.Go(func() error {
-		for _, f := range fs {
-			t.Go(wrapJobInTombFunc(t, f, actors, schema, schemaConfig, s, pump, generators, result, logger))
-		}
-		return nil
-	})
 }
 
 func createLogger(level string) *zap.Logger {
@@ -392,9 +373,6 @@ func createTableOptions(tableOptionStrings []string, logger *zap.Logger) []table
 		o, err := tableopts.FromCQL(optionString)
 		if err != nil {
 			logger.Warn("invalid table option", zap.String("option", optionString), zap.Error(err))
-			fmt.Println("----------------------------------")
-			fmt.Println(optionString)
-			fmt.Println("----------------------------------")
 			continue
 		}
 		tableOptions = append(tableOptions, o)
