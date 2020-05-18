@@ -22,7 +22,9 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -231,7 +233,20 @@ func run(cmd *cobra.Command, args []string) error {
 	result := make(chan Status, 10000)
 	ctx, done := context.WithTimeout(context.Background(), duration+warmup)
 	g, gCtx := errgroup.WithContext(ctx)
-	pump := createPump(10000, logger)
+	var graceful = make(chan os.Signal, 1)
+	signal.Notify(graceful, syscall.SIGTERM, syscall.SIGINT)
+	g.Go(func() error {
+		select {
+		case <-graceful:
+			logger.Info("Told to stop, exiting.")
+			done()
+			return ctx.Err()
+		}
+	})
+	pump := &Pump{
+		ch:     make(chan heartBeat, 10000),
+		logger: logger.Named("pump"),
+	}
 	generators := createGenerators(gCtx, schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
 	sp := createSpinner(interactive())
 	g.Go(func() error {
@@ -249,17 +264,51 @@ func run(cmd *cobra.Command, args []string) error {
 		done()
 	})
 
-	launch(gCtx, schema, schemaConfig, store, pump, generators, result, logger)
-	if err := g.Wait(); err != nil {
-		logger.Debug("error detected", zap.Error(err))
+	if warmup > 0 {
+		if err := job(gCtx, WarmupJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger); err != nil {
+			logger.Error("warmup encountered an error", zap.Error(err))
+		}
 	}
-	logger.Debug("result channel closed")
+
+	select {
+	case <-gCtx.Done():
+	default:
+		testJobs := jobsFromMode(mode)
+		for _, testJob := range testJobs {
+			g.Go(func() error {
+				return job(gCtx, testJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+			})
+		}
+		if err := g.Wait(); err != nil {
+			logger.Debug("error detected", zap.Error(err))
+		}
+	}
+	close(result)
+	logger.Info("result channel closed")
 	res := <-resCh
 	res.PrintResult(outFile, schema)
 	if res.HasErrors() {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")
 	}
 	return nil
+}
+
+func jobsFromMode(mode string) []testJob {
+	switch mode {
+	case writeMode:
+		return []testJob{
+			MutationJob,
+		}
+	case readMode:
+		return []testJob{
+			ValidationJob,
+		}
+	default:
+		return []testJob{
+			MutationJob,
+			ValidationJob,
+		}
+	}
 }
 
 func createFile(fname string, def *os.File) (*os.File, error) {
@@ -301,35 +350,6 @@ func createDistributionFunc(distribution string, size, seed uint64, mu, sigma fl
 		}, nil
 	default:
 		return nil, errors.Errorf("unsupported distribution: %s", distribution)
-	}
-}
-
-func launch(ctx context.Context, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
-	if warmup > 0 {
-		g, gCtx := errgroup.WithContext(ctx)
-		g.Go(func() error {
-			return job(gCtx, WarmupJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
-		})
-		if err := g.Wait(); err != nil && err != context.Canceled {
-			logger.Error("Warmup failed, terminates", zap.Error(err))
-			return
-		}
-	}
-
-	var testJobs []testJob
-	switch mode {
-	case writeMode:
-		testJobs = append(testJobs, MutationJob)
-	case readMode:
-		testJobs = append(testJobs, ValidationJob)
-	default:
-		testJobs = append(testJobs, MutationJob, ValidationJob)
-	}
-	g, gCtx := errgroup.WithContext(ctx)
-	for _, testJob := range testJobs {
-		g.Go(func() error {
-			return job(gCtx, testJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
-		})
 	}
 }
 

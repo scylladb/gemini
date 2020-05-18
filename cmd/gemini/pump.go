@@ -16,19 +16,15 @@ package main
 
 import (
 	"context"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"go.uber.org/zap"
 )
 
 type Pump struct {
-	ctx      context.Context
-	ch       chan heartBeat
-	graceful chan os.Signal
-	logger   *zap.Logger
+	ctx    context.Context
+	ch     chan heartBeat
+	logger *zap.Logger
 }
 
 type heartBeat struct {
@@ -48,10 +44,6 @@ func (p *Pump) Start(ctx context.Context, done context.CancelFunc) error {
 		case <-ctx.Done():
 			p.logger.Info("Test run stopped. Exiting.")
 			return ctx.Err()
-		case <-p.graceful:
-			p.logger.Info("Test run aborted. Exiting.")
-			done()
-			return ctx.Err()
 		case p.ch <- newHeartBeat():
 		}
 	}
@@ -60,16 +52,4 @@ func (p *Pump) Start(ctx context.Context, done context.CancelFunc) error {
 func (p *Pump) cleanup() {
 	close(p.ch)
 	p.logger.Debug("pump channel closed")
-}
-
-func createPump(sz int, logger *zap.Logger) *Pump {
-	logger = logger.Named("pump")
-	var graceful = make(chan os.Signal, 1)
-	signal.Notify(graceful, syscall.SIGTERM, syscall.SIGINT)
-	pump := &Pump{
-		ch:       make(chan heartBeat, sz),
-		graceful: graceful,
-		logger:   logger,
-	}
-	return pump
 }
