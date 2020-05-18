@@ -5,7 +5,7 @@ go 1.12
 require (
 	github.com/briandowns/spinner v1.11.1
 	github.com/gocql/gocql v0.0.0-20200103014340-68f928edb90a
-	github.com/google/go-cmp v0.2.0
+	github.com/google/go-cmp v0.4.1
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/mitchellh/mapstructure v1.1.2
 	github.com/pkg/errors v0.8.1
