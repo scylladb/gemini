@@ -15,12 +15,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"sync"
 
-	"github.com/briandowns/spinner"
 	"github.com/pkg/errors"
 	"github.com/scylladb/gemini"
 	"go.uber.org/zap"
@@ -34,13 +34,12 @@ type Status struct {
 	Errors      []JobError `json:"errors,omitempty"`
 }
 
-func (r *Status) Merge(sum *Status) Status {
-	sum.WriteOps += r.WriteOps
-	sum.WriteErrors += r.WriteErrors
-	sum.ReadOps += r.ReadOps
-	sum.ReadErrors += r.ReadErrors
-	sum.Errors = append(sum.Errors, r.Errors...)
-	return *sum
+func (r *Status) Merge(s Status) {
+	r.WriteOps += s.WriteOps
+	r.WriteErrors += s.WriteErrors
+	r.ReadOps += s.ReadOps
+	r.ReadErrors += s.ReadErrors
+	r.Errors = append(r.Errors, s.Errors...)
 }
 
 func (r *Status) PrintResult(w io.Writer, schema *gemini.Schema) {
@@ -84,23 +83,27 @@ func (r Status) HasErrors() bool {
 	return r.WriteErrors > 0 || r.ReadErrors > 0
 }
 
-func sampleStatus(c chan Status, sp *spinner.Spinner, logger *zap.Logger) Status {
+var errErrorsDetected = errors.New("errors detected")
+
+func sampleStatus(ctx context.Context, c chan Status, sp *spinningFeedback, logger *zap.Logger) (*Status, error) {
 	failfastDone := sync.Once{}
 	logger = logger.Named("sample_results")
-	var testRes Status
-	for res := range c {
-		testRes = res.Merge(&testRes)
-		if sp != nil {
-			sp.Suffix = fmt.Sprintf(" Running Gemini... %v", testRes)
-		}
-		if testRes.ReadErrors > 0 || testRes.WriteErrors > 0 {
-			if failFast {
-				failfastDone.Do(func() {
-					logger.Warn("Errors detected. Exiting.")
-				})
-				return testRes
+	testRes := &Status{}
+	for {
+		select {
+		case <-ctx.Done():
+			return testRes, ctx.Err()
+		case res := <-c:
+			testRes.Merge(res)
+			sp.Set(" Running Gemini... %v", testRes)
+			if testRes.ReadErrors > 0 || testRes.WriteErrors > 0 {
+				if failFast {
+					failfastDone.Do(func() {
+						logger.Warn("Errors detected. Exiting.")
+					})
+					return testRes, errErrorsDetected
+				}
 			}
 		}
 	}
-	return testRes
 }

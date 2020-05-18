@@ -15,15 +15,16 @@
 package gemini
 
 import (
+	"context"
+
 	"github.com/scylladb/gemini/inflight"
-	"gopkg.in/tomb.v2"
 )
 
 type Partition struct {
+	ctx       context.Context
 	values    chan ValueWithToken
 	oldValues chan ValueWithToken
 	inFlight  inflight.InFlight
-	t         *tomb.Tomb
 }
 
 // get returns a new value and ensures that it's corresponding token
@@ -43,7 +44,7 @@ var emptyValueWithToken = ValueWithToken{}
 // the old queue is empty.
 func (s *Partition) getOld() (ValueWithToken, bool) {
 	select {
-	case <-s.t.Dying():
+	case <-s.ctx.Done():
 		return emptyValueWithToken, false
 	case v, ok := <-s.oldValues:
 		return v, ok

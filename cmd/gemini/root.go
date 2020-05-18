@@ -22,11 +22,12 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
-	"github.com/briandowns/spinner"
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -39,8 +40,8 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/rand"
 	"golang.org/x/net/context"
+	"golang.org/x/sync/errgroup"
 	"gonum.org/v1/gonum/stat/distuv"
-	"gopkg.in/tomb.v2"
 )
 
 var (
@@ -106,7 +107,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, <-chan heartBeat, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Generator, chan Status, string, time.Duration, *zap.Logger)
+type testJob func(context.Context, <-chan heartBeat, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Generator, chan Status, string, time.Duration, *zap.Logger) error
 
 func readSchema(confFile string) (*gemini.Schema, error) {
 	byteValue, err := ioutil.ReadFile(confFile)
@@ -229,31 +230,85 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	t := &tomb.Tomb{}
 	result := make(chan Status, 10000)
-	endResult := make(chan Status, 1)
-	pump := createPump(t, 10000, logger)
-	generators := createGenerators(schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
-	t.Go(func() error {
-		var sp *spinner.Spinner = nil
-		if interactive() {
-			sp = createSpinner()
+	ctx, done := context.WithTimeout(context.Background(), duration+warmup)
+	g, gCtx := errgroup.WithContext(ctx)
+	var graceful = make(chan os.Signal, 1)
+	signal.Notify(graceful, syscall.SIGTERM, syscall.SIGINT)
+	g.Go(func() error {
+		select {
+		case <-graceful:
+			logger.Info("Told to stop, exiting.")
+			done()
+			return ctx.Err()
 		}
-		pump.Start(duration+warmup, createPumpCallback(generators, result, sp))
-		endResult <- sampleStatus(result, sp, logger)
-		return nil
+	})
+	pump := &Pump{
+		ch:     make(chan heartBeat, 10000),
+		logger: logger.Named("pump"),
+	}
+	generators := createGenerators(gCtx, schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
+	sp := createSpinner(interactive())
+	g.Go(func() error {
+		return pump.Start(gCtx, done)
+	})
+	resCh := make(chan *Status, 1)
+	g.Go(func() error {
+		res, err := sampleStatus(gCtx, result, sp, logger)
+		sp.Stop()
+		resCh <- res
+		return err
+	})
+	time.AfterFunc(duration+warmup, func() {
+		logger.Info("Test run completed. Exiting.")
+		done()
 	})
 
-	launch(schema, schemaConfig, store, pump, generators, result, logger)
+	if warmup > 0 {
+		if err := job(gCtx, WarmupJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger); err != nil {
+			logger.Error("warmup encountered an error", zap.Error(err))
+		}
+	}
+
+	select {
+	case <-gCtx.Done():
+	default:
+		testJobs := jobsFromMode(mode)
+		for _, testJob := range testJobs {
+			g.Go(func() error {
+				return job(gCtx, testJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+			})
+		}
+		if err := g.Wait(); err != nil {
+			logger.Debug("error detected", zap.Error(err))
+		}
+	}
 	close(result)
-	logger.Debug("result channel closed")
-	_ = t.Wait()
-	res := <-endResult
+	logger.Info("result channel closed")
+	res := <-resCh
 	res.PrintResult(outFile, schema)
 	if res.HasErrors() {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")
 	}
 	return nil
+}
+
+func jobsFromMode(mode string) []testJob {
+	switch mode {
+	case writeMode:
+		return []testJob{
+			MutationJob,
+		}
+	case readMode:
+		return []testJob{
+			ValidationJob,
+		}
+	default:
+		return []testJob{
+			MutationJob,
+			ValidationJob,
+		}
+	}
 }
 
 func createFile(fname string, def *os.File) (*os.File, error) {
@@ -298,60 +353,6 @@ func createDistributionFunc(distribution string, size, seed uint64, mu, sigma fl
 	}
 }
 
-func launch(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, store store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) {
-	if doWarmup(schema, schemaConfig, store, pump, generators, result, logger) {
-		logger.Debug("doWarmup terminates launch")
-		return
-	}
-	t := &tomb.Tomb{}
-	switch mode {
-	case writeMode:
-		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, MutationJob)
-	case readMode:
-		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, ValidationJob)
-	default:
-		entombJobs(t, concurrency, schema, schemaConfig, store, pump, generators, result, logger, MutationJob, ValidationJob)
-	}
-	_ = t.Wait()
-	logger.Info("All jobs complete")
-}
-
-func doWarmup(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) bool {
-	if warmup > 0 {
-		t := &tomb.Tomb{}
-		entombJobs(t, concurrency, schema, schemaConfig, s, pump, generators, result, logger, WarmupJob)
-		_ = t.Wait()
-		logger.Info("Warmup done")
-		select {
-		case <-pump.t.Dying():
-			logger.Debug("Warmup dying")
-			return true
-		case <-pump.t.Dead():
-			logger.Debug("Warmup dead")
-			return true
-		default:
-			logger.Debug("Warmup not dying")
-		}
-	}
-	return false
-}
-
-func wrapJobInTombFunc(t *tomb.Tomb, f testJob, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger) func() error {
-	return func() error {
-		job(t, f, concurrency, schema, schemaConfig, s, pump, generators, result, logger)
-		return nil
-	}
-}
-
-func entombJobs(t *tomb.Tomb, actors uint64, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, s store.Store, pump *Pump, generators []*gemini.Generator, result chan Status, logger *zap.Logger, fs ...testJob) {
-	t.Go(func() error {
-		for _, f := range fs {
-			t.Go(wrapJobInTombFunc(t, f, actors, schema, schemaConfig, s, pump, generators, result, logger))
-		}
-		return nil
-	})
-}
-
 func createLogger(level string) *zap.Logger {
 	lvl := zap.NewAtomicLevel()
 	if err := lvl.UnmarshalText([]byte(level)); err != nil {
@@ -392,9 +393,6 @@ func createTableOptions(tableOptionStrings []string, logger *zap.Logger) []table
 		o, err := tableopts.FromCQL(optionString)
 		if err != nil {
 			logger.Warn("invalid table option", zap.String("option", optionString), zap.Error(err))
-			fmt.Println("----------------------------------")
-			fmt.Println(optionString)
-			fmt.Println("----------------------------------")
 			continue
 		}
 		tableOptions = append(tableOptions, o)

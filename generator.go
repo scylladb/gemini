@@ -15,11 +15,13 @@
 package gemini
 
 import (
+	"context"
+
 	"github.com/scylladb/gemini/inflight"
 	"github.com/scylladb/gemini/murmur"
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
-	"gopkg.in/tomb.v2"
+	"golang.org/x/sync/errgroup"
 )
 
 // TokenIndex represents the position of a token in the token ring.
@@ -36,13 +38,13 @@ type TokenIndex uint64
 type DistributionFunc func() TokenIndex
 
 type Generator struct {
+	ctx              context.Context
 	partitions       []*Partition
 	partitionCount   uint64
 	table            *Table
 	partitionsConfig PartitionRangeConfig
 	seed             uint64
 	idxFunc          DistributionFunc
-	t                *tomb.Tomb
 	logger           *zap.Logger
 }
 
@@ -54,25 +56,24 @@ type GeneratorConfig struct {
 	PkUsedBufferSize           uint64
 }
 
-func NewGenerator(table *Table, config *GeneratorConfig, logger *zap.Logger) *Generator {
-	t := &tomb.Tomb{}
+func NewGenerator(ctx context.Context, table *Table, config *GeneratorConfig, logger *zap.Logger) *Generator {
 	partitions := make([]*Partition, config.PartitionsCount)
 	for i := 0; i < len(partitions); i++ {
 		partitions[i] = &Partition{
+			ctx:       ctx,
 			values:    make(chan ValueWithToken, config.PkUsedBufferSize),
 			oldValues: make(chan ValueWithToken, config.PkUsedBufferSize),
 			inFlight:  inflight.New(),
-			t:         t,
 		}
 	}
 	gs := &Generator{
+		ctx:              ctx,
 		partitions:       partitions,
 		partitionCount:   config.PartitionsCount,
 		table:            table,
 		partitionsConfig: config.PartitionsRangeConfig,
 		seed:             config.Seed,
 		idxFunc:          config.PartitionsDistributionFunc,
-		t:                t,
 		logger:           logger,
 	}
 	gs.start()
@@ -81,7 +82,7 @@ func NewGenerator(table *Table, config *GeneratorConfig, logger *zap.Logger) *Ge
 
 func (g Generator) Get() (ValueWithToken, bool) {
 	select {
-	case <-g.t.Dying():
+	case <-g.ctx.Done():
 		return emptyValueWithToken, false
 	default:
 	}
@@ -93,7 +94,7 @@ func (g Generator) Get() (ValueWithToken, bool) {
 // the old queue is empty.
 func (g Generator) GetOld() (ValueWithToken, bool) {
 	select {
-	case <-g.t.Dying():
+	case <-g.ctx.Done():
 		return emptyValueWithToken, false
 	default:
 	}
@@ -110,7 +111,7 @@ type ValueWithToken struct {
 // in-flight tracking.
 func (g *Generator) GiveOld(v ValueWithToken) {
 	select {
-	case <-g.t.Dying():
+	case <-g.ctx.Done():
 		return
 	default:
 	}
@@ -118,13 +119,13 @@ func (g *Generator) GiveOld(v ValueWithToken) {
 	partition.giveOld(v)
 }
 
-func (g *Generator) Stop() {
-	g.t.Kill(nil)
-	_ = g.t.Wait()
-}
-
 func (g *Generator) start() {
-	g.t.Go(func() error {
+	grp, gCtx := errgroup.WithContext(g.ctx)
+	g.ctx = gCtx
+	for _, partition := range g.partitions {
+		partition.ctx = gCtx
+	}
+	grp.Go(func() error {
 		g.logger.Info("starting partition key generation loop")
 		routingKeyCreator := &RoutingKeyCreator{}
 		r := rand.New(rand.NewSource(g.seed))
@@ -141,11 +142,11 @@ func (g *Generator) start() {
 			select {
 			case partition.values <- ValueWithToken{Token: hash, Value: values}:
 				cntEmitted++
-			case <-g.t.Dying():
-				g.logger.Info("stopping partition key generation loop",
+			case <-gCtx.Done():
+				g.logger.Debug("stopping partition key generation loop",
 					zap.Uint64("keys_created", cntCreated),
 					zap.Uint64("keys_emitted", cntEmitted))
-				return nil
+				return gCtx.Err()
 			default:
 			}
 		}

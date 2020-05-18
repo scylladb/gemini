@@ -15,11 +15,13 @@
 package main
 
 import (
+	"context"
+
 	"github.com/scylladb/gemini"
 	"go.uber.org/zap"
 )
 
-func createGenerators(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, distributionFunc gemini.DistributionFunc, actors, distributionSize uint64, logger *zap.Logger) []*gemini.Generator {
+func createGenerators(ctx context.Context, schema *gemini.Schema, schemaConfig gemini.SchemaConfig, distributionFunc gemini.DistributionFunc, actors, distributionSize uint64, logger *zap.Logger) []*gemini.Generator {
 	partitionRangeConfig := gemini.PartitionRangeConfig{
 		MaxBlobLength:   schemaConfig.MaxBlobLength,
 		MinBlobLength:   schemaConfig.MinBlobLength,
@@ -36,7 +38,7 @@ func createGenerators(schema *gemini.Schema, schemaConfig gemini.SchemaConfig, d
 			Seed:                       seed,
 			PkUsedBufferSize:           pkBufferReuseSize,
 		}
-		g := gemini.NewGenerator(table, gCfg, logger.Named("generator"))
+		g := gemini.NewGenerator(ctx, table, gCfg, logger.Named("generator"))
 		gs = append(gs, g)
 	}
 	return gs
