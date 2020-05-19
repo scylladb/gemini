@@ -184,10 +184,10 @@ type Table struct {
 	PartitionKeys     Columns            `json:"partition_keys"`
 	ClusteringKeys    Columns            `json:"clustering_keys"`
 	Columns           Columns            `json:"columns"`
-	Indexes           []IndexDef         `json:"indexes"`
-	MaterializedViews []MaterializedView `json:"materialized_views"`
+	Indexes           []IndexDef         `json:"indexes,omitempty"`
+	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
 	KnownIssues       map[string]bool    `json:"known_issues"`
-	TableOptions      []string           `json:"table_options"`
+	TableOptions      []string           `json:"table_options,omitempty"`
 
 	// mu protects the table during schema changes
 	mu sync.RWMutex
