@@ -27,6 +27,6 @@ require (
 )
 
 replace (
-	github.com/gocql/gocql => github.com/scylladb/gocql v1.3.1
+	github.com/gocql/gocql => github.com/scylladb/gocql v1.4.0
 	golang.org/x/sync => golang.org/x/sync v0.0.0-20200317015054-43a5402ce75a
 )
