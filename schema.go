@@ -25,7 +25,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/scylladb/gemini/replication"
 	"github.com/scylladb/gemini/tableopts"
-	"github.com/scylladb/gocqlx/qb"
+	"github.com/scylladb/gocqlx/v2/qb"
 	"golang.org/x/exp/rand"
 )
 

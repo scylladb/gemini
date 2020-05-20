@@ -32,7 +32,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/go-set/strset"
-	"github.com/scylladb/gocqlx/qb"
+	"github.com/scylladb/gocqlx/v2/qb"
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
 )
