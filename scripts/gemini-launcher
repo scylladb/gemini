@@ -21,9 +21,9 @@ go mod download || quit $? "Downloading dependencies failed"
 GOBIN="$(dirname ${GEMINI_CMD})" go install ./... || quit $? "Compilation failed"
 
 echo "Waiting for ${ORACLE_NAME} to start"
-until docker logs ${ORACLE_NAME} | grep "Starting listening for CQL clients" > /dev/null; do sleep 2; done
+until docker logs ${ORACLE_NAME} 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 2; done
 echo "Waiting for ${TEST_NAME} to start"
-until docker logs ${TEST_NAME} | grep "Starting listening for CQL clients" > /dev/null; do sleep 2; done
+until docker logs ${TEST_NAME} 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 2; done
 
 $GEMINI_CMD \
 	--duration=10m \
