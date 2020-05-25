@@ -144,6 +144,7 @@ func job(ctx context.Context, f testJob, actors uint64, schema *gemini.Schema, s
 		MinBlobLength:   schemaConfig.MinBlobLength,
 		MaxStringLength: schemaConfig.MaxStringLength,
 		MinStringLength: schemaConfig.MinStringLength,
+		UseLWT:          schemaConfig.UseLWT,
 	}
 
 	for j, table := range schema.Tables {

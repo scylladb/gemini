@@ -25,7 +25,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/scylladb/gemini/replication"
 	"github.com/scylladb/gemini/tableopts"
-	"github.com/scylladb/gocqlx/qb"
+	"github.com/scylladb/gocqlx/v2/qb"
 	"golang.org/x/exp/rand"
 )
 
@@ -59,6 +59,7 @@ type SchemaConfig struct {
 	MinBlobLength                    int
 	MinStringLength                  int
 	UseCounters                      bool
+	UseLWT                           bool
 	CQLFeature                       CQLFeature
 	AsyncObjectStabilizationAttempts int
 	AsyncObjectStabilizationDelay    time.Duration
@@ -184,10 +185,10 @@ type Table struct {
 	PartitionKeys     Columns            `json:"partition_keys"`
 	ClusteringKeys    Columns            `json:"clustering_keys"`
 	Columns           Columns            `json:"columns"`
-	Indexes           []IndexDef         `json:"indexes"`
-	MaterializedViews []MaterializedView `json:"materialized_views"`
+	Indexes           []IndexDef         `json:"indexes,omitempty"`
+	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
 	KnownIssues       map[string]bool    `json:"known_issues"`
-	TableOptions      []string           `json:"table_options"`
+	TableOptions      []string           `json:"table_options,omitempty"`
 
 	// mu protects the table during schema changes
 	mu sync.RWMutex
@@ -404,6 +405,7 @@ type PartitionRangeConfig struct {
 	MinBlobLength   int
 	MaxStringLength int
 	MinStringLength int
+	UseLWT          bool
 }
 
 func (s *Schema) GetDropSchema() []string {
@@ -658,7 +660,6 @@ func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 		builder = builder.Columns(pk.Name)
 		typs = append(typs, pk.Type)
 	}
-
 	valuesWithToken, ok := g.Get()
 	if !ok {
 		return nil, nil
@@ -678,6 +679,9 @@ func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 		}
 		values = appendValue(cdef.Type, r, p, values)
 		typs = append(typs, cdef.Type)
+	}
+	if p.UseLWT && r.Uint32()%10 == 0 {
+		builder = builder.Unique()
 	}
 	return &Stmt{
 		Query: builder,
