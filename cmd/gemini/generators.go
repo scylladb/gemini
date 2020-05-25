@@ -27,6 +27,7 @@ func createGenerators(ctx context.Context, schema *gemini.Schema, schemaConfig g
 		MinBlobLength:   schemaConfig.MinBlobLength,
 		MaxStringLength: schemaConfig.MaxStringLength,
 		MinStringLength: schemaConfig.MinStringLength,
+		UseLWT:          schemaConfig.UseLWT,
 	}
 
 	var gs []*gemini.Generator

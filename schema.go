@@ -59,6 +59,7 @@ type SchemaConfig struct {
 	MinBlobLength                    int
 	MinStringLength                  int
 	UseCounters                      bool
+	UseLWT                           bool
 	CQLFeature                       CQLFeature
 	AsyncObjectStabilizationAttempts int
 	AsyncObjectStabilizationDelay    time.Duration
@@ -404,6 +405,7 @@ type PartitionRangeConfig struct {
 	MinBlobLength   int
 	MaxStringLength int
 	MinStringLength int
+	UseLWT          bool
 }
 
 func (s *Schema) GetDropSchema() []string {
@@ -658,7 +660,6 @@ func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 		builder = builder.Columns(pk.Name)
 		typs = append(typs, pk.Type)
 	}
-
 	valuesWithToken, ok := g.Get()
 	if !ok {
 		return nil, nil
@@ -678,6 +679,9 @@ func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 		}
 		values = appendValue(cdef.Type, r, p, values)
 		typs = append(typs, cdef.Type)
+	}
+	if p.UseLWT && r.Uint32()%10 == 0 {
+		builder = builder.Unique()
 	}
 	return &Stmt{
 		Query: builder,

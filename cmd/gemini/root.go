@@ -84,6 +84,7 @@ var (
 	useCounters                      bool
 	asyncObjectStabilizationAttempts int
 	asyncObjectStabilizationDelay    time.Duration
+	useLWT                           bool
 )
 
 const (
@@ -477,6 +478,7 @@ func init() {
 	rootCmd.Flags().BoolVarP(&useCounters, "use-counters", "", false, "Ensure that at least one table is a counter table")
 	rootCmd.Flags().IntVarP(&asyncObjectStabilizationAttempts, "async-objects-stabilization-attempts", "", 10, "Maximum number of attempts to validate result sets from MV and SI")
 	rootCmd.Flags().DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 10*time.Millisecond, "Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
+	rootCmd.Flags().BoolVarP(&useLWT, "use-lwt", "", false, "Emit LWT based updates")
 }
 
 func printSetup() error {
