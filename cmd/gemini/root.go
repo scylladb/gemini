@@ -238,6 +238,8 @@ func run(cmd *cobra.Command, args []string) error {
 	signal.Notify(graceful, syscall.SIGTERM, syscall.SIGINT)
 	g.Go(func() error {
 		select {
+		case <-gCtx.Done():
+			return ctx.Err()
 		case <-graceful:
 			logger.Info("Told to stop, exiting.")
 			done()
@@ -251,18 +253,20 @@ func run(cmd *cobra.Command, args []string) error {
 	generators := createGenerators(gCtx, schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
 	sp := createSpinner(interactive())
 	g.Go(func() error {
-		return pump.Start(gCtx, done)
+		defer done()
+		return pump.Start(gCtx)
 	})
 	resCh := make(chan *Status, 1)
 	g.Go(func() error {
+		defer done()
 		res, err := sampleStatus(gCtx, result, sp, logger)
 		sp.Stop()
 		resCh <- res
 		return err
 	})
 	time.AfterFunc(duration+warmup, func() {
+		defer done()
 		logger.Info("Test run completed. Exiting.")
-		done()
 	})
 
 	if warmup > 0 {

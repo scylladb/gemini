@@ -37,7 +37,7 @@ func (hb heartBeat) await() {
 	}
 }
 
-func (p *Pump) Start(ctx context.Context, done context.CancelFunc) error {
+func (p *Pump) Start(ctx context.Context) error {
 	defer p.cleanup()
 	for {
 		select {
