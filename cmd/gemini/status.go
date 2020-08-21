@@ -97,6 +97,7 @@ func sampleStatus(ctx context.Context, c chan Status, sp *spinningFeedback, logg
 			testRes.Merge(res)
 			sp.Set(" Running Gemini... %v", testRes)
 			if testRes.ReadErrors > 0 || testRes.WriteErrors > 0 {
+				fmt.Printf("Errors detected: %#v", testRes.Errors)
 				if failFast {
 					failfastDone.Do(func() {
 						logger.Warn("Errors detected. Exiting.")
