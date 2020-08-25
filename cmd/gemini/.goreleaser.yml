@@ -11,23 +11,24 @@ builds:
       - linux
     goarch:
       - amd64
-archive:
-  replacements:
-    darwin: Darwin
-    linux: Linux
-    windows: Windows
-    386: i386
-    amd64: x86_64
+archives:
+  -
+    replacements:
+      darwin: Darwin
+      linux: Linux
+      windows: Windows
+      386: i386
+      amd64: x86_64
 checksum:
   name_template: 'checksums.txt'
 snapshot:
   name_template: "{{ .Tag }}-next"
-s3:
+blobs:
   -
+    provider: s3
     bucket: downloads.scylladb.com
     region: us-east-1
     folder: "gemini/{{.Version}}"
-    acl: public-read
 changelog:
   sort: asc
   filters:
