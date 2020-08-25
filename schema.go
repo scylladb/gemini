@@ -248,7 +248,7 @@ func (t *Table) GetCreateTypes(keyspace Keyspace) []string {
 	for _, column := range t.Columns {
 		switch c := column.Type.(type) {
 		case UDTType:
-			createType := "CREATE TYPE %s.%s (%s)"
+			createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s)"
 			var typs []string
 			for name, typ := range c.Types {
 				typs = append(typs, name+" "+typ.CQLDef())
@@ -271,7 +271,7 @@ func (t *Table) addColumn(keyspace string, sc *SchemaConfig) ([]*Stmt, func(), e
 	var stmts []*Stmt
 	column := ColumnDef{Name: genColumnName("col", len(t.Columns)+1), Type: genColumnType(len(t.Columns)+1, sc)}
 	if c, ok := column.Type.(UDTType); ok {
-		createType := "CREATE TYPE %s.%s (%s);"
+		createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s);"
 		var typs []string
 		for name, typ := range c.Types {
 			typs = append(typs, name+" "+typ.CQLDef())
