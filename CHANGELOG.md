@@ -1,5 +1,9 @@
 # Changelog
 
+# [1.7.2]
+
+- schema: add "IF NOT EXISTS" check when creating a new type
+
 # [1.6.9]
 
 - Avoid DDL operations for a table with MV ([#198](https://github.com/scylladb/gemini/issues/198))
