@@ -16,7 +16,7 @@ package store
 
 import (
 	"context"
-	"io"
+	"os"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -119,7 +119,7 @@ func (cs cqlStore) close() error {
 	return nil
 }
 
-func newSession(cluster *gocql.ClusterConfig, out io.Writer) *gocql.Session {
+func newSession(cluster *gocql.ClusterConfig, out *os.File) *gocql.Session {
 	session, err := cluster.CreateSession()
 	if err != nil {
 		panic(err)
