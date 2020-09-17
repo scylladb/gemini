@@ -85,6 +85,7 @@ var (
 	asyncObjectStabilizationAttempts int
 	asyncObjectStabilizationDelay    time.Duration
 	useLWT                           bool
+	useServerSideTimestamps          bool
 )
 
 const (
@@ -188,8 +189,9 @@ func run(cmd *cobra.Command, args []string) error {
 
 	testCluster, oracleCluster := createClusters(cons)
 	storeConfig := store.Config{
-		MaxRetriesMutate:      maxRetriesMutate,
-		MaxRetriesMutateSleep: maxRetriesMutateSleep,
+		MaxRetriesMutate:        maxRetriesMutate,
+		MaxRetriesMutateSleep:   maxRetriesMutateSleep,
+		UseServerSideTimestamps: useServerSideTimestamps,
 	}
 	var tracingFile *os.File
 	if tracingOutFile != "" {
@@ -483,6 +485,7 @@ func init() {
 	rootCmd.Flags().IntVarP(&asyncObjectStabilizationAttempts, "async-objects-stabilization-attempts", "", 10, "Maximum number of attempts to validate result sets from MV and SI")
 	rootCmd.Flags().DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 10*time.Millisecond, "Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
 	rootCmd.Flags().BoolVarP(&useLWT, "use-lwt", "", false, "Emit LWT based updates")
+	rootCmd.Flags().BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
 }
 
 func printSetup() error {
