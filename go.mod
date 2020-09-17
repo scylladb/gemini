@@ -6,6 +6,7 @@ require (
 	github.com/briandowns/spinner v1.11.1
 	github.com/gocql/gocql v0.0.0-20200131111108-92af2e088537
 	github.com/google/go-cmp v0.4.1
+	github.com/hailocab/go-hostpool v0.0.0-20160125115350-e80d13ce29ed
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/mitchellh/mapstructure v1.1.2
 	github.com/pkg/errors v0.8.1
