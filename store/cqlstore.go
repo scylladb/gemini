@@ -29,11 +29,12 @@ import (
 )
 
 type cqlStore struct {
-	session               *gocql.Session
-	schema                *gemini.Schema
-	system                string
-	maxRetriesMutate      int
-	maxRetriesMutateSleep time.Duration
+	session                 *gocql.Session
+	schema                  *gemini.Schema
+	system                  string
+	maxRetriesMutate        int
+	maxRetriesMutateSleep   time.Duration
+	useServerSideTimestamps bool
 
 	ops    *prometheus.CounterVec
 	logger *zap.Logger
@@ -68,27 +69,33 @@ func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time
 }
 
 func (cs *cqlStore) doMutate(ctx context.Context, builder qb.Builder, ts time.Time, values ...interface{}) error {
-	query, _ := builder.ToCql()
-	tsUsec := ts.UnixNano() / 1000
+	queryBody, _ := builder.ToCql()
+
+	query := cs.session.Query(queryBody, values...).WithContext(ctx)
+	if cs.useServerSideTimestamps {
+		query = query.DefaultTimestamp(false)
+	} else {
+		query = query.WithTimestamp(ts.UnixNano() / 1000)
+	}
+
 	/*
-		q := cs.session.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec)
-			key, _ := q.GetRoutingKey()
-			if len(values) >= 2 {
-				v := values[:2]
-				s := strings.TrimRight(strings.Repeat("%v,", 2), ",")
-				format := fmt.Sprintf("{\nvalues: []interface{}{%s},\nwant: createOne(\"%s\"),\n},\n", s, hex.EncodeToString(key))
-				fmt.Printf(format, v...)
-			}
-			if err := q.Exec(); err != nil {
+		key, _ := query.GetRoutingKey()
+		if len(values) >= 2 {
+			v := values[:2]
+			s := strings.TrimRight(strings.Repeat("%v,", 2), ",")
+			format := fmt.Sprintf("{\nvalues: []interface{}{%s},\nwant: createOne(\"%s\"),\n},\n", s, hex.EncodeToString(key))
+			fmt.Printf(format, v...)
+		}
+		if err := query.Exec(); err != nil {
 	*/
-	if err := cs.session.Query(query, values...).WithContext(ctx).WithTimestamp(tsUsec).Exec(); err != nil {
+	if err := query.Exec(); err != nil {
 		if err == context.DeadlineExceeded {
 			if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for mutation query"); w != nil {
-				w.Write(zap.String("system", cs.system), zap.String("query", query), zap.Error(err))
+				w.Write(zap.String("system", cs.system), zap.String("query", queryBody), zap.Error(err))
 			}
 		}
 		if !ignore(err) {
-			return errors.Wrapf(err, "[cluster = %s, query = '%s']", cs.system, query)
+			return errors.Wrapf(err, "[cluster = %s, query = '%s']", cs.system, queryBody)
 		}
 	}
 	return nil

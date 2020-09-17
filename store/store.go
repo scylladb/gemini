@@ -60,8 +60,9 @@ type Store interface {
 }
 
 type Config struct {
-	MaxRetriesMutate      int
-	MaxRetriesMutateSleep time.Duration
+	MaxRetriesMutate        int
+	MaxRetriesMutateSleep   time.Duration
+	UseServerSideTimestamps bool
 }
 
 func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut *os.File, logger *zap.Logger) Store {
@@ -75,13 +76,14 @@ func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster 
 	var validations bool
 	if oracleCluster != nil {
 		oracleStore = &cqlStore{
-			session:               newSession(oracleCluster, traceOut),
-			schema:                schema,
-			system:                "oracle",
-			ops:                   ops,
-			maxRetriesMutate:      cfg.MaxRetriesMutate + 10,
-			maxRetriesMutateSleep: cfg.MaxRetriesMutateSleep,
-			logger:                logger,
+			session:                 newSession(oracleCluster, traceOut),
+			schema:                  schema,
+			system:                  "oracle",
+			ops:                     ops,
+			maxRetriesMutate:        cfg.MaxRetriesMutate + 10,
+			maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
+			useServerSideTimestamps: cfg.UseServerSideTimestamps,
+			logger:                  logger,
 		}
 		validations = true
 	} else {
@@ -92,13 +94,14 @@ func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster 
 
 	return &delegatingStore{
 		testStore: &cqlStore{
-			session:               newSession(testCluster, traceOut),
-			schema:                schema,
-			system:                "test",
-			ops:                   ops,
-			maxRetriesMutate:      cfg.MaxRetriesMutate,
-			maxRetriesMutateSleep: cfg.MaxRetriesMutateSleep,
-			logger:                logger,
+			session:                 newSession(testCluster, traceOut),
+			schema:                  schema,
+			system:                  "test",
+			ops:                     ops,
+			maxRetriesMutate:        cfg.MaxRetriesMutate,
+			maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
+			useServerSideTimestamps: cfg.UseServerSideTimestamps,
+			logger:                  logger,
 		},
 		oracleStore: oracleStore,
 		validations: validations,

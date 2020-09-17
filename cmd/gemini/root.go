@@ -93,6 +93,7 @@ var (
 	useLWT                           bool
 	testClusterHostSelectionPolicy   string
 	oracleClusterHostSelectionPolicy string
+	useServerSideTimestamps          bool
 )
 
 const (
@@ -205,8 +206,9 @@ func run(cmd *cobra.Command, args []string) error {
 
 	testCluster, oracleCluster := createClusters(cons, testHostSelectionPolicy, oracleHostSelectionPolicy, logger)
 	storeConfig := store.Config{
-		MaxRetriesMutate:      maxRetriesMutate,
-		MaxRetriesMutateSleep: maxRetriesMutateSleep,
+		MaxRetriesMutate:        maxRetriesMutate,
+		MaxRetriesMutateSleep:   maxRetriesMutateSleep,
+		UseServerSideTimestamps: useServerSideTimestamps,
 	}
 	var tracingFile *os.File
 	if tracingOutFile != "" {
@@ -531,6 +533,7 @@ func init() {
 	rootCmd.Flags().BoolVarP(&useLWT, "use-lwt", "", false, "Emit LWT based updates")
 	rootCmd.Flags().StringVarP(&oracleClusterHostSelectionPolicy, "oracle-host-selection-policy", "", "round-robin", "Host selection policy used by the driver for the oracle cluster: round-robin|host-pool|token-aware")
 	rootCmd.Flags().StringVarP(&testClusterHostSelectionPolicy, "test-host-selection-policy", "", "round-robin", "Host selection policy used by the driver for the test cluster: round-robin|host-pool|token-aware")
+	rootCmd.Flags().BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
 }
 
 func printSetup() error {
