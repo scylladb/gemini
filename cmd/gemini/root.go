@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/hailocab/go-hostpool"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/scylladb/gemini"
@@ -85,6 +86,8 @@ var (
 	asyncObjectStabilizationAttempts int
 	asyncObjectStabilizationDelay    time.Duration
 	useLWT                           bool
+	testClusterHostSelectionPolicy   string
+	oracleClusterHostSelectionPolicy string
 	useServerSideTimestamps          bool
 )
 
@@ -150,6 +153,15 @@ func run(cmd *cobra.Command, args []string) error {
 		cons = gocql.Quorum
 	}
 
+	testHostSelectionPolicy, err := getHostSelectionPolicy(testClusterHostSelectionPolicy, testClusterHost)
+	if err != nil {
+		return err
+	}
+	oracleHostSelectionPolicy, err := getHostSelectionPolicy(oracleClusterHostSelectionPolicy, oracleClusterHost)
+	if err != nil {
+		return err
+	}
+
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
 		_ = http.ListenAndServe(bind, nil)
@@ -187,7 +199,7 @@ func run(cmd *cobra.Command, args []string) error {
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
 	fmt.Printf("Schema: %v\n", string(jsonSchema))
 
-	testCluster, oracleCluster := createClusters(cons)
+	testCluster, oracleCluster := createClusters(cons, testHostSelectionPolicy, oracleHostSelectionPolicy)
 	storeConfig := store.Config{
 		MaxRetriesMutate:        maxRetriesMutate,
 		MaxRetriesMutateSleep:   maxRetriesMutateSleep,
@@ -374,7 +386,7 @@ func createLogger(level string) *zap.Logger {
 	return logger
 }
 
-func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
+func createClusters(consistency gocql.Consistency, testHostSelectionPolicy gocql.HostSelectionPolicy, oracleHostSelectionPolicy gocql.HostSelectionPolicy) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
 	retryPolicy := &gocql.ExponentialBackoffRetryPolicy{
 		Min:        time.Second,
 		Max:        10 * time.Second,
@@ -384,6 +396,7 @@ func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql
 	testCluster.Timeout = 5 * time.Second
 	testCluster.RetryPolicy = retryPolicy
 	testCluster.Consistency = consistency
+	testCluster.PoolConfig.HostSelectionPolicy = testHostSelectionPolicy
 	if len(oracleClusterHost) == 0 {
 		return testCluster, nil
 	}
@@ -391,6 +404,7 @@ func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql
 	oracleCluster.Timeout = 5 * time.Second
 	oracleCluster.RetryPolicy = retryPolicy
 	oracleCluster.Consistency = consistency
+	oracleCluster.PoolConfig.HostSelectionPolicy = oracleHostSelectionPolicy
 	return testCluster, oracleCluster
 }
 
@@ -431,6 +445,19 @@ func getCQLFeature(feature string) gemini.CQLFeature {
 		return gemini.CQL_FEATURE_NORMAL
 	default:
 		return gemini.CQL_FEATURE_BASIC
+	}
+}
+
+func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionPolicy, error) {
+	switch policy {
+	case "round-robin":
+		return gocql.RoundRobinHostPolicy(), nil
+	case "host-pool":
+		return gocql.HostPoolHostPolicy(hostpool.New(hosts)), nil
+	case "token-aware":
+		return gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy()), nil
+	default:
+		return nil, fmt.Errorf("unknown host selection policy \"%s\"", policy)
 	}
 }
 
@@ -485,6 +512,8 @@ func init() {
 	rootCmd.Flags().IntVarP(&asyncObjectStabilizationAttempts, "async-objects-stabilization-attempts", "", 10, "Maximum number of attempts to validate result sets from MV and SI")
 	rootCmd.Flags().DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 10*time.Millisecond, "Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
 	rootCmd.Flags().BoolVarP(&useLWT, "use-lwt", "", false, "Emit LWT based updates")
+	rootCmd.Flags().StringVarP(&oracleClusterHostSelectionPolicy, "oracle-host-selection-policy", "", "round-robin", "Host selection policy used by the driver for the oracle cluster: round-robin|host-pool|token-aware")
+	rootCmd.Flags().StringVarP(&testClusterHostSelectionPolicy, "test-host-selection-policy", "", "round-robin", "Host selection policy used by the driver for the test cluster: round-robin|host-pool|token-aware")
 	rootCmd.Flags().BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
 }
 
