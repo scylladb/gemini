@@ -20,7 +20,9 @@ import (
 	"github.com/gocql/gocql"
 )
 
-func setAuthenticator(clusterConfig *gocql.ClusterConfig, username string, password string) (*gocql.ClusterConfig, error) {
+// SetAuthenticator : Creates a new gocql.Authenticator and sets it into the provided ClusterConfig,
+// if both username and password are provided.
+func SetAuthenticator(clusterConfig *gocql.ClusterConfig, username string, password string) (*gocql.ClusterConfig, error) {
 	if username == "" && password == "" {
 		return clusterConfig, nil
 	}

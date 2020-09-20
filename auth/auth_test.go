@@ -60,7 +60,7 @@ func TestSetAuthenticator(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			clusterConfig, err := setAuthenticator(
+			clusterConfig, err := SetAuthenticator(
 				gocql.NewCluster("localhost"),
 				test.input.username,
 				test.input.password,

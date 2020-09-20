@@ -387,7 +387,7 @@ func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql
 	testCluster.Timeout = 5 * time.Second
 	testCluster.RetryPolicy = retryPolicy
 	testCluster.Consistency = consistency
-	setAuthenticator(testCluster, testClusterUsername, testClusterPassword)
+	auth.SetAuthenticator(testCluster, testClusterUsername, testClusterPassword)
 	if len(oracleClusterHost) == 0 {
 		return testCluster, nil
 	}
@@ -395,7 +395,7 @@ func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql
 	oracleCluster.Timeout = 5 * time.Second
 	oracleCluster.RetryPolicy = retryPolicy
 	oracleCluster.Consistency = consistency
-	setAuthenticator(oracleCluster, oracleClusterUsername, oracleClusterPassword)
+	auth.SetAuthenticator(oracleCluster, oracleClusterUsername, oracleClusterPassword)
 	return testCluster, oracleCluster
 }
 
