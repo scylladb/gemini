@@ -32,6 +32,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/scylladb/gemini"
+	"github.com/scylladb/gemini/auth"
 	"github.com/scylladb/gemini/replication"
 	"github.com/scylladb/gemini/store"
 	"github.com/scylladb/gemini/tableopts"
@@ -46,7 +47,11 @@ import (
 
 var (
 	testClusterHost                  []string
+	testClusterUsername              string
+	testClusterPassword              string
 	oracleClusterHost                []string
+	oracleClusterUsername            string
+	oracleClusterPassword            string
 	schemaFile                       string
 	outFileArg                       string
 	concurrency                      uint64
@@ -382,6 +387,7 @@ func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql
 	testCluster.Timeout = 5 * time.Second
 	testCluster.RetryPolicy = retryPolicy
 	testCluster.Consistency = consistency
+	setAuthenticator(testCluster, testClusterUsername, testClusterPassword)
 	if len(oracleClusterHost) == 0 {
 		return testCluster, nil
 	}
@@ -389,6 +395,7 @@ func createClusters(consistency gocql.Consistency) (*gocql.ClusterConfig, *gocql
 	oracleCluster.Timeout = 5 * time.Second
 	oracleCluster.RetryPolicy = retryPolicy
 	oracleCluster.Consistency = consistency
+	setAuthenticator(oracleCluster, oracleClusterUsername, oracleClusterPassword)
 	return testCluster, oracleCluster
 }
 
@@ -444,7 +451,11 @@ func init() {
 	rootCmd.Version = version + ", commit " + commit + ", date " + date
 	rootCmd.Flags().StringSliceVarP(&testClusterHost, "test-cluster", "t", []string{}, "Host names or IPs of the test cluster that is system under test")
 	rootCmd.MarkFlagRequired("test-cluster")
+	rootCmd.Flags().StringVarP(&testClusterUsername, "test-username", "", "", "Username for the test cluster")
+	rootCmd.Flags().StringVarP(&testClusterPassword, "test-password", "", "", "Password for the test cluster")
 	rootCmd.Flags().StringSliceVarP(&oracleClusterHost, "oracle-cluster", "o", []string{}, "Host names or IPs of the oracle cluster that provides correct answers. If omitted no oracle will be used")
+	rootCmd.Flags().StringVarP(&oracleClusterUsername, "oracle-username", "", "", "Username for the oracle cluster")
+	rootCmd.Flags().StringVarP(&oracleClusterPassword, "oracle-password", "", "", "Password for the oracle cluster")
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", mixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	rootCmd.Flags().Uint64VarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
