@@ -1,33 +1,31 @@
 # Changelog
 
-# [1.7.3] - 2020-09-21
+## [1.7.3] - 2020-09-21
 
-## Added
+### Added
 
 - Add options to choose host selection policy.
-
 - Add option to use server-side timestamps for queries.
-
 - Add support for password authentication.
 
-## Fixed
+### Fixed
 
 - Don't enable tracing if it's not requested.
 
-# [1.7.2]
+## [1.7.2]
 
 - schema: add "IF NOT EXISTS" check when creating a new type
 
-# [1.6.9]
+## [1.6.9]
 
 - Avoid DDL operations for a table with MV ([#198](https://github.com/scylladb/gemini/issues/198))
 
-# [1.6.1]
+## [1.6.1]
 
 - Add support for generating multiple tables in schema with the `--max-tables`
   command line option.
 
-# [1.6.0] - 2019-09-06
+## [1.6.0] - 2019-09-06
 
 - Bumped driver version to v1.3.0-rc.1
 - Lazy partition key generation reintroduced to avoid out of memory issues. 
@@ -36,7 +34,7 @@
   The default value of this is set to an ad-hoc value of 10000 which should supply ample possibilities
   for varying selection of values according to the chosen probability distribution.
 
-# [1.5.0] - 2019-08-26
+## [1.5.0] - 2019-08-26
 
 - Fix overlapping operations on the same partition key ([#198](https://github.com/scylladb/gemini/issues/198)).
 - Partition keys can now be drawn from various distributions such as ___"zipf"___,
@@ -47,30 +45,30 @@
   supply a host for the Oracle and Gemini will assume you want to only run against Test.
 - Replication strategy is now configurable via the CLI argument `--replication-strategy`.
 
-# 1.4.4
+## 1.4.4
 
 - Mutations on Test are only applied if they first succeeded on the Oracle.
 
-# 1.4.3
+## 1.4.3
 
 - Bugfix that makes sure that when a job terminates early, the result status is
   properly sent to the collector.
 - Gemini ensures that material views can be created in the default case by simply
   creating enough keys and columns.
 
-# 1.4.2 
+## 1.4.2 
 
 - Reused primary keys does no longer block the caller if none are available.
 - Primary key generation no longer blocks if the targeted source is full.
 - Upgraded driver to 1.2.0
 
-# v1.4.1
+## v1.4.1
 
 - Bug in shutdown handling that caused deadlock is fixed.
 - Index queries reapplied with low frequency for certain types.
 - Fix for invalid materialized view ddl statement.
 
-# 1.4.0
+## 1.4.0
 
 - A `source` concept is used to coordinate the creation, consumption and reuse of
   partition keys.
@@ -197,9 +195,15 @@
 
 - Improve progress indicator ([#14](https://github.com/scylladb/gemini/issues/14)).
 
+[1.7.3]: https://github.com/scylladb/gemini/compare/v1.7.2...v1.7.3
+[1.7.2]: https://github.com/scylladb/gemini/compare/v1.7.1...v1.7.2
+[1.7.1]: https://github.com/scylladb/gemini/compare/v1.7.0...v1.7.1
+[1.6.9]: https://github.com/scylladb/gemini/compare/v1.6.8...v1.6.9
+[1.6.1]: https://github.com/scylladb/gemini/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/scylladb/gemini/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/scylladb/gemini/compare/v1.4.4...v1.5.0
-[1.1.0]: https://github.com/scylladb/gemini/compare/v1.1.0...v1.0.0
+[1.2.0]: https://github.com/scylladb/gemini/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/scylladb/gemini/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/scylladb/gemini/compare/v0.9.2...v1.0.0
 [0.9.2]: https://github.com/scylladb/gemini/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/scylladb/gemini/compare/v0.9.0...v0.9.1
