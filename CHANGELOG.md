@@ -1,5 +1,19 @@
 # Changelog
 
+# [1.7.3] - 2020-09-21
+
+## Added
+
+- Add options to choose host selection policy.
+
+- Add option to use server-side timestamps for queries.
+
+- Add support for password authentication.
+
+## Fixed
+
+- Don't enable tracing if it's not requested.
+
 # [1.7.2]
 
 - schema: add "IF NOT EXISTS" check when creating a new type
