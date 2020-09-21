@@ -47,3 +47,5 @@ standard out is used.
 
 12. __--table-options__: Repeatable argument to set table options for example: 
 _--table-options"compression = {'sstable_compression': 'LZ4Compressor'}"_
+
+13. ___--use-server-timestamps___: Each cell written to a CQL cluster has a timestamp which is used to determine recency of writes. By default, gemini generates a timestamp for each performed write using the clock of the machine that gemini runs on. This option disables that behavior, making the write coordinator node responsible for generating write timestamps.
