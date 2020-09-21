@@ -596,10 +596,7 @@ func (s *Schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *Schema) GenInsertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
+func (s *Schema) genInsertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	if isCounterTable(t) {
 		return s.updateStmt(t, g, r, p)
 	}
@@ -806,7 +803,7 @@ func (s *Schema) GenMutateStmt(t *Table, g *Generator, r *rand.Rand, p Partition
 	defer t.mu.RUnlock()
 
 	if !deletes {
-		return s.GenInsertStmt(t, g, r, p)
+		return s.genInsertStmt(t, g, r, p)
 	}
 	switch n := rand.Intn(1000); n {
 	case 10, 100:
@@ -815,11 +812,11 @@ func (s *Schema) GenMutateStmt(t *Table, g *Generator, r *rand.Rand, p Partition
 		switch n := rand.Intn(2); n {
 		case 0:
 			if t.KnownIssues[KnownIssuesJsonWithTuples] {
-				return s.GenInsertStmt(t, g, r, p)
+				return s.genInsertStmt(t, g, r, p)
 			}
 			return s.GenInsertJsonStmt(t, g, r, p)
 		default:
-			return s.GenInsertStmt(t, g, r, p)
+			return s.genInsertStmt(t, g, r, p)
 		}
 	}
 }
