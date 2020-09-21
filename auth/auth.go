@@ -20,21 +20,21 @@ import (
 	"github.com/gocql/gocql"
 )
 
-// SetAuthenticator : Creates a new gocql.Authenticator and sets it into the provided ClusterConfig,
+// BuildAuthenticator : Returns a new gocql.PasswordAuthenticator
 // if both username and password are provided.
-func SetAuthenticator(clusterConfig *gocql.ClusterConfig, username string, password string) (*gocql.ClusterConfig, error) {
+func BuildAuthenticator(username string, password string) (*gocql.PasswordAuthenticator, error) {
 	if username == "" && password == "" {
-		return clusterConfig, nil
+		return nil, nil
 	}
 	if username != "" && password != "" {
-		clusterConfig.Authenticator = gocql.PasswordAuthenticator{
+		authenticator := gocql.PasswordAuthenticator{
 			Username: username,
 			Password: password,
 		}
-		return clusterConfig, nil
+		return &authenticator, nil
 	}
 	if username != "" {
-		return clusterConfig, errors.New("Password not provided")
+		return nil, errors.New("Password not provided")
 	}
-	return clusterConfig, errors.New("Username not provided")
+	return nil, errors.New("Username not provided")
 }

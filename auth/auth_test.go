@@ -24,55 +24,52 @@ import (
 func TestSetAuthenticator(t *testing.T) {
 	username := "username"
 	password := "password"
-	expectedConfigWithAuth := gocql.NewCluster("localhost")
-	expectedConfigWithAuth.Authenticator = gocql.PasswordAuthenticator{
+	expectedAuthenticator := gocql.PasswordAuthenticator{
 		Username: username,
 		Password: password,
 	}
-	expectedConfigWithoutAuth := gocql.NewCluster("localhost")
 	type credentials struct {
 		username string
 		password string
 	}
 	tests := map[string]struct {
 		input credentials
-		want  *gocql.ClusterConfig
+		want  *gocql.PasswordAuthenticator
 		err   string
 	}{
 		"testClusterWithCredentials": {
 			input: credentials{username: username, password: password},
-			want:  expectedConfigWithAuth,
+			want:  &expectedAuthenticator,
 		},
 		"testClusterWithoutCredentials": {
 			input: credentials{username: "", password: ""},
-			want:  expectedConfigWithoutAuth,
+			want:  nil,
 		},
 		"testClusterWithoutPassword": {
 			input: credentials{username: username, password: ""},
-			want:  expectedConfigWithoutAuth,
+			want:  nil,
 			err:   "Password not provided",
 		},
 		"testClusterWithoutUsername": {
 			input: credentials{username: "", password: password},
-			want:  expectedConfigWithoutAuth,
+			want:  nil,
 			err:   "Username not provided",
 		},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			clusterConfig, err := SetAuthenticator(
-				gocql.NewCluster("localhost"),
+			authenticator, err := BuildAuthenticator(
 				test.input.username,
 				test.input.password,
 			)
 			if test.err == "" && err != nil {
 				t.Fatalf("Returned unexpected error '%s'", err.Error())
 			} else if test.err != "" && err == nil {
-				t.Fatalf("Expected error '%s' but non was returned", test.err)
+				t.Fatalf("Expected error '%s' but none was returned", test.err)
 			} else if test.err != "" && err != nil && err.Error() != test.err {
 				t.Fatalf("Returned error '%s' doesn't match expected error '%s'", err.Error(), test.err)
 			}
-			if diff := cmp.Diff(test.want.Authenticator, clusterConfig.Authenticator); diff != "" {
+			if diff := cmp.Diff(test.want, authenticator); diff != "" {
 				t.Fatal(diff)
 			}
 		})

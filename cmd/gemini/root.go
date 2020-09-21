@@ -203,7 +203,7 @@ func run(cmd *cobra.Command, args []string) error {
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
 	fmt.Printf("Schema: %v\n", string(jsonSchema))
 
-	testCluster, oracleCluster := createClusters(cons, testHostSelectionPolicy, oracleHostSelectionPolicy)
+	testCluster, oracleCluster := createClusters(cons, testHostSelectionPolicy, oracleHostSelectionPolicy, logger)
 	storeConfig := store.Config{
 		MaxRetriesMutate:      maxRetriesMutate,
 		MaxRetriesMutateSleep: maxRetriesMutateSleep,
@@ -389,7 +389,7 @@ func createLogger(level string) *zap.Logger {
 	return logger
 }
 
-func createClusters(consistency gocql.Consistency, testHostSelectionPolicy gocql.HostSelectionPolicy, oracleHostSelectionPolicy gocql.HostSelectionPolicy) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
+func createClusters(consistency gocql.Consistency, testHostSelectionPolicy gocql.HostSelectionPolicy, oracleHostSelectionPolicy gocql.HostSelectionPolicy, logger *zap.Logger) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
 	retryPolicy := &gocql.ExponentialBackoffRetryPolicy{
 		Min:        time.Second,
 		Max:        10 * time.Second,
@@ -400,7 +400,11 @@ func createClusters(consistency gocql.Consistency, testHostSelectionPolicy gocql
 	testCluster.RetryPolicy = retryPolicy
 	testCluster.Consistency = consistency
 	testCluster.PoolConfig.HostSelectionPolicy = testHostSelectionPolicy
-	auth.SetAuthenticator(testCluster, testClusterUsername, testClusterPassword)
+	testAuthenticator, testAuthErr := auth.BuildAuthenticator(testClusterUsername, testClusterPassword)
+	if testAuthErr != nil {
+		logger.Warn("%s for test cluster", zap.Error(testAuthErr))
+	}
+	testCluster.Authenticator = testAuthenticator
 	if len(oracleClusterHost) == 0 {
 		return testCluster, nil
 	}
@@ -409,7 +413,11 @@ func createClusters(consistency gocql.Consistency, testHostSelectionPolicy gocql
 	oracleCluster.RetryPolicy = retryPolicy
 	oracleCluster.Consistency = consistency
 	oracleCluster.PoolConfig.HostSelectionPolicy = oracleHostSelectionPolicy
-	auth.SetAuthenticator(oracleCluster, oracleClusterUsername, oracleClusterPassword)
+	oracleAuthenticator, oracleAuthErr := auth.BuildAuthenticator(oracleClusterUsername, oracleClusterPassword)
+	if oracleAuthErr != nil {
+		logger.Warn("%s for oracle cluster", zap.Error(oracleAuthErr))
+	}
+	oracleCluster.Authenticator = oracleAuthenticator
 	return testCluster, oracleCluster
 }
 
