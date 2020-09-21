@@ -749,10 +749,7 @@ func (s *Schema) genInsertJsonStmt(t *Table, g *Generator, r *rand.Rand, p Parti
 	}, nil
 }
 
-func (s *Schema) GenDeleteRows(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
+func (s *Schema) genDeleteRows(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	var (
 		typs []Type
 	)
@@ -804,7 +801,7 @@ func (s *Schema) GenMutateStmt(t *Table, g *Generator, r *rand.Rand, p Partition
 	}
 	switch n := rand.Intn(1000); n {
 	case 10, 100:
-		return s.GenDeleteRows(t, g, r, p)
+		return s.genDeleteRows(t, g, r, p)
 	default:
 		switch n := rand.Intn(2); n {
 		case 0:
