@@ -47,3 +47,12 @@ standard out is used.
 
 12. __--table-options__: Repeatable argument to set table options for example: 
 _--table-options"compression = {'sstable_compression': 'LZ4Compressor'}"_
+
+13. ___--oracle-username___: Username for authentication against the ___Oracle___ cluster. If this argument is provided, then ___--oracle-password___ is also required, otherwise it will continue without authenticaton.
+
+14. ___--oracle-password___: Password for the ___Oracle___ cluster.
+
+15. ___--test-username___: Username for authentication against the ___SUT___ cluster. If this argument is provided, then ___--test-password___ is also required, otherwise it will continue without authenticaton.
+
+16. ___--test-password___: Password for the ___SUT___ cluster.
+
