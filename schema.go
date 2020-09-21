@@ -690,10 +690,7 @@ func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 	}, nil
 }
 
-func (s *Schema) GenInsertJsonStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
+func (s *Schema) genInsertJsonStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
 	if isCounterTable(t) {
 		return nil, nil
 	}
@@ -814,7 +811,7 @@ func (s *Schema) GenMutateStmt(t *Table, g *Generator, r *rand.Rand, p Partition
 			if t.KnownIssues[KnownIssuesJsonWithTuples] {
 				return s.genInsertStmt(t, g, r, p)
 			}
-			return s.GenInsertJsonStmt(t, g, r, p)
+			return s.genInsertJsonStmt(t, g, r, p)
 		default:
 			return s.genInsertStmt(t, g, r, p)
 		}
