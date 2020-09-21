@@ -1,6 +1,6 @@
 ![Gemini](docs/images/gemini.png)
 
-<p align="center"><i>An automatic randomize testing suite for Scylla and Apache Cassandra.</i></p>
+<p align="center"><i>An automatic randomized testing suite for Scylla and Apache Cassandra.</i></p>
 
 ## How does Gemini work?
 
