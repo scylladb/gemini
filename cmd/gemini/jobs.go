@@ -165,11 +165,11 @@ func ddl(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, ta
 		return nil
 	}
 	table.Lock()
+	defer table.Unlock()
 	if len(table.MaterializedViews) > 0 {
 		// Scylla does not allow changing the DDL of a table with materialized views.
 		return nil
 	}
-	defer table.Unlock()
 	ddlStmts, postStmtHook, err := schema.GenDDLStmt(table, r, p, sc)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
