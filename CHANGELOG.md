@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.4] - 2021-01-04
+
+### Added
+
+- Print errors to standard out to debug cases where Gemini detects an error but
+  no error log is generated.
+
 ## [1.7.3] - 2020-09-21
 
 ### Added
