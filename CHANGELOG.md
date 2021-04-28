@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.7.5] - 2021-04-28
+
+### Fixed
+
+- Fix materialized view creation if the view already exists.
+
 ## [1.7.4] - 2021-01-04
 
 ### Added
