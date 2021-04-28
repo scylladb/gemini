@@ -582,9 +582,9 @@ func (s *Schema) GetCreateSchema() []string {
 			}
 			var createMaterializedView string
 			if len(mv.PartitionKeys) == 1 {
-				createMaterializedView = "CREATE MATERIALIZED VIEW %s.%s AS SELECT * FROM %s.%s WHERE %s PRIMARY KEY (%s"
+				createMaterializedView = "CREATE MATERIALIZED VIEW IF NOT EXISTS %s.%s AS SELECT * FROM %s.%s WHERE %s PRIMARY KEY (%s"
 			} else {
-				createMaterializedView = "CREATE MATERIALIZED VIEW %s.%s AS SELECT * FROM %s.%s WHERE %s PRIMARY KEY ((%s)"
+				createMaterializedView = "CREATE MATERIALIZED VIEW IF NOT EXISTS %s.%s AS SELECT * FROM %s.%s WHERE %s PRIMARY KEY ((%s)"
 			}
 			createMaterializedView = createMaterializedView + ",%s)"
 			stmts = append(stmts, fmt.Sprintf(createMaterializedView,
