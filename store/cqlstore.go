@@ -106,10 +106,10 @@ func (cs *cqlStore) load(ctx context.Context, builder qb.Builder, values []inter
 	iter := cs.session.Query(query, values...).WithContext(ctx).Iter()
 	cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
 	defer func() {
-		if e := iter.Close(); err != nil {
+		if e := iter.Close(); e != nil {
 			if e == context.DeadlineExceeded {
 				if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for load query"); w != nil {
-					w.Write(zap.String("system", cs.system), zap.String("query", query), zap.Error(err))
+					w.Write(zap.String("system", cs.system), zap.String("query", query), zap.Error(e))
 				}
 			}
 			if !ignore(e) {
