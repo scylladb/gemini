@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.6] - 2022-08-03
+
+### Fixed
+
+- fixed error handling in load function
+
+
 ## [1.7.5] - 2021-04-28
 
 ### Fixed
