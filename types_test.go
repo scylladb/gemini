@@ -308,6 +308,10 @@ func TestMarshalUnmarshal(t *testing.T) {
 								Type: genUDTType(sc),
 							},
 						},
+						NonPrimaryKey: ColumnDef{
+          						Name: "",
+         						Type: SimpleType(""),
+          					},
 					},
 				},
 			},
