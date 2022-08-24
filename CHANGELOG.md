@@ -1,4 +1,10 @@
 # Changelog
+## [1.7.7] - 2022-08-24
+
+- Fix issue: max-partition-keys should align with Scylla's --max-partition-key-restrictions-per-query and --max-clustering-key-restrictions-per-query configuration options([#271](https://github.com/scylladb/gemini/issues/271))
+- Fix issue: wrong number of values passed to prepared select query ([272](https://github.com/scylladb/gemini/issues/272))
+- Fix issue: Gemini issues a query involved with data filtering without using ALLOW FILTERING and thus may have unpredictable performance ([273](https://github.com/scylladb/gemini/issues/273))
+- Support request and connection timeout. Could be set via cli parameters
 
 ## [1.7.6] - 2022-08-03
 
@@ -76,7 +82,7 @@
 - Gemini ensures that material views can be created in the default case by simply
   creating enough keys and columns.
 
-## 1.4.2 
+## 1.4.2
 
 - Reused primary keys does no longer block the caller if none are available.
 - Primary key generation no longer blocks if the targeted source is full.

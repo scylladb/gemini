@@ -1074,15 +1074,14 @@ func (s *Schema) genSingleIndexQuery(t *Table, g *Generator, r *rand.Rand, p Par
 		return nil
 	}
 
-	 // Once we have ALLOW FILTERING SUPPORT this can be applied
 	pkNum := r.Intn(len(t.Indexes))
 	if pkNum == 0 {
 		pkNum = 1
 	}
-	
+	indexes := t.Indexes[:pkNum]
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 	builder.AllowFiltering()
-	for _, idx := range t.Indexes {
+	for _, idx := range indexes {
 		builder = builder.Where(qb.Eq(idx.Column))
 		values = appendValue(t.Columns[idx.ColumnIdx].Type, r, p, values)
 		typs = append(typs, t.Columns[idx.ColumnIdx].Type)
