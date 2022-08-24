@@ -94,6 +94,8 @@ var (
 	testClusterHostSelectionPolicy   string
 	oracleClusterHostSelectionPolicy string
 	useServerSideTimestamps          bool
+	requestTimeout					 time.Duration
+	connectTimeout					 time.Duration
 )
 
 const (
@@ -394,11 +396,12 @@ func createLogger(level string) *zap.Logger {
 func createClusters(consistency gocql.Consistency, testHostSelectionPolicy gocql.HostSelectionPolicy, oracleHostSelectionPolicy gocql.HostSelectionPolicy, logger *zap.Logger) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
 	retryPolicy := &gocql.ExponentialBackoffRetryPolicy{
 		Min:        time.Second,
-		Max:        10 * time.Second,
+		Max:        60 * time.Second,
 		NumRetries: 5,
 	}
 	testCluster := gocql.NewCluster(testClusterHost...)
-	testCluster.Timeout = 5 * time.Second
+	testCluster.Timeout = requestTimeout
+	testCluster.ConnectTimeout = connectTimeout
 	testCluster.RetryPolicy = retryPolicy
 	testCluster.Consistency = consistency
 	testCluster.PoolConfig.HostSelectionPolicy = testHostSelectionPolicy
@@ -411,7 +414,7 @@ func createClusters(consistency gocql.Consistency, testHostSelectionPolicy gocql
 		return testCluster, nil
 	}
 	oracleCluster := gocql.NewCluster(oracleClusterHost...)
-	oracleCluster.Timeout = 5 * time.Second
+	oracleCluster.Timeout = 120 * time.Second
 	oracleCluster.RetryPolicy = retryPolicy
 	oracleCluster.Consistency = consistency
 	oracleCluster.PoolConfig.HostSelectionPolicy = oracleHostSelectionPolicy
@@ -534,7 +537,9 @@ func init() {
 	rootCmd.Flags().StringVarP(&oracleClusterHostSelectionPolicy, "oracle-host-selection-policy", "", "round-robin", "Host selection policy used by the driver for the oracle cluster: round-robin|host-pool|token-aware")
 	rootCmd.Flags().StringVarP(&testClusterHostSelectionPolicy, "test-host-selection-policy", "", "round-robin", "Host selection policy used by the driver for the test cluster: round-robin|host-pool|token-aware")
 	rootCmd.Flags().BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
-}
+	rootCmd.Flags().DurationVarP(&requestTimeout, "request-timeout", "", 30*time.Second, "Duration of waiting request execution")
+	rootCmd.Flags().DurationVarP(&connectTimeout, "connect-timeout", "", 30*time.Second, "Duration of waiting connection established")
+}	
 
 func printSetup() error {
 	tw := new(tabwriter.Writer)
