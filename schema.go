@@ -17,6 +17,7 @@ package gemini
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -351,6 +352,7 @@ type MaterializedView struct {
 	Name           string  `json:"name"`
 	PartitionKeys  Columns `json:"partition_keys"`
 	ClusteringKeys Columns `json:"clustering_keys"`
+	NonPrimaryKey  ColumnDef
 }
 
 type Stmt struct {
@@ -544,6 +546,7 @@ func createMaterializedViews(table Table, partitionKeys []ColumnDef, clusteringK
 			Name:           fmt.Sprintf("%s_mv_%d", table.Name, i),
 			PartitionKeys:  append(cols, partitionKeys...),
 			ClusteringKeys: clusteringKeys,
+			NonPrimaryKey:  col,
 		}
 		mvs = append(mvs, mv)
 	}
@@ -847,6 +850,10 @@ func (s *Schema) GenCheckStmt(t *Table, g *Generator, r *rand.Rand, p PartitionR
 func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	var  (
+		mv_col ColumnDef
+		mv_values []interface{}
+	)
 
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
@@ -854,6 +861,7 @@ func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p
 		view := r.Intn(len(t.MaterializedViews))
 		tableName = t.MaterializedViews[view].Name
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
+		mv_col = t.MaterializedViews[view].NonPrimaryKey
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	typs := make([]Type, 0, 10)
@@ -865,6 +873,11 @@ func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p
 	if !ok {
 		return nil
 	}
+	if (ColumnDef{}) != mv_col {
+		mv_values = appendValue(mv_col.Type, r, p, mv_values)
+		values.Value = append(mv_values, values.Value...)
+	}
+
 	return &Stmt{
 		Query: builder,
 		Values: func() (uint64, []interface{}) {
@@ -894,6 +907,11 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, g *Generator, r *rand.Rand,
 	if numQueryPKs == 0 {
 		numQueryPKs = 1
 	}
+	multiplier := int(math.Pow(float64(numQueryPKs), float64(len(partitionKeys))))
+	if multiplier > 100 {
+		numQueryPKs = 1
+	}
+
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	for i, pk := range partitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
@@ -928,6 +946,8 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 
 	var (
 		typs []Type
+		mv_col ColumnDef
+		mv_values []interface{}
 	)
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
@@ -937,6 +957,7 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 		tableName = t.MaterializedViews[view].Name
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
 		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
+		mv_col = t.MaterializedViews[view].NonPrimaryKey
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	vs, ok := g.GetOld()
@@ -948,6 +969,10 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 	for _, pk := range partitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
 		typs = append(typs, pk.Type)
+	}
+	if (ColumnDef{}) != mv_col {
+		mv_values = appendValue(mv_col.Type, r, p, mv_values)
+		values = append(mv_values, values...)
 	}
 	if len(clusteringKeys) > 0 {
 		maxClusteringRels := r.Intn(len(clusteringKeys))
@@ -990,6 +1015,10 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, g *Generator
 	}
 	numQueryPKs := r.Intn(len(partitionKeys))
 	if numQueryPKs == 0 {
+		numQueryPKs = 1
+	}
+	multiplier := int(math.Pow(float64(numQueryPKs), float64(len(partitionKeys))))
+	if multiplier > 100 {
 		numQueryPKs = 1
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
@@ -1045,18 +1074,19 @@ func (s *Schema) genSingleIndexQuery(t *Table, g *Generator, r *rand.Rand, p Par
 		return nil
 	}
 
-	/* Once we have ALLOW FILTERING SUPPORT this can be applied
-	pkNum := p.Rand.Intn(len(t.PartitionKeys))
+	pkNum := r.Intn(len(t.Indexes))
 	if pkNum == 0 {
 		pkNum = 1
 	}
-	*/
+	indexes := t.Indexes[:pkNum]
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
-	for _, idx := range t.Indexes {
+	builder.AllowFiltering()
+	for _, idx := range indexes {
 		builder = builder.Where(qb.Eq(idx.Column))
 		values = appendValue(t.Columns[idx.ColumnIdx].Type, r, p, values)
 		typs = append(typs, t.Columns[idx.ColumnIdx].Type)
 	}
+
 	return &Stmt{
 		Query: builder,
 		Values: func() (uint64, []interface{}) {
