@@ -23,7 +23,7 @@ import (
 
 func TestAddIfNotPresent(t *testing.T) {
 	t.Parallel()
-	flight := newSyncU64set()
+	flight := newSyncU64set(shrinkInflightsLimit)
 	if !flight.AddIfNotPresent(10) {
 		t.Error("could not add the first value")
 	}
@@ -34,11 +34,11 @@ func TestAddIfNotPresent(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	t.Parallel()
-	flight := newSyncU64set()
+	flight := newSyncU64set(shrinkInflightsLimit)
 	flight.AddIfNotPresent(10)
 
 	flight.Delete(10)
-	if flight.pks.Has(10) {
+	if flight.Has(10) {
 		t.Error("did not delete the value")
 	}
 }
@@ -60,20 +60,20 @@ func TestDeleteSharded(t *testing.T) {
 	flight.AddIfNotPresent(10)
 
 	flight.Delete(10)
-	if flight.shards[10%256].pks.Has(10) {
+	if flight.shards[10%256].Has(10) {
 		t.Error("did not delete the value")
 	}
 }
 
 func TestInflight(t *testing.T) {
 	t.Parallel()
-	flight := newSyncU64set()
+	flight := newSyncU64set(shrinkInflightsLimit)
 	f := func(v uint64) interface{} {
 		return flight.AddIfNotPresent(v)
 	}
 	g := func(v uint64) interface{} {
 		flight.Delete(v)
-		return !flight.pks.Has(v)
+		return !flight.Has(v)
 	}
 
 	cfg := createQuickConfig()
@@ -90,7 +90,7 @@ func TestInflightSharded(t *testing.T) {
 	}
 	g := func(v uint64) interface{} {
 		flight.Delete(v)
-		return !flight.shards[v%256].pks.Has(v)
+		return !flight.shards[v%256].Has(v)
 	}
 
 	cfg := createQuickConfig()
