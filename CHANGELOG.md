@@ -1,4 +1,8 @@
 # Changelog
+## [1.7.8] - 2023-02-02
+
+- Fix issue: memory leak due golang maps are not shrinking when you do delete on them ([#267](https://github.com/scylladb/gemini/issues/267))
+
 ## [1.7.7] - 2022-08-24
 
 - Fix issue: max-partition-keys should align with Scylla's --max-partition-key-restrictions-per-query and --max-clustering-key-restrictions-per-query configuration options([#271](https://github.com/scylladb/gemini/issues/271))
