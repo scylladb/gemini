@@ -32,11 +32,6 @@ import (
 	"github.com/hailocab/go-hostpool"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/scylladb/gemini"
-	"github.com/scylladb/gemini/auth"
-	"github.com/scylladb/gemini/replication"
-	"github.com/scylladb/gemini/store"
-	"github.com/scylladb/gemini/tableopts"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -44,6 +39,12 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/sync/errgroup"
 	"gonum.org/v1/gonum/stat/distuv"
+
+	"github.com/scylladb/gemini"
+	"github.com/scylladb/gemini/auth"
+	"github.com/scylladb/gemini/replication"
+	"github.com/scylladb/gemini/store"
+	"github.com/scylladb/gemini/tableopts"
 )
 
 var (
@@ -95,8 +96,8 @@ var (
 	testClusterHostSelectionPolicy   string
 	oracleClusterHostSelectionPolicy string
 	useServerSideTimestamps          bool
-	requestTimeout					 time.Duration
-	connectTimeout					 time.Duration
+	requestTimeout                   time.Duration
+	connectTimeout                   time.Duration
 )
 
 const (
@@ -120,7 +121,21 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-type testJob func(context.Context, <-chan heartBeat, *gemini.Schema, gemini.SchemaConfig, *gemini.Table, store.Store, *rand.Rand, gemini.PartitionRangeConfig, *gemini.Generator, chan Status, string, time.Duration, *zap.Logger) error
+type testJob func(
+	context.Context,
+	<-chan heartBeat,
+	*gemini.Schema,
+	gemini.SchemaConfig,
+	*gemini.Table,
+	store.Store,
+	*rand.Rand,
+	gemini.PartitionRangeConfig,
+	*gemini.Generator,
+	chan Status,
+	string,
+	time.Duration,
+	*zap.Logger,
+) error
 
 func readSchema(confFile string) (*gemini.Schema, error) {
 	byteValue, err := ioutil.ReadFile(confFile)
@@ -153,7 +168,7 @@ func (cb createBuilder) ToCql() (stmt string, names []string) {
 
 func run(cmd *cobra.Command, args []string) error {
 	logger := createLogger(level)
-	defer logger.Sync()
+	defer gemini.IgnoreError(logger.Sync)
 
 	cons, err := gocql.ParseConsistencyWrapper(consistency)
 	if err != nil {
@@ -175,7 +190,7 @@ func run(cmd *cobra.Command, args []string) error {
 		_ = http.ListenAndServe(bind, nil)
 	}()
 
-	if err := printSetup(); err != nil {
+	if err = printSetup(); err != nil {
 		return errors.Wrapf(err, "unable to print setup")
 	}
 	distFunc, err := createDistributionFunc(partitionKeyDistribution, math.MaxUint64, seed, stdDistMean, oneStdDev)
@@ -187,15 +202,14 @@ func run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer outFile.Sync()
+	defer gemini.IgnoreError(outFile.Sync)
 
 	schemaConfig := createSchemaConfig(logger)
-	if err := schemaConfig.Valid(); err != nil {
+	if err = schemaConfig.Valid(); err != nil {
 		return errors.Wrap(err, "invalid schema configuration")
 	}
 	var schema *gemini.Schema
 	if len(schemaFile) > 0 {
-		var err error
 		schema, err = readSchema(schemaFile)
 		if err != nil {
 			return errors.Wrap(err, "cannot create schema")
@@ -221,34 +235,34 @@ func run(cmd *cobra.Command, args []string) error {
 		case "stdout":
 			tracingFile = os.Stdout
 		default:
-			tf, err := createFile(tracingOutFile, os.Stdout)
-			if err != nil {
-				return err
+			tf, ioErr := createFile(tracingOutFile, os.Stdout)
+			if ioErr != nil {
+				return ioErr
 			}
 			tracingFile = tf
-			defer tracingFile.Sync()
+			defer gemini.IgnoreError(tracingFile.Sync)
 		}
 	}
-	store := store.New(schema, testCluster, oracleCluster, storeConfig, tracingFile, logger)
-	defer store.Close()
+	st := store.New(schema, testCluster, oracleCluster, storeConfig, tracingFile, logger)
+	defer gemini.IgnoreError(st.Close)
 
 	if dropSchema && mode != readMode {
 		for _, stmt := range schema.GetDropSchema() {
 			logger.Debug(stmt)
-			if err := store.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
+			if err = st.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
 				return errors.Wrap(err, "unable to drop schema")
 			}
 		}
 	}
 
 	testKeyspace, oracleKeyspace := schema.GetCreateKeyspaces()
-	if err := store.Create(context.Background(), createBuilder{stmt: testKeyspace}, createBuilder{stmt: oracleKeyspace}); err != nil {
+	if err = st.Create(context.Background(), createBuilder{stmt: testKeyspace}, createBuilder{stmt: oracleKeyspace}); err != nil {
 		return errors.Wrap(err, "unable to create keyspace")
 	}
 
 	for _, stmt := range schema.GetCreateSchema() {
 		logger.Debug(stmt)
-		if err := store.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
+		if err = st.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
 			return errors.Wrap(err, "unable to create schema")
 		}
 	}
@@ -256,7 +270,7 @@ func run(cmd *cobra.Command, args []string) error {
 	result := make(chan Status, 10000)
 	ctx, done := context.WithTimeout(context.Background(), duration+warmup)
 	g, gCtx := errgroup.WithContext(ctx)
-	var graceful = make(chan os.Signal, 1)
+	graceful := make(chan os.Signal, 1)
 	signal.Notify(graceful, syscall.SIGTERM, syscall.SIGINT)
 	g.Go(func() error {
 		select {
@@ -281,10 +295,10 @@ func run(cmd *cobra.Command, args []string) error {
 	resCh := make(chan *Status, 1)
 	g.Go(func() error {
 		defer done()
-		res, err := sampleStatus(gCtx, result, sp, logger)
+		res, sampleErr := sampleStatus(gCtx, result, sp, logger)
 		sp.Stop()
 		resCh <- res
-		return err
+		return sampleErr
 	})
 	time.AfterFunc(duration+warmup, func() {
 		defer done()
@@ -292,7 +306,7 @@ func run(cmd *cobra.Command, args []string) error {
 	})
 
 	if warmup > 0 {
-		if err := job(gCtx, WarmupJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger); err != nil {
+		if err = job(gCtx, WarmupJob, concurrency, schema, schemaConfig, st, pump, generators, result, logger); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
 		}
 	}
@@ -304,10 +318,10 @@ func run(cmd *cobra.Command, args []string) error {
 		for id := range testJobs {
 			tJob := testJobs[id]
 			g.Go(func() error {
-				return job(gCtx, tJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+				return job(gCtx, tJob, concurrency, schema, schemaConfig, st, pump, generators, result, logger)
 			})
 		}
-		if err := g.Wait(); err != nil {
+		if err = g.Wait(); err != nil {
 			logger.Debug("error detected", zap.Error(err))
 		}
 	}
@@ -395,7 +409,11 @@ func createLogger(level string) *zap.Logger {
 	return logger
 }
 
-func createClusters(consistency gocql.Consistency, testHostSelectionPolicy gocql.HostSelectionPolicy, oracleHostSelectionPolicy gocql.HostSelectionPolicy, logger *zap.Logger) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
+func createClusters(
+	consistency gocql.Consistency,
+	testHostSelectionPolicy, oracleHostSelectionPolicy gocql.HostSelectionPolicy,
+	logger *zap.Logger,
+) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
 	retryPolicy := &gocql.ExponentialBackoffRetryPolicy{
 		Min:        time.Second,
 		Max:        60 * time.Second,
@@ -489,13 +507,14 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-
 	rootCmd.Version = version + ", commit " + commit + ", date " + date
 	rootCmd.Flags().StringSliceVarP(&testClusterHost, "test-cluster", "t", []string{}, "Host names or IPs of the test cluster that is system under test")
-	rootCmd.MarkFlagRequired("test-cluster")
+	_ = rootCmd.MarkFlagRequired("test-cluster")
 	rootCmd.Flags().StringVarP(&testClusterUsername, "test-username", "", "", "Username for the test cluster")
 	rootCmd.Flags().StringVarP(&testClusterPassword, "test-password", "", "", "Password for the test cluster")
-	rootCmd.Flags().StringSliceVarP(&oracleClusterHost, "oracle-cluster", "o", []string{}, "Host names or IPs of the oracle cluster that provides correct answers. If omitted no oracle will be used")
+	rootCmd.Flags().StringSliceVarP(
+		&oracleClusterHost, "oracle-cluster", "o", []string{},
+		"Host names or IPs of the oracle cluster that provides correct answers. If omitted no oracle will be used")
 	rootCmd.Flags().StringVarP(&oracleClusterUsername, "oracle-username", "", "", "Username for the oracle cluster")
 	rootCmd.Flags().StringVarP(&oracleClusterPassword, "oracle-password", "", "", "Password for the oracle cluster")
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
@@ -510,8 +529,14 @@ func init() {
 	rootCmd.Flags().StringVarP(&outFileArg, "outfile", "", "", "Specify the name of the file where the results should go")
 	rootCmd.Flags().StringVarP(&bind, "bind", "b", ":2112", "Specify the interface and port which to bind prometheus metrics on. Default is ':2112'")
 	rootCmd.Flags().DurationVarP(&warmup, "warmup", "", 30*time.Second, "Specify the warmup perid as a duration for example 30s or 10h")
-	rootCmd.Flags().StringVarP(&replicationStrategy, "replication-strategy", "", "simple", "Specify the desired replication strategy as either the coded short hand simple|network to get the default for each type or provide the entire specification in the form {'class':'....'}")
-	rootCmd.Flags().StringVarP(&oracleReplicationStrategy, "oracle-replication-strategy", "", "simple", "Specify the desired replication strategy of the oracle cluster as either the coded short hand simple|network to get the default for each type or provide the entire specification in the form {'class':'....'}")
+	rootCmd.Flags().StringVarP(
+		&replicationStrategy, "replication-strategy", "", "simple",
+		"Specify the desired replication strategy as either the coded short hand simple|network to get the default for each type or provide "+
+			"the entire specification in the form {'class':'....'}")
+	rootCmd.Flags().StringVarP(
+		&oracleReplicationStrategy, "oracle-replication-strategy", "", "simple",
+		"Specify the desired replication strategy of the oracle cluster as either the coded short hand simple|network to get the default for each "+
+			"type or provide the entire specification in the form {'class':'....'}")
 	rootCmd.Flags().StringArrayVarP(&tableOptions, "table-options", "", []string{}, "Repeatable argument to set table options to be added to the created tables")
 	rootCmd.Flags().StringVarP(&consistency, "consistency", "", "QUORUM", "Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE")
 	rootCmd.Flags().IntVarP(&maxTables, "max-tables", "", 1, "Maximum number of generated tables")
@@ -525,19 +550,33 @@ func init() {
 	rootCmd.Flags().StringVarP(&cqlFeatures, "cql-features", "", "basic", "Specify the type of cql features to use, basic|normal|all")
 	rootCmd.Flags().StringVarP(&level, "level", "", "info", "Specify the logging level, debug|info|warn|error|dpanic|panic|fatal")
 	rootCmd.Flags().IntVarP(&maxRetriesMutate, "max-mutation-retries", "", 2, "Maximum number of attempts to apply a mutation")
-	rootCmd.Flags().DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond, "Duration between attempts to apply a mutation for example 10ms or 1s")
+	rootCmd.Flags().DurationVarP(
+		&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond,
+		"Duration between attempts to apply a mutation for example 10ms or 1s")
 	rootCmd.Flags().Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 100, "Number of reused buffered partition keys")
 	rootCmd.Flags().Uint64VarP(&partitionCount, "token-range-slices", "", 10000, "Number of slices to divide the token space into")
-	rootCmd.Flags().StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform", "Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
+	rootCmd.Flags().StringVarP(
+		&partitionKeyDistribution, "partition-key-distribution", "", "uniform",
+		"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
 	rootCmd.Flags().Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution")
 	rootCmd.Flags().Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, defaults to one standard deviation ~0.341")
-	rootCmd.Flags().StringVarP(&tracingOutFile, "tracing-outfile", "", "", "Specify the file to which tracing information gets written. Two magic names are available, 'stdout' and 'stderr'. By default tracing is disabled.")
+	rootCmd.Flags().StringVarP(
+		&tracingOutFile, "tracing-outfile", "", "",
+		"Specify the file to which tracing information gets written. Two magic names are available, 'stdout' and 'stderr'. By default tracing is disabled.")
 	rootCmd.Flags().BoolVarP(&useCounters, "use-counters", "", false, "Ensure that at least one table is a counter table")
-	rootCmd.Flags().IntVarP(&asyncObjectStabilizationAttempts, "async-objects-stabilization-attempts", "", 10, "Maximum number of attempts to validate result sets from MV and SI")
-	rootCmd.Flags().DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 10*time.Millisecond, "Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
+	rootCmd.Flags().IntVarP(
+		&asyncObjectStabilizationAttempts, "async-objects-stabilization-attempts", "", 10,
+		"Maximum number of attempts to validate result sets from MV and SI")
+	rootCmd.Flags().DurationVarP(
+		&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 10*time.Millisecond,
+		"Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
 	rootCmd.Flags().BoolVarP(&useLWT, "use-lwt", "", false, "Emit LWT based updates")
-	rootCmd.Flags().StringVarP(&oracleClusterHostSelectionPolicy, "oracle-host-selection-policy", "", "round-robin", "Host selection policy used by the driver for the oracle cluster: round-robin|host-pool|token-aware")
-	rootCmd.Flags().StringVarP(&testClusterHostSelectionPolicy, "test-host-selection-policy", "", "round-robin", "Host selection policy used by the driver for the test cluster: round-robin|host-pool|token-aware")
+	rootCmd.Flags().StringVarP(
+		&oracleClusterHostSelectionPolicy, "oracle-host-selection-policy", "", "round-robin",
+		"Host selection policy used by the driver for the oracle cluster: round-robin|host-pool|token-aware")
+	rootCmd.Flags().StringVarP(
+		&testClusterHostSelectionPolicy, "test-host-selection-policy", "", "round-robin",
+		"Host selection policy used by the driver for the test cluster: round-robin|host-pool|token-aware")
 	rootCmd.Flags().BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
 	rootCmd.Flags().DurationVarP(&requestTimeout, "request-timeout", "", 30*time.Second, "Duration of waiting request execution")
 	rootCmd.Flags().DurationVarP(&connectTimeout, "connect-timeout", "", 30*time.Second, "Duration of waiting connection established")

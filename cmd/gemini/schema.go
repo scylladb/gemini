@@ -17,9 +17,10 @@ package main
 import (
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/gemini/replication"
-	"go.uber.org/zap"
 )
 
 func createSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {

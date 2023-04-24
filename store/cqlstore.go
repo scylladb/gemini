@@ -4,14 +4,13 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package store
 
 import (
@@ -19,25 +18,27 @@ import (
 	"os"
 	"time"
 
+	errs "errors"
+
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/scylladb/gemini"
 	"github.com/scylladb/gocqlx/v2/qb"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+
+	"github.com/scylladb/gemini"
 )
 
 type cqlStore struct {
 	session                 *gocql.Session
 	schema                  *gemini.Schema
+	ops                     *prometheus.CounterVec
+	logger                  *zap.Logger
 	system                  string
 	maxRetriesMutate        int
 	maxRetriesMutateSleep   time.Duration
 	useServerSideTimestamps bool
-
-	ops    *prometheus.CounterVec
-	logger *zap.Logger
 }
 
 func (cs *cqlStore) name() string {
@@ -89,7 +90,7 @@ func (cs *cqlStore) doMutate(ctx context.Context, builder qb.Builder, ts time.Ti
 		if err := query.Exec(); err != nil {
 	*/
 	if err := query.Exec(); err != nil {
-		if err == context.DeadlineExceeded {
+		if errs.Is(err, context.DeadlineExceeded) {
 			if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for mutation query"); w != nil {
 				w.Write(zap.String("system", cs.system), zap.String("query", queryBody), zap.Error(err))
 			}
@@ -107,13 +108,13 @@ func (cs *cqlStore) load(ctx context.Context, builder qb.Builder, values []inter
 	cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
 	defer func() {
 		if e := iter.Close(); e != nil {
-			if e == context.DeadlineExceeded {
+			if errs.Is(e, context.DeadlineExceeded) {
 				if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for load query"); w != nil {
 					w.Write(zap.String("system", cs.system), zap.String("query", query), zap.Error(e))
 				}
 			}
 			if !ignore(e) {
-				err = multierr.Append(err, errors.Errorf("system failed: %s", e.Error()))
+				err = multierr.Append(err, errors.Errorf("system failed: %s", err.Error()))
 			}
 		}
 	}()
@@ -141,6 +142,7 @@ func ignore(err error) bool {
 	if err == nil {
 		return true
 	}
+	//nolint:errorlint
 	switch err {
 	case context.Canceled, context.DeadlineExceeded:
 		return true

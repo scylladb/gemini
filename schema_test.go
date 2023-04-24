@@ -12,24 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//nolint:lll
 package gemini
 
 import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
 	"github.com/scylladb/gemini/tableopts"
 )
 
 func TestSchemaConfigValidate(t *testing.T) {
-
 	tests := map[string]struct {
 		config *SchemaConfig
 		want   error
 	}{
 		"empty": {
 			config: &SchemaConfig{},
-			want:   SchemaConfigInvalidPK,
+			want:   ErrSchemaConfigInvalidPK,
 		},
 		"valid": {
 			config: &SchemaConfig{
@@ -47,14 +48,14 @@ func TestSchemaConfigValidate(t *testing.T) {
 				MaxPartitionKeys: 2,
 				MinPartitionKeys: 3,
 			},
-			want: SchemaConfigInvalidPK,
+			want: ErrSchemaConfigInvalidPK,
 		},
 		"ck_missing": {
 			config: &SchemaConfig{
 				MaxPartitionKeys: 3,
 				MinPartitionKeys: 2,
 			},
-			want: SchemaConfigInvalidCK,
+			want: ErrSchemaConfigInvalidCK,
 		},
 		"min_ck_gt_than_max_ck": {
 			config: &SchemaConfig{
@@ -63,7 +64,7 @@ func TestSchemaConfigValidate(t *testing.T) {
 				MaxClusteringKeys: 2,
 				MinClusteringKeys: 3,
 			},
-			want: SchemaConfigInvalidCK,
+			want: ErrSchemaConfigInvalidCK,
 		},
 		"columns_missing": {
 			config: &SchemaConfig{
@@ -72,7 +73,7 @@ func TestSchemaConfigValidate(t *testing.T) {
 				MaxClusteringKeys: 3,
 				MinClusteringKeys: 2,
 			},
-			want: SchemaConfigInvalidCols,
+			want: ErrSchemaConfigInvalidCols,
 		},
 		"min_cols_gt_than_max_cols": {
 			config: &SchemaConfig{
@@ -83,13 +84,14 @@ func TestSchemaConfigValidate(t *testing.T) {
 				MaxColumns:        2,
 				MinColumns:        3,
 			},
-			want: SchemaConfigInvalidCols,
+			want: ErrSchemaConfigInvalidCols,
 		},
 	}
 	cmp.AllowUnexported()
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			got := test.config.Valid()
+			//nolint:errorlint
 			if got != test.want {
 				t.Fatalf("expected '%s', got '%s'", test.want, got)
 			}

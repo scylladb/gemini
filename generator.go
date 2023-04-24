@@ -4,24 +4,24 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package gemini
 
 import (
 	"context"
 
-	"github.com/scylladb/gemini/inflight"
-	"github.com/scylladb/gemini/murmur"
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/scylladb/gemini/inflight"
+	"github.com/scylladb/gemini/murmur"
 )
 
 // TokenIndex represents the position of a token in the token ring.
@@ -39,19 +39,19 @@ type DistributionFunc func() TokenIndex
 
 type Generator struct {
 	ctx              context.Context
-	partitions       []*Partition
-	partitionCount   uint64
-	table            *Table
-	partitionsConfig PartitionRangeConfig
-	seed             uint64
-	idxFunc          DistributionFunc
 	logger           *zap.Logger
+	table            *Table
+	idxFunc          DistributionFunc
+	partitions       []*Partition
+	partitionsConfig PartitionRangeConfig
+	partitionCount   uint64
+	seed             uint64
 }
 
 type GeneratorConfig struct {
+	PartitionsDistributionFunc DistributionFunc
 	PartitionsRangeConfig      PartitionRangeConfig
 	PartitionsCount            uint64
-	PartitionsDistributionFunc DistributionFunc
 	Seed                       uint64
 	PkUsedBufferSize           uint64
 }
@@ -102,8 +102,8 @@ func (g Generator) GetOld() (ValueWithToken, bool) {
 }
 
 type ValueWithToken struct {
-	Token uint64
 	Value Value
+	Token uint64
 }
 
 // GiveOld returns the supplied value for later reuse unless the value

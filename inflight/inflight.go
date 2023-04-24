@@ -135,7 +135,7 @@ func (s *syncU64set) shrink() {
 	}
 
 	for key, val := range s.values {
-		if val == true {
+		if val {
 			newValues[key] = val
 		}
 	}

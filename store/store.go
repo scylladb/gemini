@@ -4,14 +4,13 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package store
 
 import (
@@ -30,11 +29,12 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/scylladb/gemini"
 	"github.com/scylladb/go-set/strset"
 	"github.com/scylladb/gocqlx/v2/qb"
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
+
+	"github.com/scylladb/gemini"
 )
 
 type loader interface {
@@ -65,7 +65,7 @@ type Config struct {
 	UseServerSideTimestamps bool
 }
 
-func New(schema *gemini.Schema, testCluster *gocql.ClusterConfig, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut *os.File, logger *zap.Logger) Store {
+func New(schema *gemini.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut *os.File, logger *zap.Logger) Store {
 	ops := promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gemini_cql_requests",
 		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
@@ -136,11 +136,11 @@ func (n *noOpStore) close() error {
 type delegatingStore struct {
 	oracleStore storeLoader
 	testStore   storeLoader
-	validations bool
 	logger      *zap.Logger
+	validations bool
 }
 
-func (ds delegatingStore) Create(ctx context.Context, testBuilder qb.Builder, oracleBuilder qb.Builder) error {
+func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder qb.Builder) error {
 	ts := time.Now()
 	if err := mutate(ctx, ds.oracleStore, ts, oracleBuilder, []interface{}{}); err != nil {
 		return errors.Wrap(err, "oracle failed store creation")

@@ -4,14 +4,13 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package gemini
 
 import (
@@ -69,10 +68,15 @@ var (
 		TYPE_BLOB:     {},
 		TYPE_DURATION: {},
 	}
-	typesForIndex         = []SimpleType{TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT, TYPE_VARINT}
-	partitionKeyTypes     = []SimpleType{TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT, TYPE_VARINT}
-	pkTypes               = []SimpleType{TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT /*TYPE_TIME,*/, TYPE_TIMESTAMP, TYPE_TIMEUUID, TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT}
-	types                 = append(append([]SimpleType{}, pkTypes...), TYPE_BOOLEAN, TYPE_DURATION)
+	typesForIndex     = []SimpleType{TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT, TYPE_VARINT}
+	partitionKeyTypes = []SimpleType{TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT, TYPE_VARINT}
+	pkTypes           = []SimpleType{
+		TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE,
+		TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT /*TYPE_TIME,*/, TYPE_TIMESTAMP, TYPE_TIMEUUID,
+		TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT,
+	}
+	types = append(append([]SimpleType{}, pkTypes...), TYPE_BOOLEAN, TYPE_DURATION)
+	//nolint:unused
 	compatibleColumnTypes = map[SimpleType][]SimpleType{
 		TYPE_ASCII: {
 			TYPE_TEXT,
@@ -251,10 +255,7 @@ func (st SimpleType) CQLType() gocql.TypeInfo {
 }
 
 func (st SimpleType) Indexable() bool {
-	if st == TYPE_DURATION {
-		return false
-	}
-	return true
+	return st != TYPE_DURATION
 }
 
 func (st SimpleType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
@@ -308,47 +309,47 @@ type TupleType struct {
 	Frozen bool         `json:"frozen"`
 }
 
-func (st TupleType) CQLType() gocql.TypeInfo {
+func (t *TupleType) CQLType() gocql.TypeInfo {
 	return goCQLTypeMap[gocql.TypeTuple]
 }
 
-func (tt TupleType) Name() string {
-	names := make([]string, len(tt.Types), len(tt.Types))
-	for i, t := range tt.Types {
-		names[i] = t.Name()
+func (t *TupleType) Name() string {
+	names := make([]string, len(t.Types))
+	for i, tp := range t.Types {
+		names[i] = tp.Name()
 	}
 	return "Type: " + strings.Join(names, ",")
 }
 
-func (tt TupleType) CQLDef() string {
-	names := make([]string, len(tt.Types), len(tt.Types))
-	for i, t := range tt.Types {
-		names[i] = t.CQLDef()
+func (t *TupleType) CQLDef() string {
+	names := make([]string, len(t.Types))
+	for i, tp := range t.Types {
+		names[i] = tp.CQLDef()
 	}
-	if tt.Frozen {
+	if t.Frozen {
 		return "frozen<tuple<" + strings.Join(names, ",") + ">>"
 	}
 	return "tuple<" + strings.Join(names, ",") + ">"
 }
 
-func (tt TupleType) CQLHolder() string {
-	return "(" + strings.TrimRight(strings.Repeat("?,", len(tt.Types)), ",") + ")"
+func (t *TupleType) CQLHolder() string {
+	return "(" + strings.TrimRight(strings.Repeat("?,", len(t.Types)), ",") + ")"
 }
 
-func (tt TupleType) CQLPretty(query string, value []interface{}) (string, int) {
+func (t *TupleType) CQLPretty(query string, value []interface{}) (string, int) {
 	if len(value) == 0 {
 		return query, 0
 	}
 	var cnt, tmp int
-	for i, t := range tt.Types {
-		query, tmp = t.CQLPretty(query, value[i:])
+	for i, tp := range t.Types {
+		query, tmp = tp.CQLPretty(query, value[i:])
 		cnt += tmp
 	}
 	return query, cnt
 }
 
-func (st TupleType) Indexable() bool {
-	for _, t := range st.Types {
+func (t *TupleType) Indexable() bool {
+	for _, t := range t.Types {
 		if t == TYPE_DURATION {
 			return false
 		}
@@ -356,12 +357,12 @@ func (st TupleType) Indexable() bool {
 	return true
 }
 
-func (tt TupleType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
-	vals := make([]interface{}, 0, len(tt.Types))
-	for _, t := range tt.Types {
-		vals = append(vals, t.GenValue(r, p)...)
+func (t *TupleType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+	out := make([]interface{}, 0, len(t.Types))
+	for _, tp := range t.Types {
+		out = append(out, tp.GenValue(r, p)...)
 	}
-	return vals
+	return out
 }
 
 type UDTType struct {
@@ -370,32 +371,32 @@ type UDTType struct {
 	Frozen   bool                  `json:"frozen"`
 }
 
-func (st UDTType) CQLType() gocql.TypeInfo {
+func (t *UDTType) CQLType() gocql.TypeInfo {
 	return goCQLTypeMap[gocql.TypeUDT]
 }
 
-func (tt UDTType) Name() string {
-	return tt.TypeName
+func (t *UDTType) Name() string {
+	return t.TypeName
 }
 
-func (tt UDTType) CQLDef() string {
-	if tt.Frozen {
-		return "frozen<" + tt.TypeName + ">"
+func (t *UDTType) CQLDef() string {
+	if t.Frozen {
+		return "frozen<" + t.TypeName + ">"
 	}
-	return tt.TypeName
+	return t.TypeName
 }
 
-func (tt UDTType) CQLHolder() string {
+func (t *UDTType) CQLHolder() string {
 	return "?"
 }
 
-func (tt UDTType) CQLPretty(query string, value []interface{}) (string, int) {
+func (t *UDTType) CQLPretty(query string, value []interface{}) (string, int) {
 	if len(value) == 0 {
 		return query, 0
 	}
 	if s, ok := value[0].(map[string]interface{}); ok {
 		vv := "{"
-		for k, v := range tt.Types {
+		for k, v := range t.Types {
 			vv += fmt.Sprintf("%s:?,", k)
 			vv, _ = v.CQLPretty(vv, []interface{}{s[k]})
 		}
@@ -403,11 +404,11 @@ func (tt UDTType) CQLPretty(query string, value []interface{}) (string, int) {
 		vv += "}"
 		return strings.Replace(query, "?", vv, 1), 1
 	}
-	panic(fmt.Sprintf("udt pretty, unknown type %v", tt))
+	panic(fmt.Sprintf("udt pretty, unknown type %v", t))
 }
 
-func (tt UDTType) Indexable() bool {
-	for _, t := range tt.Types {
+func (t *UDTType) Indexable() bool {
+	for _, t := range t.Types {
 		if t == TYPE_DURATION {
 			return false
 		}
@@ -415,9 +416,9 @@ func (tt UDTType) Indexable() bool {
 	return true
 }
 
-func (tt UDTType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+func (t *UDTType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
 	vals := make(map[string]interface{})
-	for name, typ := range tt.Types {
+	for name, typ := range t.Types {
 		vals[name] = typ.GenValue(r, p)[0]
 	}
 	return []interface{}{vals}
@@ -429,8 +430,8 @@ type BagType struct {
 	Frozen bool       `json:"frozen"`
 }
 
-func (st BagType) CQLType() gocql.TypeInfo {
-	switch st.Kind {
+func (ct *BagType) CQLType() gocql.TypeInfo {
+	switch ct.Kind {
 	case "set":
 		return goCQLTypeMap[gocql.TypeSet]
 	default:
@@ -438,25 +439,25 @@ func (st BagType) CQLType() gocql.TypeInfo {
 	}
 }
 
-func (ct BagType) Name() string {
+func (ct *BagType) Name() string {
 	if ct.Frozen {
 		return "frozen<" + ct.Kind + "<" + ct.Type.Name() + ">>"
 	}
 	return ct.Kind + "<" + ct.Type.Name() + ">"
 }
 
-func (ct BagType) CQLDef() string {
+func (ct *BagType) CQLDef() string {
 	if ct.Frozen {
 		return "frozen<" + ct.Kind + "<" + ct.Type.Name() + ">>"
 	}
 	return ct.Kind + "<" + ct.Type.Name() + ">"
 }
 
-func (ct BagType) CQLHolder() string {
+func (ct *BagType) CQLHolder() string {
 	return "?"
 }
 
-func (ct BagType) CQLPretty(query string, value []interface{}) (string, int) {
+func (ct *BagType) CQLPretty(query string, value []interface{}) (string, int) {
 	if len(value) == 0 {
 		return query, 0
 	}
@@ -475,16 +476,16 @@ func (ct BagType) CQLPretty(query string, value []interface{}) (string, int) {
 	panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
 }
 
-func (ct BagType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+func (ct *BagType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
 	count := r.Intn(9) + 1
-	vals := make([]interface{}, count, count)
+	out := make([]interface{}, count)
 	for i := 0; i < count; i++ {
-		vals[i] = ct.Type.GenValue(r, p)[0]
+		out[i] = ct.Type.GenValue(r, p)[0]
 	}
-	return []interface{}{vals}
+	return []interface{}{out}
 }
 
-func (ct BagType) Indexable() bool {
+func (ct *BagType) Indexable() bool {
 	return false
 }
 
@@ -494,22 +495,22 @@ type MapType struct {
 	Frozen    bool       `json:"frozen"`
 }
 
-func (st MapType) CQLType() gocql.TypeInfo {
+func (mt *MapType) CQLType() gocql.TypeInfo {
 	return goCQLTypeMap[gocql.TypeMap]
 }
 
-func (mt MapType) Name() string {
+func (mt *MapType) Name() string {
 	if mt.Frozen {
 		return "frozen<map<" + mt.KeyType.Name() + "," + mt.ValueType.Name() + ">>"
 	}
 	return "map<" + mt.KeyType.Name() + "," + mt.ValueType.Name() + ">"
 }
 
-func (mt MapType) CQLHolder() string {
+func (mt *MapType) CQLHolder() string {
 	return "?"
 }
 
-func (mt MapType) CQLPretty(query string, value []interface{}) (string, int) {
+func (mt *MapType) CQLPretty(query string, value []interface{}) (string, int) {
 	switch reflect.TypeOf(value[0]).Kind() {
 	case reflect.Map:
 		s := reflect.ValueOf(value[0]).MapRange()
@@ -525,7 +526,7 @@ func (mt MapType) CQLPretty(query string, value []interface{}) (string, int) {
 	panic(fmt.Sprintf("map cql pretty, unknown type %v", mt))
 }
 
-func (mt MapType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+func (mt *MapType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
 	count := r.Intn(9) + 1
 	vals := make(map[interface{}]interface{})
 	for i := 0; i < count; i++ {
@@ -534,14 +535,14 @@ func (mt MapType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
 	return []interface{}{vals}
 }
 
-func (mt MapType) CQLDef() string {
+func (mt *MapType) CQLDef() string {
 	if mt.Frozen {
 		return "frozen<map<" + mt.KeyType.CQLDef() + "," + mt.ValueType.CQLDef() + ">>"
 	}
 	return "map<" + mt.KeyType.CQLDef() + "," + mt.ValueType.CQLDef() + ">"
 }
 
-func (mt MapType) Indexable() bool {
+func (mt *MapType) Indexable() bool {
 	return false
 }
 
@@ -549,31 +550,31 @@ type CounterType struct {
 	Value int64
 }
 
-func (ct CounterType) CQLType() gocql.TypeInfo {
+func (ct *CounterType) CQLType() gocql.TypeInfo {
 	return goCQLTypeMap[gocql.TypeMap]
 }
 
-func (ct CounterType) Name() string {
+func (ct *CounterType) Name() string {
 	return "counter"
 }
 
-func (ct CounterType) CQLHolder() string {
+func (ct *CounterType) CQLHolder() string {
 	return "?"
 }
 
-func (ct CounterType) CQLPretty(query string, value []interface{}) (string, int) {
+func (ct *CounterType) CQLPretty(query string, value []interface{}) (string, int) {
 	return strings.Replace(query, "?", fmt.Sprintf("%d", value[0]), 1), 1
 }
 
-func (ct CounterType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+func (ct *CounterType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
 	return []interface{}{atomic.AddInt64(&ct.Value, 1)}
 }
 
-func (ct CounterType) CQLDef() string {
+func (ct *CounterType) CQLDef() string {
 	return "counter"
 }
 
-func (ct CounterType) Indexable() bool {
+func (ct *CounterType) Indexable() bool {
 	return false
 }
 
@@ -608,17 +609,17 @@ func genTupleType(sc *SchemaConfig) Type {
 	if n < 2 {
 		n = 2
 	}
-	typeList := make([]SimpleType, n, n)
+	typeList := make([]SimpleType, n)
 	for i := 0; i < n; i++ {
 		typeList[i] = genSimpleType(sc)
 	}
-	return TupleType{
+	return &TupleType{
 		Types:  typeList,
 		Frozen: rand.Uint32()%2 == 0,
 	}
 }
 
-func genUDTType(sc *SchemaConfig) UDTType {
+func genUDTType(sc *SchemaConfig) *UDTType {
 	udtNum := rand.Uint32()
 	typeName := fmt.Sprintf("udt_%d", udtNum)
 	ts := make(map[string]SimpleType)
@@ -627,22 +628,22 @@ func genUDTType(sc *SchemaConfig) UDTType {
 		ts[typeName+fmt.Sprintf("_%d", i)] = genSimpleType(sc)
 	}
 
-	return UDTType{
+	return &UDTType{
 		Types:    ts,
 		TypeName: typeName,
 		Frozen:   true,
 	}
 }
 
-func genSetType(sc *SchemaConfig) BagType {
+func genSetType(sc *SchemaConfig) *BagType {
 	return genBagType("set", sc)
 }
 
-func genListType(sc *SchemaConfig) BagType {
+func genListType(sc *SchemaConfig) *BagType {
 	return genBagType("list", sc)
 }
 
-func genBagType(kind string, sc *SchemaConfig) BagType {
+func genBagType(kind string, sc *SchemaConfig) *BagType {
 	var t SimpleType
 	for {
 		t = genSimpleType(sc)
@@ -650,14 +651,14 @@ func genBagType(kind string, sc *SchemaConfig) BagType {
 			break
 		}
 	}
-	return BagType{
+	return &BagType{
 		Kind:   kind,
 		Type:   t,
 		Frozen: rand.Uint32()%2 == 0,
 	}
 }
 
-func genMapType(sc *SchemaConfig) MapType {
+func genMapType(sc *SchemaConfig) *MapType {
 	t := genSimpleType(sc)
 	for {
 		if _, ok := typesMapKeyBlacklist[t]; !ok {
@@ -665,7 +666,7 @@ func genMapType(sc *SchemaConfig) MapType {
 		}
 		t = genSimpleType(sc)
 	}
-	return MapType{
+	return &MapType{
 		KeyType:   t,
 		ValueType: genSimpleType(sc),
 		Frozen:    rand.Uint32()%2 == 0,
@@ -715,40 +716,43 @@ func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func getMapTypeColumn(data map[string]interface{}) (ColumnDef, error) {
+func getMapTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	st := struct {
-		Name string
 		Type map[string]interface{}
+		Name string
 	}{}
-	err := mapstructure.Decode(data, &st)
+
+	if err = mapstructure.Decode(data, &st); err != nil {
+		return nil, errors.Wrapf(err, "can't decode MapType value, value=%+v", data)
+	}
 
 	if _, ok := st.Type["frozen"]; !ok {
-		return ColumnDef{}, errors.Errorf("not a map type, value=%v", st)
+		return nil, errors.Errorf("not a map type, value=%v", st)
 	}
 
 	if _, ok := st.Type["value_type"]; !ok {
-		return ColumnDef{}, errors.Errorf("not a map type, value=%v", st)
+		return nil, errors.Errorf("not a map type, value=%v", st)
 	}
 
 	if _, ok := st.Type["key_type"]; !ok {
-		return ColumnDef{}, errors.Errorf("not a map type, value=%v", st)
+		return nil, errors.Errorf("not a map type, value=%v", st)
 	}
 
 	var frozen bool
-	if err := mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
-		return ColumnDef{}, errors.Wrapf(err, "can't decode bool value for MapType::Frozen, value=%v", st)
+	if err = mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
+		return nil, errors.Wrapf(err, "can't decode bool value for MapType::Frozen, value=%v", st)
 	}
 	var valueType SimpleType
-	if err := mapstructure.Decode(st.Type["value_type"], &valueType); err != nil {
-		return ColumnDef{}, errors.Wrapf(err, "can't decode SimpleType value for MapType::ValueType, value=%v", st)
+	if err = mapstructure.Decode(st.Type["value_type"], &valueType); err != nil {
+		return nil, errors.Wrapf(err, "can't decode SimpleType value for MapType::ValueType, value=%v", st)
 	}
 	var keyType SimpleType
-	if err := mapstructure.Decode(st.Type["key_type"], &keyType); err != nil {
-		return ColumnDef{}, errors.Wrapf(err, "can't decode bool value for MapType::KeyType, value=%v", st)
+	if err = mapstructure.Decode(st.Type["key_type"], &keyType); err != nil {
+		return nil, errors.Wrapf(err, "can't decode bool value for MapType::KeyType, value=%v", st)
 	}
-	return ColumnDef{
+	return &ColumnDef{
 		Name: st.Name,
-		Type: MapType{
+		Type: &MapType{
 			Frozen:    frozen,
 			ValueType: valueType,
 			KeyType:   keyType,
@@ -756,28 +760,31 @@ func getMapTypeColumn(data map[string]interface{}) (ColumnDef, error) {
 	}, err
 }
 
-func getBagTypeColumn(data map[string]interface{}) (ColumnDef, error) {
+func getBagTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	st := struct {
-		Name string
 		Type map[string]interface{}
+		Name string
 	}{}
-	err := mapstructure.Decode(data, &st)
+
+	if err = mapstructure.Decode(data, &st); err != nil {
+		return nil, errors.Wrapf(err, "can't decode string value for BagType, value=%+v", data)
+	}
 
 	var kind string
-	if err := mapstructure.Decode(st.Type["kind"], &kind); err != nil {
-		return ColumnDef{}, errors.Wrapf(err, "can't decode string value for BagType::Frozen, value=%v", st)
+	if err = mapstructure.Decode(st.Type["kind"], &kind); err != nil {
+		return nil, errors.Wrapf(err, "can't decode string value for BagType::Frozen, value=%v", st)
 	}
 	var frozen bool
-	if err := mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
-		return ColumnDef{}, errors.Wrapf(err, "can't decode bool value for BagType::Frozen, value=%v", st)
+	if err = mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
+		return nil, errors.Wrapf(err, "can't decode bool value for BagType::Frozen, value=%v", st)
 	}
 	var typ SimpleType
-	if err := mapstructure.Decode(st.Type["type"], &typ); err != nil {
-		return ColumnDef{}, errors.Wrapf(err, "can't decode SimpleType value for BagType::ValueType, value=%v", st)
+	if err = mapstructure.Decode(st.Type["type"], &typ); err != nil {
+		return nil, errors.Wrapf(err, "can't decode SimpleType value for BagType::ValueType, value=%v", st)
 	}
-	return ColumnDef{
+	return &ColumnDef{
 		Name: st.Name,
-		Type: BagType{
+		Type: &BagType{
 			Kind:   kind,
 			Frozen: frozen,
 			Type:   typ,
@@ -785,80 +792,86 @@ func getBagTypeColumn(data map[string]interface{}) (ColumnDef, error) {
 	}, err
 }
 
-func getTupleTypeColumn(data map[string]interface{}) (ColumnDef, error) {
+func getTupleTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	st := struct {
-		Name string
 		Type map[string]interface{}
+		Name string
 	}{}
-	err := mapstructure.Decode(data, &st)
+
+	if err = mapstructure.Decode(data, &st); err != nil {
+		return nil, errors.Wrapf(err, "can't decode []SimpleType value, value=%+v", data)
+	}
 
 	if _, ok := st.Type["types"]; !ok {
-		return ColumnDef{}, errors.Errorf("not a tuple type, value=%v", st)
+		return nil, errors.Errorf("not a tuple type, value=%v", st)
 	}
 
-	var types []SimpleType
-	if err := mapstructure.Decode(st.Type["types"], &types); err != nil {
-		return ColumnDef{}, errors.Wrapf(err, "can't decode []SimpleType value for TupleType::Types, value=%v", st)
+	var dbTypes []SimpleType
+	if err = mapstructure.Decode(st.Type["types"], &dbTypes); err != nil {
+		return nil, errors.Wrapf(err, "can't decode []SimpleType value for TupleType::Types, value=%v", st)
 	}
 	var frozen bool
-	if err := mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
-		return ColumnDef{}, errors.Wrapf(err, "can't decode bool value for TupleType::Types, value=%v", st)
+	if err = mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
+		return nil, errors.Wrapf(err, "can't decode bool value for TupleType::Types, value=%v", st)
 	}
-	return ColumnDef{
+	return &ColumnDef{
 		Name: st.Name,
-		Type: TupleType{
-			Types:  types,
+		Type: &TupleType{
+			Types:  dbTypes,
 			Frozen: frozen,
 		},
-	}, err
+	}, nil
 }
 
-func getUDTTypeColumn(data map[string]interface{}) (ColumnDef, error) {
+func getUDTTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	st := struct {
-		Name string
 		Type map[string]interface{}
+		Name string
 	}{}
-	err := mapstructure.Decode(data, &st)
+
+	if err = mapstructure.Decode(data, &st); err != nil {
+		return nil, errors.Wrapf(err, "can't decode []SimpleType , value=%+v", data)
+	}
 
 	if _, ok := st.Type["types"]; !ok {
-		return ColumnDef{}, errors.Errorf("not a UDT type, value=%v", st)
+		return nil, errors.Errorf("not a UDT type, value=%v", st)
 	}
 	if _, ok := st.Type["type_name"]; !ok {
-		return ColumnDef{}, errors.Errorf("not a UDT type, value=%v", st)
+		return nil, errors.Errorf("not a UDT type, value=%v", st)
 	}
 
-	var types map[string]SimpleType
-	if err := mapstructure.Decode(st.Type["types"], &types); err != nil {
-		return ColumnDef{}, errors.Wrapf(err, "can't decode []SimpleType value for UDTType::Types, value=%v", st)
+	var dbTypes map[string]SimpleType
+	if err = mapstructure.Decode(st.Type["types"], &dbTypes); err != nil {
+		return nil, errors.Wrapf(err, "can't decode []SimpleType value for UDTType::Types, value=%v", st)
 	}
 	var frozen bool
-	if err := mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
-		return ColumnDef{}, errors.Wrapf(err, "can't decode bool value for UDTType::Frozen, value=%v", st)
+	if err = mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
+		return nil, errors.Wrapf(err, "can't decode bool value for UDTType::Frozen, value=%v", st)
 	}
 	var typeName string
-	if err := mapstructure.Decode(st.Type["type_name"], &typeName); err != nil {
-		return ColumnDef{}, errors.Wrapf(err, "can't decode string value for UDTType::TypeName, value=%v", st)
+	if err = mapstructure.Decode(st.Type["type_name"], &typeName); err != nil {
+		return nil, errors.Wrapf(err, "can't decode string value for UDTType::TypeName, value=%v", st)
 	}
-	return ColumnDef{
+	return &ColumnDef{
 		Name: st.Name,
-		Type: UDTType{
-			Types:    types,
+		Type: &UDTType{
+			Types:    dbTypes,
 			TypeName: typeName,
 			Frozen:   frozen,
 		},
-	}, err
+	}, nil
 }
 
-func getSimpleTypeColumn(data map[string]interface{}) (ColumnDef, error) {
+func getSimpleTypeColumn(data map[string]interface{}) (*ColumnDef, error) {
 	st := struct {
 		Name string
 		Type SimpleType
 	}{}
 	err := mapstructure.Decode(data, &st)
 	if err != nil {
-		return ColumnDef{}, err
+		return nil, err
 	}
-	return ColumnDef{
+	return &ColumnDef{
 		Name: st.Name,
 		Type: st.Type,
 	}, err
