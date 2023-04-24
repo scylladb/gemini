@@ -36,7 +36,7 @@ func randStringWithTime(rnd *rand.Rand, len int, t time.Time) string {
 
 	// Pad some extra random data
 	buff := make([]byte, len-buf.Len())
-	rnd.Read(buff)
+	_, _ = rnd.Read(buff)
 	buf.WriteString(base64.StdEncoding.EncodeToString(buff))
 
 	return buf.String()[:len]

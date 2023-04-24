@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build slow
 // +build slow
 
 package gemini
@@ -26,7 +27,10 @@ func TestNonEmptyRandString(t *testing.T) {
 	// TODO: Figure out why this is so horribly slow...
 	tt := time.Now()
 	f := func(len int32) bool {
-		r := nonEmptyRandStringWithTime(rnd, int(len), tt)
+		if len < 0 {
+			len = -len
+		}
+		r := randStringWithTime(rnd, int(len), tt)
 		return r != ""
 	}
 	cfg := &quick.Config{MaxCount: 10}
