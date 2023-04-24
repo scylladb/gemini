@@ -1,0 +1,64 @@
+issues:
+  exclude:
+    - Error return value of `.*.Unlock` is not checked
+    - Error return value of `.*.Completed` is not checked
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - unused
+    - goheader
+    - goimports
+    - revive
+    - misspell
+    - gofumpt
+    - gosimple
+    - staticcheck
+    - lll
+    - errorlint
+run:
+  deadline: 10m
+  modules-download-mode: readonly
+linters-settings:
+  govet:
+    check-shadowing: true
+    settings:
+      shadow:
+        strict: true
+    enable-all: true
+  lll:
+    line-length: 180
+  goheader:
+    values:
+      regexp:
+        spaces: \s+
+        two-digits: \d\d
+    template: 'Copyright 20{{two-digits}} ScyllaDB
+
+
+Licensed under the Apache License, Version 2.0 (the "License");
+
+you may not use this file except in compliance with the License.
+
+You may obtain a copy of the License at
+
+
+{{spaces}}http://www.apache.org/licenses/LICENSE-2.0
+
+
+Unless required by applicable law or agreed to in writing, software
+
+distributed under the License is distributed on an "AS IS" BASIS,
+
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+See the License for the specific language governing permissions and
+
+limitations under the License.'
+  gofumpt:
+    lang-version: "1.12"
+    extra-rules: true
+  goimports:
+    local-prefixes: github.com/scylladb/gemini
