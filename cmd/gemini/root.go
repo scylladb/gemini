@@ -301,9 +301,10 @@ func run(cmd *cobra.Command, args []string) error {
 	case <-gCtx.Done():
 	default:
 		testJobs := jobsFromMode(mode)
-		for _, testJob := range testJobs {
+		for id := range testJobs {
+			tJob := testJobs[id]
 			g.Go(func() error {
-				return job(gCtx, testJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
+				return job(gCtx, tJob, concurrency, schema, schemaConfig, store, pump, generators, result, logger)
 			})
 		}
 		if err := g.Wait(); err != nil {
