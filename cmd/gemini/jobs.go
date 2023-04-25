@@ -115,20 +115,21 @@ func WarmupJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Schema
 	schemaConfig := &schemaCfg
 	testStatus := Status{}
 	var i int
-	warmupTimer := time.NewTimer(warmup)
+	warmupCtx, cancel := context.WithTimeout(ctx, warmup)
+	defer cancel()
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Debug("warmup job terminated")
 			c <- testStatus
 			return ctx.Err()
-		case <-warmupTimer.C:
+		case <-warmupCtx.Done():
 			logger.Debug("warmup job finished")
 			c <- testStatus
 			return nil
 		default:
 			// Do we care about errors during warmup?
-			mutation(ctx, schema, schemaConfig, table, s, r, p, g, &testStatus, false, logger)
+			_ = mutation(warmupCtx, schema, schemaConfig, table, s, r, p, g, &testStatus, false, logger)
 			if i%1000 == 0 {
 				c <- testStatus
 				testStatus = Status{}
