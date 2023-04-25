@@ -99,7 +99,9 @@ func ValidationJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Sc
 					Message:   "Validation failed: " + err.Error(),
 					Query:     cql,
 				}
-				testStatus.Errors = append(testStatus.Errors, e)
+				if len(testStatus.Errors) < maxErrorsToStore {
+					testStatus.Errors = append(testStatus.Errors, e)
+				}
 				testStatus.ReadErrors++
 			} else {
 				testStatus.ReadOps++
@@ -214,7 +216,9 @@ func ddl(ctx context.Context, schema *gemini.Schema, sc *gemini.SchemaConfig, ta
 				Message:   "DDL failed: " + err.Error(),
 				Query:     ddlStmt.PrettyCQL(),
 			}
-			testStatus.Errors = append(testStatus.Errors, e)
+			if len(testStatus.Errors) < maxErrorsToStore {
+				testStatus.Errors = append(testStatus.Errors, e)
+			}
 			testStatus.WriteErrors++
 		} else {
 			testStatus.WriteOps++
@@ -252,7 +256,9 @@ func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig
 			Message:   "Mutation failed: " + err.Error(),
 			Query:     mutateStmt.PrettyCQL(),
 		}
-		testStatus.Errors = append(testStatus.Errors, e)
+		if len(testStatus.Errors) < maxErrorsToStore {
+			testStatus.Errors = append(testStatus.Errors, e)
+		}
 		testStatus.WriteErrors++
 	} else {
 		testStatus.WriteOps++
