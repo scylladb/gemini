@@ -217,8 +217,9 @@ func job(
 		UseLWT:          schemaConfig.UseLWT,
 	}
 
-	for j, table := range schema.Tables {
+	for j := range schema.Tables {
 		gen := generators[j]
+		table := schema.Tables[j]
 		for i := 0; i < int(actors); i++ {
 			r := rand.New(rand.NewSource(seed))
 			g.Go(func() error {
