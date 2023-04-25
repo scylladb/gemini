@@ -39,7 +39,9 @@ func (r *Status) Merge(s Status) {
 	r.WriteErrors += s.WriteErrors
 	r.ReadOps += s.ReadOps
 	r.ReadErrors += s.ReadErrors
-	r.Errors = append(r.Errors, s.Errors...)
+	if len(r.Errors) < maxErrorsToStore {
+		r.Errors = append(r.Errors, s.Errors...)
+	}
 }
 
 func (r *Status) PrintResult(w io.Writer, schema *gemini.Schema) {

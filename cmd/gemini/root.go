@@ -81,6 +81,7 @@ var (
 	level                            string
 	maxRetriesMutate                 int
 	maxRetriesMutateSleep            time.Duration
+	maxErrorsToStore                 int
 	pkBufferReuseSize                uint64
 	partitionCount                   uint64
 	partitionKeyDistribution         string
@@ -539,7 +540,8 @@ func init() {
 	rootCmd.Flags().BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
 	rootCmd.Flags().DurationVarP(&requestTimeout, "request-timeout", "", 30*time.Second, "Duration of waiting request execution")
 	rootCmd.Flags().DurationVarP(&connectTimeout, "connect-timeout", "", 30*time.Second, "Duration of waiting connection established")
-}	
+	rootCmd.Flags().IntVarP(&maxErrorsToStore, "max-errors-to-store", "", 1000, "Maximum number of errors to store and output at the end")
+}
 
 func printSetup() error {
 	tw := new(tabwriter.Writer)
