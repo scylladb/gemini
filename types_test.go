@@ -4,14 +4,13 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package gemini
 
 import (
@@ -26,15 +25,13 @@ import (
 	"gopkg.in/inf.v0"
 )
 
-var (
-	millenium = time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC)
-)
+var millennium = time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC)
 
 var prettytests = []struct {
 	typ      Type
 	query    string
-	values   []interface{}
 	expected string
+	values   []interface{}
 }{
 	{
 		typ:      TYPE_ASCII,
@@ -63,7 +60,7 @@ var prettytests = []struct {
 	{
 		typ:      TYPE_DATE,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
-		values:   []interface{}{millenium.Format("2006-01-02")},
+		values:   []interface{}{millennium.Format("2006-01-02")},
 		expected: "SELECT * FROM tbl WHERE pk0='1999-12-31'",
 	},
 	{
@@ -117,14 +114,14 @@ var prettytests = []struct {
 	{
 		typ:      TYPE_TIME,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
-		values:   []interface{}{millenium},
-		expected: "SELECT * FROM tbl WHERE pk0='" + millenium.Format(time.RFC3339) + "'",
+		values:   []interface{}{millennium},
+		expected: "SELECT * FROM tbl WHERE pk0='" + millennium.Format(time.RFC3339) + "'",
 	},
 	{
 		typ:      TYPE_TIMESTAMP,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
-		values:   []interface{}{millenium},
-		expected: "SELECT * FROM tbl WHERE pk0='" + millenium.Format(time.RFC3339) + "'",
+		values:   []interface{}{millennium},
+		expected: "SELECT * FROM tbl WHERE pk0='" + millennium.Format(time.RFC3339) + "'",
 	},
 	{
 		typ:      TYPE_TIMEUUID,
@@ -157,7 +154,7 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0=1001",
 	},
 	{
-		typ: BagType{
+		typ: &BagType{
 			Kind:   "set",
 			Type:   TYPE_ASCII,
 			Frozen: false,
@@ -167,7 +164,7 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0={'a','b'}",
 	},
 	{
-		typ: BagType{
+		typ: &BagType{
 			Kind:   "list",
 			Type:   TYPE_ASCII,
 			Frozen: false,
@@ -177,7 +174,7 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0={'a','b'}",
 	},
 	{
-		typ: MapType{
+		typ: &MapType{
 			KeyType:   TYPE_ASCII,
 			ValueType: TYPE_ASCII,
 			Frozen:    false,
@@ -187,7 +184,7 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0={a:'b'}",
 	},
 	{
-		typ: MapType{
+		typ: &MapType{
 			KeyType:   TYPE_ASCII,
 			ValueType: TYPE_BLOB,
 			Frozen:    false,
@@ -197,7 +194,7 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0={a:textasblob('b')}",
 	},
 	{
-		typ: TupleType{
+		typ: &TupleType{
 			Types:  []SimpleType{TYPE_ASCII},
 			Frozen: false,
 		},
@@ -206,7 +203,7 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0='a'",
 	},
 	{
-		typ: TupleType{
+		typ: &TupleType{
 			Types:  []SimpleType{TYPE_ASCII, TYPE_ASCII},
 			Frozen: false,
 		},
@@ -309,9 +306,9 @@ func TestMarshalUnmarshal(t *testing.T) {
 							},
 						},
 						NonPrimaryKey: ColumnDef{
-          						Name: "",
-         						Type: SimpleType(""),
-          					},
+							Name: "",
+							Type: SimpleType(""),
+						},
 					},
 				},
 			},
@@ -329,7 +326,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 	}
 
 	s2 := &Schema{}
-	if err := json.Unmarshal(b, &s2); err != nil {
+	if err = json.Unmarshal(b, &s2); err != nil {
 		t.Fatalf("unable to unmarshal json, error=%s\n", err)
 	}
 

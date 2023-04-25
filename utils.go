@@ -14,11 +14,6 @@
 
 package gemini
 
-import (
-	"time"
-
-	"golang.org/x/exp/rand"
-)
-
-//nolint:unused
-var rnd = rand.New(rand.NewSource(uint64(time.Now().UnixNano())))
+func IgnoreError(fn func() error) {
+	_ = fn()
+}

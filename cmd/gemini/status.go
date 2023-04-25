@@ -4,14 +4,13 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package main
 
 import (
@@ -22,16 +21,17 @@ import (
 	"sync"
 
 	"github.com/pkg/errors"
-	"github.com/scylladb/gemini"
 	"go.uber.org/zap"
+
+	"github.com/scylladb/gemini"
 )
 
 type Status struct {
+	Errors      []JobError `json:"errors,omitempty"`
 	WriteOps    int        `json:"write_ops"`
 	WriteErrors int        `json:"write_errors"`
 	ReadOps     int        `json:"read_ops"`
 	ReadErrors  int        `json:"read_errors"`
-	Errors      []JobError `json:"errors,omitempty"`
 }
 
 func (r *Status) Merge(s Status) {

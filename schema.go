@@ -4,14 +4,13 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package gemini
 
 import (
@@ -24,10 +23,11 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
-	"github.com/scylladb/gemini/replication"
-	"github.com/scylladb/gemini/tableopts"
 	"github.com/scylladb/gocqlx/v2/qb"
 	"golang.org/x/exp/rand"
+
+	"github.com/scylladb/gemini/replication"
+	"github.com/scylladb/gemini/tableopts"
 )
 
 type CQLFeature int
@@ -37,7 +37,7 @@ const (
 	CQL_FEATURE_NORMAL
 	CQL_FEATURE_ALL
 
-	KnownIssuesJsonWithTuples = "https://github.com/scylladb/scylla/issues/3708"
+	KnownIssuesJSONWithTuples = "https://github.com/scylladb/scylla/issues/3708"
 )
 
 type Value []interface{}
@@ -67,20 +67,20 @@ type SchemaConfig struct {
 }
 
 var (
-	SchemaConfigInvalidPK   = errors.New("max number of partition keys must be bigger than min number of partition keys")
-	SchemaConfigInvalidCK   = errors.New("max number of clustering keys must be bigger than min number of clustering keys")
-	SchemaConfigInvalidCols = errors.New("max number of columns must be bigger than min number of columns")
+	ErrSchemaConfigInvalidPK   = errors.New("max number of partition keys must be bigger than min number of partition keys")
+	ErrSchemaConfigInvalidCK   = errors.New("max number of clustering keys must be bigger than min number of clustering keys")
+	ErrSchemaConfigInvalidCols = errors.New("max number of columns must be bigger than min number of columns")
 )
 
 func (sc *SchemaConfig) Valid() error {
 	if sc.MaxPartitionKeys <= sc.MinPartitionKeys {
-		return SchemaConfigInvalidPK
+		return ErrSchemaConfigInvalidPK
 	}
 	if sc.MaxClusteringKeys <= sc.MinClusteringKeys {
-		return SchemaConfigInvalidCK
+		return ErrSchemaConfigInvalidCK
 	}
 	if sc.MaxColumns <= sc.MinClusteringKeys {
-		return SchemaConfigInvalidCols
+		return ErrSchemaConfigInvalidCols
 	}
 	return nil
 }
@@ -114,14 +114,14 @@ func (sc *SchemaConfig) GetMinColumns() int {
 }
 
 type Keyspace struct {
-	Name              string                   `json:"name"`
 	Replication       *replication.Replication `json:"replication"`
 	OracleReplication *replication.Replication `json:"oracle_replication"`
+	Name              string                   `json:"name"`
 }
 
 type ColumnDef struct {
-	Name string `json:"name"`
 	Type Type   `json:"type"`
+	Name string `json:"name"`
 }
 
 type Type interface {
@@ -150,8 +150,8 @@ func (c Columns) Names() []string {
 	return names
 }
 
-func (cs Columns) ToJSONMap(values map[string]interface{}, r *rand.Rand, p PartitionRangeConfig) map[string]interface{} {
-	for _, k := range cs {
+func (c Columns) ToJSONMap(values map[string]interface{}, r *rand.Rand, p PartitionRangeConfig) map[string]interface{} {
+	for _, k := range c {
 		switch t := k.Type.(type) {
 		case SimpleType:
 			if t != TYPE_BLOB {
@@ -162,7 +162,7 @@ func (cs Columns) ToJSONMap(values map[string]interface{}, r *rand.Rand, p Parti
 			if ok {
 				values[k.Name] = "0x" + v
 			}
-		case TupleType:
+		case *TupleType:
 			vv := t.GenValue(r, p)
 			for i, val := range vv {
 				if t.Types[i] == TYPE_BLOB {
@@ -248,7 +248,7 @@ func (t *Table) GetCreateTypes(keyspace Keyspace) []string {
 	var stmts []string
 	for _, column := range t.Columns {
 		switch c := column.Type.(type) {
-		case UDTType:
+		case *UDTType:
 			createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s)"
 			var typs []string
 			for name, typ := range c.Types {
@@ -271,7 +271,7 @@ func (atb *AlterTableBuilder) ToCql() (string, []string) {
 func (t *Table) addColumn(keyspace string, sc *SchemaConfig) ([]*Stmt, func(), error) {
 	var stmts []*Stmt
 	column := ColumnDef{Name: genColumnName("col", len(t.Columns)+1), Type: genColumnType(len(t.Columns)+1, sc)}
-	if c, ok := column.Type.(UDTType); ok {
+	if c, ok := column.Type.(*UDTType); ok {
 		createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s);"
 		var typs []string
 		for name, typ := range c.Types {
@@ -301,6 +301,7 @@ func (t *Table) addColumn(keyspace string, sc *SchemaConfig) ([]*Stmt, func(), e
 	}, nil
 }
 
+//nolint:unused
 func (t *Table) alterColumn(keyspace string) ([]*Stmt, func(), error) {
 	var stmts []*Stmt
 	idx := rand.Intn(len(t.Columns))
@@ -349,10 +350,10 @@ func (t *Table) dropColumn(keyspace string) ([]*Stmt, func(), error) {
 }
 
 type MaterializedView struct {
+	NonPrimaryKey  ColumnDef
 	Name           string  `json:"name"`
 	PartitionKeys  Columns `json:"partition_keys"`
 	ClusteringKeys Columns `json:"clustering_keys"`
-	NonPrimaryKey  ColumnDef
 }
 
 type Stmt struct {
@@ -427,12 +428,12 @@ func GenSchema(sc SchemaConfig) *Schema {
 	numTables := 1 + rand.Intn(sc.GetMaxTables())
 	for i := 0; i < numTables; i++ {
 		table := createTable(sc, fmt.Sprintf("table%d", i+1))
-		builder.Table(&table)
+		builder.Table(table)
 	}
 	return builder.Build()
 }
 
-func createTable(sc SchemaConfig, tableName string) Table {
+func createTable(sc SchemaConfig, tableName string) *Table {
 	var partitionKeys []ColumnDef
 	numPartitionKeys := rand.Intn(sc.GetMaxPartitionKeys()-sc.GetMinPartitionKeys()) + sc.GetMinPartitionKeys()
 	for i := 0; i < numPartitionKeys; i++ {
@@ -448,7 +449,7 @@ func createTable(sc SchemaConfig, tableName string) Table {
 		PartitionKeys:  partitionKeys,
 		ClusteringKeys: clusteringKeys,
 		KnownIssues: map[string]bool{
-			KnownIssuesJsonWithTuples: true,
+			KnownIssuesJSONWithTuples: true,
 		},
 	}
 	for _, option := range sc.TableOptions {
@@ -458,7 +459,7 @@ func createTable(sc SchemaConfig, tableName string) Table {
 		columns := []ColumnDef{
 			{
 				Name: genColumnName("col", 0),
-				Type: CounterType{
+				Type: &CounterType{
 					Value: 0,
 				},
 			},
@@ -477,14 +478,14 @@ func createTable(sc SchemaConfig, tableName string) Table {
 
 		var mvs []MaterializedView
 		if sc.CQLFeature > CQL_FEATURE_BASIC && numClusteringKeys > 0 {
-			mvs = createMaterializedViews(table, partitionKeys, clusteringKeys, columns)
+			mvs = createMaterializedViews(table.Name, partitionKeys, clusteringKeys, columns)
 		}
 
 		table.Columns = columns
 		table.MaterializedViews = mvs
 		table.Indexes = indexes
 	}
-	return table
+	return &table
 }
 
 func createIndexes(tableName string, numColumns int, columns []ColumnDef) []IndexDef {
@@ -510,7 +511,7 @@ func createIndexes(tableName string, numColumns int, columns []ColumnDef) []Inde
 	return indexes
 }
 
-func createMaterializedViews(table Table, partitionKeys []ColumnDef, clusteringKeys []ColumnDef, columns []ColumnDef) []MaterializedView {
+func createMaterializedViews(tableName string, partitionKeys, clusteringKeys, columns []ColumnDef) []MaterializedView {
 	validMVColumn := func() (ColumnDef, error) {
 		validCols := make([]ColumnDef, 0, len(columns))
 		for _, col := range columns {
@@ -543,7 +544,7 @@ func createMaterializedViews(table Table, partitionKeys []ColumnDef, clusteringK
 			col,
 		}
 		mv := MaterializedView{
-			Name:           fmt.Sprintf("%s_mv_%d", table.Name, i),
+			Name:           fmt.Sprintf("%s_mv_%d", tableName, i),
 			PartitionKeys:  append(cols, partitionKeys...),
 			ClusteringKeys: clusteringKeys,
 			NonPrimaryKey:  col,
@@ -573,14 +574,12 @@ func (s *Schema) GetCreateSchema() []string {
 			var (
 				mvPartitionKeys      []string
 				mvPrimaryKeysNotNull []string
-				mvClusteringKeys     []string
 			)
 			for _, pk := range mv.PartitionKeys {
 				mvPartitionKeys = append(mvPartitionKeys, pk.Name)
 				mvPrimaryKeysNotNull = append(mvPrimaryKeysNotNull, fmt.Sprintf("%s IS NOT NULL", pk.Name))
 			}
 			for _, ck := range mv.ClusteringKeys {
-				mvClusteringKeys = append(mvClusteringKeys, ck.Name)
 				mvPrimaryKeysNotNull = append(mvPrimaryKeysNotNull, fmt.Sprintf("%s IS NOT NULL", ck.Name))
 			}
 			var createMaterializedView string
@@ -607,9 +606,7 @@ func (s *Schema) genInsertStmt(t *Table, g *Generator, r *rand.Rand, p Partition
 }
 
 func (s *Schema) updateStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
-	var (
-		typs []Type
-	)
+	var typs []Type
 	builder := qb.Update(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
@@ -631,9 +628,9 @@ func (s *Schema) updateStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 	)
 	for _, cdef := range t.Columns {
 		switch t := cdef.Type.(type) {
-		case TupleType:
+		case *TupleType:
 			builder = builder.SetTuple(cdef.Name, len(t.Types))
-		case CounterType:
+		case *CounterType:
 			builder = builder.SetLit(cdef.Name, cdef.Name+"+1")
 			continue
 		default:
@@ -652,9 +649,7 @@ func (s *Schema) updateStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 }
 
 func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
-	var (
-		typs []Type
-	)
+	var typs []Type
 	builder := qb.Insert(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Columns(pk.Name)
@@ -672,7 +667,7 @@ func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 	}
 	for _, cdef := range t.Columns {
 		switch t := cdef.Type.(type) {
-		case TupleType:
+		case *TupleType:
 			builder = builder.TupleColumn(cdef.Name, len(t.Types))
 		default:
 			builder = builder.Columns(cdef.Name)
@@ -693,8 +688,9 @@ func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 	}, nil
 }
 
-func (s *Schema) genInsertJsonStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
-	if isCounterTable(t) {
+func (s *Schema) genInsertJSONStmt(table *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+	var v string
+	if isCounterTable(table) {
 		return nil, nil
 	}
 	vals, ok := g.Get()
@@ -704,22 +700,22 @@ func (s *Schema) genInsertJsonStmt(t *Table, g *Generator, r *rand.Rand, p Parti
 	vs := make([]interface{}, len(vals.Value))
 	copy(vs, vals.Value)
 	values := make(map[string]interface{})
-	for i, pk := range t.PartitionKeys {
+	for i, pk := range table.PartitionKeys {
 		switch t := pk.Type.(type) {
 		case SimpleType:
 			if t != TYPE_BLOB {
 				values[pk.Name] = vs[i]
 				continue
 			}
-			v, ok := vs[i].(string)
+			v, ok = vs[i].(string)
 			if ok {
 				values[pk.Name] = "0x" + v
 			}
-		case TupleType:
+		case *TupleType:
 			tupVals := make([]interface{}, len(t.Types))
 			for j := 0; j < len(t.Types); j++ {
 				if t.Types[j] == TYPE_BLOB {
-					v, ok := vs[i+j].(string)
+					v, ok = vs[i+j].(string)
 					if ok {
 						v = "0x" + v
 					}
@@ -733,15 +729,15 @@ func (s *Schema) genInsertJsonStmt(t *Table, g *Generator, r *rand.Rand, p Parti
 			panic(fmt.Sprintf("unknown type: %s", t.Name()))
 		}
 	}
-	values = t.ClusteringKeys.ToJSONMap(values, r, p)
-	values = t.Columns.ToJSONMap(values, r, p)
+	values = table.ClusteringKeys.ToJSONMap(values, r, p)
+	values = table.Columns.ToJSONMap(values, r, p)
 
 	jsonString, err := json.Marshal(values)
 	if err != nil {
 		return nil, err
 	}
 
-	builder := qb.Insert(s.Keyspace.Name + "." + t.Name).Json()
+	builder := qb.Insert(s.Keyspace.Name + "." + table.Name).Json()
 	return &Stmt{
 		Query: builder,
 		Values: func() (uint64, []interface{}) {
@@ -753,9 +749,7 @@ func (s *Schema) genInsertJsonStmt(t *Table, g *Generator, r *rand.Rand, p Parti
 }
 
 func (s *Schema) genDeleteRows(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
-	var (
-		typs []Type
-	)
+	var typs []Type
 	builder := qb.Delete(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
@@ -786,7 +780,7 @@ func (s *Schema) genDeleteRows(t *Table, g *Generator, r *rand.Rand, p Partition
 
 func (s *Schema) GenDDLStmt(t *Table, r *rand.Rand, p PartitionRangeConfig, sc *SchemaConfig) ([]*Stmt, func(), error) {
 	switch n := r.Intn(3); n {
-	//case 0: // Alter column not supported in Cassandra from 3.0.11
+	// case 0: // Alter column not supported in Cassandra from 3.0.11
 	//	return t.alterColumn(s.Keyspace.Name)
 	case 1: // Delete column
 		return t.dropColumn(s.Keyspace.Name)
@@ -806,12 +800,12 @@ func (s *Schema) GenMutateStmt(t *Table, g *Generator, r *rand.Rand, p Partition
 	case 10, 100:
 		return s.genDeleteRows(t, g, r, p)
 	default:
-		switch n := rand.Intn(2); n {
+		switch rand.Intn(2) {
 		case 0:
-			if t.KnownIssues[KnownIssuesJsonWithTuples] {
+			if t.KnownIssues[KnownIssuesJSONWithTuples] {
 				return s.genInsertStmt(t, g, r, p)
 			}
-			return s.genInsertJsonStmt(t, g, r, p)
+			return s.genInsertJSONStmt(t, g, r, p)
 		default:
 			return s.genInsertStmt(t, g, r, p)
 		}
@@ -836,8 +830,7 @@ func (s *Schema) GenCheckStmt(t *Table, g *Generator, r *rand.Rand, p PartitionR
 		return s.genMultiplePartitionClusteringRangeQuery(t, g, r, p)
 	case 4:
 		// Reducing the probability to hit these since they often take a long time to run
-		n := r.Intn(5)
-		switch n {
+		switch r.Intn(5) {
 		case 0:
 			return s.genSingleIndexQuery(t, g, r, p)
 		default:
@@ -850,9 +843,9 @@ func (s *Schema) GenCheckStmt(t *Table, g *Generator, r *rand.Rand, p PartitionR
 func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	var  (
-		mv_col ColumnDef
-		mv_values []interface{}
+	var (
+		mvCol    ColumnDef
+		mvValues []interface{}
 	)
 
 	tableName := t.Name
@@ -861,7 +854,7 @@ func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p
 		view := r.Intn(len(t.MaterializedViews))
 		tableName = t.MaterializedViews[view].Name
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
-		mv_col = t.MaterializedViews[view].NonPrimaryKey
+		mvCol = t.MaterializedViews[view].NonPrimaryKey
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	typs := make([]Type, 0, 10)
@@ -873,9 +866,9 @@ func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p
 	if !ok {
 		return nil
 	}
-	if (ColumnDef{}) != mv_col {
-		mv_values = appendValue(mv_col.Type, r, p, mv_values)
-		values.Value = append(mv_values, values.Value...)
+	if (ColumnDef{}) != mvCol {
+		mvValues = appendValue(mvCol.Type, r, p, mvValues)
+		values.Value = append(mvValues, values.Value...)
 	}
 
 	return &Stmt{
@@ -945,9 +938,9 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 	defer t.mu.RUnlock()
 
 	var (
-		typs []Type
-		mv_col ColumnDef
-		mv_values []interface{}
+		allTypes []Type
+		mvCol    ColumnDef
+		mvValues []interface{}
 	)
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
@@ -957,7 +950,7 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 		tableName = t.MaterializedViews[view].Name
 		partitionKeys = t.MaterializedViews[view].PartitionKeys
 		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
-		mv_col = t.MaterializedViews[view].NonPrimaryKey
+		mvCol = t.MaterializedViews[view].NonPrimaryKey
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	vs, ok := g.GetOld()
@@ -968,30 +961,30 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 	values := vs.Value
 	for _, pk := range partitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
-		typs = append(typs, pk.Type)
+		allTypes = append(allTypes, pk.Type)
 	}
-	if (ColumnDef{}) != mv_col {
-		mv_values = appendValue(mv_col.Type, r, p, mv_values)
-		values = append(mv_values, values...)
+	if (ColumnDef{}) != mvCol {
+		mvValues = appendValue(mvCol.Type, r, p, mvValues)
+		values = append(mvValues, values...)
 	}
 	if len(clusteringKeys) > 0 {
 		maxClusteringRels := r.Intn(len(clusteringKeys))
 		for i := 0; i < maxClusteringRels; i++ {
 			builder = builder.Where(qb.Eq(clusteringKeys[i].Name))
 			values = appendValue(clusteringKeys[i].Type, r, p, values)
-			typs = append(typs, clusteringKeys[i].Type)
+			allTypes = append(allTypes, clusteringKeys[i].Type)
 		}
 		builder = builder.Where(qb.Gt(clusteringKeys[maxClusteringRels].Name)).Where(qb.Lt(clusteringKeys[maxClusteringRels].Name))
 		values = appendValue(t.ClusteringKeys[maxClusteringRels].Type, r, p, values)
 		values = appendValue(t.ClusteringKeys[maxClusteringRels].Type, r, p, values)
-		typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
+		allTypes = append(allTypes, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	}
 	return &Stmt{
 		Query: builder,
 		Values: func() (uint64, []interface{}) {
 			return 0, values
 		},
-		Types:     typs,
+		Types:     allTypes,
 		QueryType: SelectRangeStatementType,
 	}
 }
@@ -1129,7 +1122,7 @@ func NewSchemaBuilder() SchemaBuilder {
 func isCounterTable(t *Table) bool {
 	if len(t.Columns) == 1 {
 		switch t.Columns[0].Type.(type) {
-		case CounterType:
+		case *CounterType:
 			return true
 		}
 	}

@@ -1,3 +1,4 @@
 cmd/gemini/dist/
 /gemini
 .idea
+bin/
