@@ -89,6 +89,10 @@ func sampleStatus(ctx context.Context, c chan Status, sp *spinningFeedback, logg
 	failfastDone := sync.Once{}
 	logger = logger.Named("sample_results")
 	testRes := &Status{}
+	logger.Info("starting result reading loop")
+	defer func() {
+		logger.Info("ending result reading loop")
+	}()
 	for {
 		select {
 		case <-ctx.Done():

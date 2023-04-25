@@ -38,6 +38,10 @@ func MutationJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Sche
 		c <- testStatus
 	}()
 	var i int
+	logger.Info("starting mutation loop")
+	defer func() {
+		logger.Info("ending mutation loop")
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -73,6 +77,10 @@ func MutationJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Sche
 func ValidationJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Schema, schemaCfg gemini.SchemaConfig, table *gemini.Table, s store.Store, r *rand.Rand, p gemini.PartitionRangeConfig, g *gemini.Generator, c chan Status, mode string, warmup time.Duration, logger *zap.Logger) error {
 	schemaConfig := &schemaCfg
 	logger = logger.Named("validation_job")
+	logger.Info("starting validation loop")
+	defer func() {
+		logger.Info("ending validation loop")
+	}()
 
 	testStatus := Status{}
 	defer func() {
@@ -117,6 +125,11 @@ func WarmupJob(ctx context.Context, pump <-chan heartBeat, schema *gemini.Schema
 	var i int
 	warmupCtx, cancel := context.WithTimeout(ctx, warmup)
 	defer cancel()
+	logger = logger.Named("warmup")
+	logger.Info("starting warmup loop")
+	defer func() {
+		logger.Info("ending warmup loop")
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -230,7 +243,7 @@ func mutation(ctx context.Context, schema *gemini.Schema, _ *gemini.SchemaConfig
 		copy(v, mutateValues)
 		g.GiveOld(gemini.ValueWithToken{Token: token, Value: v})
 	}()
-	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
+	if w := logger.Check(zap.DebugLevel, "mutation statement"); w != nil {
 		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
 	}
 	if err := s.Mutate(ctx, mutateQuery, mutateValues...); err != nil {
