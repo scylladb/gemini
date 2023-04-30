@@ -43,3 +43,6 @@ check: check-golangci
 # fix make all static code analysis tools to fix the issues
 .PHONY: fix
 fix: fix-golangci
+
+.PHONY: test
+test: go test -v -race ./...

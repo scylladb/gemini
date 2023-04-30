@@ -36,7 +36,7 @@ func New() InFlight {
 
 func newSyncU64set(limit uint64) *syncU64set {
 	return &syncU64set{
-		values:  make(map[uint64]bool),
+		values:  make(map[uint64]struct{}),
 		limit:   limit,
 		deleted: 0,
 		lock:    sync.RWMutex{},
@@ -75,7 +75,7 @@ func (s *shardedSyncU64set) AddIfNotPresent(v uint64) bool {
 }
 
 type syncU64set struct {
-	values  map[uint64]bool
+	values  map[uint64]struct{}
 	deleted uint64
 	limit   uint64
 	lock    sync.RWMutex
@@ -95,7 +95,7 @@ func (s *syncU64set) AddIfNotPresent(u uint64) bool {
 	if ok {
 		return false
 	}
-	s.values[u] = true
+	s.values[u] = struct{}{}
 	return true
 }
 
@@ -127,17 +127,14 @@ func (s *syncU64set) addDeleted(n uint64) {
 func (s *syncU64set) shrink() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	var newValues map[uint64]bool
+	mapLen := uint64(0)
 	if uint64(len(s.values)) >= s.deleted {
-		newValues = make(map[uint64]bool, uint64(len(s.values))-s.deleted)
-	} else {
-		newValues = make(map[uint64]bool, 0)
+		mapLen = uint64(len(s.values)) - s.deleted
 	}
+	newValues := make(map[uint64]struct{}, mapLen)
 
 	for key, val := range s.values {
-		if val {
-			newValues[key] = val
-		}
+		newValues[key] = val
 	}
 	s.values = newValues
 	s.deleted = 0
