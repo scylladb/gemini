@@ -174,7 +174,6 @@ func WarmupJob(
 ) error {
 	schemaConfig := &schemaCfg
 	testStatus := Status{}
-	var i int
 	warmupCtx, cancel := context.WithTimeout(ctx, warmup)
 	defer cancel()
 	logger = logger.Named("warmup")
@@ -182,7 +181,7 @@ func WarmupJob(
 	defer func() {
 		logger.Info("ending warmup loop")
 	}()
-	for {
+	for i := 0; ; i++ {
 		select {
 		case <-ctx.Done():
 			logger.Debug("warmup job terminated")
@@ -195,6 +194,10 @@ func WarmupJob(
 		default:
 			// Do we care about errors during warmup?
 			_ = mutation(warmupCtx, schema, schemaConfig, table, s, r, p, g, &testStatus, false, logger)
+			if failFast && testStatus.HasErrors() {
+				c <- testStatus
+				return nil
+			}
 			if i%1000 == 0 {
 				c <- testStatus
 				testStatus = Status{}
