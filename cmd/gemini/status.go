@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -27,11 +26,17 @@ import (
 )
 
 type Status struct {
-	Errors      []JobError `json:"errors,omitempty"`
-	WriteOps    int        `json:"write_ops"`
-	WriteErrors int        `json:"write_errors"`
-	ReadOps     int        `json:"read_ops"`
-	ReadErrors  int        `json:"read_errors"`
+	Errors      []*JobError `json:"errors,omitempty"`
+	WriteOps    int         `json:"write_ops"`
+	WriteErrors int         `json:"write_errors"`
+	ReadOps     int         `json:"read_ops"`
+	ReadErrors  int         `json:"read_errors"`
+}
+
+func (r *Status) AppendError(err *JobError) {
+	if len(r.Errors) < maxErrorsToStore {
+		r.Errors = append(r.Errors, err)
+	}
 }
 
 func (r *Status) Merge(s Status) {
@@ -77,18 +82,17 @@ func (r *Status) PrintResultAsJSON(w io.Writer, schema *gemini.Schema) error {
 	return nil
 }
 
-func (r Status) String() string {
+func (r *Status) String() string {
 	return fmt.Sprintf("write ops: %v | read ops: %v | write errors: %v | read errors: %v", r.WriteOps, r.ReadOps, r.WriteErrors, r.ReadErrors)
 }
 
-func (r Status) HasErrors() bool {
+func (r *Status) HasErrors() bool {
 	return r.WriteErrors > 0 || r.ReadErrors > 0
 }
 
 var errErrorsDetected = errors.New("errors detected")
 
 func sampleStatus(ctx context.Context, c chan Status, sp *spinningFeedback, logger *zap.Logger) (*Status, error) {
-	failfastDone := sync.Once{}
 	logger = logger.Named("sample_results")
 	testRes := &Status{}
 	logger.Info("starting result reading loop")
@@ -102,12 +106,10 @@ func sampleStatus(ctx context.Context, c chan Status, sp *spinningFeedback, logg
 		case res := <-c:
 			testRes.Merge(res)
 			sp.Set(" Running Gemini... %v", testRes)
-			if testRes.ReadErrors > 0 || testRes.WriteErrors > 0 {
+			if testRes.HasErrors() {
 				fmt.Printf("Errors detected: %#v", testRes.Errors)
 				if failFast {
-					failfastDone.Do(func() {
-						logger.Warn("Errors detected. Exiting.")
-					})
+					logger.Warn("Errors detected. Exiting.")
 					return testRes, errErrorsDetected
 				}
 			}

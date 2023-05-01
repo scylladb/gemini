@@ -53,12 +53,11 @@ func MutationJob(
 		// Send any remaining updates back
 		c <- testStatus
 	}()
-	var i int
 	logger.Info("starting mutation loop")
 	defer func() {
 		logger.Info("ending mutation loop")
 	}()
-	for {
+	for i := 0; ; i++ {
 		select {
 		case <-ctx.Done():
 			logger.Debug("mutation job terminated")
@@ -75,16 +74,15 @@ func MutationJob(
 					return err
 				}
 			}
+			if failFast && testStatus.HasErrors() {
+				c <- testStatus
+				return nil
+			}
 			if i%1000 == 0 {
 				c <- testStatus
 				testStatus = Status{}
 			}
-			if failFast && (testStatus.ReadErrors > 0 || testStatus.WriteErrors > 0) {
-				c <- testStatus
-				return nil
-			}
 		}
-		i++
 	}
 }
 
@@ -116,8 +114,7 @@ func ValidationJob(
 	defer func() {
 		c <- testStatus
 	}()
-	var i int
-	for {
+	for i := 0; ; i++ {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -130,14 +127,11 @@ func ValidationJob(
 			}
 
 			if err := validation(ctx, schemaConfig, table, s, stmt, g, &testStatus, logger); err != nil {
-				e := JobError{
+				testStatus.AppendError(&JobError{
 					Timestamp: time.Now(),
 					Message:   "Validation failed: " + err.Error(),
 					Query:     stmt.PrettyCQL(),
-				}
-				if len(testStatus.Errors) < maxErrorsToStore {
-					testStatus.Errors = append(testStatus.Errors, e)
-				}
+				})
 				testStatus.ReadErrors++
 			} else {
 				testStatus.ReadOps++
@@ -147,11 +141,10 @@ func ValidationJob(
 				c <- testStatus
 				testStatus = Status{}
 			}
-			if failFast && (testStatus.ReadErrors > 0 || testStatus.WriteErrors > 0) {
+			if failFast && testStatus.HasErrors() {
 				return nil
 			}
 		}
-		i++
 	}
 }
 
@@ -286,14 +279,11 @@ func ddl(
 			w.Write(zap.String("pretty_cql", ddlStmt.PrettyCQL()))
 		}
 		if err = s.Mutate(ctx, ddlQuery); err != nil {
-			e := JobError{
+			testStatus.AppendError(&JobError{
 				Timestamp: time.Now(),
 				Message:   "DDL failed: " + err.Error(),
 				Query:     ddlStmt.PrettyCQL(),
-			}
-			if len(testStatus.Errors) < maxErrorsToStore {
-				testStatus.Errors = append(testStatus.Errors, e)
-			}
+			})
 			testStatus.WriteErrors++
 		} else {
 			testStatus.WriteOps++
@@ -338,14 +328,11 @@ func mutation(
 		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
 	}
 	if err = s.Mutate(ctx, mutateQuery, mutateValues...); err != nil {
-		e := JobError{
+		testStatus.AppendError(&JobError{
 			Timestamp: time.Now(),
 			Message:   "Mutation failed: " + err.Error(),
 			Query:     mutateStmt.PrettyCQL(),
-		}
-		if len(testStatus.Errors) < maxErrorsToStore {
-			testStatus.Errors = append(testStatus.Errors, e)
-		}
+		})
 		testStatus.WriteErrors++
 	} else {
 		testStatus.WriteOps++
