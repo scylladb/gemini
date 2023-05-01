@@ -50,7 +50,8 @@ func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time
 	for i = 0; i < cs.maxRetriesMutate; i++ {
 		err = cs.doMutate(ctx, builder, ts, values...)
 		if err == nil {
-			break
+			cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
+			return nil
 		}
 		select {
 		case <-ctx.Done():
@@ -58,15 +59,10 @@ func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time
 		case <-time.After(cs.maxRetriesMutateSleep):
 		}
 	}
-	if err != nil {
-		if w := cs.logger.Check(zap.InfoLevel, "failed to apply mutation"); w != nil {
-			w.Write(zap.Int("attempts", i), zap.Error(err))
-		}
-		return
+	if w := cs.logger.Check(zap.InfoLevel, "failed to apply mutation"); w != nil {
+		w.Write(zap.Int("attempts", i), zap.Error(err))
 	}
-
-	cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
-	return
+	return err
 }
 
 func (cs *cqlStore) doMutate(ctx context.Context, builder qb.Builder, ts time.Time, values ...interface{}) error {
