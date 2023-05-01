@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -122,11 +123,17 @@ func ValidationJob(
 			return ctx.Err()
 		case hb := <-pump:
 			hb.await()
-			if cql, err := validation(ctx, schema, schemaConfig, table, s, r, p, g, &testStatus, logger); err != nil {
+			stmt := schema.GenCheckStmt(table, g, r, p)
+			if stmt == nil {
+				logger.Info("Validation. No statement generated from GenCheckStmt.")
+				continue
+			}
+
+			if err := validation(ctx, schemaConfig, table, s, stmt, g, &testStatus, logger); err != nil {
 				e := JobError{
 					Timestamp: time.Now(),
 					Message:   "Validation failed: " + err.Error(),
-					Query:     cql,
+					Query:     stmt.PrettyCQL(),
 				}
 				if len(testStatus.Errors) < maxErrorsToStore {
 					testStatus.Errors = append(testStatus.Errors, e)
@@ -345,52 +352,77 @@ func mutation(
 
 func validation(
 	ctx context.Context,
-	schema *gemini.Schema,
 	sc *gemini.SchemaConfig,
 	table *gemini.Table,
 	s store.Store,
-	r *rand.Rand,
-	p gemini.PartitionRangeConfig,
+	stmt *gemini.Stmt,
 	g *gemini.Generator,
 	_ *Status,
 	logger *zap.Logger,
-) (string, error) {
-	checkStmt := schema.GenCheckStmt(table, g, r, p)
-	if checkStmt == nil {
-		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
-			w.Write(zap.String("job", "validation"))
-		}
-		return "", nil
-	}
-	checkQuery := checkStmt.Query
-	token, checkValues := checkStmt.Values()
+) error {
+	checkQuery := stmt.Query
+	token, checkValues := stmt.Values()
 	defer func() {
 		// Signal done with this pk...
 		g.GiveOld(gemini.ValueWithToken{Token: token})
 	}()
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
-		w.Write(zap.String("pretty_cql", checkStmt.PrettyCQL()))
+		w.Write(zap.String("pretty_cql", stmt.PrettyCQL()))
 	}
-	if err := s.Check(ctx, table, checkQuery, checkValues...); err != nil {
-		if checkStmt.QueryType.PossibleAsyncOperation() {
-			maxAttempts := sc.AsyncObjectStabilizationAttempts
-			delay := sc.AsyncObjectStabilizationDelay
-			for attempts := 0; attempts < maxAttempts; attempts++ {
-				logger.Info("validation failed for possible async operation",
-					zap.Duration("trying_again_in", delay))
-				select {
-				case <-time.After(delay):
-				case <-ctx.Done():
-					return checkStmt.PrettyCQL(), err
-				}
-				// Should we sample all the errors?
-				if err = s.Check(ctx, table, checkQuery, checkValues...); err == nil {
-					// Result sets stabilized
-					return "", nil
-				}
-			}
+
+	maxAttempts := 1
+	delay := 10 * time.Millisecond
+	if stmt.QueryType.PossibleAsyncOperation() {
+		maxAttempts = sc.AsyncObjectStabilizationAttempts
+		if maxAttempts < 1 {
+			maxAttempts = 1
 		}
-		return checkStmt.PrettyCQL(), err
+		delay = sc.AsyncObjectStabilizationDelay
 	}
-	return "", nil
+
+	var lastErr, err error
+	attempt := 1
+	for {
+		lastErr = err
+		err = s.Check(ctx, table, checkQuery, checkValues...)
+		if err == nil {
+			if attempt > 1 {
+				logger.Info(fmt.Sprintf("Validation successfully completed on %d attempt.", attempt))
+			}
+			return nil
+		}
+		if attempt == maxAttempts {
+			break
+		}
+		if unWrapErr(err).Error() == unWrapErr(lastErr).Error() {
+			logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error same as at attempt before. ", attempt, maxAttempts))
+		} else {
+			logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
+		}
+
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			logger.Info(fmt.Sprintf("Retring failed validation stoped by done context. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
+			return nil
+		}
+		attempt++
+	}
+
+	if attempt > 1 {
+		logger.Info(fmt.Sprintf("Retring failed validation stoped by reach of max attempts %d. Error: %s", maxAttempts, err))
+	} else {
+		logger.Info(fmt.Sprintf("Validation failed. Error: %s", err))
+	}
+
+	return err
+}
+
+func unWrapErr(err error) error {
+	nextErr := err
+	for nextErr != nil {
+		err = nextErr
+		nextErr = errors.Unwrap(err)
+	}
+	return err
 }
