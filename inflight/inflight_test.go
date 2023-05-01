@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"testing"
 	"testing/quick"
+	"time"
 )
 
 func TestAddIfNotPresent(t *testing.T) {
@@ -79,6 +80,25 @@ func TestInflight(t *testing.T) {
 	cfg := createQuickConfig()
 	if err := quick.CheckEqual(f, g, cfg); err != nil {
 		t.Error(err)
+	}
+}
+
+//go:norace
+func TestAutoShrink(t *testing.T) {
+	t.Parallel()
+	flight := newSyncU64set(10)
+	for x := uint64(0); x < 11; x++ {
+		flight.AddIfNotPresent(x)
+	}
+	if len(flight.values) != 11 {
+		t.Fatal("expect 11 records in flight, but got ", len(flight.values))
+	}
+	for x := uint64(0); x < 11; x++ {
+		flight.Delete(x)
+	}
+	time.Sleep(time.Second / 2)
+	if flight.deleted != 0 {
+		t.Fatal("expect that shrink is been executed and deleted dropped back to 0, but got ", flight.deleted)
 	}
 }
 
