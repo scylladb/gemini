@@ -3,7 +3,6 @@ MAKEFILE_PATH := $(abspath $(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
 GO111MODULE := on
 # GO_UPGRADE - do not remove this comment, used by scripts/go-upgrade.sh
-GOVERSION ?= 1.12
 GOOS := $(shell uname | tr '[:upper:]' '[:lower:]')
 GOARCH := $(shell go env GOARCH)
 

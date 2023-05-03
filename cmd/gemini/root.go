@@ -17,7 +17,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"net/http"
 	_ "net/http/pprof"
@@ -138,7 +137,7 @@ type testJob func(
 ) error
 
 func readSchema(confFile string) (*gemini.Schema, error) {
-	byteValue, err := ioutil.ReadFile(confFile)
+	byteValue, err := os.ReadFile(confFile)
 	if err != nil {
 		return nil, err
 	}
