@@ -1,4 +1,18 @@
 # Changelog
+
+## [1.8.0] - 2023-05-03
+
+- Update packages and golang ([#296](https://github.com/scylladb/gemini/pull/296))
+- Fix(inflight): reduce memory footprint by using struct{} instead of bool ([#291](https://github.com/scylladb/gemini/pull/291))
+- Fix warmup hunging ([#292](https://github.com/scylladb/gemini/pull/292))
+
+## [1.7.9] - 2023-04-25
+
+- Fix endless warmup ([#278](https://github.com/scylladb/gemini/issues/278))
+- Fix EOM due to the errors ([#282](https://github.com/scylladb/gemini/issues/282))
+- Fix test jobs scheduling ([#284](https://github.com/scylladb/gemini/pull/284))
+- Fix per table job scheduling ([0140acb1241e7347be7a23215c9a869dfa7dec35]https://github.com/scylladb/gemini/commit/0140acb1241e7347be7a23215c9a869dfa7dec35)
+
 ## [1.7.8] - 2023-02-02
 
 - Fix issue: memory leak due golang maps are not shrinking when you do delete on them ([#267](https://github.com/scylladb/gemini/issues/267))
