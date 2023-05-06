@@ -15,7 +15,6 @@ package gemini
 
 import (
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"net"
@@ -687,35 +686,6 @@ func genIndexName(prefix string, idx int) string {
 
 // JSON Marshalling
 
-func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
-	dataMap := make(map[string]interface{})
-	if err := json.Unmarshal(data, &dataMap); err != nil {
-		return err
-	}
-
-	t, err := getSimpleTypeColumn(dataMap)
-	if err != nil {
-		t, err = getUDTTypeColumn(dataMap)
-		if err != nil {
-			t, err = getTupleTypeColumn(dataMap)
-			if err != nil {
-				t, err = getMapTypeColumn(dataMap)
-				if err != nil {
-					t, err = getBagTypeColumn(dataMap)
-					if err != nil {
-						return err
-					}
-				}
-			}
-		}
-	}
-	*cd = ColumnDef{
-		Name: t.Name,
-		Type: t.Type,
-	}
-	return nil
-}
-
 func getMapTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	st := struct {
 		Type map[string]interface{}
@@ -877,7 +847,7 @@ func getSimpleTypeColumn(data map[string]interface{}) (*ColumnDef, error) {
 	}, err
 }
 
-func typeIn(columnDef ColumnDef, indexTypes []SimpleType) bool {
+func typeIn(columnDef *ColumnDef, indexTypes []SimpleType) bool {
 	if t, ok := columnDef.Type.(SimpleType); ok {
 		for _, typ := range indexTypes {
 			if t == typ {

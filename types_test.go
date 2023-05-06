@@ -285,7 +285,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 				MaterializedViews: []MaterializedView{
 					{
 						Name: "table1_mv_0",
-						PartitionKeys: []ColumnDef{
+						PartitionKeys: Columns{
 							{
 								Name: "pk_mv_0",
 								Type: genListType(sc),
@@ -295,7 +295,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 								Type: genTupleType(sc),
 							},
 						},
-						ClusteringKeys: []ColumnDef{
+						ClusteringKeys: Columns{
 							{
 								Name: "ck_mv_0",
 								Type: genSetType(sc),
