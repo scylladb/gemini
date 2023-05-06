@@ -73,6 +73,6 @@ func randIpV4Address(rnd *rand.Rand, v, pos int) string {
 	return strings.Join(blocks, ".")
 }
 
-func appendValue(columnType Type, r *rand.Rand, p PartitionRangeConfig, values []interface{}) []interface{} {
+func appendValue(columnType Type, r *rand.Rand, p *PartitionRangeConfig, values []interface{}) []interface{} {
 	return append(values, columnType.GenValue(r, p)...)
 }

@@ -124,7 +124,7 @@ type Type interface {
 	CQLDef() string
 	CQLHolder() string
 	CQLPretty(string, []interface{}) (string, int)
-	GenValue(*rand.Rand, PartitionRangeConfig) []interface{}
+	GenValue(*rand.Rand, *PartitionRangeConfig) []interface{}
 	Indexable() bool
 	CQLType() gocql.TypeInfo
 }
@@ -486,23 +486,19 @@ func (s *Schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *Schema) genInsertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) genInsertStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.Rand, p *PartitionRangeConfig) (*Stmt, error) {
 	if isCounterTable(t) {
-		return s.updateStmt(t, g, r, p)
+		return s.updateStmt(t, valuesWithToken, r, p)
 	}
-	return s.insertStmt(t, g, r, p)
+	return s.insertStmt(t, valuesWithToken, r, p)
 }
 
-func (s *Schema) updateStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) updateStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.Rand, p *PartitionRangeConfig) (*Stmt, error) {
 	var typs []Type
 	builder := qb.Update(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
 		typs = append(typs, pk.Type)
-	}
-	valuesWithToken, ok := g.Get()
-	if !ok {
-		return nil, nil
 	}
 	values := valuesWithToken.Value
 	for _, ck := range t.ClusteringKeys {
@@ -536,16 +532,12 @@ func (s *Schema) updateStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 	}, nil
 }
 
-func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) insertStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.Rand, p *PartitionRangeConfig) (*Stmt, error) {
 	var typs []Type
 	builder := qb.Insert(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Columns(pk.Name)
 		typs = append(typs, pk.Type)
-	}
-	valuesWithToken, ok := g.Get()
-	if !ok {
-		return nil, nil
 	}
 	values := valuesWithToken.Value
 	for _, ck := range t.ClusteringKeys {
@@ -576,17 +568,14 @@ func (s *Schema) insertStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRan
 	}, nil
 }
 
-func (s *Schema) genInsertJSONStmt(table *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) genInsertJSONStmt(table *Table, valuesWithToken *ValueWithToken, r *rand.Rand, p *PartitionRangeConfig) (*Stmt, error) {
 	var v string
+	var ok bool
 	if isCounterTable(table) {
 		return nil, nil
 	}
-	vals, ok := g.Get()
-	if !ok {
-		return nil, nil
-	}
-	vs := make([]interface{}, len(vals.Value))
-	copy(vs, vals.Value)
+	vs := make([]interface{}, len(valuesWithToken.Value))
+	copy(vs, valuesWithToken.Value)
 	values := make(map[string]interface{})
 	for i, pk := range table.PartitionKeys {
 		switch t := pk.Type.(type) {
@@ -629,14 +618,14 @@ func (s *Schema) genInsertJSONStmt(table *Table, g *Generator, r *rand.Rand, p P
 	return &Stmt{
 		Query: builder,
 		Values: func() (uint64, []interface{}) {
-			return vals.Token, []interface{}{string(jsonString)}
+			return valuesWithToken.Token, []interface{}{string(jsonString)}
 		},
 		Types:     []Type{TYPE_TEXT},
 		QueryType: InsertStatement,
 	}, nil
 }
 
-func (s *Schema) genDeleteRows(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) genDeleteRows(t *Table, valuesWithToken *ValueWithToken, r *rand.Rand, p *PartitionRangeConfig) (*Stmt, error) {
 	var typs []Type
 	builder := qb.Delete(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
@@ -644,11 +633,7 @@ func (s *Schema) genDeleteRows(t *Table, g *Generator, r *rand.Rand, p Partition
 		typs = append(typs, pk.Type)
 	}
 
-	vs, ok := g.Get()
-	if !ok {
-		return nil, nil
-	}
-	values := vs.Value
+	values := valuesWithToken.Value
 	if len(t.ClusteringKeys) > 0 {
 		ck := t.ClusteringKeys[0]
 		builder = builder.Where(qb.GtOrEq(ck.Name)).Where(qb.LtOrEq(ck.Name))
@@ -659,14 +644,14 @@ func (s *Schema) genDeleteRows(t *Table, g *Generator, r *rand.Rand, p Partition
 	return &Stmt{
 		Query: builder,
 		Values: func() (uint64, []interface{}) {
-			return vs.Token, values
+			return valuesWithToken.Token, values
 		},
 		Types:     typs,
 		QueryType: DeleteStatementType,
 	}, nil
 }
 
-func (s *Schema) GenDDLStmt(t *Table, r *rand.Rand, p PartitionRangeConfig, sc *SchemaConfig) ([]*Stmt, func(), error) {
+func (s *Schema) GenDDLStmt(t *Table, r *rand.Rand, p *PartitionRangeConfig, sc *SchemaConfig) ([]*Stmt, func(), error) {
 	switch n := r.Intn(3); n {
 	// case 0: // Alter column not supported in Cassandra from 3.0.11
 	//	return t.alterColumn(s.Keyspace.Name)
@@ -677,30 +662,35 @@ func (s *Schema) GenDDLStmt(t *Table, r *rand.Rand, p PartitionRangeConfig, sc *
 	}
 }
 
-func (s *Schema) GenMutateStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig, deletes bool) (*Stmt, error) {
+func (s *Schema) GenMutateStmt(t *Table, g *Generator, r *rand.Rand, p *PartitionRangeConfig, deletes bool) (*Stmt, error) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
+	valuesWithToken, ok := g.Get()
+	if !ok {
+		return nil, nil
+	}
+
 	if !deletes {
-		return s.genInsertStmt(t, g, r, p)
+		return s.genInsertStmt(t, &valuesWithToken, r, p)
 	}
 	switch n := rand.Intn(1000); n {
 	case 10, 100:
-		return s.genDeleteRows(t, g, r, p)
+		return s.genDeleteRows(t, &valuesWithToken, r, p)
 	default:
 		switch rand.Intn(2) {
 		case 0:
 			if t.KnownIssues[KnownIssuesJSONWithTuples] {
-				return s.genInsertStmt(t, g, r, p)
+				return s.genInsertStmt(t, &valuesWithToken, r, p)
 			}
-			return s.genInsertJSONStmt(t, g, r, p)
+			return s.genInsertJSONStmt(t, &valuesWithToken, r, p)
 		default:
-			return s.genInsertStmt(t, g, r, p)
+			return s.genInsertStmt(t, &valuesWithToken, r, p)
 		}
 	}
 }
 
-func (s *Schema) GenCheckStmt(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) GenCheckStmt(t *Table, g *Generator, r *rand.Rand, p *PartitionRangeConfig) *Stmt {
 	var n int
 	if len(t.Indexes) > 0 {
 		n = r.Intn(5)
@@ -728,7 +718,7 @@ func (s *Schema) GenCheckStmt(t *Table, g *Generator, r *rand.Rand, p PartitionR
 	return nil
 }
 
-func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p *PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	var (
@@ -769,7 +759,7 @@ func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p
 	}
 }
 
-func (s *Schema) genMultiplePartitionQuery(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genMultiplePartitionQuery(t *Table, g *Generator, r *rand.Rand, p *PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -821,7 +811,7 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, g *Generator, r *rand.Rand,
 	}
 }
 
-func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p *PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -877,7 +867,7 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 	}
 }
 
-func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p *PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
@@ -942,7 +932,7 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, g *Generator
 	}
 }
 
-func (s *Schema) genSingleIndexQuery(t *Table, g *Generator, r *rand.Rand, p PartitionRangeConfig) *Stmt {
+func (s *Schema) genSingleIndexQuery(t *Table, g *Generator, r *rand.Rand, p *PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 

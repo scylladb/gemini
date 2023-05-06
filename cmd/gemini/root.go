@@ -128,7 +128,7 @@ type testJob func(
 	*gemini.Table,
 	store.Store,
 	*rand.Rand,
-	gemini.PartitionRangeConfig,
+	*gemini.PartitionRangeConfig,
 	*gemini.Generator,
 	chan Status,
 	string,

@@ -74,7 +74,7 @@ func (c Columns) Names() []string {
 	return names
 }
 
-func (c Columns) ToJSONMap(values map[string]interface{}, r *rand.Rand, p PartitionRangeConfig) map[string]interface{} {
+func (c Columns) ToJSONMap(values map[string]interface{}, r *rand.Rand, p *PartitionRangeConfig) map[string]interface{} {
 	for _, k := range c {
 		switch t := k.Type.(type) {
 		case SimpleType:
