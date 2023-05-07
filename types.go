@@ -257,7 +257,7 @@ func (st SimpleType) Indexable() bool {
 	return st != TYPE_DURATION
 }
 
-func (st SimpleType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+func (st SimpleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	var val interface{}
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
@@ -356,7 +356,7 @@ func (t *TupleType) Indexable() bool {
 	return true
 }
 
-func (t *TupleType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+func (t *TupleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	out := make([]interface{}, 0, len(t.Types))
 	for _, tp := range t.Types {
 		out = append(out, tp.GenValue(r, p)...)
@@ -415,7 +415,7 @@ func (t *UDTType) Indexable() bool {
 	return true
 }
 
-func (t *UDTType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+func (t *UDTType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	vals := make(map[string]interface{})
 	for name, typ := range t.Types {
 		vals[name] = typ.GenValue(r, p)[0]
@@ -475,7 +475,7 @@ func (ct *BagType) CQLPretty(query string, value []interface{}) (string, int) {
 	panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
 }
 
-func (ct *BagType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	count := r.Intn(9) + 1
 	out := make([]interface{}, count)
 	for i := 0; i < count; i++ {
@@ -525,7 +525,7 @@ func (mt *MapType) CQLPretty(query string, value []interface{}) (string, int) {
 	panic(fmt.Sprintf("map cql pretty, unknown type %v", mt))
 }
 
-func (mt *MapType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+func (mt *MapType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	count := r.Intn(9) + 1
 	vals := make(map[interface{}]interface{})
 	for i := 0; i < count; i++ {
@@ -565,7 +565,7 @@ func (ct *CounterType) CQLPretty(query string, value []interface{}) (string, int
 	return strings.Replace(query, "?", fmt.Sprintf("%d", value[0]), 1), 1
 }
 
-func (ct *CounterType) GenValue(r *rand.Rand, p PartitionRangeConfig) []interface{} {
+func (ct *CounterType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	return []interface{}{atomic.AddInt64(&ct.Value, 1)}
 }
 

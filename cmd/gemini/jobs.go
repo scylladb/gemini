@@ -39,7 +39,7 @@ func MutationJob(
 	table *gemini.Table,
 	s store.Store,
 	r *rand.Rand,
-	p gemini.PartitionRangeConfig,
+	p *gemini.PartitionRangeConfig,
 	g *gemini.Generator,
 	c chan Status,
 	_ string,
@@ -96,7 +96,7 @@ func ValidationJob(
 	table *gemini.Table,
 	s store.Store,
 	r *rand.Rand,
-	p gemini.PartitionRangeConfig,
+	p *gemini.PartitionRangeConfig,
 	g *gemini.Generator,
 	c chan Status,
 	_ string,
@@ -158,7 +158,7 @@ func WarmupJob(
 	table *gemini.Table,
 	s store.Store,
 	r *rand.Rand,
-	p gemini.PartitionRangeConfig,
+	p *gemini.PartitionRangeConfig,
 	g *gemini.Generator,
 	c chan Status,
 	_ string,
@@ -226,7 +226,7 @@ func job(
 		for i := 0; i < int(actors); i++ {
 			r := rand.New(rand.NewSource(seed))
 			g.Go(func() error {
-				return f(gCtx, pump.ch, schema, schemaConfig, table, s, r, partitionRangeConfig, gen, result, mode, warmup, logger)
+				return f(gCtx, pump.ch, schema, schemaConfig, table, s, r, &partitionRangeConfig, gen, result, mode, warmup, logger)
 			})
 		}
 	}
@@ -240,7 +240,7 @@ func ddl(
 	table *gemini.Table,
 	s store.Store,
 	r *rand.Rand,
-	p gemini.PartitionRangeConfig,
+	p *gemini.PartitionRangeConfig,
 	testStatus *Status,
 	logger *zap.Logger,
 ) error {
@@ -299,7 +299,7 @@ func mutation(
 	table *gemini.Table,
 	s store.Store,
 	r *rand.Rand,
-	p gemini.PartitionRangeConfig,
+	p *gemini.PartitionRangeConfig,
 	g *gemini.Generator,
 	testStatus *Status,
 	deletes bool,

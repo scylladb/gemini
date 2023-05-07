@@ -156,7 +156,7 @@ func (g *Generator) start() {
 func (g *Generator) createPartitionKeyValues(r *rand.Rand) []interface{} {
 	var values []interface{}
 	for _, pk := range g.table.PartitionKeys {
-		values = append(values, pk.Type.GenValue(r, g.partitionsConfig)...)
+		values = append(values, pk.Type.GenValue(r, &g.partitionsConfig)...)
 	}
 	return values
 }
