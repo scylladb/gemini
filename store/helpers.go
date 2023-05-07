@@ -35,7 +35,7 @@ func pks(t *gemini.Table, rows []map[string]interface{}) []string {
 	return keySet
 }
 
-func extractRowValues(values []string, columns []gemini.ColumnDef, row map[string]interface{}) []string {
+func extractRowValues(values []string, columns gemini.Columns, row map[string]interface{}) []string {
 	for _, pk := range columns {
 		values = append(values, fmt.Sprintf(pk.Name+"=%v", row[pk.Name]))
 	}

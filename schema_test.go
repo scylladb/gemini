@@ -251,7 +251,7 @@ func TestGetCreateSchema(t *testing.T) {
 func createColumns(cnt int, prefix string) Columns {
 	var cols Columns
 	for i := 0; i < cnt; i++ {
-		cols = append(cols, ColumnDef{
+		cols = append(cols, &ColumnDef{
 			Name: genColumnName(prefix, i),
 			Type: TYPE_TEXT,
 		})

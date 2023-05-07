@@ -119,11 +119,6 @@ type Keyspace struct {
 	Name              string                   `json:"name"`
 }
 
-type ColumnDef struct {
-	Type Type   `json:"type"`
-	Name string `json:"name"`
-}
-
 type Type interface {
 	Name() string
 	CQLDef() string
@@ -138,47 +133,6 @@ type IndexDef struct {
 	Name      string `json:"name"`
 	Column    string `json:"column"`
 	ColumnIdx int    `json:"column_idx"`
-}
-
-type Columns []ColumnDef
-
-func (c Columns) Names() []string {
-	names := make([]string, 0, len(c))
-	for _, col := range c {
-		names = append(names, col.Name)
-	}
-	return names
-}
-
-func (c Columns) ToJSONMap(values map[string]interface{}, r *rand.Rand, p PartitionRangeConfig) map[string]interface{} {
-	for _, k := range c {
-		switch t := k.Type.(type) {
-		case SimpleType:
-			if t != TYPE_BLOB {
-				values[k.Name] = t.GenValue(r, p)[0]
-				continue
-			}
-			v, ok := t.GenValue(r, p)[0].(string)
-			if ok {
-				values[k.Name] = "0x" + v
-			}
-		case *TupleType:
-			vv := t.GenValue(r, p)
-			for i, val := range vv {
-				if t.Types[i] == TYPE_BLOB {
-					v, ok := val.(string)
-					if ok {
-						v = "0x" + v
-					}
-					vv[i] = v
-				}
-			}
-			values[k.Name] = vv
-		default:
-			panic(fmt.Sprintf("unknown type: %s", t.Name()))
-		}
-	}
-	return values
 }
 
 type Table struct {
@@ -297,7 +251,7 @@ func (t *Table) addColumn(keyspace string, sc *SchemaConfig) ([]*Stmt, func(), e
 		},
 	})
 	return stmts, func() {
-		t.Columns = append(t.Columns, column)
+		t.Columns = append(t.Columns, &column)
 	}, nil
 }
 
@@ -324,7 +278,7 @@ func (t *Table) alterColumn(keyspace string) ([]*Stmt, func(), error) {
 			QueryType: AlterColumnStatementType,
 		})
 		return stmts, func() {
-			t.Columns[idx] = newColumn
+			t.Columns[idx] = &newColumn
 		}, nil
 	}
 	return nil, func() {}, errors.Errorf("simple type=%s has no compatible types so it cannot be altered", column.Name)
@@ -434,15 +388,15 @@ func GenSchema(sc SchemaConfig) *Schema {
 }
 
 func createTable(sc SchemaConfig, tableName string) *Table {
-	var partitionKeys []ColumnDef
 	numPartitionKeys := rand.Intn(sc.GetMaxPartitionKeys()-sc.GetMinPartitionKeys()) + sc.GetMinPartitionKeys()
+	partitionKeys := make(Columns, numPartitionKeys)
 	for i := 0; i < numPartitionKeys; i++ {
-		partitionKeys = append(partitionKeys, ColumnDef{Name: genColumnName("pk", i), Type: genPartitionKeyColumnType()})
+		partitionKeys[i] = &ColumnDef{Name: genColumnName("pk", i), Type: genPartitionKeyColumnType()}
 	}
-	var clusteringKeys []ColumnDef
 	numClusteringKeys := rand.Intn(sc.GetMaxClusteringKeys()-sc.GetMinClusteringKeys()) + sc.GetMinClusteringKeys()
+	clusteringKeys := make(Columns, numClusteringKeys)
 	for i := 0; i < numClusteringKeys; i++ {
-		clusteringKeys = append(clusteringKeys, ColumnDef{Name: genColumnName("ck", i), Type: genPrimaryKeyColumnType()})
+		clusteringKeys[i] = &ColumnDef{Name: genColumnName("ck", i), Type: genPrimaryKeyColumnType()}
 	}
 	table := Table{
 		Name:           tableName,
@@ -456,7 +410,7 @@ func createTable(sc SchemaConfig, tableName string) *Table {
 		table.TableOptions = append(table.TableOptions, option.ToCQL())
 	}
 	if sc.UseCounters {
-		columns := []ColumnDef{
+		columns := Columns{
 			{
 				Name: genColumnName("col", 0),
 				Type: &CounterType{
@@ -466,19 +420,19 @@ func createTable(sc SchemaConfig, tableName string) *Table {
 		}
 		table.Columns = columns
 	} else {
-		var columns []ColumnDef
+		var columns Columns
 		numColumns := rand.Intn(sc.GetMaxColumns()-sc.GetMinColumns()) + sc.GetMinColumns()
 		for i := 0; i < numColumns; i++ {
-			columns = append(columns, ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns, &sc)})
+			columns = append(columns, &ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns, &sc)})
 		}
 		var indexes []IndexDef
-		if sc.CQLFeature > CQL_FEATURE_BASIC {
-			indexes = createIndexes(tableName, numColumns, columns)
+		if sc.CQLFeature > CQL_FEATURE_BASIC && numColumns > 0 {
+			indexes = columns.CreateIndexes(tableName, 1+rand.Intn(numColumns-1))
 		}
 
 		var mvs []MaterializedView
 		if sc.CQLFeature > CQL_FEATURE_BASIC && numClusteringKeys > 0 {
-			mvs = createMaterializedViews(table.Name, partitionKeys, clusteringKeys, columns)
+			mvs = columns.CreateMaterializedViews(table.Name, partitionKeys, clusteringKeys)
 		}
 
 		table.Columns = columns
@@ -486,72 +440,6 @@ func createTable(sc SchemaConfig, tableName string) *Table {
 		table.Indexes = indexes
 	}
 	return &table
-}
-
-func createIndexes(tableName string, numColumns int, columns []ColumnDef) []IndexDef {
-	if numColumns <= 0 {
-		return nil
-	}
-	numIndexes := rand.Intn(numColumns)
-	if numIndexes == 0 {
-		// Always try to create at least 1 index
-		numIndexes = 1
-	}
-	createdCount := 0
-	indexes := make([]IndexDef, 0, numIndexes)
-	for i, col := range columns {
-		if col.Type.Indexable() && typeIn(col, typesForIndex) {
-			indexes = append(indexes, IndexDef{Name: genIndexName(tableName+"_col", i), Column: col.Name, ColumnIdx: i})
-			createdCount++
-		}
-		if createdCount == numIndexes {
-			break
-		}
-	}
-	return indexes
-}
-
-func createMaterializedViews(tableName string, partitionKeys, clusteringKeys, columns []ColumnDef) []MaterializedView {
-	validMVColumn := func() (ColumnDef, error) {
-		validCols := make([]ColumnDef, 0, len(columns))
-		for _, col := range columns {
-			valid := false
-			for _, pkType := range pkTypes {
-				if col.Type.Name() == pkType.Name() {
-					valid = true
-					break
-				}
-			}
-			if valid {
-				validCols = append(validCols, col)
-			}
-		}
-		if len(validCols) == 0 {
-			return ColumnDef{}, errors.New("no valid MV columns found")
-		}
-		return validCols[rand.Intn(len(validCols))], nil
-	}
-	var mvs []MaterializedView
-	numMvs := 1
-	for i := 0; i < numMvs; i++ {
-		col, err := validMVColumn()
-		if err != nil {
-			fmt.Printf("unable to generate valid columns for materialized view, error=%s", err)
-			continue
-		}
-
-		cols := []ColumnDef{
-			col,
-		}
-		mv := MaterializedView{
-			Name:           fmt.Sprintf("%s_mv_%d", tableName, i),
-			PartitionKeys:  append(cols, partitionKeys...),
-			ClusteringKeys: clusteringKeys,
-			NonPrimaryKey:  col,
-		}
-		mvs = append(mvs, mv)
-	}
-	return mvs
 }
 
 func (s *Schema) GetCreateKeyspaces() (string, string) {
