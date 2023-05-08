@@ -110,7 +110,7 @@ func (cs *cqlStore) load(ctx context.Context, builder qb.Builder, values []inter
 				}
 			}
 			if !ignore(e) {
-				err = multierr.Append(err, errors.Errorf("system failed: %s", err.Error()))
+				err = multierr.Append(err, errors.Errorf("system failed: %s", e.Error()))
 			}
 		}
 	}()
