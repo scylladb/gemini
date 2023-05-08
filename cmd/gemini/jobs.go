@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/status"
+
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
@@ -41,18 +44,13 @@ func MutationJob(
 	r *rand.Rand,
 	p *gemini.PartitionRangeConfig,
 	g *gemini.Generator,
-	c chan Status,
+	globalStatus *status.GlobalStatus,
 	_ string,
 	_ time.Duration,
 	logger *zap.Logger,
 ) error {
 	schemaConfig := &schemaCfg
 	logger = logger.Named("mutation_job")
-	testStatus := Status{}
-	defer func() {
-		// Send any remaining updates back
-		c <- testStatus
-	}()
 	logger.Info("starting mutation loop")
 	defer func() {
 		logger.Info("ending mutation loop")
@@ -66,21 +64,16 @@ func MutationJob(
 			hb.await()
 			ind := r.Intn(1000000)
 			if ind%100000 == 0 {
-				if err := ddl(ctx, schema, schemaConfig, table, s, r, p, &testStatus, logger); err != nil {
+				if err := ddl(ctx, schema, schemaConfig, table, s, r, p, globalStatus, logger); err != nil {
 					return err
 				}
 			} else {
-				if err := mutation(ctx, schema, schemaConfig, table, s, r, p, g, &testStatus, true, logger); err != nil {
+				if err := mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, true, logger); err != nil {
 					return err
 				}
 			}
-			if failFast && testStatus.HasErrors() {
-				c <- testStatus
-				return nil
-			}
-			if i%1000 == 0 {
-				c <- testStatus
-				testStatus = Status{}
+			if failFast && globalStatus.HasErrors() {
+				return errors.New("encounter error, failsafe is set")
 			}
 		}
 	}
@@ -98,7 +91,7 @@ func ValidationJob(
 	r *rand.Rand,
 	p *gemini.PartitionRangeConfig,
 	g *gemini.Generator,
-	c chan Status,
+	globalStatus *status.GlobalStatus,
 	_ string,
 	_ time.Duration,
 	logger *zap.Logger,
@@ -110,10 +103,6 @@ func ValidationJob(
 		logger.Info("ending validation loop")
 	}()
 
-	testStatus := Status{}
-	defer func() {
-		c <- testStatus
-	}()
 	for i := 0; ; i++ {
 		select {
 		case <-ctx.Done():
@@ -126,23 +115,18 @@ func ValidationJob(
 				continue
 			}
 
-			if err := validation(ctx, schemaConfig, table, s, stmt, g, &testStatus, logger); err != nil {
-				testStatus.AppendError(&JobError{
+			if err := validation(ctx, schemaConfig, table, s, stmt, g, globalStatus, logger); err != nil {
+				globalStatus.AddReadError(&joberror.JobError{
 					Timestamp: time.Now(),
 					Message:   "Validation failed: " + err.Error(),
 					Query:     stmt.PrettyCQL(),
 				})
-				testStatus.ReadErrors++
 			} else {
-				testStatus.ReadOps++
+				globalStatus.ReadOps.Add(1)
 			}
 
-			if i%1000 == 0 {
-				c <- testStatus
-				testStatus = Status{}
-			}
-			if failFast && testStatus.HasErrors() {
-				return nil
+			if failFast && globalStatus.HasErrors() {
+				return errors.New("encounter error, failsafe is set")
 			}
 		}
 	}
@@ -160,13 +144,12 @@ func WarmupJob(
 	r *rand.Rand,
 	p *gemini.PartitionRangeConfig,
 	g *gemini.Generator,
-	c chan Status,
+	globalStatus *status.GlobalStatus,
 	_ string,
 	warmup time.Duration,
 	logger *zap.Logger,
 ) error {
 	schemaConfig := &schemaCfg
-	testStatus := Status{}
 	warmupCtx, cancel := context.WithTimeout(ctx, warmup)
 	defer cancel()
 	logger = logger.Named("warmup")
@@ -178,22 +161,15 @@ func WarmupJob(
 		select {
 		case <-ctx.Done():
 			logger.Debug("warmup job terminated")
-			c <- testStatus
 			return ctx.Err()
 		case <-warmupCtx.Done():
 			logger.Debug("warmup job finished")
-			c <- testStatus
 			return nil
 		default:
 			// Do we care about errors during warmup?
-			_ = mutation(warmupCtx, schema, schemaConfig, table, s, r, p, g, &testStatus, false, logger)
-			if failFast && testStatus.HasErrors() {
-				c <- testStatus
-				return nil
-			}
-			if i%1000 == 0 {
-				c <- testStatus
-				testStatus = Status{}
+			_ = mutation(warmupCtx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
+			if failFast && globalStatus.HasErrors() {
+				return errors.New("encounter error, failsafe is set")
 			}
 		}
 	}
@@ -208,7 +184,7 @@ func job(
 	s store.Store,
 	pump *Pump,
 	generators []*gemini.Generator,
-	result chan Status,
+	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
 ) error {
 	g, gCtx := errgroup.WithContext(ctx)
@@ -226,7 +202,7 @@ func job(
 		for i := 0; i < int(actors); i++ {
 			r := rand.New(rand.NewSource(seed))
 			g.Go(func() error {
-				return f(gCtx, pump.ch, schema, schemaConfig, table, s, r, &partitionRangeConfig, gen, result, mode, warmup, logger)
+				return f(gCtx, pump.ch, schema, schemaConfig, table, s, r, &partitionRangeConfig, gen, globalStatus, mode, warmup, logger)
 			})
 		}
 	}
@@ -241,7 +217,7 @@ func ddl(
 	s store.Store,
 	r *rand.Rand,
 	p *gemini.PartitionRangeConfig,
-	testStatus *Status,
+	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
 ) error {
 	if sc.CQLFeature != gemini.CQL_FEATURE_ALL {
@@ -257,7 +233,7 @@ func ddl(
 	ddlStmts, postStmtHook, err := schema.GenDDLStmt(table, r, p, sc)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
-		testStatus.WriteErrors++
+		globalStatus.WriteErrors.Add(1)
 		return err
 	}
 	if ddlStmts == nil {
@@ -279,14 +255,13 @@ func ddl(
 			w.Write(zap.String("pretty_cql", ddlStmt.PrettyCQL()))
 		}
 		if err = s.Mutate(ctx, ddlQuery); err != nil {
-			testStatus.AppendError(&JobError{
+			globalStatus.AddWriteError(&joberror.JobError{
 				Timestamp: time.Now(),
 				Message:   "DDL failed: " + err.Error(),
 				Query:     ddlStmt.PrettyCQL(),
 			})
-			testStatus.WriteErrors++
 		} else {
-			testStatus.WriteOps++
+			globalStatus.WriteOps.Add(1)
 		}
 	}
 	return nil
@@ -301,14 +276,14 @@ func mutation(
 	r *rand.Rand,
 	p *gemini.PartitionRangeConfig,
 	g *gemini.Generator,
-	testStatus *Status,
+	globalStatus *status.GlobalStatus,
 	deletes bool,
 	logger *zap.Logger,
 ) error {
 	mutateStmt, err := schema.GenMutateStmt(table, g, r, p, deletes)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
-		testStatus.WriteErrors++
+		globalStatus.WriteErrors.Add(1)
 		return err
 	}
 	if mutateStmt == nil {
@@ -328,14 +303,13 @@ func mutation(
 		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
 	}
 	if err = s.Mutate(ctx, mutateQuery, mutateValues...); err != nil {
-		testStatus.AppendError(&JobError{
+		globalStatus.AddWriteError(&joberror.JobError{
 			Timestamp: time.Now(),
 			Message:   "Mutation failed: " + err.Error(),
 			Query:     mutateStmt.PrettyCQL(),
 		})
-		testStatus.WriteErrors++
 	} else {
-		testStatus.WriteOps++
+		globalStatus.WriteOps.Add(1)
 	}
 	return nil
 }
@@ -347,7 +321,7 @@ func validation(
 	s store.Store,
 	stmt *gemini.Stmt,
 	g *gemini.Generator,
-	_ *Status,
+	_ *status.GlobalStatus,
 	logger *zap.Logger,
 ) error {
 	checkQuery := stmt.Query

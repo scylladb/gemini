@@ -27,6 +27,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/scylladb/gemini/pkg/status"
+
 	"github.com/gocql/gocql"
 	"github.com/hailocab/go-hostpool"
 	"github.com/pkg/errors"
@@ -105,17 +107,6 @@ const (
 	mixedMode = "mixed"
 )
 
-type JobError struct {
-	Timestamp time.Time `json:"timestamp"`
-	Message   string    `json:"message"`
-	Query     string    `json:"query"`
-}
-
-type Results interface {
-	Merge(*Status) Status
-	Print()
-}
-
 func interactive() bool {
 	return !nonInteractive
 }
@@ -130,7 +121,7 @@ type testJob func(
 	*rand.Rand,
 	*gemini.PartitionRangeConfig,
 	*gemini.Generator,
-	chan Status,
+	*status.GlobalStatus,
 	string,
 	time.Duration,
 	*zap.Logger,
@@ -167,6 +158,7 @@ func (cb createBuilder) ToCql() (stmt string, names []string) {
 
 func run(cmd *cobra.Command, args []string) error {
 	logger := createLogger(level)
+	globalStatus := status.NewGlobalStatus(1000)
 	defer gemini.IgnoreError(logger.Sync)
 
 	cons, err := gocql.ParseConsistencyWrapper(consistency)
@@ -266,7 +258,6 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	result := make(chan Status, 10000)
 	ctx, done := context.WithTimeout(context.Background(), duration+warmup)
 	g, gCtx := errgroup.WithContext(ctx)
 	graceful := make(chan os.Signal, 1)
@@ -286,26 +277,32 @@ func run(cmd *cobra.Command, args []string) error {
 		logger: logger.Named("pump"),
 	}
 	generators := createGenerators(gCtx, schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
-	sp := createSpinner(interactive())
 	g.Go(func() error {
 		defer done()
 		return pump.Start(gCtx)
 	})
-	resCh := make(chan *Status, 1)
-	g.Go(func() error {
-		defer done()
-		res, sampleErr := sampleStatus(gCtx, result, sp, logger)
-		sp.Stop()
-		resCh <- res
-		return sampleErr
-	})
+	if !nonInteractive {
+		sp := createSpinner(interactive())
+		ticker := time.NewTicker(time.Second)
+		go func() {
+			defer done()
+			for {
+				select {
+				case <-gCtx.Done():
+					return
+				case <-ticker.C:
+					sp.Set(" Running Gemini... %v", globalStatus)
+				}
+			}
+		}()
+	}
 	time.AfterFunc(duration+warmup, func() {
 		defer done()
 		logger.Info("Test run completed. Exiting.")
 	})
 
 	if warmup > 0 {
-		if err = job(gCtx, WarmupJob, concurrency, schema, schemaConfig, st, pump, generators, result, logger); err != nil {
+		if err = job(gCtx, WarmupJob, concurrency, schema, schemaConfig, st, pump, generators, globalStatus, logger); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
 		}
 	}
@@ -317,18 +314,16 @@ func run(cmd *cobra.Command, args []string) error {
 		for id := range testJobs {
 			tJob := testJobs[id]
 			g.Go(func() error {
-				return job(gCtx, tJob, concurrency, schema, schemaConfig, st, pump, generators, result, logger)
+				return job(gCtx, tJob, concurrency, schema, schemaConfig, st, pump, generators, globalStatus, logger)
 			})
 		}
 		if err = g.Wait(); err != nil {
 			logger.Debug("error detected", zap.Error(err))
 		}
 	}
-	close(result)
 	logger.Info("result channel closed")
-	res := <-resCh
-	res.PrintResult(outFile, schema)
-	if res.HasErrors() {
+	globalStatus.PrintResult(outFile, schema, version)
+	if globalStatus.HasErrors() {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")
 	}
 	return nil
