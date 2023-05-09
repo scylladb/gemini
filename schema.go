@@ -236,18 +236,12 @@ func (t *Table) addColumn(keyspace string, sc *SchemaConfig) ([]*Stmt, func(), e
 			Query: &AlterTableBuilder{
 				stmt: stmt,
 			},
-			Values: func() (uint64, []interface{}) {
-				return 0, nil
-			},
 		})
 	}
 	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " ADD " + column.Name + " " + column.Type.CQLDef()
 	stmts = append(stmts, &Stmt{
 		Query: &AlterTableBuilder{
 			stmt: stmt,
-		},
-		Values: func() (uint64, []interface{}) {
-			return 0, nil
 		},
 	})
 	return stmts, func() {
@@ -272,9 +266,6 @@ func (t *Table) alterColumn(keyspace string) ([]*Stmt, func(), error) {
 			Query: &AlterTableBuilder{
 				stmt: stmt,
 			},
-			Values: func() (uint64, []interface{}) {
-				return 0, nil
-			},
 			QueryType: AlterColumnStatementType,
 		})
 		return stmts, func() {
@@ -293,9 +284,6 @@ func (t *Table) dropColumn(keyspace string) ([]*Stmt, func(), error) {
 		Query: &AlterTableBuilder{
 			stmt: stmt,
 		},
-		Values: func() (uint64, []interface{}) {
-			return 0, nil
-		},
 		QueryType: DropColumnStatementType,
 	})
 	return stmts, func() {
@@ -312,8 +300,9 @@ type MaterializedView struct {
 
 type Stmt struct {
 	Query     qb.Builder
-	Values    func() (uint64, []interface{})
+	Values    []interface{}
 	Types     []Type
+	Token     uint64
 	QueryType StatementType
 }
 
@@ -330,6 +319,7 @@ const (
 	SelectFromMaterializedViewStatementType
 	DeleteStatementType
 	InsertStatement
+	Updatetatement
 	AlterColumnStatementType
 	DropColumnStatementType
 )
@@ -337,7 +327,7 @@ const (
 func (s *Stmt) PrettyCQL() string {
 	var replaced int
 	query, _ := s.Query.ToCql()
-	_, values := s.Values()
+	values := s.Values
 	if len(values) == 0 {
 		return query
 	}
@@ -524,11 +514,11 @@ func (s *Schema) updateStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.R
 		colTyps = append(colTyps, cdef.Type)
 	}
 	return &Stmt{
-		Query: builder,
-		Values: func() (uint64, []interface{}) {
-			return valuesWithToken.Token, append(colValues, values...)
-		},
-		Types: append(colTyps, typs...),
+		Query:     builder,
+		Token:     valuesWithToken.Token,
+		Values:    append(colValues, values...),
+		Types:     append(colTyps, typs...),
+		QueryType: Updatetatement,
 	}, nil
 }
 
@@ -559,10 +549,9 @@ func (s *Schema) insertStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.R
 		builder = builder.Unique()
 	}
 	return &Stmt{
-		Query: builder,
-		Values: func() (uint64, []interface{}) {
-			return valuesWithToken.Token, values
-		},
+		Query:     builder,
+		Token:     valuesWithToken.Token,
+		Values:    values,
 		Types:     typs,
 		QueryType: InsertStatement,
 	}, nil
@@ -616,10 +605,9 @@ func (s *Schema) genInsertJSONStmt(table *Table, valuesWithToken *ValueWithToken
 
 	builder := qb.Insert(s.Keyspace.Name + "." + table.Name).Json()
 	return &Stmt{
-		Query: builder,
-		Values: func() (uint64, []interface{}) {
-			return valuesWithToken.Token, []interface{}{string(jsonString)}
-		},
+		Query:     builder,
+		Token:     valuesWithToken.Token,
+		Values:    []interface{}{string(jsonString)},
 		Types:     []Type{TYPE_TEXT},
 		QueryType: InsertStatement,
 	}, nil
@@ -642,10 +630,9 @@ func (s *Schema) genDeleteRows(t *Table, valuesWithToken *ValueWithToken, r *ran
 		typs = append(typs, ck.Type, ck.Type)
 	}
 	return &Stmt{
-		Query: builder,
-		Values: func() (uint64, []interface{}) {
-			return valuesWithToken.Token, values
-		},
+		Query:     builder,
+		Token:     valuesWithToken.Token,
+		Values:    values,
 		Types:     typs,
 		QueryType: DeleteStatementType,
 	}, nil
@@ -721,6 +708,10 @@ func (s *Schema) GenCheckStmt(t *Table, g *Generator, r *rand.Rand, p *Partition
 func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p *PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	values, ok := g.GetOld()
+	if !ok {
+		return nil
+	}
 	var (
 		mvCol    ColumnDef
 		mvValues []interface{}
@@ -740,20 +731,15 @@ func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p
 		builder = builder.Where(qb.Eq(pk.Name))
 		typs = append(typs, pk.Type)
 	}
-	values, ok := g.GetOld()
-	if !ok {
-		return nil
-	}
 	if (ColumnDef{}) != mvCol {
 		mvValues = appendValue(mvCol.Type, r, p, mvValues)
 		values.Value = append(mvValues, values.Value...)
 	}
 
 	return &Stmt{
-		Query: builder,
-		Values: func() (uint64, []interface{}) {
-			return values.Token, values.Value
-		},
+		Query:     builder,
+		Token:     values.Token,
+		Values:    values.Value,
 		Types:     typs,
 		QueryType: SelectStatementType,
 	}
@@ -802,10 +788,8 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, g *Generator, r *rand.Rand,
 		}
 	}
 	return &Stmt{
-		Query: builder,
-		Values: func() (uint64, []interface{}) {
-			return 0, values
-		},
+		Query:     builder,
+		Values:    values,
 		Types:     typs,
 		QueryType: SelectStatementType,
 	}
@@ -814,6 +798,10 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, g *Generator, r *rand.Rand,
 func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p *PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
+	vs, ok := g.GetOld()
+	if !ok {
+		return nil
+	}
 
 	var (
 		allTypes []Type
@@ -831,11 +819,6 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 		mvCol = t.MaterializedViews[view].NonPrimaryKey
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
-	vs, ok := g.GetOld()
-	if !ok {
-		// Done or no values available...
-		return nil
-	}
 	values := vs.Value
 	for _, pk := range partitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
@@ -858,10 +841,8 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 		allTypes = append(allTypes, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	}
 	return &Stmt{
-		Query: builder,
-		Values: func() (uint64, []interface{}) {
-			return 0, values
-		},
+		Query:     builder,
+		Values:    values,
 		Types:     allTypes,
 		QueryType: SelectRangeStatementType,
 	}
@@ -923,10 +904,8 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, g *Generator
 		typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	}
 	return &Stmt{
-		Query: builder,
-		Values: func() (uint64, []interface{}) {
-			return 0, values
-		},
+		Query:     builder,
+		Values:    values,
 		Types:     typs,
 		QueryType: SelectRangeStatementType,
 	}
@@ -959,10 +938,8 @@ func (s *Schema) genSingleIndexQuery(t *Table, g *Generator, r *rand.Rand, p *Pa
 	}
 
 	return &Stmt{
-		Query: builder,
-		Values: func() (uint64, []interface{}) {
-			return 0, values
-		},
+		Query:     builder,
+		Values:    values,
 		Types:     typs,
 		QueryType: SelectByIndexStatementType,
 	}

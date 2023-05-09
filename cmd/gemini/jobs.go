@@ -293,7 +293,8 @@ func mutation(
 		return err
 	}
 	mutateQuery := mutateStmt.Query
-	token, mutateValues := mutateStmt.Values()
+	token := mutateStmt.Token
+	mutateValues := mutateStmt.Values
 	defer func() {
 		v := make(gemini.Value, len(table.PartitionKeys))
 		copy(v, mutateValues)
@@ -325,7 +326,8 @@ func validation(
 	logger *zap.Logger,
 ) error {
 	checkQuery := stmt.Query
-	token, checkValues := stmt.Values()
+	token := stmt.Token
+	checkValues := stmt.Values
 	defer func() {
 		// Signal done with this pk...
 		g.GiveOld(gemini.ValueWithToken{Token: token})
