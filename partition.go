@@ -21,32 +21,30 @@ import (
 
 type Partition struct {
 	ctx       context.Context
-	values    chan ValueWithToken
-	oldValues chan ValueWithToken
+	values    chan *ValueWithToken
+	oldValues chan *ValueWithToken
 	inFlight  inflight.InFlight
 }
 
 // get returns a new value and ensures that it's corresponding token
 // is not already in-flight.
-func (s *Partition) get() (ValueWithToken, bool) {
+func (s *Partition) get() *ValueWithToken {
 	for {
 		v := s.pick()
 		if s.inFlight.AddIfNotPresent(v.Token) {
-			return v, true
+			return v
 		}
 	}
 }
 
-var emptyValueWithToken = ValueWithToken{}
-
 // getOld returns a previously used value and token or a new if
 // the old queue is empty.
-func (s *Partition) getOld() (ValueWithToken, bool) {
+func (s *Partition) getOld() *ValueWithToken {
 	select {
 	case <-s.ctx.Done():
-		return emptyValueWithToken, false
-	case v, ok := <-s.oldValues:
-		return v, ok
+		return nil
+	case v := <-s.oldValues:
+		return v
 	default:
 		return s.get()
 	}
@@ -55,11 +53,7 @@ func (s *Partition) getOld() (ValueWithToken, bool) {
 // giveOld returns the supplied value for later reuse unless the value
 // is empty in which case it removes the corresponding token from the
 // in-flight tracking.
-func (s *Partition) giveOld(v ValueWithToken) {
-	if len(v.Value) == 0 {
-		s.inFlight.Delete(v.Token)
-		return
-	}
+func (s *Partition) giveOld(v *ValueWithToken) {
 	select {
 	case s.oldValues <- v:
 	default:
@@ -67,6 +61,11 @@ func (s *Partition) giveOld(v ValueWithToken) {
 	}
 }
 
-func (s *Partition) pick() ValueWithToken {
+// releaseToken removes the corresponding token from the in-flight tracking.
+func (s *Partition) releaseToken(token uint64) {
+	s.inFlight.Delete(token)
+}
+
+func (s *Partition) pick() *ValueWithToken {
 	return <-s.values
 }

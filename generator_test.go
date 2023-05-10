@@ -44,8 +44,8 @@ func TestGenerator(t *testing.T) {
 	generators := NewGenerator(context.Background(), table, cfg, logger)
 	for i := uint64(0); i < cfg.PartitionsCount; i++ {
 		atomic.StoreUint64(&current, i)
-		v, _ := generators.Get()
-		n, _ := generators.Get()
+		v := generators.Get()
+		n := generators.Get()
 		if v.Token%generators.partitionCount != n.Token%generators.partitionCount {
 			t.Errorf("expected %v, got %v", v, n)
 		}

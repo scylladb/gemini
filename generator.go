@@ -61,8 +61,8 @@ func NewGenerator(ctx context.Context, table *Table, config *GeneratorConfig, lo
 	for i := 0; i < len(partitions); i++ {
 		partitions[i] = &Partition{
 			ctx:       ctx,
-			values:    make(chan ValueWithToken, config.PkUsedBufferSize),
-			oldValues: make(chan ValueWithToken, config.PkUsedBufferSize),
+			values:    make(chan *ValueWithToken, config.PkUsedBufferSize),
+			oldValues: make(chan *ValueWithToken, config.PkUsedBufferSize),
 			inFlight:  inflight.New(),
 		}
 	}
@@ -80,11 +80,18 @@ func NewGenerator(ctx context.Context, table *Table, config *GeneratorConfig, lo
 	return gs
 }
 
-func (g Generator) Get() (ValueWithToken, bool) {
+func (g *Generator) isContextCanceled() bool {
 	select {
 	case <-g.ctx.Done():
-		return emptyValueWithToken, false
+		return true
 	default:
+		return false
+	}
+}
+
+func (g *Generator) Get() *ValueWithToken {
+	if g.isContextCanceled() {
+		return nil
 	}
 	partition := g.partitions[uint64(g.idxFunc())%g.partitionCount]
 	return partition.get()
@@ -92,11 +99,9 @@ func (g Generator) Get() (ValueWithToken, bool) {
 
 // GetOld returns a previously used value and token or a new if
 // the old queue is empty.
-func (g Generator) GetOld() (ValueWithToken, bool) {
-	select {
-	case <-g.ctx.Done():
-		return emptyValueWithToken, false
-	default:
+func (g *Generator) GetOld() *ValueWithToken {
+	if g.isContextCanceled() {
+		return nil
 	}
 	return g.partitions[uint64(g.idxFunc())%g.partitionCount].getOld()
 }
@@ -106,17 +111,20 @@ type ValueWithToken struct {
 	Token uint64
 }
 
-// GiveOld returns the supplied value for later reuse unless the value
-// is empty in which case it removes the corresponding token from the
-// in-flight tracking.
-func (g *Generator) GiveOld(v ValueWithToken) {
-	select {
-	case <-g.ctx.Done():
+// GiveOld returns the supplied value for later reuse unless
+func (g *Generator) GiveOld(v *ValueWithToken) {
+	if g.isContextCanceled() {
 		return
-	default:
 	}
-	partition := g.partitions[v.Token%g.partitionCount]
-	partition.giveOld(v)
+	g.partitions[v.Token%g.partitionCount].giveOld(v)
+}
+
+// ReleaseToken removes the corresponding token from the in-flight tracking.
+func (g *Generator) ReleaseToken(token uint64) {
+	if g.isContextCanceled() {
+		return
+	}
+	g.partitions[token%g.partitionCount].releaseToken(token)
 }
 
 func (g *Generator) start() {
@@ -135,12 +143,12 @@ func (g *Generator) start() {
 		)
 		for {
 			values := g.createPartitionKeyValues(r)
-			hash := hash(routingKeyCreator, g.table, values)
-			idx := hash % g.partitionCount
+			token := hash(routingKeyCreator, g.table, values)
+			idx := token % g.partitionCount
 			partition := g.partitions[idx]
 			cntCreated++
 			select {
-			case partition.values <- ValueWithToken{Token: hash, Value: values}:
+			case partition.values <- &ValueWithToken{Token: token, Value: values}:
 				cntEmitted++
 			case <-gCtx.Done():
 				g.logger.Debug("stopping partition key generation loop",
