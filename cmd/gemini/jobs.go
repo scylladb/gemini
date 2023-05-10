@@ -293,13 +293,12 @@ func mutation(
 		return err
 	}
 	mutateQuery := mutateStmt.Query
-	token := mutateStmt.Token
 	mutateValues := mutateStmt.Values
-	defer func() {
-		v := make(gemini.Value, len(table.PartitionKeys))
-		copy(v, mutateValues)
-		g.GiveOld(gemini.ValueWithToken{Token: token, Value: v})
-	}()
+	if mutateStmt.ValuesWithToken != nil {
+		defer func() {
+			g.GiveOld(mutateStmt.ValuesWithToken)
+		}()
+	}
 	if w := logger.Check(zap.DebugLevel, "mutation statement"); w != nil {
 		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
 	}
@@ -325,13 +324,11 @@ func validation(
 	_ *status.GlobalStatus,
 	logger *zap.Logger,
 ) error {
-	checkQuery := stmt.Query
-	token := stmt.Token
-	checkValues := stmt.Values
-	defer func() {
-		// Signal done with this pk...
-		g.GiveOld(gemini.ValueWithToken{Token: token})
-	}()
+	if stmt.ValuesWithToken != nil {
+		defer func() {
+			g.ReleaseToken(stmt.ValuesWithToken.Token)
+		}()
+	}
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
 		w.Write(zap.String("pretty_cql", stmt.PrettyCQL()))
 	}
@@ -350,7 +347,7 @@ func validation(
 	attempt := 1
 	for {
 		lastErr = err
-		err = s.Check(ctx, table, checkQuery, checkValues...)
+		err = s.Check(ctx, table, stmt.Query, stmt.Values...)
 		if err == nil {
 			if attempt > 1 {
 				logger.Info(fmt.Sprintf("Validation successfully completed on %d attempt.", attempt))

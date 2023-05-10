@@ -42,6 +42,12 @@ const (
 
 type Value []interface{}
 
+func (v Value) Copy() Value {
+	values := make(Value, len(v))
+	copy(values, v)
+	return values
+}
+
 type SchemaConfig struct {
 	ReplicationStrategy              *replication.Replication
 	OracleReplicationStrategy        *replication.Replication
@@ -299,11 +305,11 @@ type MaterializedView struct {
 }
 
 type Stmt struct {
-	Query     qb.Builder
-	Values    []interface{}
-	Types     []Type
-	Token     uint64
-	QueryType StatementType
+	ValuesWithToken *ValueWithToken
+	Query           qb.Builder
+	Values          []interface{}
+	Types           []Type
+	QueryType       StatementType
 }
 
 type StatementType uint8
@@ -490,7 +496,7 @@ func (s *Schema) updateStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.R
 		builder = builder.Where(qb.Eq(pk.Name))
 		typs = append(typs, pk.Type)
 	}
-	values := valuesWithToken.Value
+	values := valuesWithToken.Value.Copy()
 	for _, ck := range t.ClusteringKeys {
 		builder = builder.Where(qb.Eq(ck.Name))
 		values = appendValue(ck.Type, r, p, values)
@@ -514,11 +520,11 @@ func (s *Schema) updateStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.R
 		colTyps = append(colTyps, cdef.Type)
 	}
 	return &Stmt{
-		Query:     builder,
-		Token:     valuesWithToken.Token,
-		Values:    append(colValues, values...),
-		Types:     append(colTyps, typs...),
-		QueryType: Updatetatement,
+		ValuesWithToken: valuesWithToken,
+		Query:           builder,
+		Values:          append(colValues, values...),
+		Types:           append(colTyps, typs...),
+		QueryType:       Updatetatement,
 	}, nil
 }
 
@@ -529,7 +535,7 @@ func (s *Schema) insertStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.R
 		builder = builder.Columns(pk.Name)
 		typs = append(typs, pk.Type)
 	}
-	values := valuesWithToken.Value
+	values := valuesWithToken.Value.Copy()
 	for _, ck := range t.ClusteringKeys {
 		builder = builder.Columns(ck.Name)
 		values = appendValue(ck.Type, r, p, values)
@@ -549,11 +555,11 @@ func (s *Schema) insertStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.R
 		builder = builder.Unique()
 	}
 	return &Stmt{
-		Query:     builder,
-		Token:     valuesWithToken.Token,
-		Values:    values,
-		Types:     typs,
-		QueryType: InsertStatement,
+		ValuesWithToken: valuesWithToken,
+		Query:           builder,
+		Values:          values,
+		Types:           typs,
+		QueryType:       InsertStatement,
 	}, nil
 }
 
@@ -563,8 +569,7 @@ func (s *Schema) genInsertJSONStmt(table *Table, valuesWithToken *ValueWithToken
 	if isCounterTable(table) {
 		return nil, nil
 	}
-	vs := make([]interface{}, len(valuesWithToken.Value))
-	copy(vs, valuesWithToken.Value)
+	vs := valuesWithToken.Value.Copy()
 	values := make(map[string]interface{})
 	for i, pk := range table.PartitionKeys {
 		switch t := pk.Type.(type) {
@@ -605,11 +610,11 @@ func (s *Schema) genInsertJSONStmt(table *Table, valuesWithToken *ValueWithToken
 
 	builder := qb.Insert(s.Keyspace.Name + "." + table.Name).Json()
 	return &Stmt{
-		Query:     builder,
-		Token:     valuesWithToken.Token,
-		Values:    []interface{}{string(jsonString)},
-		Types:     []Type{TYPE_TEXT},
-		QueryType: InsertStatement,
+		ValuesWithToken: valuesWithToken,
+		Query:           builder,
+		Values:          []interface{}{string(jsonString)},
+		Types:           []Type{TYPE_TEXT},
+		QueryType:       InsertStatement,
 	}, nil
 }
 
@@ -621,7 +626,7 @@ func (s *Schema) genDeleteRows(t *Table, valuesWithToken *ValueWithToken, r *ran
 		typs = append(typs, pk.Type)
 	}
 
-	values := valuesWithToken.Value
+	values := valuesWithToken.Value.Copy()
 	if len(t.ClusteringKeys) > 0 {
 		ck := t.ClusteringKeys[0]
 		builder = builder.Where(qb.GtOrEq(ck.Name)).Where(qb.LtOrEq(ck.Name))
@@ -630,11 +635,11 @@ func (s *Schema) genDeleteRows(t *Table, valuesWithToken *ValueWithToken, r *ran
 		typs = append(typs, ck.Type, ck.Type)
 	}
 	return &Stmt{
-		Query:     builder,
-		Token:     valuesWithToken.Token,
-		Values:    values,
-		Types:     typs,
-		QueryType: DeleteStatementType,
+		ValuesWithToken: valuesWithToken,
+		Query:           builder,
+		Values:          values,
+		Types:           typs,
+		QueryType:       DeleteStatementType,
 	}, nil
 }
 
@@ -653,26 +658,26 @@ func (s *Schema) GenMutateStmt(t *Table, g *Generator, r *rand.Rand, p *Partitio
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	valuesWithToken, ok := g.Get()
-	if !ok {
+	valuesWithToken := g.Get()
+	if valuesWithToken == nil {
 		return nil, nil
 	}
 
 	if !deletes {
-		return s.genInsertStmt(t, &valuesWithToken, r, p)
+		return s.genInsertStmt(t, valuesWithToken, r, p)
 	}
 	switch n := rand.Intn(1000); n {
 	case 10, 100:
-		return s.genDeleteRows(t, &valuesWithToken, r, p)
+		return s.genDeleteRows(t, valuesWithToken, r, p)
 	default:
 		switch rand.Intn(2) {
 		case 0:
 			if t.KnownIssues[KnownIssuesJSONWithTuples] {
-				return s.genInsertStmt(t, &valuesWithToken, r, p)
+				return s.genInsertStmt(t, valuesWithToken, r, p)
 			}
-			return s.genInsertJSONStmt(t, &valuesWithToken, r, p)
+			return s.genInsertJSONStmt(t, valuesWithToken, r, p)
 		default:
-			return s.genInsertStmt(t, &valuesWithToken, r, p)
+			return s.genInsertStmt(t, valuesWithToken, r, p)
 		}
 	}
 }
@@ -708,8 +713,8 @@ func (s *Schema) GenCheckStmt(t *Table, g *Generator, r *rand.Rand, p *Partition
 func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p *PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	values, ok := g.GetOld()
-	if !ok {
+	valuesWithToken := g.GetOld()
+	if valuesWithToken == nil {
 		return nil
 	}
 	var (
@@ -733,15 +738,15 @@ func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p
 	}
 	if (ColumnDef{}) != mvCol {
 		mvValues = appendValue(mvCol.Type, r, p, mvValues)
-		values.Value = append(mvValues, values.Value...)
+		mvValues = append(mvValues, valuesWithToken.Value...)
 	}
 
 	return &Stmt{
-		Query:     builder,
-		Token:     values.Token,
-		Values:    values.Value,
-		Types:     typs,
-		QueryType: SelectStatementType,
+		ValuesWithToken: valuesWithToken,
+		Query:           builder,
+		Values:          mvValues,
+		Types:           typs,
+		QueryType:       SelectStatementType,
 	}
 }
 
@@ -773,8 +778,8 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, g *Generator, r *rand.Rand,
 	for i, pk := range partitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
 		for j := 0; j < numQueryPKs; j++ {
-			vs, ok := g.GetOld()
-			if !ok {
+			vs := g.GetOld()
+			if vs == nil {
 				return nil
 			}
 			numMVKeys := len(partitionKeys) - len(vs.Value)
@@ -798,8 +803,8 @@ func (s *Schema) genMultiplePartitionQuery(t *Table, g *Generator, r *rand.Rand,
 func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p *PartitionRangeConfig) *Stmt {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	vs, ok := g.GetOld()
-	if !ok {
+	vs := g.GetOld()
+	if vs == nil {
 		return nil
 	}
 
@@ -877,8 +882,8 @@ func (s *Schema) genMultiplePartitionClusteringRangeQuery(t *Table, g *Generator
 	for i, pk := range partitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
 		for j := 0; j < numQueryPKs; j++ {
-			vs, ok := g.GetOld()
-			if !ok {
+			vs := g.GetOld()
+			if vs == nil {
 				return nil
 			}
 			numMVKeys := len(partitionKeys) - len(vs.Value)
