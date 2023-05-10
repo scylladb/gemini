@@ -21,7 +21,7 @@ import (
 // We track inflights in the map, maps in golang are not shrinking
 // Therefore we track how many inflights were deleted and when it reaches the limit
 // we forcefully recreate the map to shrink it
-const shrinkInflightsLimit = 1000000
+const shrinkInflightsLimit = 1000
 
 type InFlight interface {
 	AddIfNotPresent(uint64) bool
