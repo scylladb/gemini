@@ -23,6 +23,7 @@ import (
 
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/status"
+	"github.com/scylladb/gemini/pkg/stop"
 
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
@@ -31,6 +32,8 @@ import (
 	"github.com/scylladb/gemini"
 	"github.com/scylladb/gemini/store"
 )
+
+var errorJobTerminated = errors.New("job terminated")
 
 // MutationJob continuously applies mutations against the database
 // for as long as the pump is active.
@@ -48,6 +51,7 @@ func MutationJob(
 	_ string,
 	_ time.Duration,
 	logger *zap.Logger,
+	stopFlag *stop.Flag,
 ) error {
 	schemaConfig := &schemaCfg
 	logger = logger.Named("mutation_job")
@@ -55,7 +59,10 @@ func MutationJob(
 	defer func() {
 		logger.Info("ending mutation loop")
 	}()
-	for i := 0; ; i++ {
+	for {
+		if stopFlag.IsHardOrSoft() {
+			return errorJobTerminated
+		}
 		select {
 		case <-ctx.Done():
 			logger.Debug("mutation job terminated")
@@ -73,9 +80,10 @@ func MutationJob(
 				}
 			}
 			if failFast && globalStatus.HasErrors() {
-				return errors.New("encounter error, failsafe is set")
+				return errorJobTerminated
 			}
 		}
+
 	}
 }
 
@@ -95,6 +103,7 @@ func ValidationJob(
 	_ string,
 	_ time.Duration,
 	logger *zap.Logger,
+	stopFlag *stop.Flag,
 ) error {
 	schemaConfig := &schemaCfg
 	logger = logger.Named("validation_job")
@@ -103,7 +112,10 @@ func ValidationJob(
 		logger.Info("ending validation loop")
 	}()
 
-	for i := 0; ; i++ {
+	for {
+		if stopFlag.IsHardOrSoft() {
+			return errorJobTerminated
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -126,7 +138,7 @@ func ValidationJob(
 			}
 
 			if failFast && globalStatus.HasErrors() {
-				return errors.New("encounter error, failsafe is set")
+				return errorJobTerminated
 			}
 		}
 	}
@@ -148,6 +160,7 @@ func WarmupJob(
 	_ string,
 	warmup time.Duration,
 	logger *zap.Logger,
+	stopFlag *stop.Flag,
 ) error {
 	schemaConfig := &schemaCfg
 	warmupCtx, cancel := context.WithTimeout(ctx, warmup)
@@ -157,7 +170,11 @@ func WarmupJob(
 	defer func() {
 		logger.Info("ending warmup loop")
 	}()
-	for i := 0; ; i++ {
+	for {
+		if stopFlag.IsHardOrSoft() {
+			logger.Debug("warmup job terminated")
+			return errorJobTerminated
+		}
 		select {
 		case <-ctx.Done():
 			logger.Debug("warmup job terminated")
@@ -169,7 +186,7 @@ func WarmupJob(
 			// Do we care about errors during warmup?
 			_ = mutation(warmupCtx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
 			if failFast && globalStatus.HasErrors() {
-				return errors.New("encounter error, failsafe is set")
+				return errorJobTerminated
 			}
 		}
 	}
@@ -186,6 +203,7 @@ func job(
 	generators []*gemini.Generator,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
+	stopFlag *stop.Flag,
 ) error {
 	g, gCtx := errgroup.WithContext(ctx)
 	partitionRangeConfig := gemini.PartitionRangeConfig{
@@ -202,7 +220,7 @@ func job(
 		for i := 0; i < int(actors); i++ {
 			r := rand.New(rand.NewSource(seed))
 			g.Go(func() error {
-				return f(gCtx, pump.ch, schema, schemaConfig, table, s, r, &partitionRangeConfig, gen, globalStatus, mode, warmup, logger)
+				return f(gCtx, pump.ch, schema, schemaConfig, table, s, r, &partitionRangeConfig, gen, globalStatus, mode, warmup, logger, stopFlag)
 			})
 		}
 	}
