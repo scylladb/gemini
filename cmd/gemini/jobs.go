@@ -375,7 +375,7 @@ func validation(
 		if attempt == maxAttempts {
 			break
 		}
-		if unWrapErr(err).Error() == unWrapErr(lastErr).Error() {
+		if errors.Is(err, unWrapErr(lastErr)) {
 			logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error same as at attempt before. ", attempt, maxAttempts))
 		} else {
 			logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
