@@ -35,3 +35,8 @@ changelog:
     exclude:
     - '^docs:'
     - '^test:'
+
+dockers:
+  - image_templates:
+      - scylladb/hydra-loaders:gemini-{{ .Tag }}
+      - scylladb/hydra-loaders:gemini-latest
