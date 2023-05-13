@@ -307,7 +307,7 @@ type MaterializedView struct {
 type Stmt struct {
 	ValuesWithToken *ValueWithToken
 	Query           qb.Builder
-	Values          []interface{}
+	Values          Value
 	Types           []Type
 	QueryType       StatementType
 }
@@ -333,7 +333,7 @@ const (
 func (s *Stmt) PrettyCQL() string {
 	var replaced int
 	query, _ := s.Query.ToCql()
-	values := s.Values
+	values := s.Values.Copy()
 	if len(values) == 0 {
 		return query
 	}
@@ -824,7 +824,7 @@ func (s *Schema) genClusteringRangeQuery(t *Table, g *Generator, r *rand.Rand, p
 		mvCol = t.MaterializedViews[view].NonPrimaryKey
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
-	values := vs.Value
+	values := vs.Value.Copy()
 	for _, pk := range partitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
 		allTypes = append(allTypes, pk.Type)
