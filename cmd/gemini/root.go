@@ -21,13 +21,12 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/scylladb/gemini/pkg/status"
+	"github.com/scylladb/gemini/pkg/stop"
 
 	"github.com/gocql/gocql"
 	"github.com/hailocab/go-hostpool"
@@ -125,6 +124,7 @@ type testJob func(
 	string,
 	time.Duration,
 	*zap.Logger,
+	*stop.Flag,
 ) error
 
 func readSchema(confFile string) (*gemini.Schema, error) {
@@ -260,18 +260,10 @@ func run(cmd *cobra.Command, args []string) error {
 
 	ctx, done := context.WithTimeout(context.Background(), duration+warmup)
 	g, gCtx := errgroup.WithContext(ctx)
-	graceful := make(chan os.Signal, 1)
-	signal.Notify(graceful, syscall.SIGTERM, syscall.SIGINT)
-	g.Go(func() error {
-		select {
-		case <-gCtx.Done():
-			return ctx.Err()
-		case <-graceful:
-			logger.Info("Told to stop, exiting.")
-			done()
-			return ctx.Err()
-		}
-	})
+	warmupStopFlag := stop.NewFlag()
+	workStopFlag := stop.NewFlag()
+	stop.StartOsSignalsTransmitter(logger, &warmupStopFlag, &workStopFlag)
+
 	pump := &Pump{
 		ch:     make(chan heartBeat, 10000),
 		logger: logger.Named("pump"),
@@ -301,8 +293,10 @@ func run(cmd *cobra.Command, args []string) error {
 		logger.Info("Test run completed. Exiting.")
 	})
 
-	if warmup > 0 {
-		if err = job(gCtx, WarmupJob, concurrency, schema, schemaConfig, st, pump, generators, globalStatus, logger); err != nil {
+	if warmup > 0 && !warmupStopFlag.IsHardOrSoft() {
+		jCtx, cancelJob := context.WithCancel(gCtx)
+		warmupStopFlag.SetOnHardStopHandler(cancelJob)
+		if err = job(jCtx, WarmupJob, concurrency, schema, schemaConfig, st, pump, generators, globalStatus, logger, &warmupStopFlag); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
 		}
 	}
@@ -310,11 +304,16 @@ func run(cmd *cobra.Command, args []string) error {
 	select {
 	case <-gCtx.Done():
 	default:
+		if workStopFlag.IsHardOrSoft() {
+			break
+		}
+		jCtx, cancelJob := context.WithCancel(gCtx)
+		workStopFlag.SetOnHardStopHandler(cancelJob)
 		testJobs := jobsFromMode(mode)
 		for id := range testJobs {
 			tJob := testJobs[id]
 			g.Go(func() error {
-				return job(gCtx, tJob, concurrency, schema, schemaConfig, st, pump, generators, globalStatus, logger)
+				return job(jCtx, tJob, concurrency, schema, schemaConfig, st, pump, generators, globalStatus, logger, &workStopFlag)
 			})
 		}
 		if err = g.Wait(); err != nil {
