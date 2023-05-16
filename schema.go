@@ -375,7 +375,7 @@ func GenSchema(sc SchemaConfig) *Schema {
 		OracleReplication: sc.OracleReplicationStrategy,
 	}
 	builder.Keyspace(keyspace)
-	numTables := 1 + rand.Intn(sc.GetMaxTables())
+	numTables := randInt(1, sc.GetMaxTables())
 	for i := 0; i < numTables; i++ {
 		table := createTable(sc, fmt.Sprintf("table%d", i+1))
 		builder.Table(table)
@@ -384,14 +384,12 @@ func GenSchema(sc SchemaConfig) *Schema {
 }
 
 func createTable(sc SchemaConfig, tableName string) *Table {
-	numPartitionKeys := rand.Intn(sc.GetMaxPartitionKeys()-sc.GetMinPartitionKeys()) + sc.GetMinPartitionKeys()
-	partitionKeys := make(Columns, numPartitionKeys)
-	for i := 0; i < numPartitionKeys; i++ {
+	partitionKeys := make(Columns, randInt(sc.GetMinPartitionKeys(), sc.GetMaxPartitionKeys()))
+	for i := 0; i < len(partitionKeys); i++ {
 		partitionKeys[i] = &ColumnDef{Name: genColumnName("pk", i), Type: genPartitionKeyColumnType()}
 	}
-	numClusteringKeys := rand.Intn(sc.GetMaxClusteringKeys()-sc.GetMinClusteringKeys()) + sc.GetMinClusteringKeys()
-	clusteringKeys := make(Columns, numClusteringKeys)
-	for i := 0; i < numClusteringKeys; i++ {
+	clusteringKeys := make(Columns, randInt(sc.GetMinClusteringKeys(), sc.GetMaxClusteringKeys()))
+	for i := 0; i < len(clusteringKeys); i++ {
 		clusteringKeys[i] = &ColumnDef{Name: genColumnName("ck", i), Type: genPrimaryKeyColumnType()}
 	}
 	table := Table{
@@ -406,7 +404,7 @@ func createTable(sc SchemaConfig, tableName string) *Table {
 		table.TableOptions = append(table.TableOptions, option.ToCQL())
 	}
 	if sc.UseCounters {
-		columns := Columns{
+		table.Columns = Columns{
 			{
 				Name: genColumnName("col", 0),
 				Type: &CounterType{
@@ -414,27 +412,25 @@ func createTable(sc SchemaConfig, tableName string) *Table {
 				},
 			},
 		}
-		table.Columns = columns
-	} else {
-		var columns Columns
-		numColumns := rand.Intn(sc.GetMaxColumns()-sc.GetMinColumns()) + sc.GetMinColumns()
-		for i := 0; i < numColumns; i++ {
-			columns = append(columns, &ColumnDef{Name: genColumnName("col", i), Type: genColumnType(numColumns, &sc)})
-		}
-		var indexes []IndexDef
-		if sc.CQLFeature > CQL_FEATURE_BASIC && numColumns > 0 {
-			indexes = columns.CreateIndexes(tableName, 1+rand.Intn(numColumns-1))
-		}
-
-		var mvs []MaterializedView
-		if sc.CQLFeature > CQL_FEATURE_BASIC && numClusteringKeys > 0 {
-			mvs = columns.CreateMaterializedViews(table.Name, partitionKeys, clusteringKeys)
-		}
-
-		table.Columns = columns
-		table.MaterializedViews = mvs
-		table.Indexes = indexes
+		return &table
 	}
+	columns := make(Columns, randInt(sc.GetMinColumns(), sc.GetMaxColumns()))
+	for i := 0; i < len(columns); i++ {
+		columns[i] = &ColumnDef{Name: genColumnName("col", i), Type: genColumnType(len(columns), &sc)}
+	}
+	var indexes []IndexDef
+	if sc.CQLFeature > CQL_FEATURE_BASIC && len(columns) > 0 {
+		indexes = columns.CreateIndexes(tableName, randInt(1, len(columns)))
+	}
+
+	var mvs []MaterializedView
+	if sc.CQLFeature > CQL_FEATURE_BASIC && len(clusteringKeys) > 0 {
+		mvs = columns.CreateMaterializedViews(table.Name, partitionKeys, clusteringKeys)
+	}
+
+	table.Columns = columns
+	table.MaterializedViews = mvs
+	table.Indexes = indexes
 	return &table
 }
 
@@ -987,4 +983,11 @@ func isCounterTable(t *Table) bool {
 		}
 	}
 	return false
+}
+
+func randInt(min, max int) int {
+	if max <= min {
+		return min
+	}
+	return rand.Intn(max-min) + max
 }
