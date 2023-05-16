@@ -242,12 +242,12 @@ func ddl(
 		logger.Debug("ddl statements disabled")
 		return nil
 	}
-	table.Lock()
-	defer table.Unlock()
 	if len(table.MaterializedViews) > 0 {
 		// Scylla does not allow changing the DDL of a table with materialized views.
 		return nil
 	}
+	table.Lock()
+	defer table.Unlock()
 	ddlStmts, postStmtHook, err := schema.GenDDLStmt(table, r, p, sc)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
@@ -260,27 +260,24 @@ func ddl(
 		}
 		return nil
 	}
-	defer postStmtHook()
-	defer func() {
-		if verbose {
-			jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
-			fmt.Printf("Schema: %v\n", string(jsonSchema))
-		}
-	}()
 	for _, ddlStmt := range ddlStmts {
-		ddlQuery := ddlStmt.Query
 		if w := logger.Check(zap.DebugLevel, "ddl statement"); w != nil {
 			w.Write(zap.String("pretty_cql", ddlStmt.PrettyCQL()))
 		}
-		if err = s.Mutate(ctx, ddlQuery); err != nil {
+		if err = s.Mutate(ctx, ddlStmt.Query); err != nil {
 			globalStatus.AddWriteError(&joberror.JobError{
 				Timestamp: time.Now(),
 				Message:   "DDL failed: " + err.Error(),
 				Query:     ddlStmt.PrettyCQL(),
 			})
-		} else {
-			globalStatus.WriteOps.Add(1)
+			return err
 		}
+		globalStatus.WriteOps.Add(1)
+	}
+	postStmtHook()
+	if verbose {
+		jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
+		fmt.Printf("New schema: %v\n", string(jsonSchema))
 	}
 	return nil
 }
