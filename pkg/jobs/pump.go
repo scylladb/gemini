@@ -11,43 +11,44 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package main
+
+package jobs
 
 import (
 	"context"
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/exp/rand"
 )
 
-type Pump struct {
-	ch     chan heartBeat
-	logger *zap.Logger
-}
-
-type heartBeat struct {
-	sleep time.Duration
-}
-
-func (hb heartBeat) await() {
-	if hb.sleep > 0 {
-		time.Sleep(hb.sleep)
-	}
-}
-
-func (p *Pump) Start(ctx context.Context) error {
-	defer p.cleanup()
-	for {
-		select {
-		case <-ctx.Done():
-			p.logger.Info("Test run stopped. Exiting.")
-			return ctx.Err()
-		case p.ch <- newHeartBeat():
+func NewPump(ctx context.Context, logger *zap.Logger) chan time.Duration {
+	pump := make(chan time.Duration, 10000)
+	logger = logger.Named("Pump")
+	go func() {
+		logger.Debug("pump channel opened")
+		defer func() {
+			close(pump)
+			logger.Debug("pump channel closed")
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				break
+			case pump <- newHeartBeat():
+			}
 		}
-	}
+	}()
+
+	return pump
 }
 
-func (p *Pump) cleanup() {
-	close(p.ch)
-	p.logger.Debug("pump channel closed")
+func newHeartBeat() time.Duration {
+	r := rand.Intn(10)
+	switch r {
+	case 0:
+		return 10 * time.Millisecond
+	default:
+		return 0
+	}
 }
