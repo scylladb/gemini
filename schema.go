@@ -720,6 +720,7 @@ func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p
 
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
+	values := valuesWithToken.Value.Copy()
 	if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
 		view := r.Intn(len(t.MaterializedViews))
 		tableName = t.MaterializedViews[view].Name
@@ -734,13 +735,13 @@ func (s *Schema) genSinglePartitionQuery(t *Table, g *Generator, r *rand.Rand, p
 	}
 	if (ColumnDef{}) != mvCol {
 		mvValues = appendValue(mvCol.Type, r, p, mvValues)
-		mvValues = append(mvValues, valuesWithToken.Value...)
+		values = append(mvValues, values...)
 	}
 
 	return &Stmt{
 		ValuesWithToken: valuesWithToken,
 		Query:           builder,
-		Values:          mvValues,
+		Values:          values,
 		Types:           typs,
 		QueryType:       SelectStatementType,
 	}
