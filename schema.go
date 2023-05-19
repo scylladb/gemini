@@ -478,11 +478,11 @@ func (s *Schema) GetCreateSchema() []string {
 	return stmts
 }
 
-func (s *Schema) genInsertStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.Rand, p *PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) genInsertStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.Rand, p *PartitionRangeConfig, useLWT bool) (*Stmt, error) {
 	if isCounterTable(t) {
 		return s.updateStmt(t, valuesWithToken, r, p)
 	}
-	return s.insertStmt(t, valuesWithToken, r, p)
+	return s.insertStmt(t, valuesWithToken, r, p, useLWT)
 }
 
 func (s *Schema) updateStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.Rand, p *PartitionRangeConfig) (*Stmt, error) {
@@ -524,7 +524,7 @@ func (s *Schema) updateStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.R
 	}, nil
 }
 
-func (s *Schema) insertStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.Rand, p *PartitionRangeConfig) (*Stmt, error) {
+func (s *Schema) insertStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.Rand, p *PartitionRangeConfig, useLWT bool) (*Stmt, error) {
 	var typs []Type
 	builder := qb.Insert(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
@@ -547,9 +547,10 @@ func (s *Schema) insertStmt(t *Table, valuesWithToken *ValueWithToken, r *rand.R
 		values = appendValue(cdef.Type, r, p, values)
 		typs = append(typs, cdef.Type)
 	}
-	if p.UseLWT && r.Uint32()%10 == 0 {
+	if useLWT {
 		builder = builder.Unique()
 	}
+
 	return &Stmt{
 		ValuesWithToken: valuesWithToken,
 		Query:           builder,
@@ -658,9 +659,13 @@ func (s *Schema) GenMutateStmt(t *Table, g *Generator, r *rand.Rand, p *Partitio
 	if valuesWithToken == nil {
 		return nil, nil
 	}
+	useLWT := false
+	if p.UseLWT && r.Uint32()%10 == 0 {
+		useLWT = true
+	}
 
 	if !deletes {
-		return s.genInsertStmt(t, valuesWithToken, r, p)
+		return s.genInsertStmt(t, valuesWithToken, r, p, useLWT)
 	}
 	switch n := rand.Intn(1000); n {
 	case 10, 100:
@@ -669,11 +674,11 @@ func (s *Schema) GenMutateStmt(t *Table, g *Generator, r *rand.Rand, p *Partitio
 		switch rand.Intn(2) {
 		case 0:
 			if t.KnownIssues[KnownIssuesJSONWithTuples] {
-				return s.genInsertStmt(t, valuesWithToken, r, p)
+				return s.genInsertStmt(t, valuesWithToken, r, p, useLWT)
 			}
 			return s.genInsertJSONStmt(t, valuesWithToken, r, p)
 		default:
-			return s.genInsertStmt(t, valuesWithToken, r, p)
+			return s.genInsertStmt(t, valuesWithToken, r, p, useLWT)
 		}
 	}
 }
