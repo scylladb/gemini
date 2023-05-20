@@ -17,7 +17,7 @@ package main
 import (
 	"testing"
 
-	"github.com/scylladb/gemini/replication"
+	"github.com/scylladb/gemini/pkg/replication"
 
 	"github.com/google/go-cmp/cmp"
 

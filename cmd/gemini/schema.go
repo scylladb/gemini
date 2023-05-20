@@ -17,17 +17,17 @@ package main
 import (
 	"strings"
 
-	"go.uber.org/zap"
+	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/typedef"
 
-	"github.com/scylladb/gemini"
-	"github.com/scylladb/gemini/replication"
+	"go.uber.org/zap"
 )
 
-func createSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
+func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 	defaultConfig := createDefaultSchemaConfig(logger)
 	switch strings.ToLower(datasetSize) {
 	case "small":
-		return gemini.SchemaConfig{
+		return typedef.SchemaConfig{
 			ReplicationStrategy:              defaultConfig.ReplicationStrategy,
 			OracleReplicationStrategy:        defaultConfig.OracleReplicationStrategy,
 			TableOptions:                     defaultConfig.TableOptions,
@@ -53,7 +53,7 @@ func createSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 	}
 }
 
-func createDefaultSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
+func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 	const (
 		MaxBlobLength   = 1e4
 		MinBlobLength   = 0
@@ -64,7 +64,7 @@ func createDefaultSchemaConfig(logger *zap.Logger) gemini.SchemaConfig {
 	)
 	rs := getReplicationStrategy(replicationStrategy, replication.NewSimpleStrategy(), logger)
 	ors := getReplicationStrategy(oracleReplicationStrategy, rs, logger)
-	return gemini.SchemaConfig{
+	return typedef.SchemaConfig{
 		ReplicationStrategy:              rs,
 		OracleReplicationStrategy:        ors,
 		TableOptions:                     createTableOptions(tableOptions, logger),
