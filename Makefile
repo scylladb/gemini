@@ -20,7 +20,7 @@ define dl_tgz
 	fi
 endef
 
-$(GOBIN)/golangci-lint: GOLANGCI_VERSION = 1.51.1
+$(GOBIN)/golangci-lint: GOLANGCI_VERSION = 1.52.2
 $(GOBIN)/golangci-lint: Makefile
 	$(call dl_tgz,golangci-lint,https://github.com/golangci/golangci-lint/releases/download/v$(GOLANGCI_VERSION)/golangci-lint-$(GOLANGCI_VERSION)-$(GOOS)-amd64.tar.gz)
 
