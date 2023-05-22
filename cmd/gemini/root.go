@@ -25,16 +25,16 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/scylladb/gemini/pkg/utils"
-
 	"github.com/scylladb/gemini/pkg/auth"
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/jobs"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
@@ -48,7 +48,6 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/exp/rand"
 	"golang.org/x/net/context"
-	"golang.org/x/sync/errgroup"
 	"gonum.org/v1/gonum/stat/distuv"
 )
 
@@ -105,32 +104,9 @@ var (
 	connectTimeout                   time.Duration
 )
 
-const (
-	writeMode = "write"
-	readMode  = "read"
-	mixedMode = "mixed"
-)
-
 func interactive() bool {
 	return !nonInteractive
 }
-
-type testJob func(
-	context.Context,
-	<-chan heartBeat,
-	*testschema.Schema,
-	typedef.SchemaConfig,
-	*testschema.Table,
-	store.Store,
-	*rand.Rand,
-	*typedef.PartitionRangeConfig,
-	*generators.Generator,
-	*status.GlobalStatus,
-	string,
-	time.Duration,
-	*zap.Logger,
-	*stop.Flag,
-) error
 
 func readSchema(confFile string) (*testschema.Schema, error) {
 	byteValue, err := os.ReadFile(confFile)
@@ -242,7 +218,7 @@ func run(cmd *cobra.Command, args []string) error {
 	st := store.New(schema, testCluster, oracleCluster, storeConfig, tracingFile, logger)
 	defer utils.IgnoreError(st.Close)
 
-	if dropSchema && mode != readMode {
+	if dropSchema && mode != jobs.ReadMode {
 		for _, stmt := range generators.GetDropSchema(schema) {
 			logger.Debug(stmt)
 			if err = st.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
@@ -263,21 +239,14 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	ctx, done := context.WithTimeout(context.Background(), duration+warmup)
-	g, gCtx := errgroup.WithContext(ctx)
+	ctx, done := context.WithTimeout(context.Background(), duration+warmup+time.Second*2)
 	warmupStopFlag := stop.NewFlag()
 	workStopFlag := stop.NewFlag()
 	stop.StartOsSignalsTransmitter(logger, &warmupStopFlag, &workStopFlag)
+	pump := jobs.NewPump(ctx, logger)
 
-	pump := &Pump{
-		ch:     make(chan heartBeat, 10000),
-		logger: logger.Named("pump"),
-	}
-	generators := createGenerators(gCtx, schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
-	g.Go(func() error {
-		defer done()
-		return pump.Start(gCtx)
-	})
+	generators := createGenerators(ctx, schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
+
 	if !nonInteractive {
 		sp := createSpinner(interactive())
 		ticker := time.NewTicker(time.Second)
@@ -285,7 +254,7 @@ func run(cmd *cobra.Command, args []string) error {
 			defer done()
 			for {
 				select {
-				case <-gCtx.Done():
+				case <-ctx.Done():
 					return
 				case <-ticker.C:
 					sp.Set(" Running Gemini... %v", globalStatus)
@@ -293,62 +262,32 @@ func run(cmd *cobra.Command, args []string) error {
 			}
 		}()
 	}
-	time.AfterFunc(duration+warmup, func() {
-		defer done()
-		logger.Info("Test run completed. Exiting.")
-	})
 
 	if warmup > 0 && !warmupStopFlag.IsHardOrSoft() {
-		jCtx, cancelJob := context.WithCancel(gCtx)
-		warmupStopFlag.SetOnHardStopHandler(cancelJob)
-		if err = job(jCtx, WarmupJob, concurrency, schema, schemaConfig, st, pump, generators, globalStatus, logger, &warmupStopFlag); err != nil {
+		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, generators, globalStatus, logger, seed, &warmupStopFlag, failFast, verbose); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
 		}
 	}
 
 	select {
-	case <-gCtx.Done():
+	case <-ctx.Done():
 	default:
 		if workStopFlag.IsHardOrSoft() {
 			break
 		}
-		jCtx, cancelJob := context.WithCancel(gCtx)
-		workStopFlag.SetOnHardStopHandler(cancelJob)
-		testJobs := jobsFromMode(mode)
-		for id := range testJobs {
-			tJob := testJobs[id]
-			g.Go(func() error {
-				return job(jCtx, tJob, concurrency, schema, schemaConfig, st, pump, generators, globalStatus, logger, &workStopFlag)
-			})
-		}
-		if err = g.Wait(); err != nil {
+		jobsList := jobs.ListFromMode(mode, duration, concurrency)
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, generators, globalStatus, logger, seed, &workStopFlag, failFast, verbose); err != nil {
 			logger.Debug("error detected", zap.Error(err))
 		}
+
 	}
-	logger.Info("result channel closed")
+	logger.Info("test finished")
 	globalStatus.PrintResult(outFile, schema, version)
 	if globalStatus.HasErrors() {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")
 	}
 	return nil
-}
-
-func jobsFromMode(mode string) []testJob {
-	switch mode {
-	case writeMode:
-		return []testJob{
-			MutationJob,
-		}
-	case readMode:
-		return []testJob{
-			ValidationJob,
-		}
-	default:
-		return []testJob{
-			MutationJob,
-			ValidationJob,
-		}
-	}
 }
 
 func createFile(fname string, def *os.File) (*os.File, error) {
@@ -516,7 +455,7 @@ func init() {
 	rootCmd.Flags().StringVarP(&oracleClusterUsername, "oracle-username", "", "", "Username for the oracle cluster")
 	rootCmd.Flags().StringVarP(&oracleClusterPassword, "oracle-password", "", "", "Password for the oracle cluster")
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
-	rootCmd.Flags().StringVarP(&mode, "mode", "m", mixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
+	rootCmd.Flags().StringVarP(&mode, "mode", "m", jobs.MixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	rootCmd.Flags().Uint64VarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
 	rootCmd.Flags().Uint64VarP(&seed, "seed", "s", 1, "PRNG seed value")
 	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
@@ -598,16 +537,4 @@ func printSetup() error {
 	}
 	tw.Flush()
 	return nil
-}
-
-func newHeartBeat() heartBeat {
-	r := rand.Intn(10)
-	switch r {
-	case 0:
-		return heartBeat{
-			sleep: 10 * time.Millisecond,
-		}
-	default:
-		return heartBeat{}
-	}
 }

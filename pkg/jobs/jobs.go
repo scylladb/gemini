@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package jobs
 
 import (
 	"context"
@@ -35,13 +35,127 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var errorJobTerminated = errors.New("job terminated")
+const (
+	WriteMode  = "write"
+	ReadMode   = "read"
+	MixedMode  = "mixed"
+	WarmupMode = "warmup"
+)
 
-// MutationJob continuously applies mutations against the database
-// for as long as the pump is active.
-func MutationJob(
+const (
+	warmupName   = "Warmup"
+	validateName = "Validation"
+	mutateName   = "Mutation"
+)
+
+var (
+	warmup   = job{name: warmupName, function: warmupJob}
+	validate = job{name: validateName, function: validationJob}
+	mutate   = job{name: mutateName, function: mutationJob}
+
+	errorJobTerminated = errors.New("job terminated")
+)
+
+type list struct {
+	name     string
+	jobs     []job
+	duration time.Duration
+	workers  uint64
+}
+
+type job struct {
+	function func(
+		context.Context,
+		<-chan time.Duration,
+		*testschema.Schema,
+		typedef.SchemaConfig,
+		*testschema.Table,
+		store.Store,
+		*rand.Rand,
+		*typedef.PartitionRangeConfig,
+		*generators.Generator,
+		*status.GlobalStatus,
+		*zap.Logger,
+		*stop.Flag,
+		bool,
+		bool,
+	) error
+	name string
+}
+
+func ListFromMode(mode string, duration time.Duration, workers uint64) list {
+	jobs := make([]job, 0, 2)
+	name := "work cycle"
+	switch mode {
+	case WriteMode:
+		jobs = append(jobs, mutate)
+	case ReadMode:
+		jobs = append(jobs, validate)
+	case WarmupMode:
+		jobs = append(jobs, warmup)
+		name = "warmup cycle"
+	default:
+		jobs = append(jobs, mutate, validate)
+	}
+	return list{
+		name:     name,
+		jobs:     jobs,
+		duration: duration,
+		workers:  workers,
+	}
+}
+
+func (l list) Run(
 	ctx context.Context,
-	pump <-chan heartBeat,
+	schema *testschema.Schema,
+	schemaConfig typedef.SchemaConfig,
+	s store.Store,
+	pump <-chan time.Duration,
+	generators []*generators.Generator,
+	globalStatus *status.GlobalStatus,
+	logger *zap.Logger,
+	seed uint64,
+	stopFlag *stop.Flag,
+	failFast, verbose bool,
+) error {
+	logger = logger.Named(l.name)
+	jCtx, jobCancel := context.WithCancel(ctx)
+	g, gCtx := errgroup.WithContext(jCtx)
+	stopFlag.SetOnHardStopHandler(jobCancel)
+	time.AfterFunc(l.duration, func() {
+		logger.Info("jobs time is up, begins jobs completion")
+		stopFlag.SetSoft()
+	})
+
+	partitionRangeConfig := typedef.PartitionRangeConfig{
+		MaxBlobLength:   schemaConfig.MaxBlobLength,
+		MinBlobLength:   schemaConfig.MinBlobLength,
+		MaxStringLength: schemaConfig.MaxStringLength,
+		MinStringLength: schemaConfig.MinStringLength,
+		UseLWT:          schemaConfig.UseLWT,
+	}
+	logger.Info("start jobs")
+	for j := range schema.Tables {
+		gen := generators[j]
+		table := schema.Tables[j]
+		for i := 0; i < int(l.workers); i++ {
+			for idx := range l.jobs {
+				jobF := l.jobs[idx].function
+				r := rand.New(rand.NewSource(seed))
+				g.Go(func() error {
+					return jobF(gCtx, pump, schema, schemaConfig, table, s, r, &partitionRangeConfig, gen, globalStatus, logger, stopFlag, failFast, verbose)
+				})
+			}
+		}
+	}
+	return g.Wait()
+}
+
+// mutationJob continuously applies mutations against the database
+// for as long as the pump is active.
+func mutationJob(
+	ctx context.Context,
+	pump <-chan time.Duration,
 	schema *testschema.Schema,
 	schemaCfg typedef.SchemaConfig,
 	table *testschema.Table,
@@ -50,10 +164,9 @@ func MutationJob(
 	p *typedef.PartitionRangeConfig,
 	g *generators.Generator,
 	globalStatus *status.GlobalStatus,
-	_ string,
-	_ time.Duration,
 	logger *zap.Logger,
 	stopFlag *stop.Flag,
+	failFast, verbose bool,
 ) error {
 	schemaConfig := &schemaCfg
 	logger = logger.Named("mutation_job")
@@ -63,17 +176,17 @@ func MutationJob(
 	}()
 	for {
 		if stopFlag.IsHardOrSoft() {
-			return errorJobTerminated
+			return nil
 		}
 		select {
 		case <-ctx.Done():
 			logger.Debug("mutation job terminated")
-			return ctx.Err()
+			return nil
 		case hb := <-pump:
-			hb.await()
+			time.Sleep(hb)
 			ind := r.Intn(1000000)
 			if ind%100000 == 0 {
-				if err := ddl(ctx, schema, schemaConfig, table, s, r, p, globalStatus, logger); err != nil {
+				if err := ddl(ctx, schema, schemaConfig, table, s, r, p, globalStatus, logger, verbose); err != nil {
 					return err
 				}
 			} else {
@@ -89,11 +202,11 @@ func MutationJob(
 	}
 }
 
-// ValidationJob continuously applies validations against the database
+// validationJob continuously applies validations against the database
 // for as long as the pump is active.
-func ValidationJob(
+func validationJob(
 	ctx context.Context,
-	pump <-chan heartBeat,
+	pump <-chan time.Duration,
 	schema *testschema.Schema,
 	schemaCfg typedef.SchemaConfig,
 	table *testschema.Table,
@@ -102,10 +215,9 @@ func ValidationJob(
 	p *typedef.PartitionRangeConfig,
 	g *generators.Generator,
 	globalStatus *status.GlobalStatus,
-	_ string,
-	_ time.Duration,
 	logger *zap.Logger,
 	stopFlag *stop.Flag,
+	failFast, _ bool,
 ) error {
 	schemaConfig := &schemaCfg
 	logger = logger.Named("validation_job")
@@ -116,13 +228,13 @@ func ValidationJob(
 
 	for {
 		if stopFlag.IsHardOrSoft() {
-			return errorJobTerminated
+			return nil
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		case hb := <-pump:
-			hb.await()
+			time.Sleep(hb)
 			stmt := generators.GenCheckStmt(schema, table, g, r, p)
 			if stmt == nil {
 				logger.Info("Validation. No statement generated from GenCheckStmt.")
@@ -146,11 +258,11 @@ func ValidationJob(
 	}
 }
 
-// WarmupJob continuously applies mutations against the database
+// warmupJob continuously applies mutations against the database
 // for as long as the pump is active or the supplied duration expires.
-func WarmupJob(
+func warmupJob(
 	ctx context.Context,
-	_ <-chan heartBeat,
+	_ <-chan time.Duration,
 	schema *testschema.Schema,
 	schemaCfg typedef.SchemaConfig,
 	table *testschema.Table,
@@ -159,14 +271,11 @@ func WarmupJob(
 	p *typedef.PartitionRangeConfig,
 	g *generators.Generator,
 	globalStatus *status.GlobalStatus,
-	_ string,
-	warmup time.Duration,
 	logger *zap.Logger,
 	stopFlag *stop.Flag,
+	failFast, _ bool,
 ) error {
 	schemaConfig := &schemaCfg
-	warmupCtx, cancel := context.WithTimeout(ctx, warmup)
-	defer cancel()
 	logger = logger.Named("warmup")
 	logger.Info("starting warmup loop")
 	defer func() {
@@ -175,58 +284,21 @@ func WarmupJob(
 	for {
 		if stopFlag.IsHardOrSoft() {
 			logger.Debug("warmup job terminated")
-			return errorJobTerminated
+			return nil
 		}
 		select {
 		case <-ctx.Done():
 			logger.Debug("warmup job terminated")
-			return ctx.Err()
-		case <-warmupCtx.Done():
-			logger.Debug("warmup job finished")
 			return nil
+
 		default:
 			// Do we care about errors during warmup?
-			_ = mutation(warmupCtx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
+			_ = mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
 			if failFast && globalStatus.HasErrors() {
 				return errorJobTerminated
 			}
 		}
 	}
-}
-
-func job(
-	ctx context.Context,
-	f testJob,
-	actors uint64,
-	schema *testschema.Schema,
-	schemaConfig typedef.SchemaConfig,
-	s store.Store,
-	pump *Pump,
-	generators []*generators.Generator,
-	globalStatus *status.GlobalStatus,
-	logger *zap.Logger,
-	stopFlag *stop.Flag,
-) error {
-	g, gCtx := errgroup.WithContext(ctx)
-	partitionRangeConfig := typedef.PartitionRangeConfig{
-		MaxBlobLength:   schemaConfig.MaxBlobLength,
-		MinBlobLength:   schemaConfig.MinBlobLength,
-		MaxStringLength: schemaConfig.MaxStringLength,
-		MinStringLength: schemaConfig.MinStringLength,
-		UseLWT:          schemaConfig.UseLWT,
-	}
-
-	for j := range schema.Tables {
-		gen := generators[j]
-		table := schema.Tables[j]
-		for i := 0; i < int(actors); i++ {
-			r := rand.New(rand.NewSource(seed))
-			g.Go(func() error {
-				return f(gCtx, pump.ch, schema, schemaConfig, table, s, r, &partitionRangeConfig, gen, globalStatus, mode, warmup, logger, stopFlag)
-			})
-		}
-	}
-	return g.Wait()
 }
 
 func ddl(
@@ -239,6 +311,7 @@ func ddl(
 	p *typedef.PartitionRangeConfig,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
+	verbose bool,
 ) error {
 	if sc.CQLFeature != typedef.CQL_FEATURE_ALL {
 		logger.Debug("ddl statements disabled")
@@ -365,6 +438,7 @@ func validation(
 	for {
 		lastErr = err
 		err = s.Check(ctx, table, stmt.Query, stmt.Values...)
+
 		if err == nil {
 			if attempt > 1 {
 				logger.Info(fmt.Sprintf("Validation successfully completed on %d attempt.", attempt))
