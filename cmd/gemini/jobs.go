@@ -21,6 +21,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/store"
+	"github.com/scylladb/gemini/pkg/testschema"
+	"github.com/scylladb/gemini/pkg/typedef"
+
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
@@ -28,9 +33,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/scylladb/gemini"
-	"github.com/scylladb/gemini/store"
 )
 
 var errorJobTerminated = errors.New("job terminated")
@@ -40,13 +42,13 @@ var errorJobTerminated = errors.New("job terminated")
 func MutationJob(
 	ctx context.Context,
 	pump <-chan heartBeat,
-	schema *gemini.Schema,
-	schemaCfg gemini.SchemaConfig,
-	table *gemini.Table,
+	schema *testschema.Schema,
+	schemaCfg typedef.SchemaConfig,
+	table *testschema.Table,
 	s store.Store,
 	r *rand.Rand,
-	p *gemini.PartitionRangeConfig,
-	g *gemini.Generator,
+	p *typedef.PartitionRangeConfig,
+	g *generators.Generator,
 	globalStatus *status.GlobalStatus,
 	_ string,
 	_ time.Duration,
@@ -92,13 +94,13 @@ func MutationJob(
 func ValidationJob(
 	ctx context.Context,
 	pump <-chan heartBeat,
-	schema *gemini.Schema,
-	schemaCfg gemini.SchemaConfig,
-	table *gemini.Table,
+	schema *testschema.Schema,
+	schemaCfg typedef.SchemaConfig,
+	table *testschema.Table,
 	s store.Store,
 	r *rand.Rand,
-	p *gemini.PartitionRangeConfig,
-	g *gemini.Generator,
+	p *typedef.PartitionRangeConfig,
+	g *generators.Generator,
 	globalStatus *status.GlobalStatus,
 	_ string,
 	_ time.Duration,
@@ -121,7 +123,7 @@ func ValidationJob(
 			return ctx.Err()
 		case hb := <-pump:
 			hb.await()
-			stmt := schema.GenCheckStmt(table, g, r, p)
+			stmt := generators.GenCheckStmt(schema, table, g, r, p)
 			if stmt == nil {
 				logger.Info("Validation. No statement generated from GenCheckStmt.")
 				continue
@@ -149,13 +151,13 @@ func ValidationJob(
 func WarmupJob(
 	ctx context.Context,
 	_ <-chan heartBeat,
-	schema *gemini.Schema,
-	schemaCfg gemini.SchemaConfig,
-	table *gemini.Table,
+	schema *testschema.Schema,
+	schemaCfg typedef.SchemaConfig,
+	table *testschema.Table,
 	s store.Store,
 	r *rand.Rand,
-	p *gemini.PartitionRangeConfig,
-	g *gemini.Generator,
+	p *typedef.PartitionRangeConfig,
+	g *generators.Generator,
 	globalStatus *status.GlobalStatus,
 	_ string,
 	warmup time.Duration,
@@ -196,17 +198,17 @@ func job(
 	ctx context.Context,
 	f testJob,
 	actors uint64,
-	schema *gemini.Schema,
-	schemaConfig gemini.SchemaConfig,
+	schema *testschema.Schema,
+	schemaConfig typedef.SchemaConfig,
 	s store.Store,
 	pump *Pump,
-	generators []*gemini.Generator,
+	generators []*generators.Generator,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
 	stopFlag *stop.Flag,
 ) error {
 	g, gCtx := errgroup.WithContext(ctx)
-	partitionRangeConfig := gemini.PartitionRangeConfig{
+	partitionRangeConfig := typedef.PartitionRangeConfig{
 		MaxBlobLength:   schemaConfig.MaxBlobLength,
 		MinBlobLength:   schemaConfig.MinBlobLength,
 		MaxStringLength: schemaConfig.MaxStringLength,
@@ -229,16 +231,16 @@ func job(
 
 func ddl(
 	ctx context.Context,
-	schema *gemini.Schema,
-	sc *gemini.SchemaConfig,
-	table *gemini.Table,
+	schema *testschema.Schema,
+	sc *typedef.SchemaConfig,
+	table *testschema.Table,
 	s store.Store,
 	r *rand.Rand,
-	p *gemini.PartitionRangeConfig,
+	p *typedef.PartitionRangeConfig,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
 ) error {
-	if sc.CQLFeature != gemini.CQL_FEATURE_ALL {
+	if sc.CQLFeature != typedef.CQL_FEATURE_ALL {
 		logger.Debug("ddl statements disabled")
 		return nil
 	}
@@ -248,7 +250,7 @@ func ddl(
 	}
 	table.Lock()
 	defer table.Unlock()
-	ddlStmts, postStmtHook, err := schema.GenDDLStmt(table, r, p, sc)
+	ddlStmts, postStmtHook, err := generators.GenDDLStmt(schema, table, r, p, sc)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		globalStatus.WriteErrors.Add(1)
@@ -284,18 +286,18 @@ func ddl(
 
 func mutation(
 	ctx context.Context,
-	schema *gemini.Schema,
-	_ *gemini.SchemaConfig,
-	table *gemini.Table,
+	schema *testschema.Schema,
+	_ *typedef.SchemaConfig,
+	table *testschema.Table,
 	s store.Store,
 	r *rand.Rand,
-	p *gemini.PartitionRangeConfig,
-	g *gemini.Generator,
+	p *typedef.PartitionRangeConfig,
+	g *generators.Generator,
 	globalStatus *status.GlobalStatus,
 	deletes bool,
 	logger *zap.Logger,
 ) error {
-	mutateStmt, err := schema.GenMutateStmt(table, g, r, p, deletes)
+	mutateStmt, err := generators.GenMutateStmt(schema, table, g, r, p, deletes)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		globalStatus.WriteErrors.Add(1)
@@ -331,11 +333,11 @@ func mutation(
 
 func validation(
 	ctx context.Context,
-	sc *gemini.SchemaConfig,
-	table *gemini.Table,
+	sc *typedef.SchemaConfig,
+	table *testschema.Table,
 	s store.Store,
-	stmt *gemini.Stmt,
-	g *gemini.Generator,
+	stmt *typedef.Stmt,
+	g *generators.Generator,
 	_ *status.GlobalStatus,
 	logger *zap.Logger,
 ) error {

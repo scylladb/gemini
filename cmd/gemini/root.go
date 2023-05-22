@@ -25,6 +25,17 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/scylladb/gemini/pkg/utils"
+
+	"github.com/scylladb/gemini/pkg/auth"
+	"github.com/scylladb/gemini/pkg/builders"
+	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/store"
+	"github.com/scylladb/gemini/pkg/tableopts"
+	"github.com/scylladb/gemini/pkg/testschema"
+	"github.com/scylladb/gemini/pkg/typedef"
+
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 
@@ -39,12 +50,6 @@ import (
 	"golang.org/x/net/context"
 	"golang.org/x/sync/errgroup"
 	"gonum.org/v1/gonum/stat/distuv"
-
-	"github.com/scylladb/gemini"
-	"github.com/scylladb/gemini/auth"
-	"github.com/scylladb/gemini/replication"
-	"github.com/scylladb/gemini/store"
-	"github.com/scylladb/gemini/tableopts"
 )
 
 var (
@@ -113,13 +118,13 @@ func interactive() bool {
 type testJob func(
 	context.Context,
 	<-chan heartBeat,
-	*gemini.Schema,
-	gemini.SchemaConfig,
-	*gemini.Table,
+	*testschema.Schema,
+	typedef.SchemaConfig,
+	*testschema.Table,
 	store.Store,
 	*rand.Rand,
-	*gemini.PartitionRangeConfig,
-	*gemini.Generator,
+	*typedef.PartitionRangeConfig,
+	*generators.Generator,
 	*status.GlobalStatus,
 	string,
 	time.Duration,
@@ -127,20 +132,20 @@ type testJob func(
 	*stop.Flag,
 ) error
 
-func readSchema(confFile string) (*gemini.Schema, error) {
+func readSchema(confFile string) (*testschema.Schema, error) {
 	byteValue, err := os.ReadFile(confFile)
 	if err != nil {
 		return nil, err
 	}
 
-	var shm gemini.Schema
+	var shm testschema.Schema
 
 	err = json.Unmarshal(byteValue, &shm)
 	if err != nil {
 		return nil, err
 	}
 
-	schemaBuilder := gemini.NewSchemaBuilder()
+	schemaBuilder := builders.NewSchemaBuilder()
 	schemaBuilder.Keyspace(shm.Keyspace)
 	for _, tbl := range shm.Tables {
 		schemaBuilder.Table(tbl)
@@ -159,7 +164,7 @@ func (cb createBuilder) ToCql() (stmt string, names []string) {
 func run(cmd *cobra.Command, args []string) error {
 	logger := createLogger(level)
 	globalStatus := status.NewGlobalStatus(1000)
-	defer gemini.IgnoreError(logger.Sync)
+	defer utils.IgnoreError(logger.Sync)
 
 	cons, err := gocql.ParseConsistencyWrapper(consistency)
 	if err != nil {
@@ -193,20 +198,20 @@ func run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer gemini.IgnoreError(outFile.Sync)
+	defer utils.IgnoreError(outFile.Sync)
 
 	schemaConfig := createSchemaConfig(logger)
 	if err = schemaConfig.Valid(); err != nil {
 		return errors.Wrap(err, "invalid schema configuration")
 	}
-	var schema *gemini.Schema
+	var schema *testschema.Schema
 	if len(schemaFile) > 0 {
 		schema, err = readSchema(schemaFile)
 		if err != nil {
 			return errors.Wrap(err, "cannot create schema")
 		}
 	} else {
-		schema = gemini.GenSchema(schemaConfig)
+		schema = generators.GenSchema(schemaConfig)
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
@@ -231,14 +236,14 @@ func run(cmd *cobra.Command, args []string) error {
 				return ioErr
 			}
 			tracingFile = tf
-			defer gemini.IgnoreError(tracingFile.Sync)
+			defer utils.IgnoreError(tracingFile.Sync)
 		}
 	}
 	st := store.New(schema, testCluster, oracleCluster, storeConfig, tracingFile, logger)
-	defer gemini.IgnoreError(st.Close)
+	defer utils.IgnoreError(st.Close)
 
 	if dropSchema && mode != readMode {
-		for _, stmt := range schema.GetDropSchema() {
+		for _, stmt := range generators.GetDropSchema(schema) {
 			logger.Debug(stmt)
 			if err = st.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
 				return errors.Wrap(err, "unable to drop schema")
@@ -246,12 +251,12 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	testKeyspace, oracleKeyspace := schema.GetCreateKeyspaces()
+	testKeyspace, oracleKeyspace := generators.GetCreateKeyspaces(schema)
 	if err = st.Create(context.Background(), createBuilder{stmt: testKeyspace}, createBuilder{stmt: oracleKeyspace}); err != nil {
 		return errors.Wrap(err, "unable to create keyspace")
 	}
 
-	for _, stmt := range schema.GetCreateSchema() {
+	for _, stmt := range generators.GetCreateSchema(schema) {
 		logger.Debug(stmt)
 		if err = st.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
 			return errors.Wrap(err, "unable to create schema")
@@ -362,12 +367,12 @@ const (
 	oneStdDev   = 0.341 * math.MaxUint64
 )
 
-func createDistributionFunc(distribution string, size, seed uint64, mu, sigma float64) (gemini.DistributionFunc, error) {
+func createDistributionFunc(distribution string, size, seed uint64, mu, sigma float64) (generators.DistributionFunc, error) {
 	switch strings.ToLower(distribution) {
 	case "zipf":
 		dist := rand.NewZipf(rand.New(rand.NewSource(seed)), 1.1, 1.1, size)
-		return func() gemini.TokenIndex {
-			return gemini.TokenIndex(dist.Uint64())
+		return func() generators.TokenIndex {
+			return generators.TokenIndex(dist.Uint64())
 		}, nil
 	case "normal":
 		dist := distuv.Normal{
@@ -375,13 +380,13 @@ func createDistributionFunc(distribution string, size, seed uint64, mu, sigma fl
 			Mu:    mu,
 			Sigma: sigma,
 		}
-		return func() gemini.TokenIndex {
-			return gemini.TokenIndex(dist.Rand())
+		return func() generators.TokenIndex {
+			return generators.TokenIndex(dist.Rand())
 		}, nil
 	case "uniform":
 		rnd := rand.New(rand.NewSource(seed))
-		return func() gemini.TokenIndex {
-			return gemini.TokenIndex(rnd.Uint64n(size))
+		return func() generators.TokenIndex {
+			return generators.TokenIndex(rnd.Uint64n(size))
 		}, nil
 	default:
 		return nil, errors.Errorf("unsupported distribution: %s", distribution)
@@ -468,14 +473,14 @@ func getReplicationStrategy(rs string, fallback *replication.Replication, logger
 	}
 }
 
-func getCQLFeature(feature string) gemini.CQLFeature {
+func getCQLFeature(feature string) typedef.CQLFeature {
 	switch strings.ToLower(feature) {
 	case "all":
-		return gemini.CQL_FEATURE_ALL
+		return typedef.CQL_FEATURE_ALL
 	case "normal":
-		return gemini.CQL_FEATURE_NORMAL
+		return typedef.CQL_FEATURE_NORMAL
 	default:
-		return gemini.CQL_FEATURE_BASIC
+		return typedef.CQL_FEATURE_BASIC
 	}
 }
 

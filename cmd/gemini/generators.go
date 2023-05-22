@@ -16,20 +16,22 @@ package main
 import (
 	"context"
 
-	"go.uber.org/zap"
+	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/testschema"
+	"github.com/scylladb/gemini/pkg/typedef"
 
-	"github.com/scylladb/gemini"
+	"go.uber.org/zap"
 )
 
 func createGenerators(
 	ctx context.Context,
-	schema *gemini.Schema,
-	schemaConfig gemini.SchemaConfig,
-	distributionFunc gemini.DistributionFunc,
+	schema *testschema.Schema,
+	schemaConfig typedef.SchemaConfig,
+	distributionFunc generators.DistributionFunc,
 	_, distributionSize uint64,
 	logger *zap.Logger,
-) []*gemini.Generator {
-	partitionRangeConfig := gemini.PartitionRangeConfig{
+) []*generators.Generator {
+	partitionRangeConfig := typedef.PartitionRangeConfig{
 		MaxBlobLength:   schemaConfig.MaxBlobLength,
 		MinBlobLength:   schemaConfig.MinBlobLength,
 		MaxStringLength: schemaConfig.MaxStringLength,
@@ -37,16 +39,16 @@ func createGenerators(
 		UseLWT:          schemaConfig.UseLWT,
 	}
 
-	var gs []*gemini.Generator
+	var gs []*generators.Generator
 	for _, table := range schema.Tables {
-		gCfg := &gemini.GeneratorConfig{
+		gCfg := &generators.Config{
 			PartitionsRangeConfig:      partitionRangeConfig,
 			PartitionsCount:            distributionSize,
 			PartitionsDistributionFunc: distributionFunc,
 			Seed:                       seed,
 			PkUsedBufferSize:           pkBufferReuseSize,
 		}
-		g := gemini.NewGenerator(ctx, table, gCfg, logger.Named("generator"))
+		g := generators.NewGenerator(ctx, table, gCfg, logger.Named("generators"))
 		gs = append(gs, g)
 	}
 	return gs
