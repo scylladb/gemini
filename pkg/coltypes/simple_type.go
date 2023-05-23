@@ -185,8 +185,7 @@ func (st SimpleType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []i
 	case TYPE_SMALLINT:
 		val = int16(r.Int31())
 	case TYPE_TIMEUUID, TYPE_UUID:
-		r := gocql.UUIDFromTime(utils.RandTime(r))
-		val = r.String()
+		val = utils.UUIDFromTime(r)
 	case TYPE_TINYINT:
 		val = int8(r.Int31())
 	case TYPE_VARINT:

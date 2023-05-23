@@ -43,6 +43,13 @@ type TokenIndex uint64
 
 type DistributionFunc func() TokenIndex
 
+type GeneratorInterface interface {
+	Get() *typedef.ValueWithToken
+	GetOld() *typedef.ValueWithToken
+	GiveOld(_ *typedef.ValueWithToken)
+	ReleaseToken(_ uint64)
+}
+
 type Generator struct {
 	ctx              context.Context
 	logger           *zap.Logger

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//nolint:lll
 package generators_test
 
 import (
@@ -49,9 +48,11 @@ func TestGetCreateSchema(t *testing.T) {
 			table: &testschema.Table{
 				Name:          "tbl0",
 				PartitionKeys: createColumns(1, "pk"),
-				TableOptions:  options("compaction = {'class':'LeveledCompactionStrategy','enabled':true,'tombstone_threshold':0.2,'tombstone_compaction_interval':86400,'sstable_size_in_mb':160}"),
+				TableOptions: options("compaction = {'class':'LeveledCompactionStrategy','enabled':true,'tombstone_threshold':0.2," +
+					"'tombstone_compaction_interval':86400,'sstable_size_in_mb':160}"),
 			},
-			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text, PRIMARY KEY ((pk0))) WITH compaction = {'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2};",
+			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text, PRIMARY KEY ((pk0))) WITH compaction = " +
+				"{'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2};",
 		},
 		"single_partition_key_single_column": {
 			table: &testschema.Table{
@@ -90,9 +91,11 @@ func TestGetCreateSchema(t *testing.T) {
 				Name:           "tbl0",
 				PartitionKeys:  createColumns(1, "pk"),
 				ClusteringKeys: createColumns(1, "ck"),
-				TableOptions:   options("compaction = {'class':'LeveledCompactionStrategy','enabled':true,'tombstone_threshold':0.2,'tombstone_compaction_interval':86400,'sstable_size_in_mb':160}"),
+				TableOptions: options("compaction = {'class':'LeveledCompactionStrategy','enabled':true,'tombstone_threshold':0.2," +
+					"'tombstone_compaction_interval':86400,'sstable_size_in_mb':160}"),
 			},
-			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text,ck0 text, PRIMARY KEY ((pk0), ck0)) WITH compaction = {'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2};",
+			want: "CREATE TABLE IF NOT EXISTS ks1.tbl0 (pk0 text,ck0 text, PRIMARY KEY ((pk0), ck0)) WITH compaction = " +
+				"{'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2};",
 		},
 		"single_partition_key_single_clustering_key_single_column": {
 			table: &testschema.Table{

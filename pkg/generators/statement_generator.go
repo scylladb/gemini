@@ -45,7 +45,7 @@ func GenMutateStmt(s *testschema.Schema, t *testschema.Table, g *Generator, r *r
 	}
 
 	if !deletes {
-		return genInsertStmt(s, t, valuesWithToken, r, p, useLWT)
+		return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, useLWT)
 	}
 	switch n := rand.Intn(1000); n {
 	case 10, 100:
@@ -54,11 +54,11 @@ func GenMutateStmt(s *testschema.Schema, t *testschema.Table, g *Generator, r *r
 		switch rand.Intn(2) {
 		case 0:
 			if t.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
-				return genInsertStmt(s, t, valuesWithToken, r, p, useLWT)
+				return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, useLWT)
 			}
 			return genInsertJSONStmt(s, t, valuesWithToken, r, p)
 		default:
-			return genInsertStmt(s, t, valuesWithToken, r, p, useLWT)
+			return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, useLWT)
 		}
 	}
 }
@@ -332,7 +332,7 @@ func genSingleIndexQuery(s *testschema.Schema, t *testschema.Table, g *Generator
 	}
 }
 
-func genInsertStmt(
+func genInsertOrUpdateStmt(
 	s *testschema.Schema,
 	t *testschema.Table,
 	valuesWithToken *typedef.ValueWithToken,
@@ -341,12 +341,12 @@ func genInsertStmt(
 	useLWT bool,
 ) (*typedef.Stmt, error) {
 	if t.IsCounterTable() {
-		return updateStmt(s, t, valuesWithToken, r, p)
+		return genUpdateStmt(s, t, valuesWithToken, r, p)
 	}
-	return insertStmt(s, t, valuesWithToken, r, p, useLWT)
+	return genInsertStmt(s, t, valuesWithToken, r, p, useLWT)
 }
 
-func updateStmt(s *testschema.Schema, t *testschema.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
+func genUpdateStmt(s *testschema.Schema, t *testschema.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
 	var typs []typedef.Type
 	builder := qb.Update(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
@@ -385,7 +385,7 @@ func updateStmt(s *testschema.Schema, t *testschema.Table, valuesWithToken *type
 	}, nil
 }
 
-func insertStmt(
+func genInsertStmt(
 	s *testschema.Schema,
 	t *testschema.Table,
 	valuesWithToken *typedef.ValueWithToken,
@@ -514,14 +514,14 @@ func genDeleteRows(s *testschema.Schema, t *testschema.Table, valuesWithToken *t
 	}, nil
 }
 
-func GenDDLStmt(s *testschema.Schema, t *testschema.Table, r *rand.Rand, p *typedef.PartitionRangeConfig, sc *typedef.SchemaConfig) ([]*typedef.Stmt, func(), error) {
+func GenDDLStmt(s *testschema.Schema, t *testschema.Table, r *rand.Rand, p *typedef.PartitionRangeConfig, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
 	switch n := r.Intn(3); n {
 	// case 0: // Alter column not supported in Cassandra from 3.0.11
 	//	return t.alterColumn(s.Keyspace.Name)
-	case 1: // Delete column
-		return dropColumn(t, s.Keyspace.Name)
-	default: // Alter column
-		return addColumn(t, s.Keyspace.Name, sc)
+	case 1:
+		return genDropColumnStmt(t, s.Keyspace.Name)
+	default:
+		return genAddColumnStmt(t, s.Keyspace.Name, sc)
 	}
 }
 
@@ -529,7 +529,7 @@ func appendValue(columnType typedef.Type, r *rand.Rand, p *typedef.PartitionRang
 	return append(values, columnType.GenValue(r, p)...)
 }
 
-func addColumn(t *testschema.Table, keyspace string, sc *typedef.SchemaConfig) ([]*typedef.Stmt, func(), error) {
+func genAddColumnStmt(t *testschema.Table, keyspace string, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
 	var stmts []*typedef.Stmt
 	column := testschema.ColumnDef{Name: GenColumnName("col", len(t.Columns)+1), Type: GenColumnType(len(t.Columns)+1, sc)}
 	if c, ok := column.Type.(*coltypes.UDTType); ok {
@@ -551,8 +551,11 @@ func addColumn(t *testschema.Table, keyspace string, sc *typedef.SchemaConfig) (
 			Stmt: stmt,
 		},
 	})
-	return stmts, func() {
-		t.Columns = append(t.Columns, &column)
+	return &typedef.Stmts{
+		List: stmts,
+		PostStmtHook: func() {
+			t.Columns = append(t.Columns, &column)
+		},
 	}, nil
 }
 
@@ -583,7 +586,7 @@ func alterColumn(t *testschema.Table, keyspace string) ([]*typedef.Stmt, func(),
 	}, nil
 }
 
-func dropColumn(t *testschema.Table, keyspace string) ([]*typedef.Stmt, func(), error) {
+func genDropColumnStmt(t *testschema.Table, keyspace string) (*typedef.Stmts, error) {
 	var stmts []*typedef.Stmt
 	idx := rand.Intn(len(t.Columns))
 	column := t.Columns[idx]
@@ -594,8 +597,11 @@ func dropColumn(t *testschema.Table, keyspace string) ([]*typedef.Stmt, func(), 
 		},
 		QueryType: typedef.DropColumnStatementType,
 	})
-	return stmts, func() {
-		t.Columns = append(t.Columns[:idx], t.Columns[idx+1:]...)
+	return &typedef.Stmts{
+		List: stmts,
+		PostStmtHook: func() {
+			t.Columns = append(t.Columns[:idx], t.Columns[idx+1:]...)
+		},
 	}, nil
 }
 

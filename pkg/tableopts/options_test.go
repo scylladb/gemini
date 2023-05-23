@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//nolint:lll
 package tableopts_test
 
 import (
@@ -43,16 +42,20 @@ func TestToCQL(t *testing.T) {
 			want: "cdc = {'enabled':'true','preimage':'true'}",
 		},
 		"size tiered compaction strategy": {
-			rs:   "compaction = {'bucket_high':1.5,'bucket_low':0.5,'class':'SizeTieredCompactionStrategy','enabled':true,'max_threshold':32,'min_sstable_size':50,'min_threshold':4,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
-			want: "compaction = {'bucket_high':1.5,'bucket_low':0.5,'class':'SizeTieredCompactionStrategy','enabled':true,'max_threshold':32,'min_sstable_size':50,'min_threshold':4,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
+			rs: "compaction = {'bucket_high':1.5,'bucket_low':0.5,'class':'SizeTieredCompactionStrategy','enabled':true," +
+				"'max_threshold':32,'min_sstable_size':50,'min_threshold':4,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
+			want: "compaction = {'bucket_high':1.5,'bucket_low':0.5,'class':'SizeTieredCompactionStrategy','enabled':true," +
+				"'max_threshold':32,'min_sstable_size':50,'min_threshold':4,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
 		},
 		"size leveled compaction strategy": {
 			rs:   "compaction = {'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
 			want: "compaction = {'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
 		},
 		"size time window compaction strategy": {
-			rs:   "compaction = {'class':'TimeWindowCompactionStrategy','compaction_window_size':1,'compaction_window_unit':'DAYS','enabled':true,'max_threshold':32,'min_threshold':4,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
-			want: "compaction = {'class':'TimeWindowCompactionStrategy','compaction_window_size':1,'compaction_window_unit':'DAYS','enabled':true,'max_threshold':32,'min_threshold':4,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
+			rs: "compaction = {'class':'TimeWindowCompactionStrategy','compaction_window_size':1,'compaction_window_unit':'DAYS'," +
+				"'enabled':true,'max_threshold':32,'min_threshold':4,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
+			want: "compaction = {'class':'TimeWindowCompactionStrategy','compaction_window_size':1,'compaction_window_unit':'DAYS'," +
+				"'enabled':true,'max_threshold':32,'min_threshold':4,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
 		},
 	}
 	for name, test := range tests {
