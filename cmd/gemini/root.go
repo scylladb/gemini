@@ -371,7 +371,8 @@ func createClusters(
 		return testCluster, nil
 	}
 	oracleCluster := gocql.NewCluster(oracleClusterHost...)
-	oracleCluster.Timeout = 120 * time.Second
+	testCluster.Timeout = requestTimeout
+	testCluster.ConnectTimeout = connectTimeout
 	oracleCluster.RetryPolicy = retryPolicy
 	oracleCluster.Consistency = consistency
 	oracleCluster.PoolConfig.HostSelectionPolicy = oracleHostSelectionPolicy
