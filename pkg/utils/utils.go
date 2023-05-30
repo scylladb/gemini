@@ -76,8 +76,8 @@ func RandString(rnd *rand.Rand, ln int) string {
 	if ln <= 32 {
 		return buff
 	}
-	out := make([]byte, ln+buffLen)
-	for idx := 0; idx < ln+buffLen; idx += buffLen {
+	out := make([]byte, ln)
+	for idx := 0; idx < ln; idx += buffLen {
 		copy(out[idx:], buff)
 	}
 	return string(out[:ln])
