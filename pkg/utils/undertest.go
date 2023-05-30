@@ -12,30 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package typedef
+package utils
 
-import (
-	"github.com/gocql/gocql"
-	"golang.org/x/exp/rand"
-)
+var UnderTest = false
 
-type Type interface {
-	Name() string
-	CQLDef() string
-	CQLHolder() string
-	CQLPretty(string, []interface{}) (string, int)
-	GenValue(*rand.Rand, *PartitionRangeConfig) []interface{}
-	LenValue() int
-	Indexable() bool
-	CQLType() gocql.TypeInfo
-}
-
-type Types []Type
-
-func (l Types) LenValue() int {
-	out := 0
-	for _, t := range l {
-		out += t.LenValue()
-	}
-	return out
+func SetUnderTest() {
+	UnderTest = true
 }

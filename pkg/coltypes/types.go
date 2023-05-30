@@ -24,6 +24,7 @@ import (
 	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 const (
@@ -144,6 +145,10 @@ func (mt *MapType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []int
 	return []interface{}{vals}
 }
 
+func (mt *MapType) LenValue() int {
+	return 1
+}
+
 func (mt *MapType) CQLDef() string {
 	if mt.Frozen {
 		return "frozen<map<" + mt.KeyType.CQLDef() + "," + mt.ValueType.CQLDef() + ">>"
@@ -176,7 +181,14 @@ func (ct *CounterType) CQLPretty(query string, value []interface{}) (string, int
 }
 
 func (ct *CounterType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []interface{} {
+	if utils.UnderTest {
+		return []interface{}{r.Int63()}
+	}
 	return []interface{}{atomic.AddInt64(&ct.Value, 1)}
+}
+
+func (ct *CounterType) LenValue() int {
+	return 1
 }
 
 func (ct *CounterType) CQLDef() string {

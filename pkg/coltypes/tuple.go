@@ -83,3 +83,11 @@ func (t *TupleType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []in
 	}
 	return out
 }
+
+func (t *TupleType) LenValue() int {
+	out := 0
+	for _, tp := range t.Types {
+		out += tp.LenValue()
+	}
+	return out
+}

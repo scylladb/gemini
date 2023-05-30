@@ -15,6 +15,8 @@
 package typedef
 
 import (
+	"fmt"
+
 	"github.com/scylladb/gocqlx/v2/qb"
 
 	"github.com/scylladb/gemini/pkg/replication"
@@ -53,12 +55,17 @@ type Stmts struct {
 	List         []*Stmt
 }
 
+type StmtCache struct {
+	Query     qb.Builder
+	Types     Types
+	QueryType StatementType
+	LenValue  int
+}
+
 type Stmt struct {
+	*StmtCache
 	ValuesWithToken *ValueWithToken
-	Query           qb.Builder
 	Values          Values
-	Types           []Type
-	QueryType       StatementType
 }
 
 func (s *Stmt) PrettyCQL() string {
@@ -92,3 +99,34 @@ func (v Values) Copy() Values {
 	copy(values, v)
 	return values
 }
+
+func (v Values) CopyFrom(src Values) Values {
+	out := v[len(v) : len(v)+len(src)]
+	copy(out, src)
+	return v[:len(v)+len(src)]
+}
+
+type StatementCacheType uint8
+
+func (t StatementCacheType) ToString() string {
+	switch t {
+	case CacheInsert:
+		return "CacheInsert"
+	case CacheInsertIfNotExists:
+		return "CacheInsertIfNotExists"
+	case CacheUpdate:
+		return "CacheUpdate"
+	case CacheDelete:
+		return "CacheDelete"
+	default:
+		panic(fmt.Sprintf("unknown statement cache type %d", t))
+	}
+}
+
+const (
+	CacheInsert StatementCacheType = iota
+	CacheInsertIfNotExists
+	CacheUpdate
+	CacheDelete
+	CacheArrayLen
+)

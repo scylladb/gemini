@@ -15,27 +15,27 @@
 package typedef
 
 import (
-	"github.com/gocql/gocql"
-	"golang.org/x/exp/rand"
+	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
-type Type interface {
-	Name() string
-	CQLDef() string
-	CQLHolder() string
-	CQLPretty(string, []interface{}) (string, int)
-	GenValue(*rand.Rand, *PartitionRangeConfig) []interface{}
-	LenValue() int
-	Indexable() bool
-	CQLType() gocql.TypeInfo
-}
-
-type Types []Type
-
-func (l Types) LenValue() int {
-	out := 0
-	for _, t := range l {
-		out += t.LenValue()
+func TestValues(t *testing.T) {
+	tmp := make(Values, 0, 10)
+	expected := Values{1, 2, 3, 4, 5, 6, 7}
+	expected2 := Values{1, 2, 3, 4, 5, 6, 7, 8, 9}
+	expected3 := Values{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	tmp = append(tmp, 1, 2, 3, 4, 5)
+	tmp = tmp.CopyFrom(Values{6, 7})
+	if !cmp.Equal(tmp, expected) {
+		t.Error("%i != %i", tmp, expected)
 	}
-	return out
+	tmp = tmp.CopyFrom(Values{8, 9})
+	if !cmp.Equal(tmp, expected2) {
+		t.Error("%i != %i", tmp, expected)
+	}
+	tmp = append(tmp, 10)
+	if !cmp.Equal(tmp, expected3) {
+		t.Error("%i != %i", tmp, expected)
+	}
 }

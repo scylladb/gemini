@@ -15,6 +15,7 @@
 package builders
 
 import (
+	"github.com/scylladb/gemini/pkg/querycache"
 	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -49,7 +50,11 @@ func (s *schemaBuilder) Table(table *testschema.Table) SchemaBuilder {
 }
 
 func (s *schemaBuilder) Build() *testschema.Schema {
-	return &testschema.Schema{Keyspace: s.keyspace, Tables: s.tables}
+	out := &testschema.Schema{Keyspace: s.keyspace, Tables: s.tables}
+	for id := range s.tables {
+		s.tables[id].Init(out, querycache.New(out))
+	}
+	return out
 }
 
 func NewSchemaBuilder() SchemaBuilder {

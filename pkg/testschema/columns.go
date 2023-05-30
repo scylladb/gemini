@@ -72,6 +72,10 @@ func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
 
 type Columns []*ColumnDef
 
+func (c Columns) Len() int {
+	return len(c)
+}
+
 func (c Columns) Names() []string {
 	names := make([]string, 0, len(c))
 	for _, col := range c {
@@ -123,6 +127,26 @@ func (c Columns) ValidColumnsForPrimaryKey() Columns {
 
 func (c Columns) Random() *ColumnDef {
 	return c[rand.Intn(len(c))]
+}
+
+func (c Columns) LenValues() int {
+	out := 0
+	for _, col := range c {
+		out += col.Type.LenValue()
+	}
+	return out
+}
+
+func (c Columns) NonCounters() Columns {
+	out := make(Columns, 0, len(c))
+	for _, col := range c {
+		switch col.Type.(type) {
+		case *coltypes.CounterType:
+			continue
+		}
+		out = append(out, col)
+	}
+	return out
 }
 
 func (c Columns) CreateMaterializedViews(tableName string, partitionKeys, clusteringKeys Columns) []MaterializedView {

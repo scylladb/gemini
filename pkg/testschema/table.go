@@ -21,14 +21,24 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
+type QueryCache interface {
+	GetQuery(qct typedef.StatementCacheType) *typedef.StmtCache
+	Reset()
+	BindToTable(t *Table)
+}
+
+type KnownIssues map[string]bool
+
 type Table struct {
+	queryCache        QueryCache
+	schema            *Schema
 	Name              string             `json:"name"`
 	PartitionKeys     Columns            `json:"partition_keys"`
 	ClusteringKeys    Columns            `json:"clustering_keys"`
 	Columns           Columns            `json:"columns"`
 	Indexes           []typedef.IndexDef `json:"indexes,omitempty"`
 	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
-	KnownIssues       map[string]bool    `json:"known_issues"`
+	KnownIssues       KnownIssues        `json:"known_issues"`
 	TableOptions      []string           `json:"table_options,omitempty"`
 
 	// mu protects the table during schema changes
@@ -57,4 +67,18 @@ func (t *Table) RLock() {
 
 func (t *Table) RUnlock() {
 	t.mu.RUnlock()
+}
+
+func (t *Table) GetQueryCache(st typedef.StatementCacheType) *typedef.StmtCache {
+	return t.queryCache.GetQuery(st)
+}
+
+func (t *Table) ResetQueryCache() {
+	t.queryCache.Reset()
+}
+
+func (t *Table) Init(s *Schema, c QueryCache) {
+	t.schema = s
+	t.queryCache = c
+	t.queryCache.BindToTable(t)
 }

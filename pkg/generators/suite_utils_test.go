@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/builders"
@@ -30,10 +31,6 @@ import (
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/testschema"
-	"github.com/scylladb/gemini/pkg/utils"
-
-	"github.com/pkg/errors"
-
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -139,16 +136,16 @@ func getErrorMsgIfDifferent(t *testing.T, expected, received, errMsg string) {
 		// Inject nice row that highlights differences if length is not changed
 		errMsgList = []string{
 			errMsg,
-			fmt.Sprintf("Expected⇶⇶⇶%s", expected),
+			fmt.Sprintf("Expected   %s", expected),
 			"           " + diffHighlightString(expected, received),
-			fmt.Sprintf("Received⇶⇶⇶%s", received),
+			fmt.Sprintf("Received   %s", received),
 			"-------------------------------------------",
 		}
 	case false:
 		errMsgList = []string{
 			errMsg,
-			fmt.Sprintf("Expected⇶⇶⇶%s", expected),
-			fmt.Sprintf("Received⇶⇶⇶%s", received),
+			fmt.Sprintf("Expected   %s", expected),
+			fmt.Sprintf("Received   %s", received),
 			"-------------------------------------------",
 		}
 	}
@@ -254,7 +251,6 @@ type testInterface interface {
 }
 
 func getAllForTestStmt(t testInterface, caseName string) (*testschema.Schema, *typedef.PartitionRangeConfig, *MockGenerator, *rand.Rand, bool, bool) {
-	utils.SetTestUUIDFromTime()
 	rnd := rand.New(nonRandSource(1))
 	table, useLWT, useMV := getTableAndOptionsFromName(t, caseName)
 

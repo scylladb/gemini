@@ -86,6 +86,10 @@ func (ct *BagType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []int
 	return []interface{}{out}
 }
 
+func (ct *BagType) LenValue() int {
+	return 1
+}
+
 func (ct *BagType) Indexable() bool {
 	return false
 }
