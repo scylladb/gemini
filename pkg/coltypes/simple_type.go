@@ -63,6 +63,10 @@ func (st SimpleType) CQLHolder() string {
 	return "?"
 }
 
+func (st SimpleType) LenValue() int {
+	return 1
+}
+
 func (st SimpleType) CQLPretty(query string, value []interface{}) (string, int) {
 	if len(value) == 0 {
 		return query, 0

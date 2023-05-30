@@ -43,6 +43,5 @@ func TestRandString(t *testing.T) {
 		if len(out) != ln {
 			t.Fatalf("%d != %d", ln, len(out))
 		}
-		println(out)
 	}
 }

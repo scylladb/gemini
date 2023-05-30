@@ -60,7 +60,7 @@
       "TokenValues": "[1]",
       "Query": "INSERT INTO ks1.pk1_ck1_col1cr_lwt (pk0,ck0,col0) VALUES (?,?,?) IF NOT EXISTS",
       "Names": "[pk0 ck0 col0]",
-      "Values": "[1 1969-12-31 5]",
+      "Values": "[1 1969-12-31 1]",
       "Types": " bigint date counter",
       "QueryType": "5"
     }
@@ -71,7 +71,7 @@
       "TokenValues": "[1 1.110223e-16 1.1.1.1]",
       "Query": "INSERT INTO ks1.pk3_ck3_col3cr (pk0,pk1,pk2,ck0,ck1,ck2,col0,col1,col2) VALUES (?,?,?,?,?,?,?,?,?)",
       "Names": "[pk0 pk1 pk2 ck0 ck1 ck2 col0 col1 col2]",
-      "Values": "[1 1.110223e-16 1.1.1.1 01 1969-12-31 0.001 2 3 4]",
+      "Values": "[1 1.110223e-16 1.1.1.1 01 1969-12-31 0.001 1 1 1]",
       "Types": " bigint float inet ascii date decimal counter counter counter",
       "QueryType": "5"
     }

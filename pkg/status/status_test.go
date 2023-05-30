@@ -27,6 +27,7 @@ import (
 )
 
 func TestSerialization(t *testing.T) {
+	t.Parallel()
 	//nolint:lll
 	expected := []byte(`{"errors":[{"timestamp":"2020-02-01T00:00:00Z","message":"Some Message 0","query":"Some Query 0"},{"timestamp":"2020-02-02T00:00:00Z","message":"Some Message 1","query":"Some Query 1"},{"timestamp":"2020-02-03T00:00:00Z","message":"Some Message 2","query":"Some Query 2"},{"timestamp":"2020-02-04T00:00:00Z","message":"Some Message 3","query":"Some Query 3"},{"timestamp":"2020-02-05T00:00:00Z","message":"Some Message 4","query":"Some Query 4"},{"timestamp":"2020-03-01T00:00:00Z","message":"Some Message 0","query":"Some Query 0"},{"timestamp":"2020-03-02T00:00:00Z","message":"Some Message 1","query":"Some Query 1"},{"timestamp":"2020-03-03T00:00:00Z","message":"Some Message 2","query":"Some Query 2"},{"timestamp":"2020-03-04T00:00:00Z","message":"Some Message 3","query":"Some Query 3"},{"timestamp":"2020-03-05T00:00:00Z","message":"Some Message 4","query":"Some Query 4"}],"write_ops":10,"write_errors":5,"read_ops":5,"read_errors":5}`)
 	st := status.NewGlobalStatus(10)

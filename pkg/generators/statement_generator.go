@@ -124,11 +124,13 @@ func genSinglePartitionQuery(s *testschema.Schema, t *testschema.Table, g *Gener
 	}
 
 	return &typedef.Stmt{
+		StmtCache: &typedef.StmtCache{
+			Query:     builder,
+			Types:     typs,
+			QueryType: typedef.SelectStatementType,
+		},
 		ValuesWithToken: valuesWithToken,
-		Query:           builder,
 		Values:          values,
-		Types:           typs,
-		QueryType:       typedef.SelectStatementType,
 	}
 }
 
@@ -175,10 +177,12 @@ func genMultiplePartitionQuery(s *testschema.Schema, t *testschema.Table, g *Gen
 		}
 	}
 	return &typedef.Stmt{
-		Query:     builder,
-		Values:    values,
-		Types:     typs,
-		QueryType: typedef.SelectStatementType,
+		StmtCache: &typedef.StmtCache{
+			Query:     builder,
+			Types:     typs,
+			QueryType: typedef.SelectStatementType,
+		},
+		Values: values,
 	}
 }
 
@@ -228,10 +232,12 @@ func genClusteringRangeQuery(s *testschema.Schema, t *testschema.Table, g *Gener
 		allTypes = append(allTypes, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	}
 	return &typedef.Stmt{
-		Query:     builder,
-		Values:    values,
-		Types:     allTypes,
-		QueryType: typedef.SelectRangeStatementType,
+		StmtCache: &typedef.StmtCache{
+			Query:     builder,
+			QueryType: typedef.SelectRangeStatementType,
+			Types:     allTypes,
+		},
+		Values: values,
 	}
 }
 
@@ -291,10 +297,12 @@ func genMultiplePartitionClusteringRangeQuery(s *testschema.Schema, t *testschem
 		typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	}
 	return &typedef.Stmt{
-		Query:     builder,
-		Values:    values,
-		Types:     typs,
-		QueryType: typedef.SelectRangeStatementType,
+		StmtCache: &typedef.StmtCache{
+			Query:     builder,
+			Types:     typs,
+			QueryType: typedef.SelectRangeStatementType,
+		},
+		Values: values,
 	}
 }
 
@@ -325,10 +333,12 @@ func genSingleIndexQuery(s *testschema.Schema, t *testschema.Table, g *Generator
 	}
 
 	return &typedef.Stmt{
-		Query:     builder,
-		Values:    values,
-		Types:     typs,
-		QueryType: typedef.SelectByIndexStatementType,
+		StmtCache: &typedef.StmtCache{
+			Query:     builder,
+			Types:     typs,
+			QueryType: typedef.SelectByIndexStatementType,
+		},
+		Values: values,
 	}
 }
 
@@ -347,41 +357,20 @@ func genInsertOrUpdateStmt(
 }
 
 func genUpdateStmt(s *testschema.Schema, t *testschema.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
-	var typs []typedef.Type
-	builder := qb.Update(s.Keyspace.Name + "." + t.Name)
-	for _, pk := range t.PartitionKeys {
-		builder = builder.Where(qb.Eq(pk.Name))
-		typs = append(typs, pk.Type)
+	stmtCache := t.GetQueryCache(typedef.CacheUpdate)
+	nonCounters := t.Columns.NonCounters()
+	values := make(typedef.Values, 0, t.PartitionKeys.LenValues()+t.ClusteringKeys.LenValues()+nonCounters.LenValues())
+	for _, cdef := range nonCounters {
+		values = appendValue(cdef.Type, r, p, values)
 	}
-	values := valuesWithToken.Value.Copy()
+	values = values.CopyFrom(valuesWithToken.Value)
 	for _, ck := range t.ClusteringKeys {
-		builder = builder.Where(qb.Eq(ck.Name))
 		values = appendValue(ck.Type, r, p, values)
-		typs = append(typs, ck.Type)
-	}
-	var (
-		colValues typedef.Values
-		colTyps   []typedef.Type
-	)
-	for _, cdef := range t.Columns {
-		switch t := cdef.Type.(type) {
-		case *coltypes.TupleType:
-			builder = builder.SetTuple(cdef.Name, len(t.Types))
-		case *coltypes.CounterType:
-			builder = builder.SetLit(cdef.Name, cdef.Name+"+1")
-			continue
-		default:
-			builder = builder.Set(cdef.Name)
-		}
-		colValues = appendValue(cdef.Type, r, p, colValues)
-		colTyps = append(colTyps, cdef.Type)
 	}
 	return &typedef.Stmt{
+		StmtCache:       stmtCache,
 		ValuesWithToken: valuesWithToken,
-		Query:           builder,
-		Values:          append(colValues, values...),
-		Types:           append(colTyps, typs...),
-		QueryType:       typedef.Updatetatement,
+		Values:          values,
 	}, nil
 }
 
@@ -393,38 +382,23 @@ func genInsertStmt(
 	p *typedef.PartitionRangeConfig,
 	useLWT bool,
 ) (*typedef.Stmt, error) {
-	var typs []typedef.Type
-	builder := qb.Insert(s.Keyspace.Name + "." + t.Name)
-	for _, pk := range t.PartitionKeys {
-		builder = builder.Columns(pk.Name)
-		typs = append(typs, pk.Type)
-	}
-	values := valuesWithToken.Value.Copy()
+	values := make(typedef.Values, 0, t.PartitionKeys.LenValues()+t.ClusteringKeys.LenValues()+t.Columns.LenValues())
+	values = values.CopyFrom(valuesWithToken.Value)
 	for _, ck := range t.ClusteringKeys {
-		builder = builder.Columns(ck.Name)
-		values = appendValue(ck.Type, r, p, values)
-		typs = append(typs, ck.Type)
+		values = append(values, ck.Type.GenValue(r, p)...)
 	}
-	for _, cdef := range t.Columns {
-		switch t := cdef.Type.(type) {
-		case *coltypes.TupleType:
-			builder = builder.TupleColumn(cdef.Name, len(t.Types))
-		default:
-			builder = builder.Columns(cdef.Name)
-		}
-		values = appendValue(cdef.Type, r, p, values)
-		typs = append(typs, cdef.Type)
+	for _, col := range t.Columns {
+		values = append(values, col.Type.GenValue(r, p)...)
 	}
+	cacheType := typedef.CacheInsert
 	if useLWT {
-		builder = builder.Unique()
+		cacheType = typedef.CacheInsertIfNotExists
 	}
-
+	stmtCache := t.GetQueryCache(cacheType)
 	return &typedef.Stmt{
+		StmtCache:       stmtCache,
 		ValuesWithToken: valuesWithToken,
-		Query:           builder,
 		Values:          values,
-		Types:           typs,
-		QueryType:       typedef.InsertStatement,
 	}, nil
 }
 
@@ -481,36 +455,28 @@ func genInsertJSONStmt(
 
 	builder := qb.Insert(s.Keyspace.Name + "." + table.Name).Json()
 	return &typedef.Stmt{
+		StmtCache: &typedef.StmtCache{
+			Query:     builder,
+			Types:     []typedef.Type{coltypes.TYPE_TEXT},
+			QueryType: typedef.InsertStatement,
+		},
 		ValuesWithToken: valuesWithToken,
-		Query:           builder,
 		Values:          []interface{}{string(jsonString)},
-		Types:           []typedef.Type{coltypes.TYPE_TEXT},
-		QueryType:       typedef.InsertStatement,
 	}, nil
 }
 
 func genDeleteRows(s *testschema.Schema, t *testschema.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
-	var typs []typedef.Type
-	builder := qb.Delete(s.Keyspace.Name + "." + t.Name)
-	for _, pk := range t.PartitionKeys {
-		builder = builder.Where(qb.Eq(pk.Name))
-		typs = append(typs, pk.Type)
-	}
-
+	stmtCache := t.GetQueryCache(typedef.CacheDelete)
 	values := valuesWithToken.Value.Copy()
 	if len(t.ClusteringKeys) > 0 {
 		ck := t.ClusteringKeys[0]
-		builder = builder.Where(qb.GtOrEq(ck.Name)).Where(qb.LtOrEq(ck.Name))
 		values = appendValue(ck.Type, r, p, values)
 		values = appendValue(ck.Type, r, p, values)
-		typs = append(typs, ck.Type, ck.Type)
 	}
 	return &typedef.Stmt{
+		StmtCache:       stmtCache,
 		ValuesWithToken: valuesWithToken,
-		Query:           builder,
 		Values:          values,
-		Types:           typs,
-		QueryType:       typedef.DeleteStatementType,
 	}, nil
 }
 
@@ -540,21 +506,26 @@ func genAddColumnStmt(t *testschema.Table, keyspace string, sc *typedef.SchemaCo
 		}
 		stmt := fmt.Sprintf(createType, keyspace, c.TypeName, strings.Join(typs, ","))
 		stmts = append(stmts, &typedef.Stmt{
-			Query: &builders.AlterTableBuilder{
-				Stmt: stmt,
+			StmtCache: &typedef.StmtCache{
+				Query: &builders.AlterTableBuilder{
+					Stmt: stmt,
+				},
 			},
 		})
 	}
 	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " ADD " + column.Name + " " + column.Type.CQLDef()
 	stmts = append(stmts, &typedef.Stmt{
-		Query: &builders.AlterTableBuilder{
-			Stmt: stmt,
+		StmtCache: &typedef.StmtCache{
+			Query: &builders.AlterTableBuilder{
+				Stmt: stmt,
+			},
 		},
 	})
 	return &typedef.Stmts{
 		List: stmts,
 		PostStmtHook: func() {
 			t.Columns = append(t.Columns, &column)
+			t.ResetQueryCache()
 		},
 	}, nil
 }
@@ -576,13 +547,16 @@ func alterColumn(t *testschema.Table, keyspace string) ([]*typedef.Stmt, func(),
 	newColumn := testschema.ColumnDef{Name: column.Name, Type: newType}
 	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " ALTER " + column.Name + " TYPE " + column.Type.CQLDef()
 	stmts = append(stmts, &typedef.Stmt{
-		Query: &builders.AlterTableBuilder{
-			Stmt: stmt,
+		StmtCache: &typedef.StmtCache{
+			Query: &builders.AlterTableBuilder{
+				Stmt: stmt,
+			},
+			QueryType: typedef.AlterColumnStatementType,
 		},
-		QueryType: typedef.AlterColumnStatementType,
 	})
 	return stmts, func() {
 		t.Columns[idx] = &newColumn
+		t.ResetQueryCache()
 	}, nil
 }
 
@@ -592,15 +566,18 @@ func genDropColumnStmt(t *testschema.Table, keyspace string) (*typedef.Stmts, er
 	column := t.Columns[idx]
 	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " DROP " + column.Name
 	stmts = append(stmts, &typedef.Stmt{
-		Query: &builders.AlterTableBuilder{
-			Stmt: stmt,
+		StmtCache: &typedef.StmtCache{
+			Query: &builders.AlterTableBuilder{
+				Stmt: stmt,
+			},
+			QueryType: typedef.DropColumnStatementType,
 		},
-		QueryType: typedef.DropColumnStatementType,
 	})
 	return &typedef.Stmts{
 		List: stmts,
 		PostStmtHook: func() {
 			t.Columns = append(t.Columns[:idx], t.Columns[idx+1:]...)
+			t.ResetQueryCache()
 		},
 	}, nil
 }

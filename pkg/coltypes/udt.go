@@ -82,3 +82,7 @@ func (t *UDTType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []inte
 	}
 	return []interface{}{vals}
 }
+
+func (t *UDTType) LenValue() int {
+	return 1
+}
