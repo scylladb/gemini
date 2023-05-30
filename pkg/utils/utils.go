@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
 )
 
@@ -81,4 +82,18 @@ func RandString(rnd *rand.Rand, ln int) string {
 		copy(out[idx:], buff)
 	}
 	return string(out[:ln])
+}
+
+var testUUIDFromTime bool
+
+func UUIDFromTime(rnd *rand.Rand) string {
+	if testUUIDFromTime {
+		return gocql.TimeUUIDWith(rnd.Int63(), 0, []byte("127.0.0.1")).String()
+	}
+	return gocql.UUIDFromTime(RandTime(rnd)).String()
+}
+
+func SetTestUUIDFromTime() {
+	// Makes TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR, TYPE_BLOB predictable
+	testUUIDFromTime = true
 }

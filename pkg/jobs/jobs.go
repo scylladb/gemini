@@ -323,7 +323,7 @@ func ddl(
 	}
 	table.Lock()
 	defer table.Unlock()
-	ddlStmts, postStmtHook, err := generators.GenDDLStmt(schema, table, r, p, sc)
+	ddlStmts, err := generators.GenDDLStmt(schema, table, r, p, sc)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		globalStatus.WriteErrors.Add(1)
@@ -335,7 +335,7 @@ func ddl(
 		}
 		return nil
 	}
-	for _, ddlStmt := range ddlStmts {
+	for _, ddlStmt := range ddlStmts.List {
 		if w := logger.Check(zap.DebugLevel, "ddl statement"); w != nil {
 			w.Write(zap.String("pretty_cql", ddlStmt.PrettyCQL()))
 		}
@@ -349,7 +349,7 @@ func ddl(
 		}
 		globalStatus.WriteOps.Add(1)
 	}
-	postStmtHook()
+	ddlStmts.PostStmtHook()
 	if verbose {
 		jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
 		fmt.Printf("New schema: %v\n", string(jsonSchema))

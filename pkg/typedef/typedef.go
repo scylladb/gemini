@@ -48,6 +48,11 @@ type (
 	CQLFeature int
 )
 
+type Stmts struct {
+	PostStmtHook func()
+	List         []*Stmt
+}
+
 type Stmt struct {
 	ValuesWithToken *ValueWithToken
 	Query           qb.Builder
