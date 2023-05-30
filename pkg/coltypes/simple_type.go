@@ -158,10 +158,10 @@ func (st SimpleType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []i
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
 		ln := r.Intn(p.MaxStringLength) + p.MinStringLength
-		val = utils.RandStringWithTime(r, ln, utils.RandTime(r))
+		val = utils.RandString(r, ln)
 	case TYPE_BLOB:
 		ln := r.Intn(p.MaxBlobLength) + p.MinBlobLength
-		val = hex.EncodeToString([]byte(utils.RandStringWithTime(r, ln, utils.RandTime(r))))
+		val = hex.EncodeToString([]byte(utils.RandString(r, ln)))
 	case TYPE_BIGINT:
 		val = r.Int63()
 	case TYPE_BOOLEAN:
