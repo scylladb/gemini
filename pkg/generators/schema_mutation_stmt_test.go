@@ -107,7 +107,10 @@ func BenchmarkGenInsertStmt(t *testing.B) {
 		t.Run(caseName,
 			func(subT *testing.B) {
 				schema, prc, gen, rnd, useLWT, _ := getAllForTestStmt(subT, caseName)
-				_, _ = genInsertStmt(schema, schema.Tables[0], gen.Get(), rnd, prc, useLWT)
+				subT.ResetTimer()
+				for x := 0; x < subT.N; x++ {
+					_, _ = genInsertStmt(schema, schema.Tables[0], gen.Get(), rnd, prc, useLWT)
+				}
 			})
 	}
 }
@@ -118,7 +121,10 @@ func BenchmarkGenUpdateStmt(t *testing.B) {
 		t.Run(caseName,
 			func(subT *testing.B) {
 				schema, prc, gen, rnd, _, _ := getAllForTestStmt(subT, caseName)
-				_, _ = genUpdateStmt(schema, schema.Tables[0], gen.Get(), rnd, prc)
+				subT.ResetTimer()
+				for x := 0; x < subT.N; x++ {
+					_, _ = genUpdateStmt(schema, schema.Tables[0], gen.Get(), rnd, prc)
+				}
 			})
 	}
 }
@@ -129,7 +135,10 @@ func BenchmarkGenDeleteRows(t *testing.B) {
 		t.Run(caseName,
 			func(subT *testing.B) {
 				schema, prc, gen, rnd, _, _ := getAllForTestStmt(subT, caseName)
-				_, _ = genDeleteRows(schema, schema.Tables[0], gen.Get(), rnd, prc)
+				subT.ResetTimer()
+				for x := 0; x < subT.N; x++ {
+					_, _ = genDeleteRows(schema, schema.Tables[0], gen.Get(), rnd, prc)
+				}
 			})
 	}
 }
