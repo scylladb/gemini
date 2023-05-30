@@ -248,7 +248,12 @@ func (s nonRandSource) Uint64() uint64 {
 func (s nonRandSource) Seed(uint64) {
 }
 
-func getAllForTestStmt(t *testing.T, caseName string) (*testschema.Schema, *typedef.PartitionRangeConfig, *MockGenerator, *rand.Rand, bool, bool) {
+type testInterface interface {
+	Errorf(format string, args ...any)
+	Fatalf(format string, args ...any)
+}
+
+func getAllForTestStmt(t testInterface, caseName string) (*testschema.Schema, *typedef.PartitionRangeConfig, *MockGenerator, *rand.Rand, bool, bool) {
 	utils.SetTestUUIDFromTime()
 	rnd := rand.New(nonRandSource(1))
 	table, useLWT, useMV := getTableAndOptionsFromName(t, caseName)
@@ -329,7 +334,7 @@ func genTestSchema(sc typedef.SchemaConfig, table *testschema.Table) *testschema
 	return builder.Build()
 }
 
-func getTableAndOptionsFromName(t *testing.T, tableName string) (*testschema.Table, bool, bool) {
+func getTableAndOptionsFromName(t testInterface, tableName string) (*testschema.Table, bool, bool) {
 	nameParts := strings.Split(tableName, "_")
 	var table testschema.Table
 	var useLWT, useMV bool
@@ -361,7 +366,7 @@ func getTableAndOptionsFromName(t *testing.T, tableName string) (*testschema.Tab
 	return &table, useLWT, useMV
 }
 
-func genColumnsFromCase(t *testing.T, typeCases map[string][]typedef.Type, caseName, prefix string) testschema.Columns {
+func genColumnsFromCase(t testInterface, typeCases map[string][]typedef.Type, caseName, prefix string) testschema.Columns {
 	typeCase, ok := typeCases[caseName]
 	if !ok {
 		t.Fatalf("Error caseName:%s, not found", caseName)
