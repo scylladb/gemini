@@ -12,33 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build slow
-// +build slow
-
 package utils_test
 
 import (
-	"github.com/scylladb/gemini/pkg/utils"
-	"golang.org/x/exp/rand"
 	"testing"
-	"testing/quick"
 	"time"
+
+	"golang.org/x/exp/rand"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 var rnd = rand.New(rand.NewSource(uint64(time.Now().UnixNano())))
 
-func TestNonEmptyRandString(t *testing.T) {
-	// TODO: Figure out why this is so horribly slow...
-	tt := time.Now()
-	f := func(len int32) bool {
-		if len < 0 {
-			len = -len
-		}
-		r := utils.RandStringWithTime(rnd, int(len), tt)
-		return r != ""
+func BenchmarkUtilsRandString100(t *testing.B) {
+	for x := 0; x < t.N; x++ {
+		utils.RandString(rnd, 100)
 	}
-	cfg := &quick.Config{MaxCount: 10}
-	if err := quick.Check(f, cfg); err != nil {
-		t.Error(err)
+}
+
+func BenchmarkUtilsRandString1000(t *testing.B) {
+	for x := 0; x < t.N; x++ {
+		utils.RandString(rnd, 1000)
+	}
+}
+
+func TestRandString(t *testing.T) {
+	for _, ln := range []int{1, 3, 5, 16, 45, 100, 1000} {
+		out := utils.RandString(rnd, ln)
+		if len(out) != ln {
+			t.Fatalf("%d != %d", ln, len(out))
+		}
+		println(out)
 	}
 }

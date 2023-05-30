@@ -15,32 +15,14 @@
 package utils
 
 import (
-	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/segmentio/ksuid"
 	"golang.org/x/exp/rand"
 )
-
-func RandStringWithTime(rnd *rand.Rand, len int, t time.Time) string {
-	id, _ := ksuid.NewRandomWithTime(t)
-
-	var buf strings.Builder
-	buf.WriteString(id.String())
-	if buf.Len() >= len {
-		return buf.String()[:len]
-	}
-
-	// Pad some extra random data
-	buff := make([]byte, len-buf.Len())
-	_, _ = rnd.Read(buff)
-	buf.WriteString(base64.StdEncoding.EncodeToString(buff))
-
-	return buf.String()[:len]
-}
 
 func RandDate(rnd *rand.Rand) string {
 	return RandTime(rnd).Format("2006-01-02")
@@ -51,7 +33,7 @@ func RandTime(rnd *rand.Rand) time.Time {
 	max := time.Date(2024, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
 
 	sec := rnd.Int63n(max-min) + min
-	return time.Unix(sec, 0)
+	return time.Unix(sec, 0).UTC()
 }
 
 func RandIpV4Address(rnd *rand.Rand, v, pos int) string {
@@ -81,4 +63,22 @@ func RandInt(min, max int) int {
 
 func IgnoreError(fn func() error) {
 	_ = fn()
+}
+
+func RandString(rnd *rand.Rand, ln int) string {
+	buffLen := ln
+	if buffLen > 32 {
+		buffLen = 32
+	}
+	binBuff := make([]byte, buffLen/2+1)
+	_, _ = rnd.Read(binBuff)
+	buff := hex.EncodeToString(binBuff)[:buffLen]
+	if ln <= 32 {
+		return buff
+	}
+	out := make([]byte, ln+buffLen)
+	for idx := 0; idx < ln+buffLen; idx += buffLen {
+		copy(out[idx:], buff)
+	}
+	return string(out[:ln])
 }
