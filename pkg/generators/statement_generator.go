@@ -63,64 +63,108 @@ func GenMutateStmt(s *testschema.Schema, t *testschema.Table, g *Generator, r *r
 	}
 }
 
-func GenCheckStmt(s *testschema.Schema, t *testschema.Table, g *Generator, r *rand.Rand, p *typedef.PartitionRangeConfig) *typedef.Stmt {
+func GenCheckStmt(
+	s *testschema.Schema,
+	table *testschema.Table,
+	g *Generator,
+	rnd *rand.Rand,
+	p *typedef.PartitionRangeConfig,
+) *typedef.Stmt {
 	var n int
-	if len(t.Indexes) > 0 {
-		n = r.Intn(5)
+	if len(table.Indexes) > 0 {
+		n = rnd.Intn(5)
 	} else {
-		n = r.Intn(4)
+		n = rnd.Intn(4)
 	}
+	var mv *testschema.MaterializedView
+	if len(table.MaterializedViews) > 0 && rnd.Int()%2 == 0 {
+		mv = &table.MaterializedViews[rnd.Intn(len(table.MaterializedViews))]
+	}
+
+	maxClusteringRels := 0
+	numQueryPKs := 0
+
 	switch n {
 	case 0:
-		return genSinglePartitionQuery(s, t, g, r, p)
+		return genSinglePartitionQuery(s, table, g, rnd, p, mv)
 	case 1:
-		return genMultiplePartitionQuery(s, t, g, r, p)
+		lenPartitionKeys := len(table.PartitionKeys)
+		if len(table.MaterializedViews) > 0 && rnd.Int()%2 == 0 {
+			mv = &table.MaterializedViews[rnd.Intn(len(table.MaterializedViews))]
+			lenPartitionKeys = len(mv.PartitionKeys)
+		}
+		numQueryPKs = utils.RandInt2(rnd, 1, lenPartitionKeys)
+		multiplier := int(math.Pow(float64(numQueryPKs), float64(lenPartitionKeys)))
+		if multiplier > 100 {
+			numQueryPKs = 1
+		}
+		return genMultiplePartitionQuery(s, table, g, rnd, p, mv, numQueryPKs)
 	case 2:
-		return genClusteringRangeQuery(s, t, g, r, p)
+		lenClusteringKeys := len(table.ClusteringKeys)
+		if len(table.MaterializedViews) > 0 && rnd.Int()%2 == 0 {
+			mv = &table.MaterializedViews[rnd.Intn(len(table.MaterializedViews))]
+			lenClusteringKeys = len(mv.ClusteringKeys)
+		}
+		maxClusteringRels = utils.RandInt2(rnd, 0, lenClusteringKeys)
+		return genClusteringRangeQuery(s, table, g, rnd, p, mv, maxClusteringRels)
 	case 3:
-		return genMultiplePartitionClusteringRangeQuery(s, t, g, r, p)
+		lenPartitionKeys := len(table.PartitionKeys)
+		lenClusteringKeys := len(table.ClusteringKeys)
+		if len(table.MaterializedViews) > 0 && rnd.Int()%2 == 0 {
+			mv = &table.MaterializedViews[rnd.Intn(len(table.MaterializedViews))]
+			lenPartitionKeys = len(mv.PartitionKeys)
+			lenClusteringKeys = len(mv.ClusteringKeys)
+		}
+		numQueryPKs = utils.RandInt2(rnd, 1, lenPartitionKeys)
+		multiplier := int(math.Pow(float64(numQueryPKs), float64(lenPartitionKeys)))
+		if multiplier > 100 {
+			numQueryPKs = 1
+		}
+		maxClusteringRels = utils.RandInt2(rnd, 0, lenClusteringKeys)
+		return genMultiplePartitionClusteringRangeQuery(s, table, g, rnd, p, mv, numQueryPKs, maxClusteringRels)
 	case 4:
 		// Reducing the probability to hit these since they often take a long time to run
-		switch r.Intn(5) {
+		switch rnd.Intn(5) {
 		case 0:
-			return genSingleIndexQuery(s, t, g, r, p)
+			indexes := table.Indexes[:utils.RandInt2(rnd, 1, len(table.Indexes))]
+			return genSingleIndexQuery(s, table, g, rnd, p, indexes)
 		default:
-			return genSinglePartitionQuery(s, t, g, r, p)
+			return genSinglePartitionQuery(s, table, g, rnd, p, mv)
 		}
 	}
 	return nil
 }
 
-func genSinglePartitionQuery(s *testschema.Schema, t *testschema.Table, g *Generator, r *rand.Rand, p *typedef.PartitionRangeConfig) *typedef.Stmt {
+func genSinglePartitionQuery(
+	s *testschema.Schema,
+	t *testschema.Table,
+	g *Generator,
+	r *rand.Rand,
+	p *typedef.PartitionRangeConfig,
+	mv *testschema.MaterializedView,
+) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
 	valuesWithToken := g.GetOld()
 	if valuesWithToken == nil {
 		return nil
 	}
-	var (
-		mvCol    testschema.ColumnDef
-		mvValues []interface{}
-	)
+	var mvValues []interface{}
 
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	values := valuesWithToken.Value.Copy()
-	if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
-		view := r.Intn(len(t.MaterializedViews))
-		tableName = t.MaterializedViews[view].Name
-		partitionKeys = t.MaterializedViews[view].PartitionKeys
-		mvCol = t.MaterializedViews[view].NonPrimaryKey
+	if mv != nil {
+		tableName = mv.Name
+		partitionKeys = mv.PartitionKeys
+		mvValues = append(mvValues, mv.NonPrimaryKey.Type.GenValue(r, p)...)
+		values = append(mvValues, values...)
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	typs := make([]typedef.Type, 0, 10)
 	for _, pk := range partitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
 		typs = append(typs, pk.Type)
-	}
-	if (testschema.ColumnDef{}) != mvCol {
-		mvValues = appendValue(mvCol.Type, r, p, mvValues)
-		values = append(mvValues, values...)
 	}
 
 	return &typedef.Stmt{
@@ -134,7 +178,15 @@ func genSinglePartitionQuery(s *testschema.Schema, t *testschema.Table, g *Gener
 	}
 }
 
-func genMultiplePartitionQuery(s *testschema.Schema, t *testschema.Table, g *Generator, r *rand.Rand, p *typedef.PartitionRangeConfig) *typedef.Stmt {
+func genMultiplePartitionQuery(
+	s *testschema.Schema,
+	t *testschema.Table,
+	g *Generator,
+	r *rand.Rand,
+	p *typedef.PartitionRangeConfig,
+	mv *testschema.MaterializedView,
+	numQueryPKs int,
+) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
 
@@ -144,18 +196,9 @@ func genMultiplePartitionQuery(s *testschema.Schema, t *testschema.Table, g *Gen
 	)
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
-	if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
-		view := r.Intn(len(t.MaterializedViews))
-		tableName = t.MaterializedViews[view].Name
-		partitionKeys = t.MaterializedViews[view].PartitionKeys
-	}
-	numQueryPKs := r.Intn(len(partitionKeys))
-	if numQueryPKs == 0 {
-		numQueryPKs = 1
-	}
-	multiplier := int(math.Pow(float64(numQueryPKs), float64(len(partitionKeys))))
-	if multiplier > 100 {
-		numQueryPKs = 1
+	if mv != nil {
+		tableName = mv.Name
+		partitionKeys = mv.PartitionKeys
 	}
 
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
@@ -168,7 +211,7 @@ func genMultiplePartitionQuery(s *testschema.Schema, t *testschema.Table, g *Gen
 			}
 			numMVKeys := len(partitionKeys) - len(vs.Value)
 			if i < numMVKeys {
-				values = appendValue(pk.Type, r, p, values)
+				values = append(values, pk.Type.GenValue(r, p)...)
 				typs = append(typs, pk.Type)
 			} else {
 				values = append(values, vs.Value[i-numMVKeys])
@@ -186,7 +229,15 @@ func genMultiplePartitionQuery(s *testschema.Schema, t *testschema.Table, g *Gen
 	}
 }
 
-func genClusteringRangeQuery(s *testschema.Schema, t *testschema.Table, g *Generator, r *rand.Rand, p *typedef.PartitionRangeConfig) *typedef.Stmt {
+func genClusteringRangeQuery(
+	s *testschema.Schema,
+	t *testschema.Table,
+	g *Generator,
+	r *rand.Rand,
+	p *typedef.PartitionRangeConfig,
+	mv *testschema.MaterializedView,
+	maxClusteringRels int,
+) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
 	vs := g.GetOld()
@@ -196,39 +247,35 @@ func genClusteringRangeQuery(s *testschema.Schema, t *testschema.Table, g *Gener
 
 	var (
 		allTypes []typedef.Type
-		mvCol    testschema.ColumnDef
 		mvValues []interface{}
 	)
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	clusteringKeys := t.ClusteringKeys
-	if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
-		view := r.Intn(len(t.MaterializedViews))
-		tableName = t.MaterializedViews[view].Name
-		partitionKeys = t.MaterializedViews[view].PartitionKeys
-		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
-		mvCol = t.MaterializedViews[view].NonPrimaryKey
+	values := vs.Value.Copy()
+
+	if mv != nil {
+		tableName = mv.Name
+		partitionKeys = mv.PartitionKeys
+		clusteringKeys = mv.ClusteringKeys
+		mvValues = append(values, mv.NonPrimaryKey.Type.GenValue(r, p)...)
+		values = append(mvValues, values...)
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
-	values := vs.Value.Copy()
+
 	for _, pk := range partitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
 		allTypes = append(allTypes, pk.Type)
 	}
-	if (testschema.ColumnDef{}) != mvCol {
-		mvValues = appendValue(mvCol.Type, r, p, mvValues)
-		values = append(mvValues, values...)
-	}
 	if len(clusteringKeys) > 0 {
-		maxClusteringRels := r.Intn(len(clusteringKeys))
 		for i := 0; i < maxClusteringRels; i++ {
 			builder = builder.Where(qb.Eq(clusteringKeys[i].Name))
-			values = appendValue(clusteringKeys[i].Type, r, p, values)
+			values = append(values, clusteringKeys[i].Type.GenValue(r, p)...)
 			allTypes = append(allTypes, clusteringKeys[i].Type)
 		}
 		builder = builder.Where(qb.Gt(clusteringKeys[maxClusteringRels].Name)).Where(qb.Lt(clusteringKeys[maxClusteringRels].Name))
-		values = appendValue(t.ClusteringKeys[maxClusteringRels].Type, r, p, values)
-		values = appendValue(t.ClusteringKeys[maxClusteringRels].Type, r, p, values)
+		values = append(values, t.ClusteringKeys[maxClusteringRels].Type.GenValue(r, p)...)
+		values = append(values, t.ClusteringKeys[maxClusteringRels].Type.GenValue(r, p)...)
 		allTypes = append(allTypes, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	}
 	return &typedef.Stmt{
@@ -241,7 +288,15 @@ func genClusteringRangeQuery(s *testschema.Schema, t *testschema.Table, g *Gener
 	}
 }
 
-func genMultiplePartitionClusteringRangeQuery(s *testschema.Schema, t *testschema.Table, g *Generator, r *rand.Rand, p *typedef.PartitionRangeConfig) *typedef.Stmt {
+func genMultiplePartitionClusteringRangeQuery(
+	s *testschema.Schema,
+	t *testschema.Table,
+	g *Generator,
+	r *rand.Rand,
+	p *typedef.PartitionRangeConfig,
+	mv *testschema.MaterializedView,
+	numQueryPKs, maxClusteringRels int,
+) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
 
@@ -252,20 +307,12 @@ func genMultiplePartitionClusteringRangeQuery(s *testschema.Schema, t *testschem
 	tableName := t.Name
 	partitionKeys := t.PartitionKeys
 	clusteringKeys := t.ClusteringKeys
-	if len(t.MaterializedViews) > 0 && r.Int()%2 == 0 {
-		view := r.Intn(len(t.MaterializedViews))
-		tableName = t.MaterializedViews[view].Name
-		partitionKeys = t.MaterializedViews[view].PartitionKeys
-		clusteringKeys = t.MaterializedViews[view].ClusteringKeys
+	if mv != nil {
+		tableName = mv.Name
+		partitionKeys = mv.PartitionKeys
+		clusteringKeys = mv.ClusteringKeys
 	}
-	numQueryPKs := r.Intn(len(partitionKeys))
-	if numQueryPKs == 0 {
-		numQueryPKs = 1
-	}
-	multiplier := int(math.Pow(float64(numQueryPKs), float64(len(partitionKeys))))
-	if multiplier > 100 {
-		numQueryPKs = 1
-	}
+
 	builder := qb.Select(s.Keyspace.Name + "." + tableName)
 	for i, pk := range partitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
@@ -285,15 +332,14 @@ func genMultiplePartitionClusteringRangeQuery(s *testschema.Schema, t *testschem
 		}
 	}
 	if len(clusteringKeys) > 0 {
-		maxClusteringRels := r.Intn(len(clusteringKeys))
 		for i := 0; i < maxClusteringRels; i++ {
 			builder = builder.Where(qb.Eq(clusteringKeys[i].Name))
-			values = appendValue(clusteringKeys[i].Type, r, p, values)
+			values = append(values, clusteringKeys[i].Type.GenValue(r, p)...)
 			typs = append(typs, clusteringKeys[i].Type)
 		}
 		builder = builder.Where(qb.Gt(clusteringKeys[maxClusteringRels].Name)).Where(qb.Lt(clusteringKeys[maxClusteringRels].Name))
-		values = appendValue(clusteringKeys[maxClusteringRels].Type, r, p, values)
-		values = appendValue(clusteringKeys[maxClusteringRels].Type, r, p, values)
+		values = append(values, clusteringKeys[maxClusteringRels].Type.GenValue(r, p)...)
+		values = append(values, clusteringKeys[maxClusteringRels].Type.GenValue(r, p)...)
 		typs = append(typs, clusteringKeys[maxClusteringRels].Type, clusteringKeys[maxClusteringRels].Type)
 	}
 	return &typedef.Stmt{
@@ -306,7 +352,7 @@ func genMultiplePartitionClusteringRangeQuery(s *testschema.Schema, t *testschem
 	}
 }
 
-func genSingleIndexQuery(s *testschema.Schema, t *testschema.Table, g *Generator, r *rand.Rand, p *typedef.PartitionRangeConfig) *typedef.Stmt {
+func genSingleIndexQuery(s *testschema.Schema, t *testschema.Table, g *Generator, r *rand.Rand, p *typedef.PartitionRangeConfig, indexes []typedef.IndexDef) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
 
@@ -319,16 +365,11 @@ func genSingleIndexQuery(s *testschema.Schema, t *testschema.Table, g *Generator
 		return nil
 	}
 
-	pkNum := r.Intn(len(t.Indexes))
-	if pkNum == 0 {
-		pkNum = 1
-	}
-	indexes := t.Indexes[:pkNum]
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 	builder.AllowFiltering()
 	for _, idx := range indexes {
 		builder = builder.Where(qb.Eq(idx.Column))
-		values = appendValue(t.Columns[idx.ColumnIdx].Type, r, p, values)
+		values = append(values, t.Columns[idx.ColumnIdx].Type.GenValue(r, p)...)
 		typs = append(typs, t.Columns[idx.ColumnIdx].Type)
 	}
 
@@ -481,13 +522,19 @@ func genDeleteRows(s *testschema.Schema, t *testschema.Table, valuesWithToken *t
 }
 
 func GenDDLStmt(s *testschema.Schema, t *testschema.Table, r *rand.Rand, p *typedef.PartitionRangeConfig, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
-	switch n := r.Intn(3); n {
+	maxVariant := 1
+	if len(t.Columns) > 0 {
+		maxVariant = 2
+	}
+	switch n := r.Intn(maxVariant + 2); n {
 	// case 0: // Alter column not supported in Cassandra from 3.0.11
 	//	return t.alterColumn(s.Keyspace.Name)
-	case 1:
-		return genDropColumnStmt(t, s.Keyspace.Name)
+	case 2:
+		colNum := r.Intn(len(t.Columns))
+		return genDropColumnStmt(t, s.Keyspace.Name, colNum)
 	default:
-		return genAddColumnStmt(t, s.Keyspace.Name, sc)
+		column := testschema.ColumnDef{Name: GenColumnName("col", len(t.Columns)+1), Type: GenColumnType(len(t.Columns)+1, sc)}
+		return genAddColumnStmt(t, s.Keyspace.Name, sc, &column)
 	}
 }
 
@@ -495,9 +542,8 @@ func appendValue(columnType typedef.Type, r *rand.Rand, p *typedef.PartitionRang
 	return append(values, columnType.GenValue(r, p)...)
 }
 
-func genAddColumnStmt(t *testschema.Table, keyspace string, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
+func genAddColumnStmt(t *testschema.Table, keyspace string, sc *typedef.SchemaConfig, column *testschema.ColumnDef) (*typedef.Stmts, error) {
 	var stmts []*typedef.Stmt
-	column := testschema.ColumnDef{Name: GenColumnName("col", len(t.Columns)+1), Type: GenColumnType(len(t.Columns)+1, sc)}
 	if c, ok := column.Type.(*coltypes.UDTType); ok {
 		createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s);"
 		var typs []string
@@ -524,7 +570,7 @@ func genAddColumnStmt(t *testschema.Table, keyspace string, sc *typedef.SchemaCo
 	return &typedef.Stmts{
 		List: stmts,
 		PostStmtHook: func() {
-			t.Columns = append(t.Columns, &column)
+			t.Columns = append(t.Columns, column)
 			t.ResetQueryCache()
 		},
 	}, nil
@@ -560,10 +606,10 @@ func alterColumn(t *testschema.Table, keyspace string) ([]*typedef.Stmt, func(),
 	}, nil
 }
 
-func genDropColumnStmt(t *testschema.Table, keyspace string) (*typedef.Stmts, error) {
+func genDropColumnStmt(t *testschema.Table, keyspace string, colNum int) (*typedef.Stmts, error) {
 	var stmts []*typedef.Stmt
-	idx := rand.Intn(len(t.Columns))
-	column := t.Columns[idx]
+
+	column := t.Columns[colNum]
 	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " DROP " + column.Name
 	stmts = append(stmts, &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
@@ -576,7 +622,7 @@ func genDropColumnStmt(t *testschema.Table, keyspace string) (*typedef.Stmts, er
 	return &typedef.Stmts{
 		List: stmts,
 		PostStmtHook: func() {
-			t.Columns = append(t.Columns[:idx], t.Columns[idx+1:]...)
+			t.Columns = append(t.Columns[:colNum], t.Columns[colNum+1:]...)
 			t.ResetQueryCache()
 		},
 	}, nil

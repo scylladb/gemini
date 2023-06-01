@@ -55,11 +55,18 @@ func RandIpV4Address(rnd *rand.Rand, v, pos int) string {
 	return strings.Join(blocks, ".")
 }
 
+func RandInt2(rnd *rand.Rand, min, max int) int {
+	if max <= min {
+		return min
+	}
+	return min + rnd.Intn(max-min)
+}
+
 func RandInt(min, max int) int {
 	if max <= min {
 		return min
 	}
-	return rand.Intn(max-min) + max
+	return min + rand.Intn(max-min)
 }
 
 func IgnoreError(fn func() error) {
