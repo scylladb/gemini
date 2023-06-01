@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.8.2] - 2023-06-01
+
+- Redo jobs execution: warm up and work cycles execution should be clear and predictable ([#310](https://github.com/scylladb/gemini/pull/310))
+- Use request-timeout parameter for Oracle ([#323](https://github.com/scylladb/gemini/pull/323))
+- Speedup random string generation ([#325](https://github.com/scylladb/gemini/pull/325))
+- Implement statement cache ([#328](https://github.com/scylladb/gemini/pull/328))
+
+## [1.8.1] - 2023-05-15
+
+- Fix value corruption ([#318](https://github.com/scylladb/gemini/pull/318))
+- Make gemini work properly when min=max ([#317](https://github.com/scylladb/gemini/pull/317))
+- Fix pk values spoiling ([#314](https://github.com/scylladb/gemini/pull/314))
+- Fix lt function have wrong compare for big.Int ([#311](https://github.com/scylladb/gemini/pull/311))
+- Reduce memory allocations ([#308](https://github.com/scylladb/gemini/pull/308))
+- Reduce inflight shrinking limit ([#306](https://github.com/scylladb/gemini/pull/306))
+- Fix gemini table data corruption on DDL statement execution error ([#305](https://github.com/scylladb/gemini/pull/305))
+- Package reorganization ([#303](https://github.com/scylladb/gemini/pull/303))
+- Use atomic global status instead of channel pipeline ([#301](https://github.com/scylladb/gemini/pull/301))
+- Delivery values and partition range config as pointers ([#299](https://github.com/scylladb/gemini/pull/299))
+- Added soft stop ([#297](https://github.com/scylladb/gemini/pull/297))
+
 ## [1.8.0] - 2023-05-03
 
 - Update packages and golang ([#296](https://github.com/scylladb/gemini/pull/296))
