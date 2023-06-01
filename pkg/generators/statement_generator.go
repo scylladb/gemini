@@ -622,7 +622,7 @@ func genDropColumnStmt(t *testschema.Table, keyspace string, colNum int) (*typed
 	return &typedef.Stmts{
 		List: stmts,
 		PostStmtHook: func() {
-			t.Columns = append(t.Columns[:colNum], t.Columns[colNum+1:]...)
+			t.Columns = t.Columns.Remove(colNum)
 			t.ResetQueryCache()
 		},
 	}, nil
