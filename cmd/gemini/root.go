@@ -17,10 +17,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
-	_ "net/http/pprof"
+	"net/http/pprof"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -102,6 +104,7 @@ var (
 	useServerSideTimestamps          bool
 	requestTimeout                   time.Duration
 	connectTimeout                   time.Duration
+	profilingPort                    int
 )
 
 func interactive() bool {
@@ -161,6 +164,14 @@ func run(cmd *cobra.Command, args []string) error {
 		http.Handle("/metrics", promhttp.Handler())
 		_ = http.ListenAndServe(bind, nil)
 	}()
+
+	if profilingPort != 0 {
+		go func() {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/profile", pprof.Profile)
+			log.Fatal(http.ListenAndServe(":"+strconv.Itoa(profilingPort), mux))
+		}()
+	}
 
 	if err = printSetup(); err != nil {
 		return errors.Wrapf(err, "unable to print setup")
@@ -518,6 +529,7 @@ func init() {
 	rootCmd.Flags().BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
 	rootCmd.Flags().DurationVarP(&requestTimeout, "request-timeout", "", 30*time.Second, "Duration of waiting request execution")
 	rootCmd.Flags().DurationVarP(&connectTimeout, "connect-timeout", "", 30*time.Second, "Duration of waiting connection established")
+	rootCmd.Flags().IntVarP(&profilingPort, "profiling-port", "", 0, "If non-zero starts pprof profiler on given port at 'http://0.0.0.0:<port>/profile'")
 	rootCmd.Flags().IntVarP(&maxErrorsToStore, "max-errors-to-store", "", 1000, "Maximum number of errors to store and output at the end")
 }
 
