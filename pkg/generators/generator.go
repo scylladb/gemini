@@ -201,7 +201,7 @@ func (g *Generator) start() {
 }
 
 func (g *Generator) createPartitionKeyValues(r *rand.Rand) []interface{} {
-	var values []interface{}
+	values := make([]interface{}, 0, g.table.PartitionKeysLenValues())
 	for _, pk := range g.table.PartitionKeys {
 		values = append(values, pk.Type.GenValue(r, &g.partitionsConfig)...)
 	}

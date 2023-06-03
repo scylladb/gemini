@@ -30,19 +30,27 @@ type QueryCache interface {
 type KnownIssues map[string]bool
 
 type Table struct {
-	queryCache        QueryCache
-	schema            *Schema
-	Name              string             `json:"name"`
-	PartitionKeys     Columns            `json:"partition_keys"`
-	ClusteringKeys    Columns            `json:"clustering_keys"`
-	Columns           Columns            `json:"columns"`
-	Indexes           []typedef.IndexDef `json:"indexes,omitempty"`
-	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
-	KnownIssues       KnownIssues        `json:"known_issues"`
-	TableOptions      []string           `json:"table_options,omitempty"`
+	queryCache             QueryCache
+	schema                 *Schema
+	Name                   string             `json:"name"`
+	PartitionKeys          Columns            `json:"partition_keys"`
+	ClusteringKeys         Columns            `json:"clustering_keys"`
+	Columns                Columns            `json:"columns"`
+	Indexes                []typedef.IndexDef `json:"indexes,omitempty"`
+	MaterializedViews      []MaterializedView `json:"materialized_views,omitempty"`
+	KnownIssues            KnownIssues        `json:"known_issues"`
+	TableOptions           []string           `json:"table_options,omitempty"`
+	partitionKeysLenValues int
 
 	// mu protects the table during schema changes
 	mu sync.RWMutex
+}
+
+func (t *Table) PartitionKeysLenValues() int {
+	if t.partitionKeysLenValues == 0 {
+		t.partitionKeysLenValues = t.PartitionKeys.LenValues()
+	}
+	return t.partitionKeysLenValues
 }
 
 func (t *Table) IsCounterTable() bool {
@@ -75,6 +83,7 @@ func (t *Table) GetQueryCache(st typedef.StatementCacheType) *typedef.StmtCache 
 
 func (t *Table) ResetQueryCache() {
 	t.queryCache.Reset()
+	t.partitionKeysLenValues = 0
 }
 
 func (t *Table) Init(s *Schema, c QueryCache) {
