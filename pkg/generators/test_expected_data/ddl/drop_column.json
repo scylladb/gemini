@@ -14,7 +14,7 @@
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pkAll_ckAll_colAll_delLast DROP col20",
+      "Query": "ALTER TABLE ks1.pkAll_ckAll_colAll_delLast DROP col19",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
