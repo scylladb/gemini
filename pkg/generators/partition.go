@@ -28,6 +28,10 @@ type Partition struct {
 	inFlight  inflight.InFlight
 }
 
+func (s *Partition) NeedMoreValues() bool {
+	return len(s.values) < cap(s.values)-30
+}
+
 // get returns a new value and ensures that it's corresponding token
 // is not already in-flight.
 func (s *Partition) get() *typedef.ValueWithToken {
@@ -70,4 +74,15 @@ func (s *Partition) releaseToken(token uint64) {
 
 func (s *Partition) pick() *typedef.ValueWithToken {
 	return <-s.values
+}
+
+type Partitions []*Partition
+
+func (p Partitions) NeedMoreValues() bool {
+	for _, part := range p {
+		if part.NeedMoreValues() {
+			return true
+		}
+	}
+	return false
 }

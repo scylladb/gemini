@@ -51,11 +51,12 @@ type GeneratorInterface interface {
 }
 
 type Generator struct {
+	wakeUpSignal     chan struct{}
 	ctx              context.Context
 	logger           *zap.Logger
 	table            *testschema.Table
 	idxFunc          DistributionFunc
-	partitions       []*Partition
+	partitions       Partitions
 	partitionsConfig typedef.PartitionRangeConfig
 	partitionCount   uint64
 	seed             uint64
@@ -92,6 +93,7 @@ func NewGenerator(ctx context.Context, table *testschema.Table, config *Config, 
 		seed:             config.Seed,
 		idxFunc:          config.PartitionsDistributionFunc,
 		logger:           logger,
+		wakeUpSignal:     make(chan struct{}),
 	}
 	gs.start()
 	return gs
@@ -111,7 +113,21 @@ func (g *Generator) Get() *typedef.ValueWithToken {
 		return nil
 	}
 	partition := g.partitions[uint64(g.idxFunc())%g.partitionCount]
+	if partition.NeedMoreValues() {
+		g.wakeupGenerator()
+	}
 	return partition.get()
+}
+
+func (g *Generator) wakeupGenerator() {
+	select {
+	case g.wakeUpSignal <- struct{}{}:
+	default:
+	}
+}
+
+func (g *Generator) waitForMoreValuesNeeded() {
+	<-g.wakeUpSignal
 }
 
 // GetOld returns a previously used value and token or a new if
@@ -171,13 +187,21 @@ func (g *Generator) start() {
 					zap.Uint64("keys_emitted", cntEmitted))
 				return gCtx.Err()
 			default:
+				// This part is only get triggered when partition is full of values
+				// Which is signal to stop generating
+				// But if partitions values are not balanced, you can have case when one partition is full
+				// While other partitions are low on values
+				// To address this case before pausing generation we need to make sure that all partition are above the limit
+				if g.partitions.NeedMoreValues() {
+					g.waitForMoreValuesNeeded()
+				}
 			}
 		}
 	})
 }
 
 func (g *Generator) createPartitionKeyValues(r *rand.Rand) []interface{} {
-	var values []interface{}
+	values := make([]interface{}, 0, g.table.PartitionKeysLenValues())
 	for _, pk := range g.table.PartitionKeys {
 		values = append(values, pk.Type.GenValue(r, &g.partitionsConfig)...)
 	}
