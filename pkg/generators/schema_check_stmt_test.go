@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//nolint:thelper
 package generators
 
 import (
+	"path"
 	"testing"
 
 	"github.com/scylladb/gemini/pkg/utils"
@@ -22,100 +24,50 @@ import (
 
 var checkDataPath = "./test_expected_data/check/"
 
-// GenCheck functions tests
 func TestGenSinglePartitionQuery(t *testing.T) {
-	utils.SetUnderTest()
-	t.Parallel()
-	expected := initExpected(t, checkDataPath, "single_partition.json", genSinglePartitionQueryCases, *updateExpected)
-	if *updateExpected {
-		defer expected.updateExpected(t)
-	}
-	for idx := range genSinglePartitionQueryCases {
-		caseName := genSinglePartitionQueryCases[idx]
-		t.Run(caseName,
-			func(subT *testing.T) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-				stmt := genSinglePartitionQuery(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum)
-				validateStmt(subT, stmt, nil)
-				expected.CompareOrStore(subT, caseName, stmt)
-			})
-	}
+	RunStmtTest(t, path.Join(checkDataPath, "single_partition.json"), genSinglePartitionQueryCases, func(subT *testing.T, caseName string, expected *expectedStore) {
+		schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+		stmt := genSinglePartitionQuery(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum)
+		validateStmt(subT, stmt, nil)
+		expected.CompareOrStore(subT, caseName, stmt)
+	})
 }
 
 func TestGenMultiplePartitionQuery(t *testing.T) {
-	utils.SetUnderTest()
-	t.Parallel()
-	expected := initExpected(t, checkDataPath, "multiple_partition.json", genMultiplePartitionQueryCases, *updateExpected)
-	if *updateExpected {
-		defer expected.updateExpected(t)
-	}
-	for idx := range genMultiplePartitionQueryCases {
-		caseName := genMultiplePartitionQueryCases[idx]
-		t.Run(caseName,
-			func(subT *testing.T) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-				stmt := genMultiplePartitionQuery(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.pkCount)
-				validateStmt(subT, stmt, nil)
-				expected.CompareOrStore(subT, caseName, stmt)
-			})
-	}
+	RunStmtTest(t, path.Join(checkDataPath, "multiple_partition.json"), genMultiplePartitionQueryCases, func(subT *testing.T, caseName string, expected *expectedStore) {
+		schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+		stmt := genMultiplePartitionQuery(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.pkCount)
+		validateStmt(subT, stmt, nil)
+		expected.CompareOrStore(subT, caseName, stmt)
+	})
 }
 
 func TestGenClusteringRangeQuery(t *testing.T) {
-	utils.SetUnderTest()
-	t.Parallel()
-	expected := initExpected(t, checkDataPath, "clustering_range.json", genClusteringRangeQueryCases, *updateExpected)
-	if *updateExpected {
-		defer expected.updateExpected(t)
-	}
-	for idx := range genClusteringRangeQueryCases {
-		caseName := genClusteringRangeQueryCases[idx]
-		t.Run(caseName,
-			func(subT *testing.T) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-				stmt := genClusteringRangeQuery(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.ckCount)
-				validateStmt(subT, stmt, nil)
-				expected.CompareOrStore(subT, caseName, stmt)
-			})
-	}
+	RunStmtTest(t, path.Join(checkDataPath, "clustering_range.json"), genClusteringRangeQueryCases, func(subT *testing.T, caseName string, expected *expectedStore) {
+		schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+		stmt := genClusteringRangeQuery(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.ckCount)
+		validateStmt(subT, stmt, nil)
+		expected.CompareOrStore(subT, caseName, stmt)
+	})
 }
 
 func TestGenMultiplePartitionClusteringRangeQuery(t *testing.T) {
-	utils.SetUnderTest()
-	t.Parallel()
-	expected := initExpected(t, checkDataPath, "multiple_partition_clustering_range.json", genMultiplePartitionClusteringRangeQueryCases, *updateExpected)
-	if *updateExpected {
-		defer expected.updateExpected(t)
-	}
-	for idx := range genMultiplePartitionClusteringRangeQueryCases {
-		caseName := genMultiplePartitionClusteringRangeQueryCases[idx]
-		t.Run(caseName,
-			func(subT *testing.T) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-				stmt := genMultiplePartitionClusteringRangeQuery(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.pkCount, opts.ckCount)
-				validateStmt(subT, stmt, nil)
-				expected.CompareOrStore(subT, caseName, stmt)
-			})
-	}
+	RunStmtTest(t, path.Join(checkDataPath, "multiple_partition_clustering_range.json"), genMultiplePartitionClusteringRangeQueryCases,
+		func(subT *testing.T, caseName string, expected *expectedStore) {
+			schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+			stmt := genMultiplePartitionClusteringRangeQuery(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.pkCount, opts.ckCount)
+			validateStmt(subT, stmt, nil)
+			expected.CompareOrStore(subT, caseName, stmt)
+		})
 }
 
 func TestGenSingleIndexQuery(t *testing.T) {
-	utils.SetUnderTest()
-	t.Parallel()
-	expected := initExpected(t, checkDataPath, "single_index.json", genSingleIndexQueryCases, *updateExpected)
-	if *updateExpected {
-		defer expected.updateExpected(t)
-	}
-	for idx := range genSingleIndexQueryCases {
-		caseName := genSingleIndexQueryCases[idx]
-		t.Run(caseName,
-			func(subT *testing.T) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-				stmt := genSingleIndexQuery(schema, schema.Tables[0], gen, rnd, prc, opts.idxCount)
-				validateStmt(subT, stmt, nil)
-				expected.CompareOrStore(subT, caseName, stmt)
-			})
-	}
+	RunStmtTest(t, path.Join(checkDataPath, "single_index.json"), genSingleIndexQueryCases, func(subT *testing.T, caseName string, expected *expectedStore) {
+		schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+		stmt := genSingleIndexQuery(schema, schema.Tables[0], gen, rnd, prc, opts.idxCount)
+		validateStmt(subT, stmt, nil)
+		expected.CompareOrStore(subT, caseName, stmt)
+	})
 }
 
 func BenchmarkGenSinglePartitionQuery(t *testing.B) {

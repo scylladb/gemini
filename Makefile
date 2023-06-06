@@ -44,4 +44,5 @@ check: check-golangci
 fix: fix-golangci
 
 .PHONY: test
-test: go test -v -race ./...
+test:
+	go test -v -race ./...

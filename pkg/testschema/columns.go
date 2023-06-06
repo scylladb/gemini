@@ -147,11 +147,9 @@ func (c Columns) LenValues() int {
 func (c Columns) NonCounters() Columns {
 	out := make(Columns, 0, len(c))
 	for _, col := range c {
-		switch col.Type.(type) {
-		case *coltypes.CounterType:
-			continue
+		if _, ok := col.Type.(*coltypes.CounterType); !ok {
+			out = append(out, col)
 		}
-		out = append(out, col)
 	}
 	return out
 }

@@ -110,7 +110,7 @@ func TestMurmur3H1(t *testing.T) {
 	for i, expected := range seriesExpected {
 		assertMurmur3H1(t, []byte(sample), expected)
 
-		sample = sample + strconv.Itoa(i%10)
+		sample += strconv.Itoa(i % 10)
 	}
 
 	// Here are some test examples from other driver implementations
@@ -122,6 +122,7 @@ func TestMurmur3H1(t *testing.T) {
 
 // helper function for testing the murmur3 implementation
 func assertMurmur3H1(t *testing.T, data []byte, expected uint64) {
+	t.Helper()
 	actual := Murmur3H1(data)
 	if actual != int64(expected) {
 		t.Errorf("Expected h1 = %x for data = %x, but was %x", int64(expected), data, actual)

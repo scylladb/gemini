@@ -56,7 +56,7 @@ var (
 	errorJobTerminated = errors.New("job terminated")
 )
 
-type list struct {
+type List struct {
 	name     string
 	jobs     []job
 	duration time.Duration
@@ -83,7 +83,7 @@ type job struct {
 	name string
 }
 
-func ListFromMode(mode string, duration time.Duration, workers uint64) list {
+func ListFromMode(mode string, duration time.Duration, workers uint64) List {
 	jobs := make([]job, 0, 2)
 	name := "work cycle"
 	switch mode {
@@ -97,7 +97,7 @@ func ListFromMode(mode string, duration time.Duration, workers uint64) list {
 	default:
 		jobs = append(jobs, mutate, validate)
 	}
-	return list{
+	return List{
 		name:     name,
 		jobs:     jobs,
 		duration: duration,
@@ -105,7 +105,7 @@ func ListFromMode(mode string, duration time.Duration, workers uint64) list {
 	}
 }
 
-func (l list) Run(
+func (l List) Run(
 	ctx context.Context,
 	schema *testschema.Schema,
 	schemaConfig typedef.SchemaConfig,

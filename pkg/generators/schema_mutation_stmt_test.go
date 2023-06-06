@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//nolint:thelper
 package generators
 
 import (
+	"path"
 	"testing"
 
 	"github.com/scylladb/gemini/pkg/utils"
@@ -23,79 +25,39 @@ import (
 var mutateDataPath = "./test_expected_data/mutate/"
 
 func TestGenInsertStmt(t *testing.T) {
-	utils.SetUnderTest()
-	t.Parallel()
-	expected := initExpected(t, mutateDataPath, "insert.json", genInsertStmtCases, *updateExpected)
-	if *updateExpected {
-		defer expected.updateExpected(t)
-	}
-	for idx := range genInsertStmtCases {
-		caseName := genInsertStmtCases[idx]
-		t.Run(caseName,
-			func(subT *testing.T) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-				stmt, err := genInsertStmt(schema, schema.Tables[0], gen.Get(), rnd, prc, opts.useLWT)
-				validateStmt(subT, stmt, err)
-				expected.CompareOrStore(subT, caseName, stmt)
-			})
-	}
+	RunStmtTest(t, path.Join(mutateDataPath, "insert.json"), genInsertStmtCases, func(t *testing.T, caseName string, expected *expectedStore) {
+		schema, prc, gen, rnd, opts := getAllForTestStmt(t, caseName)
+		stmt, err := genInsertStmt(schema, schema.Tables[0], gen.Get(), rnd, prc, opts.useLWT)
+		validateStmt(t, stmt, err)
+		expected.CompareOrStore(t, caseName, stmt)
+	})
 }
 
 func TestGenInsertJSONStmt(t *testing.T) {
-	utils.SetUnderTest()
-	t.Parallel()
-	expected := initExpected(t, mutateDataPath, "insert_j.json", genInsertJSONStmtCases, *updateExpected)
-	if *updateExpected {
-		defer expected.updateExpected(t)
-	}
-	for idx := range genInsertJSONStmtCases {
-		caseName := genInsertJSONStmtCases[idx]
-		t.Run(caseName,
-			func(subT *testing.T) {
-				schema, prc, gen, rnd, _ := getAllForTestStmt(subT, caseName)
-				stmt, err := genInsertJSONStmt(schema, schema.Tables[0], gen.Get(), rnd, prc)
-				validateStmt(subT, stmt, err)
-				expected.CompareOrStore(subT, caseName, stmt)
-			})
-	}
+	RunStmtTest(t, path.Join(mutateDataPath, "insert_j.json"), genInsertJSONStmtCases, func(t *testing.T, caseName string, expected *expectedStore) {
+		schema, prc, gen, rnd, _ := getAllForTestStmt(t, caseName)
+		stmt, err := genInsertJSONStmt(schema, schema.Tables[0], gen.Get(), rnd, prc)
+		validateStmt(t, stmt, err)
+		expected.CompareOrStore(t, caseName, stmt)
+	})
 }
 
 func TestGenUpdateStmt(t *testing.T) {
-	utils.SetUnderTest()
-	t.Parallel()
-	expected := initExpected(t, mutateDataPath, "update.json", genUpdateStmtCases, *updateExpected)
-	if *updateExpected {
-		defer expected.updateExpected(t)
-	}
-	for idx := range genUpdateStmtCases {
-		caseName := genUpdateStmtCases[idx]
-		t.Run(caseName,
-			func(subT *testing.T) {
-				schema, prc, gen, rnd, _ := getAllForTestStmt(subT, caseName)
-				stmt, err := genUpdateStmt(schema, schema.Tables[0], gen.Get(), rnd, prc)
-				validateStmt(subT, stmt, err)
-				expected.CompareOrStore(subT, caseName, stmt)
-			})
-	}
+	RunStmtTest(t, path.Join(mutateDataPath, "update.json"), genUpdateStmtCases, func(t *testing.T, caseName string, expected *expectedStore) {
+		schema, prc, gen, rnd, _ := getAllForTestStmt(t, caseName)
+		stmt, err := genUpdateStmt(schema, schema.Tables[0], gen.Get(), rnd, prc)
+		validateStmt(t, stmt, err)
+		expected.CompareOrStore(t, caseName, stmt)
+	})
 }
 
 func TestGenDeleteRows(t *testing.T) {
-	utils.SetUnderTest()
-	t.Parallel()
-	expected := initExpected(t, mutateDataPath, "delete.json", genDeleteStmtCases, *updateExpected)
-	if *updateExpected {
-		defer expected.updateExpected(t)
-	}
-	for idx := range genDeleteStmtCases {
-		caseName := genDeleteStmtCases[idx]
-		t.Run(caseName,
-			func(subT *testing.T) {
-				schema, prc, gen, rnd, _ := getAllForTestStmt(subT, caseName)
-				stmt, err := genDeleteRows(schema, schema.Tables[0], gen.Get(), rnd, prc)
-				validateStmt(subT, stmt, err)
-				expected.CompareOrStore(subT, caseName, stmt)
-			})
-	}
+	RunStmtTest(t, path.Join(mutateDataPath, "delete.json"), genDeleteStmtCases, func(t *testing.T, caseName string, expected *expectedStore) {
+		schema, prc, gen, rnd, _ := getAllForTestStmt(t, caseName)
+		stmt, err := genDeleteRows(schema, schema.Tables[0], gen.Get(), rnd, prc)
+		validateStmt(t, stmt, err)
+		expected.CompareOrStore(t, caseName, stmt)
+	})
 }
 
 func BenchmarkGenInsertStmt(t *testing.B) {
@@ -103,10 +65,10 @@ func BenchmarkGenInsertStmt(t *testing.B) {
 	for idx := range genInsertStmtCases {
 		caseName := genInsertStmtCases[idx]
 		t.Run(caseName,
-			func(subT *testing.B) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-				subT.ResetTimer()
-				for x := 0; x < subT.N; x++ {
+			func(t *testing.B) {
+				schema, prc, gen, rnd, opts := getAllForTestStmt(t, caseName)
+				t.ResetTimer()
+				for x := 0; x < t.N; x++ {
 					_, _ = genInsertStmt(schema, schema.Tables[0], gen.Get(), rnd, prc, opts.useLWT)
 				}
 			})
@@ -118,10 +80,10 @@ func BenchmarkGenInsertJSONStmt(t *testing.B) {
 	for idx := range genInsertJSONStmtCases {
 		caseName := genInsertJSONStmtCases[idx]
 		t.Run(caseName,
-			func(subT *testing.B) {
-				schema, prc, gen, rnd, _ := getAllForTestStmt(subT, caseName)
-				subT.ResetTimer()
-				for x := 0; x < subT.N; x++ {
+			func(t *testing.B) {
+				schema, prc, gen, rnd, _ := getAllForTestStmt(t, caseName)
+				t.ResetTimer()
+				for x := 0; x < t.N; x++ {
 					_, _ = genInsertJSONStmt(schema, schema.Tables[0], gen.Get(), rnd, prc)
 				}
 			})
@@ -133,10 +95,10 @@ func BenchmarkGenUpdateStmt(t *testing.B) {
 	for idx := range genUpdateStmtCases {
 		caseName := genUpdateStmtCases[idx]
 		t.Run(caseName,
-			func(subT *testing.B) {
-				schema, prc, gen, rnd, _ := getAllForTestStmt(subT, caseName)
-				subT.ResetTimer()
-				for x := 0; x < subT.N; x++ {
+			func(t *testing.B) {
+				schema, prc, gen, rnd, _ := getAllForTestStmt(t, caseName)
+				t.ResetTimer()
+				for x := 0; x < t.N; x++ {
 					_, _ = genUpdateStmt(schema, schema.Tables[0], gen.Get(), rnd, prc)
 				}
 			})
@@ -148,10 +110,10 @@ func BenchmarkGenDeleteRows(t *testing.B) {
 	for idx := range genDeleteStmtCases {
 		caseName := genDeleteStmtCases[idx]
 		t.Run(caseName,
-			func(subT *testing.B) {
-				schema, prc, gen, rnd, _ := getAllForTestStmt(subT, caseName)
-				subT.ResetTimer()
-				for x := 0; x < subT.N; x++ {
+			func(t *testing.B) {
+				schema, prc, gen, rnd, _ := getAllForTestStmt(t, caseName)
+				t.ResetTimer()
+				for x := 0; x < t.N; x++ {
 					_, _ = genDeleteRows(schema, schema.Tables[0], gen.Get(), rnd, prc)
 				}
 			})

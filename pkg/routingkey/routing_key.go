@@ -26,11 +26,11 @@ import (
 	"github.com/gocql/gocql"
 )
 
-type RoutingKeyCreator struct {
+type Creator struct {
 	routingKeyBuffer []byte
 }
 
-func (rc *RoutingKeyCreator) CreateRoutingKey(table *testschema.Table, values []interface{}) ([]byte, error) {
+func (rc *Creator) CreateRoutingKey(table *testschema.Table, values []interface{}) ([]byte, error) {
 	partitionKeys := table.PartitionKeys
 	if len(partitionKeys) == 1 {
 		// single column routing key
@@ -68,7 +68,7 @@ func (rc *RoutingKeyCreator) CreateRoutingKey(table *testschema.Table, values []
 	return routingKey, nil
 }
 
-func (rc *RoutingKeyCreator) GetHash(t *testschema.Table, values typedef.Values) (uint64, error) {
+func (rc *Creator) GetHash(t *testschema.Table, values typedef.Values) (uint64, error) {
 	b, err := rc.CreateRoutingKey(t, values)
 	if err != nil {
 		return 0, err

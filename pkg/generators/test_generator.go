@@ -28,14 +28,14 @@ type MockGenerator struct {
 	table             *testschema.Table
 	rand              *rand.Rand
 	partitionsConfig  *typedef.PartitionRangeConfig
-	routingKeyCreator *routingkey.RoutingKeyCreator
+	routingKeyCreator *routingkey.Creator
 }
 
 func NewTestGenerator(
 	table *testschema.Table,
 	rnd *rand.Rand,
 	partitionsConfig *typedef.PartitionRangeConfig,
-	routingKeyCreator *routingkey.RoutingKeyCreator,
+	routingKeyCreator *routingkey.Creator,
 ) *MockGenerator {
 	return &MockGenerator{table: table, rand: rnd, partitionsConfig: partitionsConfig, routingKeyCreator: routingKeyCreator}
 }

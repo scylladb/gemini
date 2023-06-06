@@ -45,7 +45,7 @@ func GenColumnType(numColumns int, sc *typedef.SchemaConfig) typedef.Type {
 	}
 }
 
-func GenSimpleType(sc *typedef.SchemaConfig) coltypes.SimpleType {
+func GenSimpleType(_ *typedef.SchemaConfig) coltypes.SimpleType {
 	return coltypes.AllTypes[rand.Intn(len(coltypes.AllTypes))]
 }
 

@@ -36,6 +36,7 @@ const (
 	DropColumnStatementType
 )
 
+//nolint:revive
 const (
 	CQL_FEATURE_BASIC CQLFeature = iota + 1
 	CQL_FEATURE_NORMAL

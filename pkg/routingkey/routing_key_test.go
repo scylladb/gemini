@@ -32,7 +32,7 @@ func TestRoutingKey(t *testing.T) {
 		values typedef.Values
 		want   []byte
 	}
-	rkc := &routingkey.RoutingKeyCreator{}
+	rkc := &routingkey.Creator{}
 	tests := map[string]struct {
 		table *testschema.Table
 		data  []data

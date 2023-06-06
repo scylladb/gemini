@@ -163,7 +163,7 @@ func (g *Generator) start() {
 	}
 	grp.Go(func() error {
 		g.logger.Info("starting partition key generation loop")
-		routingKeyCreator := &routingkey.RoutingKeyCreator{}
+		routingKeyCreator := &routingkey.Creator{}
 		r := rand.New(rand.NewSource(g.seed))
 		var (
 			cntCreated uint64
