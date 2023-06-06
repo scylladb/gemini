@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 	"testing"
@@ -34,6 +33,7 @@ import (
 	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type expectedStore struct {
@@ -65,8 +65,8 @@ type funcOptions struct {
 
 type Results []*Result
 
-func initExpected(t *testing.T, dirPath, fileName string, cases []string, updateExpected bool) *expectedStore {
-	filePath := path.Join(dirPath, fileName)
+func initExpected(t *testing.T, filePath string, cases []string, updateExpected bool) *expectedStore {
+	t.Helper()
 	expected := make(ExpectedList)
 	if updateExpected {
 		expected.addCases(cases...)
@@ -84,6 +84,7 @@ func initExpected(t *testing.T, dirPath, fileName string, cases []string, update
 }
 
 func (f *expectedStore) CompareOrStore(t *testing.T, caseName string, stmt interface{}) {
+	t.Helper()
 	received := convertStmtsToResults(stmt)
 
 	if f.update {
@@ -100,6 +101,7 @@ func (f *expectedStore) CompareOrStore(t *testing.T, caseName string, stmt inter
 }
 
 func (f *expectedStore) updateExpected(t *testing.T) {
+	t.Helper()
 	if f.update {
 		data, err := json.MarshalIndent(f.list, "", "  ")
 		if err != nil {
@@ -113,6 +115,7 @@ func (f *expectedStore) updateExpected(t *testing.T) {
 }
 
 func validateStmt(t *testing.T, stmt interface{}, err error) {
+	t.Helper()
 	if err != nil {
 		t.Fatalf("error: get an error on create test inputs:%v", err)
 	}
@@ -139,6 +142,7 @@ func validateStmt(t *testing.T, stmt interface{}, err error) {
 }
 
 func getErrorMsgIfDifferent(t *testing.T, expected, received, errMsg string) {
+	t.Helper()
 	if expected == received {
 		return
 	}
@@ -168,9 +172,9 @@ func diffHighlightString(expected, received string) string {
 	out := ""
 	for idx := range expected {
 		if expected[idx] == received[idx] {
-			out = out + " "
+			out += " "
 		} else {
-			out = out + "↕"
+			out += "↕"
 		}
 	}
 	return out
@@ -198,9 +202,9 @@ func convertStmtToResults(stmt *typedef.Stmt) *Result {
 	query, names := stmt.Query.ToCql()
 	token := ""
 	tokenValues := ""
-	if (*stmt).ValuesWithToken != nil {
-		token = fmt.Sprintf("%v", (*stmt).ValuesWithToken.Token)
-		tokenValues = strings.TrimSpace(fmt.Sprintf("%v", (*stmt).ValuesWithToken.Value))
+	if stmt.ValuesWithToken != nil {
+		token = fmt.Sprintf("%v", stmt.ValuesWithToken.Token)
+		tokenValues = strings.TrimSpace(fmt.Sprintf("%v", stmt.ValuesWithToken.Value))
 	}
 	return &Result{
 		Token:       token,
@@ -214,6 +218,7 @@ func convertStmtToResults(stmt *typedef.Stmt) *Result {
 }
 
 func (r *Result) Diff(t *testing.T, received *Result) {
+	t.Helper()
 	getErrorMsgIfDifferent(t, r.Token, received.Token, " error: value stmt.ValuesWithToken.Token expected and received are different:")
 	getErrorMsgIfDifferent(t, r.TokenValues, received.TokenValues, " error: value stmt.ValuesWithToken.Value expected and received are different:")
 	getErrorMsgIfDifferent(t, r.Query, received.Query, " error: value stmt.Query.ToCql().stmt expected and received are different:")
@@ -289,7 +294,7 @@ func getAllForTestStmt(t testInterface, caseName string) (*testschema.Schema, *t
 		UseLWT:          testSchemaCfg.UseLWT,
 	}
 
-	testGenerator := NewTestGenerator(testSchema.Tables[0], rnd, testPRC, &routingkey.RoutingKeyCreator{})
+	testGenerator := NewTestGenerator(testSchema.Tables[0], rnd, testPRC, &routingkey.Creator{})
 
 	return testSchema, testPRC, testGenerator, rnd, opts
 }
@@ -503,4 +508,24 @@ func genColumnsFromCase(t testInterface, typeCases map[string][]typedef.Type, ca
 			})
 	}
 	return columns
+}
+
+func RunStmtTest(t *testing.T, filePath string, cases []string, testBody func(subT *testing.T, caseName string, expected *expectedStore)) {
+	t.Helper()
+	utils.SetUnderTest()
+	t.Parallel()
+	expected := initExpected(t, filePath, cases, *updateExpected)
+	if *updateExpected {
+		t.Cleanup(func() {
+			expected.updateExpected(t)
+		})
+	}
+	for idx := range cases {
+		caseName := cases[idx]
+		t.Run(caseName,
+			func(subT *testing.T) {
+				subT.Parallel()
+				testBody(subT, caseName, expected)
+			})
+	}
 }
