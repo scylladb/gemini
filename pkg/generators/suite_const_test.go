@@ -122,6 +122,8 @@ var (
 		"pkAll_ckAll_colAll",
 		"pk1_ck1_col1cr",
 		"pk3_ck3_col3cr",
+	}
+	genSinglePartitionQueryMvCases = []string{
 		"pk1_ck0_col0_mv",
 		"pk1_ck1_col1_mv",
 		"pkAll_ckAll_colAll_mv",
@@ -137,7 +139,8 @@ var (
 		"pk3_ck3_col3cr_cpkAll",
 		"pk3_ck3_col5_cpkAll",
 		"pkAll_ckAll_colAll_cpkAll",
-
+	}
+	genMultiplePartitionQueryMvCases = []string{
 		"pk1_ck0_col0_cpk1.mv",
 		"pk1_ck1_col1_cpk1.mv",
 		"pk3_ck3_col5_cpk1.mv",
@@ -162,7 +165,8 @@ var (
 		"pk3_ck3_col3cr_cckAll",
 		"pk3_ck3_col5_cckAll",
 		"pkAll_ckAll_colAll_cckAll",
-
+	}
+	genClusteringRangeQueryMvCases = []string{
 		"pk1_ck1_col1_cck1.mv",
 		"pk3_ck3_col5_cck1.mv",
 		"pkAll_ckAll_colAll_cck1.mv",
@@ -193,7 +197,9 @@ var (
 		"pk3_ck3_col3cr_cpkAll.cckAll",
 		"pk3_ck3_col5_cpkAll.cckAll",
 		"pkAll_ckAll_colAll_cpkAll.cckAll",
+	}
 
+	genMultiplePartitionClusteringRangeQueryMvCases = []string{
 		"pk1_ck1_col1_cpk1.cck1.mv",
 		"pk3_ck3_col5_cpk1.cck1.mv",
 		"pkAll_ckAll_colAll_cpk1.cck1.mv",

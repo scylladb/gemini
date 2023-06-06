@@ -111,10 +111,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 								Type: generators.GenUDTType(sc),
 							},
 						},
-						NonPrimaryKey: testschema.ColumnDef{
-							Name: "",
-							Type: coltypes.SimpleType(""),
-						},
+						NonPrimaryKey: nil,
 					},
 				},
 			},

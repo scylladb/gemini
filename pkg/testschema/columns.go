@@ -172,7 +172,7 @@ func (c Columns) CreateMaterializedViews(tableName string, partitionKeys, cluste
 			Name:           fmt.Sprintf("%s_mv_%d", tableName, i),
 			PartitionKeys:  append(cols, partitionKeys...),
 			ClusteringKeys: clusteringKeys,
-			NonPrimaryKey:  *col,
+			NonPrimaryKey:  col,
 		}
 		mvs = append(mvs, mv)
 	}
