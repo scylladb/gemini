@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/builders"
+	"github.com/scylladb/gemini/pkg/coltypes"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/tableopts"
@@ -51,10 +53,20 @@ type Result struct {
 	QueryType   string
 }
 
+type funcOptions struct {
+	addType  testschema.ColumnDef
+	idxCount int
+	mvNum    int
+	useLWT   bool
+	pkCount  int
+	ckCount  int
+	delNum   int
+}
+
 type Results []*Result
 
-func initExpected(t *testing.T, fileName string, cases []string, updateExpected bool) *expectedStore {
-	filePath := path.Join(testDirPath, fileName)
+func initExpected(t *testing.T, dirPath, fileName string, cases []string, updateExpected bool) *expectedStore {
+	filePath := path.Join(dirPath, fileName)
 	expected := make(ExpectedList)
 	if updateExpected {
 		expected.addCases(cases...)
@@ -184,9 +196,15 @@ func convertStmtToResults(stmt *typedef.Stmt) *Result {
 		types = fmt.Sprintf("%s %s", types, stmt.Types[idx].Name())
 	}
 	query, names := stmt.Query.ToCql()
+	token := ""
+	tokenValues := ""
+	if (*stmt).ValuesWithToken != nil {
+		token = fmt.Sprintf("%v", (*stmt).ValuesWithToken.Token)
+		tokenValues = strings.TrimSpace(fmt.Sprintf("%v", (*stmt).ValuesWithToken.Value))
+	}
 	return &Result{
-		Token:       fmt.Sprintf("%v", (*stmt).ValuesWithToken.Token),
-		TokenValues: strings.TrimSpace(fmt.Sprintf("%v", (*stmt).ValuesWithToken.Value)),
+		Token:       token,
+		TokenValues: tokenValues,
 		Query:       strings.TrimSpace(query),
 		Names:       strings.TrimSpace(fmt.Sprintf("%s", names)),
 		Values:      strings.TrimSpace(fmt.Sprintf("%v", stmt.Values)),
@@ -250,10 +268,14 @@ type testInterface interface {
 	Fatalf(format string, args ...any)
 }
 
-func getAllForTestStmt(t testInterface, caseName string) (*testschema.Schema, *typedef.PartitionRangeConfig, *MockGenerator, *rand.Rand, bool, bool) {
+func getAllForTestStmt(t testInterface, caseName string) (*testschema.Schema, *typedef.PartitionRangeConfig, *MockGenerator, *rand.Rand, funcOptions) {
 	rnd := rand.New(nonRandSource(1))
-	table, useLWT, useMV := getTableAndOptionsFromName(t, caseName)
-
+	table, options, optionsNum := getTableAndOptionsFromName(t, caseName)
+	opts, mv, indexes := getFromOptions(t, table, options, optionsNum)
+	table.Indexes = indexes
+	if opts.mvNum >= 0 {
+		table.MaterializedViews = []testschema.MaterializedView{*mv}
+	}
 	testSchema, testSchemaCfg, err := getTestSchema(table)
 	if err != nil {
 		t.Errorf("getTestSchema error:%v", err)
@@ -269,7 +291,31 @@ func getAllForTestStmt(t testInterface, caseName string) (*testschema.Schema, *t
 
 	testGenerator := NewTestGenerator(testSchema.Tables[0], rnd, testPRC, &routingkey.RoutingKeyCreator{})
 
-	return testSchema, testPRC, testGenerator, rnd, useLWT, useMV
+	return testSchema, testPRC, testGenerator, rnd, opts
+}
+
+func createMv(t testInterface, table *testschema.Table, haveNonPrimaryKey bool) *testschema.MaterializedView {
+	switch haveNonPrimaryKey {
+	case true:
+		var cols testschema.Columns
+		col := table.Columns.ValidColumnsForPrimaryKey()
+		if len(col) == 0 {
+			t.Fatalf("no valid columns for mv primary key")
+		}
+		cols = append(cols, col[0])
+		return &testschema.MaterializedView{
+			Name:           fmt.Sprintf("%s_mv_1", table.Name),
+			PartitionKeys:  append(cols, table.PartitionKeys...),
+			ClusteringKeys: table.ClusteringKeys,
+			NonPrimaryKey:  *col[0],
+		}
+	default:
+		return &testschema.MaterializedView{
+			Name:           fmt.Sprintf("%s_mv_1", table.Name),
+			PartitionKeys:  table.PartitionKeys,
+			ClusteringKeys: table.ClusteringKeys,
+		}
+	}
 }
 
 func getTestSchema(table *testschema.Table) (*testschema.Schema, *typedef.SchemaConfig, error) {
@@ -330,10 +376,9 @@ func genTestSchema(sc typedef.SchemaConfig, table *testschema.Table) *testschema
 	return builder.Build()
 }
 
-func getTableAndOptionsFromName(t testInterface, tableName string) (*testschema.Table, bool, bool) {
+func getTableAndOptionsFromName(t testInterface, tableName string) (table *testschema.Table, options, optionsNum string) {
 	nameParts := strings.Split(tableName, "_")
-	var table testschema.Table
-	var useLWT, useMV bool
+	table = &testschema.Table{}
 	for idx := range nameParts {
 		switch idx {
 		case 0:
@@ -343,23 +388,105 @@ func getTableAndOptionsFromName(t testInterface, tableName string) (*testschema.
 		case 2:
 			table.Columns = genColumnsFromCase(t, columnsCases, nameParts[2], "col")
 		case 3:
-			opt, haveOpt := optionsCases[nameParts[3]]
-			if !haveOpt {
-				t.Fatalf("Error in getTableAndOptionsFromName OptCaseName:%s, not found", nameParts[3])
-			}
-			for i := range opt {
-				switch opt[i] {
-				case "lwt":
-					useLWT = true
-				case "mv":
-					useMV = true
-				}
-			}
+			options = nameParts[3]
+		case 4:
+			optionsNum = nameParts[4]
 		}
 	}
 	table.Name = tableName
 
-	return &table, useLWT, useMV
+	return table, options, optionsNum
+}
+
+func getFromOptions(t testInterface, table *testschema.Table, option, optionsNum string) (funcOptions, *testschema.MaterializedView, []typedef.IndexDef) {
+	funcOpts := funcOptions{
+		mvNum: -1,
+	}
+	var mv *testschema.MaterializedView
+	var indexes []typedef.IndexDef
+	if option == "" {
+		return funcOpts, nil, nil
+	}
+	options := strings.Split(option, ".")
+	for i := range options {
+		_, haveOpt := optionsCases[options[i]]
+		if !haveOpt {
+			t.Fatalf("Error in getTableAndOptionsFromName OptCaseName:%s, not found", options[i])
+		}
+		switch options[i] {
+		case "lwt":
+			funcOpts.useLWT = true
+		case "mv":
+			funcOpts.mvNum = 0
+			mv = createMv(t, table, false)
+		case "mvNp":
+			funcOpts.mvNum = 0
+			mv = createMv(t, table, true)
+		case "cpk1":
+			funcOpts.pkCount = 1
+		case "cpkAll":
+			funcOpts.pkCount = len(table.PartitionKeys)
+			if funcOpts.pkCount == 0 {
+				t.Fatalf("wrong pk case definition")
+			}
+		case "cck1":
+			funcOpts.ckCount = 0
+		case "cckAll":
+			funcOpts.ckCount = len(table.ClusteringKeys) - 1
+			if funcOpts.ckCount < 0 {
+				t.Fatalf("wrong ck case definition")
+			}
+		case "idx1":
+			indexes = createIdxFromColumns(t, table, false)
+			funcOpts.idxCount = 1
+		case "idxAll":
+			indexes = createIdxFromColumns(t, table, true)
+			funcOpts.idxCount = len(indexes)
+		case "delFist":
+			funcOpts.delNum = 0
+		case "delLast":
+			funcOpts.delNum = len(table.Columns) - 1
+		case "addSt":
+			funcOpts.addType = testschema.ColumnDef{
+				Type: createColumnSimpleType(t, optionsNum),
+				Name: GenColumnName("col", len(table.Columns)+1),
+			}
+		}
+
+	}
+	return funcOpts, mv, indexes
+}
+
+func createColumnSimpleType(t testInterface, typeNum string) coltypes.SimpleType {
+	num, err := strconv.ParseInt(typeNum, 0, 8)
+	if err != nil {
+		t.Fatalf("wrong options case for add column definition")
+	}
+	return coltypes.AllTypes[int(num)]
+}
+
+func createIdxFromColumns(t testInterface, table *testschema.Table, all bool) (indexes []typedef.IndexDef) {
+	if len(table.Columns) < 1 {
+		t.Fatalf("wrong idxCount case definition")
+	}
+	switch all {
+	case true:
+		for i := range table.Columns {
+			var index typedef.IndexDef
+			index.Name = table.Columns[i].Name + "_idx"
+			index.Column = table.Columns[i].Name
+			index.ColumnIdx = i
+			indexes = append(indexes, index)
+		}
+	default:
+		var index typedef.IndexDef
+		index.Name = table.Columns[0].Name + "_idx"
+		index.Column = table.Columns[0].Name
+		index.ColumnIdx = 0
+		indexes = append(indexes, index)
+
+	}
+	return indexes
 }
 
 func genColumnsFromCase(t testInterface, typeCases map[string][]typedef.Type, caseName, prefix string) testschema.Columns {
