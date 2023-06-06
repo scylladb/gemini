@@ -172,7 +172,9 @@ func (st SimpleType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []i
 		val = r.Int()%2 == 0
 	case TYPE_DATE:
 		val = utils.RandDate(r)
-	case TYPE_TIME, TYPE_TIMESTAMP:
+	case TYPE_TIME:
+		val = utils.RandTime(r).UnixNano()
+	case TYPE_TIMESTAMP:
 		val = utils.RandTime(r)
 	case TYPE_DECIMAL:
 		val = inf.NewDec(r.Int63(), 3)
