@@ -64,15 +64,16 @@ func GetCreateTypes(t *testschema.Table, keyspace typedef.Keyspace) []string {
 
 	var stmts []string
 	for _, column := range t.Columns {
-		switch c := column.Type.(type) {
-		case *coltypes.UDTType:
-			createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s)"
-			var typs []string
-			for name, typ := range c.Types {
-				typs = append(typs, name+" "+typ.CQLDef())
-			}
-			stmts = append(stmts, fmt.Sprintf(createType, keyspace.Name, c.TypeName, strings.Join(typs, ",")))
+		c, ok := column.Type.(*coltypes.UDTType)
+		if !ok {
+			continue
 		}
+		createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s)"
+		var typs []string
+		for name, typ := range c.Types {
+			typs = append(typs, name+" "+typ.CQLDef())
+		}
+		stmts = append(stmts, fmt.Sprintf(createType, keyspace.Name, c.TypeName, strings.Join(typs, ",")))
 	}
 	return stmts
 }

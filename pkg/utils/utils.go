@@ -37,7 +37,7 @@ func RandTime(rnd *rand.Rand) time.Time {
 	return time.Unix(sec, 0).UTC()
 }
 
-func RandIpV4Address(rnd *rand.Rand, v, pos int) string {
+func RandIPV4Address(rnd *rand.Rand, v, pos int) string {
 	if pos < 0 || pos > 4 {
 		panic(fmt.Sprintf("invalid position for the desired value of the IP part %d, 0-3 supported", pos))
 	}

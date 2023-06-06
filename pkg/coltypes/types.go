@@ -27,6 +27,7 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
+// nolint:revive
 const (
 	TYPE_ASCII     = SimpleType("ascii")
 	TYPE_BIGINT    = SimpleType("bigint")
@@ -121,19 +122,18 @@ func (mt *MapType) CQLHolder() string {
 }
 
 func (mt *MapType) CQLPretty(query string, value []interface{}) (string, int) {
-	switch reflect.TypeOf(value[0]).Kind() {
-	case reflect.Map:
-		s := reflect.ValueOf(value[0]).MapRange()
-		vv := "{"
-		for s.Next() {
-			vv += fmt.Sprintf("%v:?,", s.Key().Interface())
-			vv, _ = mt.ValueType.CQLPretty(vv, []interface{}{s.Value().Interface()})
-		}
-		vv = strings.TrimSuffix(vv, ",")
-		vv += "}"
-		return strings.Replace(query, "?", vv, 1), 1
+	if reflect.TypeOf(value[0]).Kind() != reflect.Map {
+		panic(fmt.Sprintf("map cql pretty, unknown type %v", mt))
 	}
-	panic(fmt.Sprintf("map cql pretty, unknown type %v", mt))
+	s := reflect.ValueOf(value[0]).MapRange()
+	vv := "{"
+	for s.Next() {
+		vv += fmt.Sprintf("%v:?,", s.Key().Interface())
+		vv, _ = mt.ValueType.CQLPretty(vv, []interface{}{s.Value().Interface()})
+	}
+	vv = strings.TrimSuffix(vv, ",")
+	vv += "}"
+	return strings.Replace(query, "?", vv, 1), 1
 }
 
 func (mt *MapType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []interface{} {
@@ -180,7 +180,7 @@ func (ct *CounterType) CQLPretty(query string, value []interface{}) (string, int
 	return strings.Replace(query, "?", fmt.Sprintf("%d", value[0]), 1), 1
 }
 
-func (ct *CounterType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []interface{} {
+func (ct *CounterType) GenValue(r *rand.Rand, _ *typedef.PartitionRangeConfig) []interface{} {
 	if utils.UnderTest {
 		return []interface{}{r.Int63()}
 	}

@@ -140,7 +140,7 @@ func (cb createBuilder) ToCql() (stmt string, names []string) {
 	return cb.stmt, nil
 }
 
-func run(cmd *cobra.Command, args []string) error {
+func run(_ *cobra.Command, _ []string) error {
 	logger := createLogger(level)
 	globalStatus := status.NewGlobalStatus(1000)
 	defer utils.IgnoreError(logger.Sync)

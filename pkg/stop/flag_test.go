@@ -30,7 +30,7 @@ func TestHardStop(t *testing.T) {
 	testFlag, ctx, workersDone := initVars()
 	workers := 30
 
-	testSignals(workersDone, workers, testFlag.IsHard, testFlag.SetHard, t)
+	testSignals(t, workersDone, workers, testFlag.IsHard, testFlag.SetHard)
 	if ctx.Err() == nil {
 		t.Error("Error:SetHard function does not apply hardStopHandler")
 	}
@@ -40,7 +40,7 @@ func TestSoftStop(t *testing.T) {
 	testFlag, ctx, workersDone := initVars()
 	workers := 30
 
-	testSignals(workersDone, workers, testFlag.IsSoft, testFlag.SetSoft, t)
+	testSignals(t, workersDone, workers, testFlag.IsSoft, testFlag.SetSoft)
 	if ctx.Err() != nil {
 		t.Error("Error:SetSoft function apply hardStopHandler")
 	}
@@ -50,13 +50,13 @@ func TestSoftOrHardStop(t *testing.T) {
 	testFlag, ctx, workersDone := initVars()
 	workers := 30
 
-	testSignals(workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetSoft, t)
+	testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetSoft)
 	if ctx.Err() != nil {
 		t.Error("Error:SetSoft function apply hardStopHandler")
 	}
 
 	workersDone.Store(uint32(0))
-	testSignals(workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetHard, t)
+	testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetHard)
 	if ctx.Err() != nil {
 		t.Error("Error:SetHard function apply hardStopHandler after SetSoft")
 	}
@@ -64,7 +64,7 @@ func TestSoftOrHardStop(t *testing.T) {
 	testFlag, ctx, workersDone = initVars()
 	workersDone.Store(uint32(0))
 
-	testSignals(workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetHard, t)
+	testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetHard)
 	if ctx.Err() == nil {
 		t.Error("Error:SetHard function does not apply hardStopHandler")
 	}
@@ -78,12 +78,14 @@ func initVars() (testFlag *stop.Flag, ctx context.Context, workersDone *atomic.U
 	return &testFlagOut, ctx, workersDone
 }
 
-func testSignals(workersDone *atomic.Uint32,
+func testSignals(
+	t *testing.T,
+	workersDone *atomic.Uint32,
 	workers int,
 	checkFunc func() bool,
 	setFunc func() bool,
-	t *testing.T,
 ) {
+	t.Helper()
 	for i := 0; i != workers; i++ {
 		go func() {
 			for {

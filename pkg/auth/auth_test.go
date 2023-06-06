@@ -64,11 +64,12 @@ func TestSetAuthenticator(t *testing.T) {
 				test.input.username,
 				test.input.password,
 			)
-			if test.err == "" && err != nil {
+			switch {
+			case test.err == "" && err != nil:
 				t.Fatalf("Returned unexpected error '%s'", err.Error())
-			} else if test.err != "" && err == nil {
+			case test.err != "" && err == nil:
 				t.Fatalf("Expected error '%s' but none was returned", test.err)
-			} else if test.err != "" && err != nil && err.Error() != test.err {
+			case test.err != "" && err != nil && err.Error() != test.err:
 				t.Fatalf("Returned error '%s' doesn't match expected error '%s'", err.Error(), test.err)
 			}
 			if diff := cmp.Diff(test.want, authenticator); diff != "" {

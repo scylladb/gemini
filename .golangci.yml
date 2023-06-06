@@ -17,6 +17,14 @@ linters:
     - staticcheck
     - lll
     - errorlint
+    - gocritic
+    - gosimple
+    - predeclared
+    - revive
+    - thelper
+    - tparallel
+    - typecheck
+    - unused
 run:
   deadline: 10m
   modules-download-mode: readonly

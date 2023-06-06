@@ -353,7 +353,7 @@ func genMultiplePartitionClusteringRangeQuery(
 func genSingleIndexQuery(
 	s *testschema.Schema,
 	t *testschema.Table,
-	g GeneratorInterface,
+	_ GeneratorInterface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	idxCount int,
@@ -398,7 +398,7 @@ func genInsertOrUpdateStmt(
 	return genInsertStmt(s, t, valuesWithToken, r, p, useLWT)
 }
 
-func genUpdateStmt(s *testschema.Schema, t *testschema.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
+func genUpdateStmt(_ *testschema.Schema, t *testschema.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
 	stmtCache := t.GetQueryCache(typedef.CacheUpdate)
 	nonCounters := t.Columns.NonCounters()
 	values := make(typedef.Values, 0, t.PartitionKeys.LenValues()+t.ClusteringKeys.LenValues()+nonCounters.LenValues())
@@ -417,7 +417,7 @@ func genUpdateStmt(s *testschema.Schema, t *testschema.Table, valuesWithToken *t
 }
 
 func genInsertStmt(
-	s *testschema.Schema,
+	_ *testschema.Schema,
 	t *testschema.Table,
 	valuesWithToken *typedef.ValueWithToken,
 	r *rand.Rand,
@@ -507,7 +507,7 @@ func genInsertJSONStmt(
 	}, nil
 }
 
-func genDeleteRows(s *testschema.Schema, t *testschema.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
+func genDeleteRows(_ *testschema.Schema, t *testschema.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
 	stmtCache := t.GetQueryCache(typedef.CacheDelete)
 	values := valuesWithToken.Value.Copy()
 	if len(t.ClusteringKeys) > 0 {
@@ -522,7 +522,7 @@ func genDeleteRows(s *testschema.Schema, t *testschema.Table, valuesWithToken *t
 	}, nil
 }
 
-func GenDDLStmt(s *testschema.Schema, t *testschema.Table, r *rand.Rand, p *typedef.PartitionRangeConfig, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
+func GenDDLStmt(s *testschema.Schema, t *testschema.Table, r *rand.Rand, _ *typedef.PartitionRangeConfig, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
 	maxVariant := 1
 	if len(t.Columns) > 0 {
 		maxVariant = 2
@@ -730,7 +730,7 @@ func GetCreateSchema(s *testschema.Schema) []string {
 			} else {
 				createMaterializedView = "CREATE MATERIALIZED VIEW IF NOT EXISTS %s.%s AS SELECT * FROM %s.%s WHERE %s PRIMARY KEY ((%s)"
 			}
-			createMaterializedView = createMaterializedView + ",%s)"
+			createMaterializedView += ",%s)"
 			stmts = append(stmts, fmt.Sprintf(createMaterializedView,
 				s.Keyspace.Name, mv.Name, s.Keyspace.Name, t.Name,
 				strings.Join(mvPrimaryKeysNotNull, " AND "),

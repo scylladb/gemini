@@ -62,19 +62,18 @@ func (ct *BagType) CQLPretty(query string, value []interface{}) (string, int) {
 	if len(value) == 0 {
 		return query, 0
 	}
-	switch reflect.TypeOf(value[0]).Kind() {
-	case reflect.Slice:
-		s := reflect.ValueOf(value[0])
-		vv := "{"
-		vv += strings.Repeat("?,", s.Len())
-		vv = strings.TrimRight(vv, ",")
-		vv += "}"
-		for i := 0; i < s.Len(); i++ {
-			vv, _ = ct.Type.CQLPretty(vv, []interface{}{s.Index(i).Interface()})
-		}
-		return strings.Replace(query, "?", vv, 1), 1
+	if reflect.TypeOf(value[0]).Kind() != reflect.Slice {
+		panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
 	}
-	panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
+	s := reflect.ValueOf(value[0])
+	vv := "{"
+	vv += strings.Repeat("?,", s.Len())
+	vv = strings.TrimRight(vv, ",")
+	vv += "}"
+	for i := 0; i < s.Len(); i++ {
+		vv, _ = ct.Type.CQLPretty(vv, []interface{}{s.Index(i).Interface()})
+	}
+	return strings.Replace(query, "?", vv, 1), 1
 }
 
 func (ct *BagType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []interface{} {
