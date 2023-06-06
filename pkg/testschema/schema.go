@@ -19,7 +19,7 @@ import (
 )
 
 type MaterializedView struct {
-	NonPrimaryKey  ColumnDef
+	NonPrimaryKey  *ColumnDef
 	Name           string  `json:"name"`
 	PartitionKeys  Columns `json:"partition_keys"`
 	ClusteringKeys Columns `json:"clustering_keys"`
@@ -28,4 +28,8 @@ type MaterializedView struct {
 type Schema struct {
 	Keyspace typedef.Keyspace `json:"keyspace"`
 	Tables   []*Table         `json:"tables"`
+}
+
+func (m *MaterializedView) HaveNonPrimaryKey() bool {
+	return m.NonPrimaryKey != nil
 }

@@ -312,7 +312,7 @@ func createMv(t testInterface, table *testschema.Table, haveNonPrimaryKey bool) 
 			Name:           fmt.Sprintf("%s_mv_1", table.Name),
 			PartitionKeys:  append(cols, table.PartitionKeys...),
 			ClusteringKeys: table.ClusteringKeys,
-			NonPrimaryKey:  *col[0],
+			NonPrimaryKey:  col[0],
 		}
 	default:
 		return &testschema.MaterializedView{
