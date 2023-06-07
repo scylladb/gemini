@@ -418,23 +418,29 @@ func genMultiplePartitionClusteringRangeQuery(
 	t.RLock()
 	defer t.RUnlock()
 
-	var (
-		values []interface{}
-		typs   []typedef.Type
-	)
+	clusteringKeys := t.ClusteringKeys
+	pkValues := t.PartitionKeysLenValues()
+	valuesCount := pkValues*numQueryPKs + clusteringKeys[:maxClusteringRels].LenValues() + clusteringKeys[maxClusteringRels].Type.LenValue()*2
+	values := make(typedef.Values, pkValues*numQueryPKs, valuesCount)
+	typs := make(typedef.Types, pkValues*numQueryPKs, valuesCount)
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
-	for i, pk := range t.PartitionKeys {
+
+	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
-		for j := 0; j < numQueryPKs; j++ {
-			vs := g.GetOld()
-			if vs == nil {
-				return nil
-			}
-			values = append(values, vs.Value[i])
-			typs = append(typs, pk.Type)
+	}
+
+	for j := 0; j < numQueryPKs; j++ {
+		vs := g.GetOld()
+		if vs == nil {
+			return nil
+		}
+		for id := range vs.Value {
+			idx := id*numQueryPKs + j
+			typs[idx] = t.PartitionKeys[id].Type
+			values[idx] = vs.Value[id]
 		}
 	}
-	clusteringKeys := t.ClusteringKeys
+
 	if len(clusteringKeys) > 0 {
 		for i := 0; i < maxClusteringRels; i++ {
 			ck := clusteringKeys[i]
