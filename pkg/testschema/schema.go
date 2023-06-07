@@ -19,10 +19,11 @@ import (
 )
 
 type MaterializedView struct {
-	NonPrimaryKey  *ColumnDef
-	Name           string  `json:"name"`
-	PartitionKeys  Columns `json:"partition_keys"`
-	ClusteringKeys Columns `json:"clustering_keys"`
+	NonPrimaryKey          *ColumnDef
+	Name                   string  `json:"name"`
+	PartitionKeys          Columns `json:"partition_keys"`
+	ClusteringKeys         Columns `json:"clustering_keys"`
+	partitionKeysLenValues int
 }
 
 type Schema struct {
@@ -32,4 +33,11 @@ type Schema struct {
 
 func (m *MaterializedView) HaveNonPrimaryKey() bool {
 	return m.NonPrimaryKey != nil
+}
+
+func (m *MaterializedView) PartitionKeysLenValues() int {
+	if m.partitionKeysLenValues == 0 && m.PartitionKeys != nil {
+		m.partitionKeysLenValues = m.PartitionKeys.LenValues()
+	}
+	return m.partitionKeysLenValues
 }

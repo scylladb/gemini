@@ -371,8 +371,7 @@ func genClusteringRangeQueryMv(
 	values := vs.Value.Copy()
 	mv := t.MaterializedViews[mvNum]
 	if mv.HaveNonPrimaryKey() {
-		var mvValues []interface{}
-		mvValues = append(mvValues, mv.NonPrimaryKey.Type.GenValue(r, p)...)
+		mvValues := append([]interface{}{}, mv.NonPrimaryKey.Type.GenValue(r, p)...)
 		values = append(mvValues, values...)
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
@@ -474,44 +473,50 @@ func genMultiplePartitionClusteringRangeQueryMv(
 ) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
-	var (
-		values []interface{}
-		typs   []typedef.Type
-	)
+
 	mv := t.MaterializedViews[mvNum]
+	clusteringKeys := mv.ClusteringKeys
+	pkValues := mv.PartitionKeysLenValues()
+	valuesCount := pkValues*numQueryPKs + clusteringKeys[:maxClusteringRels].LenValues() + clusteringKeys[maxClusteringRels].Type.LenValue()*2
+	mvKey := mv.NonPrimaryKey
+
+	var (
+		mvKeyLen int
+		baseID   int
+	)
+	if mvKey != nil {
+		mvKeyLen = mvKey.Type.LenValue()
+		baseID = 1
+		valuesCount += mv.PartitionKeys.LenValues() * numQueryPKs
+	}
+	values := make(typedef.Values, pkValues*numQueryPKs, valuesCount)
+	typs := make(typedef.Types, pkValues*numQueryPKs, valuesCount)
 	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
-	switch mv.HaveNonPrimaryKey() {
-	case true:
-		for i, pk := range mv.PartitionKeys {
-			builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
-			for j := 0; j < numQueryPKs; j++ {
-				vs := g.GetOld()
-				if vs == nil {
-					return nil
-				}
-				if i == 0 {
-					values = appendValue(pk.Type, r, p, values)
-					typs = append(typs, pk.Type)
-				} else {
-					values = append(values, vs.Value[i-1])
-					typs = append(typs, pk.Type)
-				}
-			}
-		}
-	case false:
-		for i, pk := range mv.PartitionKeys {
-			builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
-			for j := 0; j < numQueryPKs; j++ {
-				vs := g.GetOld()
-				if vs == nil {
-					return nil
-				}
-				values = append(values, vs.Value[i])
-				typs = append(typs, pk.Type)
-			}
+
+	for _, pk := range mv.PartitionKeys {
+		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
+	}
+
+	if mvKey != nil {
+		// Fill values for Materialized view primary key
+		for j := 0; j < numQueryPKs; j++ {
+			typs[j] = mvKey.Type
+			copy(values[j*mvKeyLen:], mvKey.Type.GenValue(r, p))
 		}
 	}
-	clusteringKeys := mv.ClusteringKeys
+
+	for j := 0; j < numQueryPKs; j++ {
+		vs := g.GetOld()
+		if vs == nil {
+			return nil
+		}
+		for id := range vs.Value {
+			idx := (baseID+id)*numQueryPKs + j
+			typs[idx] = mv.PartitionKeys[baseID+id].Type
+			values[idx] = vs.Value[id]
+		}
+	}
+
 	if len(clusteringKeys) > 0 {
 		for i := 0; i < maxClusteringRels; i++ {
 			ck := clusteringKeys[i]
