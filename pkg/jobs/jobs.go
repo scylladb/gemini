@@ -235,7 +235,7 @@ func validationJob(
 			return nil
 		case hb := <-pump:
 			time.Sleep(hb)
-			stmt := generators.GenCheckStmt(schema, table, g, r, p)
+			stmt := GenCheckStmt(schema, table, g, r, p)
 			if stmt == nil {
 				logger.Info("Validation. No statement generated from GenCheckStmt.")
 				continue
@@ -323,7 +323,7 @@ func ddl(
 	}
 	table.Lock()
 	defer table.Unlock()
-	ddlStmts, err := generators.GenDDLStmt(schema, table, r, p, sc)
+	ddlStmts, err := GenDDLStmt(schema, table, r, p, sc)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		globalStatus.WriteErrors.Add(1)
@@ -370,7 +370,7 @@ func mutation(
 	deletes bool,
 	logger *zap.Logger,
 ) error {
-	mutateStmt, err := generators.GenMutateStmt(schema, table, g, r, p, deletes)
+	mutateStmt, err := GenMutateStmt(schema, table, g, r, p, deletes)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		globalStatus.WriteErrors.Add(1)
