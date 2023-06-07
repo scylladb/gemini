@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //nolint:thelper
-package generators
+package jobs
 
 import (
 	"path"

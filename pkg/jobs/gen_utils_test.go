@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package generators
+package jobs
 
 import (
 	"encoding/json"
@@ -28,6 +28,7 @@ import (
 
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/coltypes"
+	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/tableopts"
@@ -454,7 +455,7 @@ func getFromOptions(t testInterface, table *testschema.Table, option, optionsNum
 		case "addSt":
 			funcOpts.addType = testschema.ColumnDef{
 				Type: createColumnSimpleType(t, optionsNum),
-				Name: GenColumnName("col", len(table.Columns)+1),
+				Name: generators.GenColumnName("col", len(table.Columns)+1),
 			}
 		}
 
