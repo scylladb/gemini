@@ -119,8 +119,8 @@ func TestMarshalUnmarshal(t *testing.T) {
 	}
 
 	opts := cmp.Options{
-		cmp.AllowUnexported(testschema.Table{}),
-		cmpopts.IgnoreUnexported(testschema.Table{}),
+		cmp.AllowUnexported(testschema.Table{}, testschema.MaterializedView{}),
+		cmpopts.IgnoreUnexported(testschema.Table{}, testschema.MaterializedView{}),
 	}
 
 	b, err := json.MarshalIndent(s1, "  ", "  ")
