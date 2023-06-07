@@ -26,21 +26,31 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
+const (
+	GenAddColumnStmtID = iota
+	GenDropColumnStmtID
+)
+
+var GenDdlStmtConditions = typedef.CasesConditions{
+	GenAddColumnStmtID:  func(table *typedef.Table) bool { return true },
+	GenDropColumnStmtID: func(table *typedef.Table) bool { return len(table.Columns) > 1 },
+}
+
+var GenDdlStmtRatios = typedef.CasesRatios{
+	GenAddColumnStmtID:  3,
+	GenDropColumnStmtID: 1,
+}
+
 func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, _ *typedef.PartitionRangeConfig, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
-	maxVariant := 1
-	if len(t.Columns) > 0 {
-		maxVariant = 2
-	}
-	switch n := r.Intn(maxVariant + 2); n {
-	// case 0: // Alter column not supported in Cassandra from 3.0.11
-	//	return t.alterColumn(s.Keyspace.Name)
-	case 2:
+	switch t.AvailableFuncs.DDL.RandomCase(r) {
+	case GenDropColumnStmtID:
 		colNum := r.Intn(len(t.Columns))
 		return genDropColumnStmt(t, s.Keyspace.Name, colNum)
-	default:
+	case GenAddColumnStmtID:
 		column := typedef.ColumnDef{Name: generators.GenColumnName("col", len(t.Columns)+1), Type: generators.GenColumnType(len(t.Columns)+1, sc)}
 		return genAddColumnStmt(t, s.Keyspace.Name, &column)
 	}
+	return nil, nil
 }
 
 func appendValue(columnType typedef.Type, r *rand.Rand, p *typedef.PartitionRangeConfig, values []interface{}) []interface{} {
@@ -76,6 +86,7 @@ func genAddColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnD
 		List: stmts,
 		PostStmtHook: func() {
 			t.Columns = append(t.Columns, column)
+			t.AvailableFuncs = UpdateAllCases(t)
 			t.ResetQueryCache()
 		},
 	}, nil
@@ -128,6 +139,7 @@ func genDropColumnStmt(t *typedef.Table, keyspace string, colNum int) (*typedef.
 		List: stmts,
 		PostStmtHook: func() {
 			t.Columns = t.Columns.Remove(colNum)
+			t.AvailableFuncs = UpdateAllCases(t)
 			t.ResetQueryCache()
 		},
 	}, nil

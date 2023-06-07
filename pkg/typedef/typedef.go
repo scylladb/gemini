@@ -33,6 +33,8 @@ type (
 		Name              string                   `json:"name"`
 	}
 
+	Indexes []IndexDef
+
 	IndexDef struct {
 		Column *ColumnDef
 		Name   string `json:"name"`
@@ -134,3 +136,7 @@ const (
 	CacheDelete
 	CacheArrayLen
 )
+
+func (i Indexes) Len() int {
+	return len(i)
+}

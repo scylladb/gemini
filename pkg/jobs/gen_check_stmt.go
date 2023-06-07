@@ -25,6 +25,80 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
+const (
+	GenSinglePartitionID = iota
+	GenSinglePartitionMvID
+	GenMultiplePartitionID
+	GenMultiplePartitionMvID
+	GenClusteringRangeID
+	GenClusteringRangeMvID
+	GenMultiplePartitionClusteringRangeID
+	GenMultiplePartitionClusteringRangeMvID
+	GenSingleIndexQueryID
+)
+
+var GenCheckStmtConditions = typedef.CasesConditions{
+	GenSinglePartitionID:                    func(table *typedef.Table) bool { return true },
+	GenSinglePartitionMvID:                  func(table *typedef.Table) bool { return table.HasMV() },
+	GenMultiplePartitionID:                  func(table *typedef.Table) bool { return true },
+	GenMultiplePartitionMvID:                func(table *typedef.Table) bool { return table.HasMV() },
+	GenClusteringRangeID:                    func(table *typedef.Table) bool { return table.HasClusteringKeys() },
+	GenClusteringRangeMvID:                  func(table *typedef.Table) bool { return table.HasClusteringKeys() && table.HasMV() },
+	GenMultiplePartitionClusteringRangeID:   func(table *typedef.Table) bool { return table.HasClusteringKeys() },
+	GenMultiplePartitionClusteringRangeMvID: func(table *typedef.Table) bool { return table.HasClusteringKeys() && table.HasMV() },
+	GenSingleIndexQueryID:                   func(table *typedef.Table) bool { return table.HasIndexes() },
+}
+
+var GenCheckStmtRatios = typedef.CasesRatios{
+	GenSinglePartitionID:                    20,
+	GenSinglePartitionMvID:                  20,
+	GenMultiplePartitionID:                  20,
+	GenMultiplePartitionMvID:                20,
+	GenClusteringRangeID:                    20,
+	GenClusteringRangeMvID:                  20,
+	GenMultiplePartitionClusteringRangeID:   20,
+	GenMultiplePartitionClusteringRangeMvID: 20,
+	GenSingleIndexQueryID:                   1,
+}
+
+func GenCheckStmtNew(s *typedef.Schema, table *typedef.Table, g generators.GeneratorInterface, rnd *rand.Rand, p *typedef.PartitionRangeConfig) *typedef.Stmt {
+	switch table.AvailableFuncs.Check.RandomCase(rnd) {
+	case GenSinglePartitionID:
+		return genSinglePartitionQuery(s, table, g)
+	case GenMultiplePartitionID:
+		numQueryPKs := utils.RandIntLimited(rnd, 1, table.PartitionKeys.Len())
+		return genMultiplePartitionQuery(s, table, g, numQueryPKs)
+	case GenClusteringRangeID:
+		maxClusteringRels := utils.RandInt2(rnd, 1, table.ClusteringKeys.Len())
+		return genClusteringRangeQuery(s, table, g, rnd, p, maxClusteringRels)
+	case GenMultiplePartitionClusteringRangeID:
+		numQueryPKs := utils.RandIntLimited(rnd, 1, table.PartitionKeys.Len())
+		maxClusteringRels := utils.RandInt2(rnd, 1, table.ClusteringKeys.Len())
+		return genMultiplePartitionClusteringRangeQuery(s, table, g, rnd, p, numQueryPKs, maxClusteringRels)
+	case GenSinglePartitionMvID:
+		mvNum := utils.RandInt2(rnd, 0, table.MaterializedViews.Len())
+		return genSinglePartitionQueryMv(s, table, g, rnd, p, mvNum)
+	case GenMultiplePartitionMvID:
+		mvNum := utils.RandInt2(rnd, 0, table.MaterializedViews.Len())
+		numQueryPKs := utils.RandIntLimited(rnd, 1, table.PartitionKeys.Len())
+		return genMultiplePartitionQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs)
+	case GenClusteringRangeMvID:
+		mvNum := utils.RandInt2(rnd, 0, table.MaterializedViews.Len())
+		maxClusteringRels := utils.RandInt2(rnd, 1, table.ClusteringKeys.Len())
+		return genClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, maxClusteringRels)
+	case GenMultiplePartitionClusteringRangeMvID:
+		mvNum := utils.RandInt2(rnd, 0, table.MaterializedViews.Len())
+		numQueryPKs := utils.RandIntLimited(rnd, 1, table.PartitionKeys.Len())
+		maxClusteringRels := utils.RandInt2(rnd, 1, table.ClusteringKeys.Len())
+		return genMultiplePartitionClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs, maxClusteringRels)
+	case GenSingleIndexQueryID:
+		idxCount := utils.RandInt2(rnd, 0, table.Indexes.Len())
+		return genSingleIndexQuery(s, table, g, rnd, p, idxCount)
+
+	}
+	return nil
+}
+
 func GenCheckStmt(
 	s *typedef.Schema,
 	table *typedef.Table,

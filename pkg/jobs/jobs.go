@@ -135,6 +135,7 @@ func (l List) Run(
 	}
 	logger.Info("start jobs")
 	for j := range schema.Tables {
+		schema.Tables[j].AvailableFuncs = UpdateAllCases(schema.Tables[j])
 		gen := generators[j]
 		table := schema.Tables[j]
 		for i := 0; i < int(l.workers); i++ {
@@ -478,4 +479,12 @@ func unWrapErr(err error) error {
 		nextErr = errors.Unwrap(err)
 	}
 	return err
+}
+
+func UpdateAllCases(table *typedef.Table) typedef.Functions {
+	return typedef.Functions{
+		Check:  typedef.UpdateFuncCases(table, GenCheckStmtConditions, GenCheckStmtRatios),
+		Mutate: typedef.UpdateFuncCases(table, GenMutateStmtConditions, GenMutateStmtRatios),
+		DDL:    typedef.UpdateFuncCases(table, GenDdlStmtConditions, GenDdlStmtRatios),
+	}
 }

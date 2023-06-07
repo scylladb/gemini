@@ -29,14 +29,15 @@ type KnownIssues map[string]bool
 type Table struct {
 	queryCache             QueryCache
 	schema                 *Schema
-	Name                   string             `json:"name"`
-	PartitionKeys          Columns            `json:"partition_keys"`
-	ClusteringKeys         Columns            `json:"clustering_keys"`
-	Columns                Columns            `json:"columns"`
-	Indexes                []IndexDef         `json:"indexes,omitempty"`
-	MaterializedViews      []MaterializedView `json:"materialized_views,omitempty"`
-	KnownIssues            KnownIssues        `json:"known_issues"`
-	TableOptions           []string           `json:"table_options,omitempty"`
+	Name                   string            `json:"name"`
+	PartitionKeys          Columns           `json:"partition_keys"`
+	ClusteringKeys         Columns           `json:"clustering_keys"`
+	Columns                Columns           `json:"columns"`
+	Indexes                Indexes           `json:"indexes,omitempty"`
+	MaterializedViews      MaterializedViews `json:"materialized_views,omitempty"`
+	KnownIssues            KnownIssues       `json:"known_issues"`
+	TableOptions           []string          `json:"table_options,omitempty"`
+	AvailableFuncs         Functions
 	partitionKeysLenValues int
 
 	// mu protects the table during schema changes
@@ -87,4 +88,16 @@ func (t *Table) Init(s *Schema, c QueryCache) {
 	t.schema = s
 	t.queryCache = c
 	t.queryCache.BindToTable(t)
+}
+
+func (t *Table) HasClusteringKeys() bool {
+	return len(t.ClusteringKeys) != 0
+}
+
+func (t *Table) HasMV() bool {
+	return len(t.MaterializedViews) != 0
+}
+
+func (t *Table) HasIndexes() bool {
+	return len(t.Indexes) != 0
 }
