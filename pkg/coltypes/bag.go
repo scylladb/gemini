@@ -69,7 +69,6 @@ func (ct *BagType) CQLPretty(query string, value []interface{}) (string, int) {
 	op, cl := "[", "]"
 	if ct.Kind == "set" {
 		op, cl = "{", "}"
-
 	}
 	vv := op
 	vv += strings.Repeat("?,", s.Len())
