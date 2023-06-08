@@ -66,10 +66,15 @@ func (ct *BagType) CQLPretty(query string, value []interface{}) (string, int) {
 		panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
 	}
 	s := reflect.ValueOf(value[0])
-	vv := "{"
+	op, cl := "[", "]"
+	if ct.Kind == "set" {
+		op, cl = "{", "}"
+
+	}
+	vv := op
 	vv += strings.Repeat("?,", s.Len())
 	vv = strings.TrimRight(vv, ",")
-	vv += "}"
+	vv += cl
 	for i := 0; i < s.Len(); i++ {
 		vv, _ = ct.Type.CQLPretty(vv, []interface{}{s.Index(i).Interface()})
 	}

@@ -172,7 +172,7 @@ var prettytests = []struct {
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{[]string{"a", "b"}},
-		expected: "SELECT * FROM tbl WHERE pk0={'a','b'}",
+		expected: "SELECT * FROM tbl WHERE pk0=['a','b']",
 	},
 	{
 		typ: &coltypes.MapType{
