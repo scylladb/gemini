@@ -13,13 +13,13 @@ services:
   gemini-oracle:
     image: scylladb/scylla:5.2.2
     container_name: gemini-oracle
-    command: --smp 1 --memory 128M --api-address 0.0.0.0
+    command: --smp 2 --memory 1024M --api-address 0.0.0.0
     networks:
       gemini:
 
   gemini-test:
     image: scylladb/scylla:5.2.2
     container_name: gemini-test
-    command: --smp 1 --memory 128M --api-address 0.0.0.0
+    command: --smp 2 --memory 1024M --api-address 0.0.0.0
     networks:
       gemini:
