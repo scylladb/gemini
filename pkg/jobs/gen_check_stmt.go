@@ -125,16 +125,13 @@ func genSinglePartitionQuery(
 	}
 	values := valuesWithToken.Value.Copy()
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
-	typs := make([]typedef.Type, 0, 10)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
-		typs = append(typs, pk.Type)
 	}
 
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
-			Types:     typs,
 			QueryType: typedef.SelectStatementType,
 		},
 		ValuesWithToken: valuesWithToken,
@@ -158,10 +155,8 @@ func genSinglePartitionQueryMv(
 	}
 	mv := t.MaterializedViews[mvNum]
 	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
-	typs := make([]typedef.Type, 0, 10)
 	for _, pk := range mv.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
-		typs = append(typs, pk.Type)
 	}
 
 	values := valuesWithToken.Value.Copy()
@@ -173,7 +168,6 @@ func genSinglePartitionQueryMv(
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
-			Types:     typs,
 			QueryType: typedef.SelectStatementType,
 		},
 		ValuesWithToken: valuesWithToken,
@@ -189,10 +183,7 @@ func genMultiplePartitionQuery(
 ) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
-	var (
-		values []interface{}
-		typs   []typedef.Type
-	)
+	var values []interface{}
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 	for i, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
@@ -202,13 +193,11 @@ func genMultiplePartitionQuery(
 				return nil
 			}
 			values = append(values, vs.Value[i])
-			typs = append(typs, pk.Type)
 		}
 	}
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
-			Types:     typs,
 			QueryType: typedef.SelectStatementType,
 		},
 		Values: values,
@@ -227,7 +216,6 @@ func genMultiplePartitionQueryMv(
 	defer t.RUnlock()
 
 	var values []interface{}
-	var typs []typedef.Type
 
 	mv := t.MaterializedViews[mvNum]
 	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
@@ -242,10 +230,8 @@ func genMultiplePartitionQueryMv(
 				}
 				if i == 0 {
 					values = appendValue(pk.Type, r, p, values)
-					typs = append(typs, pk.Type)
 				} else {
 					values = append(values, vs.Value[i-1])
-					typs = append(typs, pk.Type)
 				}
 			}
 		}
@@ -258,14 +244,12 @@ func genMultiplePartitionQueryMv(
 					return nil
 				}
 				values = append(values, vs.Value[i])
-				typs = append(typs, pk.Type)
 			}
 		}
 	}
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
-			Types:     typs,
 			QueryType: typedef.SelectStatementType,
 		},
 		Values: values,
@@ -286,12 +270,10 @@ func genClusteringRangeQuery(
 	if vs == nil {
 		return nil
 	}
-	var allTypes []typedef.Type
 	values := vs.Value.Copy()
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
-		allTypes = append(allTypes, pk.Type)
 	}
 	clusteringKeys := t.ClusteringKeys
 	if len(clusteringKeys) > 0 {
@@ -299,19 +281,16 @@ func genClusteringRangeQuery(
 			ck := clusteringKeys[i]
 			builder = builder.Where(qb.Eq(ck.Name))
 			values = append(values, ck.Type.GenValue(r, p)...)
-			allTypes = append(allTypes, ck.Type)
 		}
 		ck := clusteringKeys[maxClusteringRels]
 		builder = builder.Where(qb.Gt(ck.Name)).Where(qb.Lt(ck.Name))
 		values = append(values, ck.Type.GenValue(r, p)...)
 		values = append(values, ck.Type.GenValue(r, p)...)
-		allTypes = append(allTypes, ck.Type, ck.Type)
 	}
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
 			QueryType: typedef.SelectRangeStatementType,
-			Types:     allTypes,
 		},
 		Values: values,
 	}
@@ -339,10 +318,8 @@ func genClusteringRangeQueryMv(
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
 
-	var allTypes []typedef.Type
 	for _, pk := range mv.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
-		allTypes = append(allTypes, pk.Type)
 	}
 
 	clusteringKeys := mv.ClusteringKeys
@@ -351,19 +328,16 @@ func genClusteringRangeQueryMv(
 			ck := clusteringKeys[i]
 			builder = builder.Where(qb.Eq(ck.Name))
 			values = append(values, ck.Type.GenValue(r, p)...)
-			allTypes = append(allTypes, ck.Type)
 		}
 		ck := clusteringKeys[maxClusteringRels]
 		builder = builder.Where(qb.Gt(ck.Name)).Where(qb.Lt(ck.Name))
 		values = append(values, t.ClusteringKeys[maxClusteringRels].Type.GenValue(r, p)...)
 		values = append(values, t.ClusteringKeys[maxClusteringRels].Type.GenValue(r, p)...)
-		allTypes = append(allTypes, ck.Type, ck.Type)
 	}
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
 			QueryType: typedef.SelectRangeStatementType,
-			Types:     allTypes,
 		},
 		Values: values,
 	}
@@ -384,7 +358,6 @@ func genMultiplePartitionClusteringRangeQuery(
 	pkValues := t.PartitionKeysLenValues()
 	valuesCount := pkValues*numQueryPKs + clusteringKeys[:maxClusteringRels].LenValues() + clusteringKeys[maxClusteringRels].Type.LenValue()*2
 	values := make(typedef.Values, pkValues*numQueryPKs, valuesCount)
-	typs := make(typedef.Types, pkValues*numQueryPKs, valuesCount)
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 
 	for _, pk := range t.PartitionKeys {
@@ -398,7 +371,6 @@ func genMultiplePartitionClusteringRangeQuery(
 		}
 		for id := range vs.Value {
 			idx := id*numQueryPKs + j
-			typs[idx] = t.PartitionKeys[id].Type
 			values[idx] = vs.Value[id]
 		}
 	}
@@ -408,18 +380,15 @@ func genMultiplePartitionClusteringRangeQuery(
 			ck := clusteringKeys[i]
 			builder = builder.Where(qb.Eq(ck.Name))
 			values = append(values, ck.Type.GenValue(r, p)...)
-			typs = append(typs, ck.Type)
 		}
 		ck := clusteringKeys[maxClusteringRels]
 		builder = builder.Where(qb.Gt(ck.Name)).Where(qb.Lt(ck.Name))
 		values = append(values, ck.Type.GenValue(r, p)...)
 		values = append(values, ck.Type.GenValue(r, p)...)
-		typs = append(typs, ck.Type, ck.Type)
 	}
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
-			Types:     typs,
 			QueryType: typedef.SelectRangeStatementType,
 		},
 		Values: values,
@@ -453,7 +422,6 @@ func genMultiplePartitionClusteringRangeQueryMv(
 		valuesCount += mv.PartitionKeys.LenValues() * numQueryPKs
 	}
 	values := make(typedef.Values, pkValues*numQueryPKs, valuesCount)
-	typs := make(typedef.Types, pkValues*numQueryPKs, valuesCount)
 	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
 
 	for _, pk := range mv.PartitionKeys {
@@ -463,7 +431,6 @@ func genMultiplePartitionClusteringRangeQueryMv(
 	if mvKey != nil {
 		// Fill values for Materialized view primary key
 		for j := 0; j < numQueryPKs; j++ {
-			typs[j] = mvKey.Type
 			copy(values[j*mvKeyLen:], mvKey.Type.GenValue(r, p))
 		}
 	}
@@ -475,7 +442,6 @@ func genMultiplePartitionClusteringRangeQueryMv(
 		}
 		for id := range vs.Value {
 			idx := (baseID+id)*numQueryPKs + j
-			typs[idx] = mv.PartitionKeys[baseID+id].Type
 			values[idx] = vs.Value[id]
 		}
 	}
@@ -485,18 +451,15 @@ func genMultiplePartitionClusteringRangeQueryMv(
 			ck := clusteringKeys[i]
 			builder = builder.Where(qb.Eq(ck.Name))
 			values = append(values, ck.Type.GenValue(r, p)...)
-			typs = append(typs, ck.Type)
 		}
 		ck := clusteringKeys[maxClusteringRels]
 		builder = builder.Where(qb.Gt(ck.Name)).Where(qb.Lt(ck.Name))
 		values = append(values, ck.Type.GenValue(r, p)...)
 		values = append(values, ck.Type.GenValue(r, p)...)
-		typs = append(typs, ck.Type, ck.Type)
 	}
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
-			Types:     typs,
 			QueryType: typedef.SelectFromMaterializedViewStatementType,
 		},
 		Values: values,
@@ -514,23 +477,17 @@ func genSingleIndexQuery(
 	t.RLock()
 	defer t.RUnlock()
 
-	var (
-		values []interface{}
-		typs   []typedef.Type
-	)
-
+	var values []interface{}
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 	builder.AllowFiltering()
 	for i := 0; i < idxCount; i++ {
 		builder = builder.Where(qb.Eq(t.Indexes[i].Column))
 		values = append(values, t.Columns[t.Indexes[i].ColumnIdx].Type.GenValue(r, p)...)
-		typs = append(typs, t.Columns[t.Indexes[i].ColumnIdx].Type)
 	}
 
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
-			Types:     typs,
 			QueryType: typedef.SelectByIndexStatementType,
 		},
 		Values: values,
