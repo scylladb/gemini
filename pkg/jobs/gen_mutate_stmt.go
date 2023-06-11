@@ -109,11 +109,11 @@ func genUpdateStmt(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef
 	nonCounters := t.Columns.NonCounters()
 	values := make(typedef.Values, 0, t.PartitionKeys.LenValues()+t.ClusteringKeys.LenValues()+nonCounters.LenValues())
 	for _, cdef := range nonCounters {
-		values = appendValue(cdef.Type, r, p, values)
+		values = append(values, cdef.Type.GenValue(r, p)...)
 	}
 	values = values.CopyFrom(valuesWithToken.Value)
 	for _, ck := range t.ClusteringKeys {
-		values = appendValue(ck.Type, r, p, values)
+		values = append(values, ck.Type.GenValue(r, p)...)
 	}
 	return &typedef.Stmt{
 		StmtCache:       stmtCache,
@@ -218,8 +218,8 @@ func genDeleteRows(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef
 	values := valuesWithToken.Value.Copy()
 	if len(t.ClusteringKeys) > 0 {
 		ck := t.ClusteringKeys[0]
-		values = appendValue(ck.Type, r, p, values)
-		values = appendValue(ck.Type, r, p, values)
+		values = append(values, ck.Type.GenValue(r, p)...)
+		values = append(values, ck.Type.GenValue(r, p)...)
 	}
 	return &typedef.Stmt{
 		StmtCache:       stmtCache,

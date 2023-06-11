@@ -53,10 +53,6 @@ func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, _ *typedef.Pa
 	return nil, nil
 }
 
-func appendValue(columnType typedef.Type, r *rand.Rand, p *typedef.PartitionRangeConfig, values []interface{}) []interface{} {
-	return append(values, columnType.GenValue(r, p)...)
-}
-
 func genAddColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnDef) (*typedef.Stmts, error) {
 	var stmts []*typedef.Stmt
 	if c, ok := column.Type.(*typedef.UDTType); ok {
