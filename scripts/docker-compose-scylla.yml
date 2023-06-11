@@ -11,8 +11,9 @@ networks:
 
 services:
   gemini-oracle:
-    image: cassandra:3.11.3
+    image: scylladb/scylla:5.2.2
     container_name: gemini-oracle
+    command: --smp 2 --memory 1024M --api-address 0.0.0.0
     networks:
       gemini:
 
