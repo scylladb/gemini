@@ -89,7 +89,12 @@ func (s *Stmt) PrettyCQL() string {
 type StatementType uint8
 
 func (st StatementType) PossibleAsyncOperation() bool {
-	return st == SelectByIndexStatementType || st == SelectFromMaterializedViewStatementType
+	switch st {
+	case SelectByIndexStatementType, SelectFromMaterializedViewStatementType:
+		return true
+	default:
+		return false
+	}
 }
 
 type Values []interface{}

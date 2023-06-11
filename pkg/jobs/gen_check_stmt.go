@@ -497,7 +497,7 @@ func genMultiplePartitionClusteringRangeQueryMv(
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
 			Types:     typs,
-			QueryType: typedef.SelectRangeStatementType,
+			QueryType: typedef.SelectFromMaterializedViewStatementType,
 		},
 		Values: values,
 	}
