@@ -12,7 +12,6 @@ require (
 	github.com/prometheus/client_golang v1.15.0
 	github.com/scylladb/go-set v1.0.2
 	github.com/scylladb/gocqlx/v2 v2.8.0
-	github.com/segmentio/ksuid v1.0.4
 	github.com/spf13/cobra v1.7.0
 	go.uber.org/multierr v1.6.0
 	go.uber.org/zap v1.24.0
