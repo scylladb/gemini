@@ -13,7 +13,7 @@ test_gemini() {
     ./scripts/prepare-environment.sh $oracle || exit 1
 
     echo -n "Running test with $oracle as oracle for 'gemini $@' ... "
-    ./scripts/run-gemini-test.sh --drop-schema $@
+    ./scripts/run-gemini-test.sh --drop-schema -c 8 $@
     if [ $? -eq 0 ]; then
        echo "OK"
     else
