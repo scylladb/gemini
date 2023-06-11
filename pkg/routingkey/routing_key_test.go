@@ -20,11 +20,10 @@ import (
 
 	"github.com/scylladb/gemini/pkg/typedef"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/routingkey"
-	"github.com/scylladb/gemini/pkg/testschema"
-
-	"github.com/google/go-cmp/cmp"
 )
 
 func TestRoutingKey(t *testing.T) {
@@ -34,11 +33,11 @@ func TestRoutingKey(t *testing.T) {
 	}
 	rkc := &routingkey.Creator{}
 	tests := map[string]struct {
-		table *testschema.Table
+		table *typedef.Table
 		data  []data
 	}{
 		"single_partition_key": {
-			table: &testschema.Table{
+			table: &typedef.Table{
 				Name:          "tbl0",
 				PartitionKeys: generators.CreatePkColumns(1, "pk"),
 			},
@@ -274,7 +273,7 @@ func TestRoutingKey(t *testing.T) {
 			},
 		},
 		"complex_partition_key": {
-			table: &testschema.Table{
+			table: &typedef.Table{
 				Name:          "tbl0",
 				PartitionKeys: generators.CreatePkColumns(2, "pk"),
 			},

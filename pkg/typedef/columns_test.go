@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package testschema_test
+package typedef_test
 
 import (
 	"encoding/json"
@@ -22,9 +22,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/scylladb/gemini/pkg/coltypes"
 	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -39,40 +37,40 @@ func TestMarshalUnmarshal(t *testing.T) {
 		MaxTupleParts:     2,
 		MaxUDTParts:       2,
 	}
-	columns := testschema.Columns{
-		&testschema.ColumnDef{
+	columns := typedef.Columns{
+		&typedef.ColumnDef{
 			Name: generators.GenColumnName("col", 0),
 			Type: generators.GenMapType(sc),
 		},
-		&testschema.ColumnDef{
+		&typedef.ColumnDef{
 			Name: generators.GenColumnName("col", 1),
 			Type: generators.GenSetType(sc),
 		},
-		&testschema.ColumnDef{
+		&typedef.ColumnDef{
 			Name: generators.GenColumnName("col", 2),
 			Type: generators.GenListType(sc),
 		},
-		&testschema.ColumnDef{
+		&typedef.ColumnDef{
 			Name: generators.GenColumnName("col", 3),
 			Type: generators.GenTupleType(sc),
 		},
-		&testschema.ColumnDef{
+		&typedef.ColumnDef{
 			Name: generators.GenColumnName("col", 4),
 			Type: generators.GenUDTType(sc),
 		},
 	}
-	s1 := &testschema.Schema{
-		Tables: []*testschema.Table{
+	s1 := &typedef.Schema{
+		Tables: []*typedef.Table{
 			{
 				Name: "table",
-				PartitionKeys: testschema.Columns{
-					&testschema.ColumnDef{
+				PartitionKeys: typedef.Columns{
+					&typedef.ColumnDef{
 						Name: generators.GenColumnName("pk", 0),
 						Type: generators.GenSimpleType(sc),
 					},
 				},
-				ClusteringKeys: testschema.Columns{
-					&testschema.ColumnDef{
+				ClusteringKeys: typedef.Columns{
+					&typedef.ColumnDef{
 						Name: generators.GenColumnName("ck", 0),
 						Type: generators.GenSimpleType(sc),
 					},
@@ -88,25 +86,25 @@ func TestMarshalUnmarshal(t *testing.T) {
 						Column: columns[1].Name,
 					},
 				},
-				MaterializedViews: []testschema.MaterializedView{
+				MaterializedViews: []typedef.MaterializedView{
 					{
 						Name: "table1_mv_0",
-						PartitionKeys: testschema.Columns{
-							&testschema.ColumnDef{
+						PartitionKeys: typedef.Columns{
+							&typedef.ColumnDef{
 								Name: "pk_mv_0",
 								Type: generators.GenListType(sc),
 							},
-							&testschema.ColumnDef{
+							&typedef.ColumnDef{
 								Name: "pk_mv_1",
 								Type: generators.GenTupleType(sc),
 							},
 						},
-						ClusteringKeys: testschema.Columns{
-							&testschema.ColumnDef{
+						ClusteringKeys: typedef.Columns{
+							&typedef.ColumnDef{
 								Name: "ck_mv_0",
 								Type: generators.GenSetType(sc),
 							},
-							&testschema.ColumnDef{
+							&typedef.ColumnDef{
 								Name: "ck_mv_1",
 								Type: generators.GenUDTType(sc),
 							},
@@ -119,8 +117,8 @@ func TestMarshalUnmarshal(t *testing.T) {
 	}
 
 	opts := cmp.Options{
-		cmp.AllowUnexported(testschema.Table{}, testschema.MaterializedView{}),
-		cmpopts.IgnoreUnexported(testschema.Table{}, testschema.MaterializedView{}),
+		cmp.AllowUnexported(typedef.Table{}, typedef.MaterializedView{}),
+		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}),
 	}
 
 	b, err := json.MarshalIndent(s1, "  ", "  ")
@@ -128,7 +126,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 		t.Fatalf("unable to marshal json, error=%s\n", err)
 	}
 
-	s2 := &testschema.Schema{}
+	s2 := &typedef.Schema{}
 	if err = json.Unmarshal(b, &s2); err != nil {
 		t.Fatalf("unable to unmarshal json, error=%s\n", err)
 	}
@@ -150,18 +148,18 @@ func TestPrimitives(t *testing.T) {
 		MaxUDTParts:       2,
 	}
 
-	cols := testschema.Columns{
-		&testschema.ColumnDef{
+	cols := typedef.Columns{
+		&typedef.ColumnDef{
 			Name: "pk_mv_0",
 			Type: generators.GenListType(sc),
 		},
-		&testschema.ColumnDef{
+		&typedef.ColumnDef{
 			Name: "pk_mv_1",
 			Type: generators.GenTupleType(sc),
 		},
-		&testschema.ColumnDef{
+		&typedef.ColumnDef{
 			Name: "ct_1",
-			Type: &coltypes.CounterType{},
+			Type: &typedef.CounterType{},
 		},
 	}
 	if cols.Len() != 3 {

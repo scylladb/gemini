@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package coltypes_test
+package typedef_test
 
 import (
 	"math/big"
@@ -20,10 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scylladb/gemini/pkg/coltypes"
-	"github.com/scylladb/gemini/pkg/typedef"
-
 	"gopkg.in/inf.v0"
+
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 var millennium = time.Date(1999, 12, 31, 23, 59, 59, 0, time.UTC)
@@ -35,129 +34,129 @@ var prettytests = []struct {
 	values   []interface{}
 }{
 	{
-		typ:      coltypes.TYPE_ASCII,
+		typ:      typedef.TYPE_ASCII,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{"a"},
 		expected: "SELECT * FROM tbl WHERE pk0='a'",
 	},
 	{
-		typ:      coltypes.TYPE_BIGINT,
+		typ:      typedef.TYPE_BIGINT,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{big.NewInt(10)},
 		expected: "SELECT * FROM tbl WHERE pk0=10",
 	},
 	{
-		typ:      coltypes.TYPE_BLOB,
+		typ:      typedef.TYPE_BLOB,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{"a"},
 		expected: "SELECT * FROM tbl WHERE pk0=textasblob('a')",
 	},
 	{
-		typ:      coltypes.TYPE_BOOLEAN,
+		typ:      typedef.TYPE_BOOLEAN,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{true},
 		expected: "SELECT * FROM tbl WHERE pk0=true",
 	},
 	{
-		typ:      coltypes.TYPE_DATE,
+		typ:      typedef.TYPE_DATE,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{millennium.Format("2006-01-02")},
 		expected: "SELECT * FROM tbl WHERE pk0='1999-12-31'",
 	},
 	{
-		typ:      coltypes.TYPE_DECIMAL,
+		typ:      typedef.TYPE_DECIMAL,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{inf.NewDec(1000, 0)},
 		expected: "SELECT * FROM tbl WHERE pk0=1000",
 	},
 	{
-		typ:      coltypes.TYPE_DOUBLE,
+		typ:      typedef.TYPE_DOUBLE,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{10.0},
 		expected: "SELECT * FROM tbl WHERE pk0=10.00",
 	},
 	{
-		typ:      coltypes.TYPE_DURATION,
+		typ:      typedef.TYPE_DURATION,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{10 * time.Minute},
 		expected: "SELECT * FROM tbl WHERE pk0=10m0s",
 	},
 	{
-		typ:      coltypes.TYPE_FLOAT,
+		typ:      typedef.TYPE_FLOAT,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{10.0},
 		expected: "SELECT * FROM tbl WHERE pk0=10.00",
 	},
 	{
-		typ:      coltypes.TYPE_INET,
+		typ:      typedef.TYPE_INET,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{net.ParseIP("192.168.0.1")},
 		expected: "SELECT * FROM tbl WHERE pk0='192.168.0.1'",
 	},
 	{
-		typ:      coltypes.TYPE_INT,
+		typ:      typedef.TYPE_INT,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{10},
 		expected: "SELECT * FROM tbl WHERE pk0=10",
 	},
 	{
-		typ:      coltypes.TYPE_SMALLINT,
+		typ:      typedef.TYPE_SMALLINT,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{2},
 		expected: "SELECT * FROM tbl WHERE pk0=2",
 	},
 	{
-		typ:      coltypes.TYPE_TEXT,
+		typ:      typedef.TYPE_TEXT,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{"a"},
 		expected: "SELECT * FROM tbl WHERE pk0='a'",
 	},
 	{
-		typ:      coltypes.TYPE_TIME,
+		typ:      typedef.TYPE_TIME,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{millennium},
 		expected: "SELECT * FROM tbl WHERE pk0='" + millennium.Format(time.RFC3339) + "'",
 	},
 	{
-		typ:      coltypes.TYPE_TIMESTAMP,
+		typ:      typedef.TYPE_TIMESTAMP,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{millennium},
 		expected: "SELECT * FROM tbl WHERE pk0='" + millennium.Format(time.RFC3339) + "'",
 	},
 	{
-		typ:      coltypes.TYPE_TIMEUUID,
+		typ:      typedef.TYPE_TIMEUUID,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{"63176980-bfde-11d3-bc37-1c4d704231dc"},
 		expected: "SELECT * FROM tbl WHERE pk0=63176980-bfde-11d3-bc37-1c4d704231dc",
 	},
 	{
-		typ:      coltypes.TYPE_TINYINT,
+		typ:      typedef.TYPE_TINYINT,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{1},
 		expected: "SELECT * FROM tbl WHERE pk0=1",
 	},
 	{
-		typ:      coltypes.TYPE_UUID,
+		typ:      typedef.TYPE_UUID,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{"63176980-bfde-11d3-bc37-1c4d704231dc"},
 		expected: "SELECT * FROM tbl WHERE pk0=63176980-bfde-11d3-bc37-1c4d704231dc",
 	},
 	{
-		typ:      coltypes.TYPE_VARCHAR,
+		typ:      typedef.TYPE_VARCHAR,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{"a"},
 		expected: "SELECT * FROM tbl WHERE pk0='a'",
 	},
 	{
-		typ:      coltypes.TYPE_VARINT,
+		typ:      typedef.TYPE_VARINT,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{big.NewInt(1001)},
 		expected: "SELECT * FROM tbl WHERE pk0=1001",
 	},
 	{
-		typ: &coltypes.BagType{
+		typ: &typedef.BagType{
 			Kind:   "set",
-			Type:   coltypes.TYPE_ASCII,
+			Type:   typedef.TYPE_ASCII,
 			Frozen: false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
@@ -165,9 +164,9 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0={'a','b'}",
 	},
 	{
-		typ: &coltypes.BagType{
+		typ: &typedef.BagType{
 			Kind:   "list",
-			Type:   coltypes.TYPE_ASCII,
+			Type:   typedef.TYPE_ASCII,
 			Frozen: false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
@@ -175,9 +174,9 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0=['a','b']",
 	},
 	{
-		typ: &coltypes.MapType{
-			KeyType:   coltypes.TYPE_ASCII,
-			ValueType: coltypes.TYPE_ASCII,
+		typ: &typedef.MapType{
+			KeyType:   typedef.TYPE_ASCII,
+			ValueType: typedef.TYPE_ASCII,
 			Frozen:    false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
@@ -185,9 +184,9 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0={a:'b'}",
 	},
 	{
-		typ: &coltypes.MapType{
-			KeyType:   coltypes.TYPE_ASCII,
-			ValueType: coltypes.TYPE_BLOB,
+		typ: &typedef.MapType{
+			KeyType:   typedef.TYPE_ASCII,
+			ValueType: typedef.TYPE_BLOB,
 			Frozen:    false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
@@ -195,8 +194,8 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0={a:textasblob('b')}",
 	},
 	{
-		typ: &coltypes.TupleType{
-			Types:  []coltypes.SimpleType{coltypes.TYPE_ASCII},
+		typ: &typedef.TupleType{
+			Types:  []typedef.SimpleType{typedef.TYPE_ASCII},
 			Frozen: false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
@@ -204,8 +203,8 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0='a'",
 	},
 	{
-		typ: &coltypes.TupleType{
-			Types:  []coltypes.SimpleType{coltypes.TYPE_ASCII, coltypes.TYPE_ASCII},
+		typ: &typedef.TupleType{
+			Types:  []typedef.SimpleType{typedef.TYPE_ASCII, typedef.TYPE_ASCII},
 			Frozen: false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0={?,?}",

@@ -27,12 +27,10 @@ import (
 	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/builders"
-	"github.com/scylladb/gemini/pkg/coltypes"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/tableopts"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -55,7 +53,7 @@ type Result struct {
 }
 
 type funcOptions struct {
-	addType  testschema.ColumnDef
+	addType  typedef.ColumnDef
 	idxCount int
 	mvNum    int
 	useLWT   bool
@@ -274,13 +272,13 @@ type testInterface interface {
 	Fatalf(format string, args ...any)
 }
 
-func getAllForTestStmt(t testInterface, caseName string) (*testschema.Schema, *typedef.PartitionRangeConfig, *MockGenerator, *rand.Rand, funcOptions) {
+func getAllForTestStmt(t testInterface, caseName string) (*typedef.Schema, *typedef.PartitionRangeConfig, *MockGenerator, *rand.Rand, funcOptions) {
 	rnd := rand.New(nonRandSource(1))
 	table, options, optionsNum := getTableAndOptionsFromName(t, caseName)
 	opts, mv, indexes := getFromOptions(t, table, options, optionsNum)
 	table.Indexes = indexes
 	if opts.mvNum >= 0 {
-		table.MaterializedViews = []testschema.MaterializedView{*mv}
+		table.MaterializedViews = []typedef.MaterializedView{*mv}
 	}
 	testSchema, testSchemaCfg, err := getTestSchema(table)
 	if err != nil {
@@ -300,23 +298,23 @@ func getAllForTestStmt(t testInterface, caseName string) (*testschema.Schema, *t
 	return testSchema, testPRC, testGenerator, rnd, opts
 }
 
-func createMv(t testInterface, table *testschema.Table, haveNonPrimaryKey bool) *testschema.MaterializedView {
+func createMv(t testInterface, table *typedef.Table, haveNonPrimaryKey bool) *typedef.MaterializedView {
 	switch haveNonPrimaryKey {
 	case true:
-		var cols testschema.Columns
+		var cols typedef.Columns
 		col := table.Columns.ValidColumnsForPrimaryKey()
 		if len(col) == 0 {
 			t.Fatalf("no valid columns for mv primary key")
 		}
 		cols = append(cols, col[0])
-		return &testschema.MaterializedView{
+		return &typedef.MaterializedView{
 			Name:           fmt.Sprintf("%s_mv_1", table.Name),
 			PartitionKeys:  append(cols, table.PartitionKeys...),
 			ClusteringKeys: table.ClusteringKeys,
 			NonPrimaryKey:  col[0],
 		}
 	default:
-		return &testschema.MaterializedView{
+		return &typedef.MaterializedView{
 			Name:           fmt.Sprintf("%s_mv_1", table.Name),
 			PartitionKeys:  table.PartitionKeys,
 			ClusteringKeys: table.ClusteringKeys,
@@ -324,7 +322,7 @@ func createMv(t testInterface, table *testschema.Table, haveNonPrimaryKey bool) 
 	}
 }
 
-func getTestSchema(table *testschema.Table) (*testschema.Schema, *typedef.SchemaConfig, error) {
+func getTestSchema(table *typedef.Table) (*typedef.Schema, *typedef.SchemaConfig, error) {
 	tableOpt := createTableOptions("compaction = {'class':'LeveledCompactionStrategy','enabled':true,'tombstone_threshold':0.2," +
 		"'tombstone_compaction_interval':86400,'sstable_size_in_mb':160}")
 	testSchemaConfig := typedef.SchemaConfig{
@@ -370,7 +368,7 @@ func createTableOptions(cql string) []tableopts.Option {
 	return tableOptions
 }
 
-func genTestSchema(sc typedef.SchemaConfig, table *testschema.Table) *testschema.Schema {
+func genTestSchema(sc typedef.SchemaConfig, table *typedef.Table) *typedef.Schema {
 	builder := builders.NewSchemaBuilder()
 	keyspace := typedef.Keyspace{
 		Name:              "ks1",
@@ -382,9 +380,9 @@ func genTestSchema(sc typedef.SchemaConfig, table *testschema.Table) *testschema
 	return builder.Build()
 }
 
-func getTableAndOptionsFromName(t testInterface, tableName string) (table *testschema.Table, options, optionsNum string) {
+func getTableAndOptionsFromName(t testInterface, tableName string) (table *typedef.Table, options, optionsNum string) {
 	nameParts := strings.Split(tableName, "_")
-	table = &testschema.Table{}
+	table = &typedef.Table{}
 	for idx := range nameParts {
 		switch idx {
 		case 0:
@@ -404,11 +402,11 @@ func getTableAndOptionsFromName(t testInterface, tableName string) (table *tests
 	return table, options, optionsNum
 }
 
-func getFromOptions(t testInterface, table *testschema.Table, option, optionsNum string) (funcOptions, *testschema.MaterializedView, []typedef.IndexDef) {
+func getFromOptions(t testInterface, table *typedef.Table, option, optionsNum string) (funcOptions, *typedef.MaterializedView, []typedef.IndexDef) {
 	funcOpts := funcOptions{
 		mvNum: -1,
 	}
-	var mv *testschema.MaterializedView
+	var mv *typedef.MaterializedView
 	var indexes []typedef.IndexDef
 	if option == "" {
 		return funcOpts, nil, nil
@@ -453,7 +451,7 @@ func getFromOptions(t testInterface, table *testschema.Table, option, optionsNum
 		case "delLast":
 			funcOpts.delNum = len(table.Columns) - 1
 		case "addSt":
-			funcOpts.addType = testschema.ColumnDef{
+			funcOpts.addType = typedef.ColumnDef{
 				Type: createColumnSimpleType(t, optionsNum),
 				Name: generators.GenColumnName("col", len(table.Columns)+1),
 			}
@@ -463,15 +461,15 @@ func getFromOptions(t testInterface, table *testschema.Table, option, optionsNum
 	return funcOpts, mv, indexes
 }
 
-func createColumnSimpleType(t testInterface, typeNum string) coltypes.SimpleType {
+func createColumnSimpleType(t testInterface, typeNum string) typedef.SimpleType {
 	num, err := strconv.ParseInt(typeNum, 0, 8)
 	if err != nil {
 		t.Fatalf("wrong options case for add column definition")
 	}
-	return coltypes.AllTypes[int(num)]
+	return typedef.AllTypes[int(num)]
 }
 
-func createIdxFromColumns(t testInterface, table *testschema.Table, all bool) (indexes []typedef.IndexDef) {
+func createIdxFromColumns(t testInterface, table *typedef.Table, all bool) (indexes []typedef.IndexDef) {
 	if len(table.Columns) < 1 {
 		t.Fatalf("wrong idxCount case definition")
 	}
@@ -495,15 +493,15 @@ func createIdxFromColumns(t testInterface, table *testschema.Table, all bool) (i
 	return indexes
 }
 
-func genColumnsFromCase(t testInterface, typeCases map[string][]typedef.Type, caseName, prefix string) testschema.Columns {
+func genColumnsFromCase(t testInterface, typeCases map[string][]typedef.Type, caseName, prefix string) typedef.Columns {
 	typeCase, ok := typeCases[caseName]
 	if !ok {
 		t.Fatalf("Error caseName:%s, not found", caseName)
 	}
-	columns := make(testschema.Columns, 0, len(typeCase))
+	columns := make(typedef.Columns, 0, len(typeCase))
 	for idx := range typeCase {
 		columns = append(columns,
-			&testschema.ColumnDef{
+			&typedef.ColumnDef{
 				Type: typeCase[idx],
 				Name: fmt.Sprintf("%s%d", prefix, idx),
 			})

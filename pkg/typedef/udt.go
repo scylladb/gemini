@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package coltypes
+package typedef
 
 import (
 	"fmt"
 	"strings"
-
-	"github.com/scylladb/gemini/pkg/typedef"
 
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
@@ -75,7 +73,7 @@ func (t *UDTType) Indexable() bool {
 	return true
 }
 
-func (t *UDTType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []interface{} {
+func (t *UDTType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	vals := make(map[string]interface{})
 	for name, typ := range t.Types {
 		vals[name] = typ.GenValue(r, p)[0]

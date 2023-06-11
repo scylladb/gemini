@@ -19,10 +19,8 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/scylladb/gemini/pkg/coltypes"
 	"github.com/scylladb/gemini/pkg/inflight"
 	"github.com/scylladb/gemini/pkg/routingkey"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 
 	"go.uber.org/zap"
@@ -54,7 +52,7 @@ type Generator struct {
 	wakeUpSignal     chan struct{}
 	ctx              context.Context
 	logger           *zap.Logger
-	table            *testschema.Table
+	table            *typedef.Table
 	idxFunc          DistributionFunc
 	partitions       Partitions
 	partitionsConfig typedef.PartitionRangeConfig
@@ -74,7 +72,7 @@ type Config struct {
 	PkUsedBufferSize           uint64
 }
 
-func NewGenerator(ctx context.Context, table *testschema.Table, config *Config, logger *zap.Logger) *Generator {
+func NewGenerator(ctx context.Context, table *typedef.Table, config *Config, logger *zap.Logger) *Generator {
 	partitions := make([]*Partition, config.PartitionsCount)
 	for i := 0; i < len(partitions); i++ {
 		partitions[i] = &Partition{
@@ -208,12 +206,12 @@ func (g *Generator) createPartitionKeyValues(r *rand.Rand) []interface{} {
 	return values
 }
 
-func CreatePkColumns(cnt int, prefix string) testschema.Columns {
-	var cols testschema.Columns
+func CreatePkColumns(cnt int, prefix string) typedef.Columns {
+	var cols typedef.Columns
 	for i := 0; i < cnt; i++ {
-		cols = append(cols, &testschema.ColumnDef{
+		cols = append(cols, &typedef.ColumnDef{
 			Name: GenColumnName(prefix, i),
-			Type: coltypes.TYPE_INT,
+			Type: typedef.TYPE_INT,
 		})
 	}
 	return cols

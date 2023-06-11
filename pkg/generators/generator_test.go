@@ -20,14 +20,13 @@ import (
 	"testing"
 
 	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 
 	"go.uber.org/zap"
 )
 
 func TestGenerator(t *testing.T) {
-	table := &testschema.Table{
+	table := &typedef.Table{
 		Name:          "tbl",
 		PartitionKeys: generators.CreatePkColumns(1, "pk"),
 	}

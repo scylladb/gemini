@@ -22,13 +22,11 @@ import (
 
 	"github.com/scylladb/gocqlx/v2/qb"
 
-	"github.com/scylladb/gemini/pkg/coltypes"
 	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func GenMutateStmt(s *testschema.Schema, t *testschema.Table, g generators.GeneratorInterface, r *rand.Rand, p *typedef.PartitionRangeConfig, deletes bool) (*typedef.Stmt, error) {
+func GenMutateStmt(s *typedef.Schema, t *typedef.Table, g generators.GeneratorInterface, r *rand.Rand, p *typedef.PartitionRangeConfig, deletes bool) (*typedef.Stmt, error) {
 	t.RLock()
 	defer t.RUnlock()
 
@@ -61,8 +59,8 @@ func GenMutateStmt(s *testschema.Schema, t *testschema.Table, g generators.Gener
 }
 
 func genInsertOrUpdateStmt(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 	valuesWithToken *typedef.ValueWithToken,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -74,7 +72,7 @@ func genInsertOrUpdateStmt(
 	return genInsertStmt(s, t, valuesWithToken, r, p, useLWT)
 }
 
-func genUpdateStmt(_ *testschema.Schema, t *testschema.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
+func genUpdateStmt(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
 	stmtCache := t.GetQueryCache(typedef.CacheUpdate)
 	nonCounters := t.Columns.NonCounters()
 	values := make(typedef.Values, 0, t.PartitionKeys.LenValues()+t.ClusteringKeys.LenValues()+nonCounters.LenValues())
@@ -93,8 +91,8 @@ func genUpdateStmt(_ *testschema.Schema, t *testschema.Table, valuesWithToken *t
 }
 
 func genInsertStmt(
-	_ *testschema.Schema,
-	t *testschema.Table,
+	_ *typedef.Schema,
+	t *typedef.Table,
 	valuesWithToken *typedef.ValueWithToken,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -121,8 +119,8 @@ func genInsertStmt(
 }
 
 func genInsertJSONStmt(
-	s *testschema.Schema,
-	table *testschema.Table,
+	s *typedef.Schema,
+	table *typedef.Table,
 	valuesWithToken *typedef.ValueWithToken,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -136,8 +134,8 @@ func genInsertJSONStmt(
 	values := make(map[string]interface{})
 	for i, pk := range table.PartitionKeys {
 		switch t := pk.Type.(type) {
-		case coltypes.SimpleType:
-			if t != coltypes.TYPE_BLOB {
+		case typedef.SimpleType:
+			if t != typedef.TYPE_BLOB {
 				values[pk.Name] = vs[i]
 				continue
 			}
@@ -145,10 +143,10 @@ func genInsertJSONStmt(
 			if ok {
 				values[pk.Name] = "0x" + v
 			}
-		case *coltypes.TupleType:
+		case *typedef.TupleType:
 			tupVals := make([]interface{}, len(t.Types))
 			for j := 0; j < len(t.Types); j++ {
-				if t.Types[j] == coltypes.TYPE_BLOB {
+				if t.Types[j] == typedef.TYPE_BLOB {
 					v, ok = vs[i+j].(string)
 					if ok {
 						v = "0x" + v
@@ -175,7 +173,7 @@ func genInsertJSONStmt(
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
-			Types:     []typedef.Type{coltypes.TYPE_TEXT},
+			Types:     []typedef.Type{typedef.TYPE_TEXT},
 			QueryType: typedef.InsertStatement,
 		},
 		ValuesWithToken: valuesWithToken,
@@ -183,7 +181,7 @@ func genInsertJSONStmt(
 	}, nil
 }
 
-func genDeleteRows(_ *testschema.Schema, t *testschema.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
+func genDeleteRows(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
 	stmtCache := t.GetQueryCache(typedef.CacheDelete)
 	values := valuesWithToken.Value.Copy()
 	if len(t.ClusteringKeys) > 0 {

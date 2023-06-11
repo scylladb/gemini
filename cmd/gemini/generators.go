@@ -17,7 +17,6 @@ import (
 	"context"
 
 	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 
 	"go.uber.org/zap"
@@ -25,7 +24,7 @@ import (
 
 func createGenerators(
 	ctx context.Context,
-	schema *testschema.Schema,
+	schema *typedef.Schema,
 	schemaConfig typedef.SchemaConfig,
 	distributionFunc generators.DistributionFunc,
 	_, distributionSize uint64,

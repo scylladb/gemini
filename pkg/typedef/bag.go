@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package coltypes
+package typedef
 
 import (
 	"fmt"
@@ -21,8 +21,6 @@ import (
 
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
-
-	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 type BagType struct {
@@ -80,7 +78,7 @@ func (ct *BagType) CQLPretty(query string, value []interface{}) (string, int) {
 	return strings.Replace(query, "?", vv, 1), 1
 }
 
-func (ct *BagType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []interface{} {
+func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	count := r.Intn(9) + 1
 	out := make([]interface{}, count)
 	for i := 0; i < count; i++ {

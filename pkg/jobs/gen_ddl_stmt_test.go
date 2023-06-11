@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scylladb/gemini/pkg/coltypes"
+	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
@@ -78,7 +78,7 @@ func BenchmarkGenAddColumnStmt(t *testing.B) {
 //nolint:unused
 func checkOnAllTypesInAddColumnCases(t *testing.T, cases []string) {
 	founded := 0
-	for j := 0; j < len(coltypes.AllTypes); j++ {
+	for j := 0; j < len(typedef.AllTypes); j++ {
 		for i := range cases {
 			caseName := cases[i]
 			_, caseNum, _ := strings.Cut(caseName, ".")
@@ -89,7 +89,7 @@ func checkOnAllTypesInAddColumnCases(t *testing.T, cases []string) {
 			}
 		}
 	}
-	if founded != len(coltypes.AllTypes) || founded != len(cases) {
+	if founded != len(typedef.AllTypes) || founded != len(cases) {
 		t.Error("not all column types in genAddColumnStmtCases")
 	}
 }

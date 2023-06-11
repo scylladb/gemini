@@ -13,27 +13,25 @@
 // limitations under the License.
 
 //nolint:lll
-package testschema
+package typedef
 
 import (
 	"testing"
-
-	"github.com/scylladb/gemini/pkg/typedef"
 
 	"github.com/google/go-cmp/cmp"
 )
 
 func TestSchemaConfigValidate(t *testing.T) {
 	tests := map[string]struct {
-		config *typedef.SchemaConfig
+		config *SchemaConfig
 		want   error
 	}{
 		"empty": {
-			config: &typedef.SchemaConfig{},
-			want:   typedef.ErrSchemaConfigInvalidPK,
+			config: &SchemaConfig{},
+			want:   ErrSchemaConfigInvalidPK,
 		},
 		"valid": {
-			config: &typedef.SchemaConfig{
+			config: &SchemaConfig{
 				MaxPartitionKeys:  3,
 				MinPartitionKeys:  2,
 				MaxClusteringKeys: 3,
@@ -44,39 +42,39 @@ func TestSchemaConfigValidate(t *testing.T) {
 			want: nil,
 		},
 		"min_pk_gt_than_max_pk": {
-			config: &typedef.SchemaConfig{
+			config: &SchemaConfig{
 				MaxPartitionKeys: 2,
 				MinPartitionKeys: 3,
 			},
-			want: typedef.ErrSchemaConfigInvalidPK,
+			want: ErrSchemaConfigInvalidPK,
 		},
 		"ck_missing": {
-			config: &typedef.SchemaConfig{
+			config: &SchemaConfig{
 				MaxPartitionKeys: 3,
 				MinPartitionKeys: 2,
 			},
-			want: typedef.ErrSchemaConfigInvalidCK,
+			want: ErrSchemaConfigInvalidCK,
 		},
 		"min_ck_gt_than_max_ck": {
-			config: &typedef.SchemaConfig{
+			config: &SchemaConfig{
 				MaxPartitionKeys:  3,
 				MinPartitionKeys:  2,
 				MaxClusteringKeys: 2,
 				MinClusteringKeys: 3,
 			},
-			want: typedef.ErrSchemaConfigInvalidCK,
+			want: ErrSchemaConfigInvalidCK,
 		},
 		"columns_missing": {
-			config: &typedef.SchemaConfig{
+			config: &SchemaConfig{
 				MaxPartitionKeys:  3,
 				MinPartitionKeys:  2,
 				MaxClusteringKeys: 3,
 				MinClusteringKeys: 2,
 			},
-			want: typedef.ErrSchemaConfigInvalidCols,
+			want: ErrSchemaConfigInvalidCols,
 		},
 		"min_cols_gt_than_max_cols": {
-			config: &typedef.SchemaConfig{
+			config: &SchemaConfig{
 				MaxPartitionKeys:  3,
 				MinPartitionKeys:  2,
 				MaxClusteringKeys: 3,
@@ -84,7 +82,7 @@ func TestSchemaConfigValidate(t *testing.T) {
 				MaxColumns:        2,
 				MinColumns:        3,
 			},
-			want: typedef.ErrSchemaConfigInvalidCols,
+			want: ErrSchemaConfigInvalidCols,
 		},
 	}
 	cmp.AllowUnexported()

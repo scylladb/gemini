@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package coltypes
+package typedef
 
 import (
 	"encoding/hex"
@@ -26,13 +26,12 @@ import (
 	"golang.org/x/exp/rand"
 	"gopkg.in/inf.v0"
 
-	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type SimpleTypes []SimpleType
 
-func (l SimpleTypes) Contains(colType typedef.Type) bool {
+func (l SimpleTypes) Contains(colType Type) bool {
 	t, ok := colType.(SimpleType)
 	if !ok {
 		return false
@@ -157,7 +156,7 @@ func (st SimpleType) Indexable() bool {
 	return st != TYPE_DURATION
 }
 
-func (st SimpleType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []interface{} {
+func (st SimpleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	var val interface{}
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:

@@ -22,13 +22,11 @@ import (
 	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/builders"
-	"github.com/scylladb/gemini/pkg/coltypes"
 	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func GenDDLStmt(s *testschema.Schema, t *testschema.Table, r *rand.Rand, _ *typedef.PartitionRangeConfig, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
+func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, _ *typedef.PartitionRangeConfig, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
 	maxVariant := 1
 	if len(t.Columns) > 0 {
 		maxVariant = 2
@@ -40,7 +38,7 @@ func GenDDLStmt(s *testschema.Schema, t *testschema.Table, r *rand.Rand, _ *type
 		colNum := r.Intn(len(t.Columns))
 		return genDropColumnStmt(t, s.Keyspace.Name, colNum)
 	default:
-		column := testschema.ColumnDef{Name: generators.GenColumnName("col", len(t.Columns)+1), Type: generators.GenColumnType(len(t.Columns)+1, sc)}
+		column := typedef.ColumnDef{Name: generators.GenColumnName("col", len(t.Columns)+1), Type: generators.GenColumnType(len(t.Columns)+1, sc)}
 		return genAddColumnStmt(t, s.Keyspace.Name, &column)
 	}
 }
@@ -49,9 +47,9 @@ func appendValue(columnType typedef.Type, r *rand.Rand, p *typedef.PartitionRang
 	return append(values, columnType.GenValue(r, p)...)
 }
 
-func genAddColumnStmt(t *testschema.Table, keyspace string, column *testschema.ColumnDef) (*typedef.Stmts, error) {
+func genAddColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnDef) (*typedef.Stmts, error) {
 	var stmts []*typedef.Stmt
-	if c, ok := column.Type.(*coltypes.UDTType); ok {
+	if c, ok := column.Type.(*typedef.UDTType); ok {
 		createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s);"
 		var typs []string
 		for name, typ := range c.Types {
@@ -84,20 +82,20 @@ func genAddColumnStmt(t *testschema.Table, keyspace string, column *testschema.C
 }
 
 //nolint:unused
-func alterColumn(t *testschema.Table, keyspace string) ([]*typedef.Stmt, func(), error) {
+func alterColumn(t *typedef.Table, keyspace string) ([]*typedef.Stmt, func(), error) {
 	var stmts []*typedef.Stmt
 	idx := rand.Intn(len(t.Columns))
 	column := t.Columns[idx]
-	oldType, isSimpleType := column.Type.(coltypes.SimpleType)
+	oldType, isSimpleType := column.Type.(typedef.SimpleType)
 	if !isSimpleType {
 		return nil, func() {}, errors.Errorf("complex type=%s cannot be altered", column.Name)
 	}
-	compatTypes := coltypes.CompatibleColumnTypes[oldType]
+	compatTypes := typedef.CompatibleColumnTypes[oldType]
 	if len(compatTypes) == 0 {
 		return nil, func() {}, errors.Errorf("simple type=%s has no compatible coltypes so it cannot be altered", column.Name)
 	}
 	newType := compatTypes.Random()
-	newColumn := testschema.ColumnDef{Name: column.Name, Type: newType}
+	newColumn := typedef.ColumnDef{Name: column.Name, Type: newType}
 	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " ALTER " + column.Name + " TYPE " + column.Type.CQLDef()
 	stmts = append(stmts, &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
@@ -113,7 +111,7 @@ func alterColumn(t *testschema.Table, keyspace string) ([]*typedef.Stmt, func(),
 	}, nil
 }
 
-func genDropColumnStmt(t *testschema.Table, keyspace string, colNum int) (*typedef.Stmts, error) {
+func genDropColumnStmt(t *typedef.Table, keyspace string, colNum int) (*typedef.Stmts, error) {
 	var stmts []*typedef.Stmt
 
 	column := t.Columns[colNum]

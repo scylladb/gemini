@@ -16,14 +16,13 @@ package builders
 
 import (
 	"github.com/scylladb/gemini/pkg/querycache"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 type SchemaBuilder interface {
 	Keyspace(typedef.Keyspace) SchemaBuilder
-	Table(*testschema.Table) SchemaBuilder
-	Build() *testschema.Schema
+	Table(*typedef.Table) SchemaBuilder
+	Build() *typedef.Schema
 }
 
 type AlterTableBuilder struct {
@@ -36,7 +35,7 @@ func (atb *AlterTableBuilder) ToCql() (string, []string) {
 
 type schemaBuilder struct {
 	keyspace typedef.Keyspace
-	tables   []*testschema.Table
+	tables   []*typedef.Table
 }
 
 func (s *schemaBuilder) Keyspace(keyspace typedef.Keyspace) SchemaBuilder {
@@ -44,13 +43,13 @@ func (s *schemaBuilder) Keyspace(keyspace typedef.Keyspace) SchemaBuilder {
 	return s
 }
 
-func (s *schemaBuilder) Table(table *testschema.Table) SchemaBuilder {
+func (s *schemaBuilder) Table(table *typedef.Table) SchemaBuilder {
 	s.tables = append(s.tables, table)
 	return s
 }
 
-func (s *schemaBuilder) Build() *testschema.Schema {
-	out := &testschema.Schema{Keyspace: s.keyspace, Tables: s.tables}
+func (s *schemaBuilder) Build() *typedef.Schema {
+	out := &typedef.Schema{Keyspace: s.keyspace, Tables: s.tables}
 	for id := range s.tables {
 		s.tables[id].Init(out, querycache.New(out))
 	}

@@ -21,8 +21,6 @@ import (
 	"github.com/scylladb/gemini/pkg/murmur"
 	"github.com/scylladb/gemini/pkg/typedef"
 
-	"github.com/scylladb/gemini/pkg/testschema"
-
 	"github.com/gocql/gocql"
 )
 
@@ -30,7 +28,7 @@ type Creator struct {
 	routingKeyBuffer []byte
 }
 
-func (rc *Creator) CreateRoutingKey(table *testschema.Table, values []interface{}) ([]byte, error) {
+func (rc *Creator) CreateRoutingKey(table *typedef.Table, values []interface{}) ([]byte, error) {
 	partitionKeys := table.PartitionKeys
 	if len(partitionKeys) == 1 {
 		// single column routing key
@@ -68,7 +66,7 @@ func (rc *Creator) CreateRoutingKey(table *testschema.Table, values []interface{
 	return routingKey, nil
 }
 
-func (rc *Creator) GetHash(t *testschema.Table, values typedef.Values) (uint64, error) {
+func (rc *Creator) GetHash(t *typedef.Table, values typedef.Values) (uint64, error) {
 	b, err := rc.CreateRoutingKey(t, values)
 	if err != nil {
 		return 0, err

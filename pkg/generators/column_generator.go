@@ -19,7 +19,6 @@ import (
 
 	"golang.org/x/exp/rand"
 
-	"github.com/scylladb/gemini/pkg/coltypes"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -45,8 +44,8 @@ func GenColumnType(numColumns int, sc *typedef.SchemaConfig) typedef.Type {
 	}
 }
 
-func GenSimpleType(_ *typedef.SchemaConfig) coltypes.SimpleType {
-	return coltypes.AllTypes[rand.Intn(len(coltypes.AllTypes))]
+func GenSimpleType(_ *typedef.SchemaConfig) typedef.SimpleType {
+	return typedef.AllTypes[rand.Intn(len(typedef.AllTypes))]
 }
 
 func GenTupleType(sc *typedef.SchemaConfig) typedef.Type {
@@ -54,64 +53,64 @@ func GenTupleType(sc *typedef.SchemaConfig) typedef.Type {
 	if n < 2 {
 		n = 2
 	}
-	typeList := make([]coltypes.SimpleType, n)
+	typeList := make([]typedef.SimpleType, n)
 	for i := 0; i < n; i++ {
 		typeList[i] = GenSimpleType(sc)
 	}
-	return &coltypes.TupleType{
+	return &typedef.TupleType{
 		Types:  typeList,
 		Frozen: rand.Uint32()%2 == 0,
 	}
 }
 
-func GenUDTType(sc *typedef.SchemaConfig) *coltypes.UDTType {
+func GenUDTType(sc *typedef.SchemaConfig) *typedef.UDTType {
 	udtNum := rand.Uint32()
 	typeName := fmt.Sprintf("udt_%d", udtNum)
-	ts := make(map[string]coltypes.SimpleType)
+	ts := make(map[string]typedef.SimpleType)
 
 	for i := 0; i < rand.Intn(sc.MaxUDTParts)+1; i++ {
 		ts[typeName+fmt.Sprintf("_%d", i)] = GenSimpleType(sc)
 	}
 
-	return &coltypes.UDTType{
+	return &typedef.UDTType{
 		Types:    ts,
 		TypeName: typeName,
 		Frozen:   true,
 	}
 }
 
-func GenSetType(sc *typedef.SchemaConfig) *coltypes.BagType {
+func GenSetType(sc *typedef.SchemaConfig) *typedef.BagType {
 	return genBagType("set", sc)
 }
 
-func GenListType(sc *typedef.SchemaConfig) *coltypes.BagType {
+func GenListType(sc *typedef.SchemaConfig) *typedef.BagType {
 	return genBagType("list", sc)
 }
 
-func genBagType(kind string, sc *typedef.SchemaConfig) *coltypes.BagType {
-	var t coltypes.SimpleType
+func genBagType(kind string, sc *typedef.SchemaConfig) *typedef.BagType {
+	var t typedef.SimpleType
 	for {
 		t = GenSimpleType(sc)
-		if t != coltypes.TYPE_DURATION {
+		if t != typedef.TYPE_DURATION {
 			break
 		}
 	}
-	return &coltypes.BagType{
+	return &typedef.BagType{
 		Kind:   kind,
 		Type:   t,
 		Frozen: rand.Uint32()%2 == 0,
 	}
 }
 
-func GenMapType(sc *typedef.SchemaConfig) *coltypes.MapType {
+func GenMapType(sc *typedef.SchemaConfig) *typedef.MapType {
 	t := GenSimpleType(sc)
 	for {
-		if _, ok := coltypes.TypesMapKeyBlacklist[t]; !ok {
+		if _, ok := typedef.TypesMapKeyBlacklist[t]; !ok {
 			break
 		}
 		t = GenSimpleType(sc)
 	}
-	return &coltypes.MapType{
+	return &typedef.MapType{
 		KeyType:   t,
 		ValueType: GenSimpleType(sc),
 		Frozen:    rand.Uint32()%2 == 0,
@@ -119,11 +118,11 @@ func GenMapType(sc *typedef.SchemaConfig) *coltypes.MapType {
 }
 
 func GenPartitionKeyColumnType() typedef.Type {
-	return coltypes.PartitionKeyTypes[rand.Intn(len(coltypes.PartitionKeyTypes))]
+	return typedef.PartitionKeyTypes[rand.Intn(len(typedef.PartitionKeyTypes))]
 }
 
 func GenPrimaryKeyColumnType() typedef.Type {
-	return coltypes.PkTypes[rand.Intn(len(coltypes.PkTypes))]
+	return typedef.PkTypes[rand.Intn(len(typedef.PkTypes))]
 }
 
 func GenIndexName(prefix string, idx int) string {
