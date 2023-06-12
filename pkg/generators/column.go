@@ -18,12 +18,12 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func CreateIndexesForColumn(c typedef.Columns, tableName string, maxIndexes int) []typedef.IndexDef {
+func CreateIndexesForColumn(table *typedef.Table, maxIndexes int) []typedef.IndexDef {
 	createdCount := 0
 	indexes := make([]typedef.IndexDef, 0, maxIndexes)
-	for i, col := range c {
+	for i, col := range table.Columns {
 		if col.Type.Indexable() && typedef.TypesForIndex.Contains(col.Type) {
-			indexes = append(indexes, typedef.IndexDef{Name: GenIndexName(tableName+"_col", i), Column: col.Name, ColumnIdx: i})
+			indexes = append(indexes, typedef.IndexDef{Name: GenIndexName(table.Name+"_col", i), Column: table.Columns[i]})
 			createdCount++
 		}
 		if createdCount == maxIndexes {
