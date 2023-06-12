@@ -14,6 +14,8 @@
 
 package typedef
 
+type MaterializedViews []MaterializedView
+
 type MaterializedView struct {
 	NonPrimaryKey          *ColumnDef
 	Name                   string  `json:"name"`
@@ -36,4 +38,8 @@ func (m *MaterializedView) PartitionKeysLenValues() int {
 		m.partitionKeysLenValues = m.PartitionKeys.LenValues()
 	}
 	return m.partitionKeysLenValues
+}
+
+func (m MaterializedViews) Len() int {
+	return len(m)
 }

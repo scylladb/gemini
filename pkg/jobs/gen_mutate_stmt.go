@@ -26,7 +26,37 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func GenMutateStmt(s *typedef.Schema, t *typedef.Table, g generators.GeneratorInterface, r *rand.Rand, p *typedef.PartitionRangeConfig, deletes bool) (*typedef.Stmt, error) {
+const (
+	GenInsertStmtID = iota
+	GenUpdateStmtID
+	GenInsertJSONStmtID
+	GenDeleteRowsID
+)
+
+var GenMutateStmtConditions = typedef.CasesConditions{
+	GenUpdateStmtID: func(table *typedef.Table) bool { return true },
+	GenInsertStmtID: func(table *typedef.Table) bool { return !table.IsCounterTable() },
+	GenInsertJSONStmtID: func(table *typedef.Table) bool {
+		return !table.KnownIssues[typedef.KnownIssuesJSONWithTuples] && !table.IsCounterTable()
+	},
+	GenDeleteRowsID: func(table *typedef.Table) bool { return true },
+}
+
+var GenMutateStmtRatios = typedef.CasesRatios{
+	GenInsertStmtID:     190,
+	GenUpdateStmtID:     190,
+	GenInsertJSONStmtID: 120,
+	GenDeleteRowsID:     1,
+}
+
+func GenMutateStmt(
+	s *typedef.Schema,
+	t *typedef.Table,
+	g generators.GeneratorInterface,
+	r *rand.Rand,
+	p *typedef.PartitionRangeConfig,
+	deletes bool,
+) (*typedef.Stmt, error) {
 	t.RLock()
 	defer t.RUnlock()
 
@@ -34,28 +64,30 @@ func GenMutateStmt(s *typedef.Schema, t *typedef.Table, g generators.GeneratorIn
 	if valuesWithToken == nil {
 		return nil, nil
 	}
-	useLWT := false
-	if p.UseLWT && r.Uint32()%10 == 0 {
-		useLWT = true
-	}
 
 	if !deletes {
-		return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, useLWT)
+		return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, false)
 	}
-	switch n := rand.Intn(1000); n {
-	case 10, 100:
-		return genDeleteRows(s, t, valuesWithToken, r, p)
-	default:
-		switch rand.Intn(2) {
-		case 0:
-			if t.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
-				return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, useLWT)
-			}
-			return genInsertJSONStmt(s, t, valuesWithToken, r, p)
-		default:
-			return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, useLWT)
+
+	if t.IsCounterTable() { // TODO: for counter tables scylla supports update and delete rows. Need to inspect gemini on deleting rows for counter tables and remove this restriction.
+		return genUpdateStmt(s, t, valuesWithToken, r, p)
+	}
+
+	switch t.AvailableFuncs.Mutate.RandomCase(r) {
+	case GenInsertStmtID:
+		useLWT := false
+		if p.UseLWT && r.Uint32()%10 == 0 {
+			useLWT = true
 		}
+		return genInsertStmt(s, t, valuesWithToken, r, p, useLWT)
+	case GenInsertJSONStmtID:
+		return genInsertJSONStmt(s, t, valuesWithToken, r, p)
+	case GenDeleteRowsID:
+		return genDeleteRows(s, t, valuesWithToken, r, p)
+	case GenUpdateStmtID:
+		return genUpdateStmt(s, t, valuesWithToken, r, p)
 	}
+	return nil, nil
 }
 
 func genInsertOrUpdateStmt(
@@ -77,11 +109,11 @@ func genUpdateStmt(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef
 	nonCounters := t.Columns.NonCounters()
 	values := make(typedef.Values, 0, t.PartitionKeys.LenValues()+t.ClusteringKeys.LenValues()+nonCounters.LenValues())
 	for _, cdef := range nonCounters {
-		values = appendValue(cdef.Type, r, p, values)
+		values = append(values, cdef.Type.GenValue(r, p)...)
 	}
 	values = values.CopyFrom(valuesWithToken.Value)
 	for _, ck := range t.ClusteringKeys {
-		values = appendValue(ck.Type, r, p, values)
+		values = append(values, ck.Type.GenValue(r, p)...)
 	}
 	return &typedef.Stmt{
 		StmtCache:       stmtCache,
@@ -186,8 +218,8 @@ func genDeleteRows(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef
 	values := valuesWithToken.Value.Copy()
 	if len(t.ClusteringKeys) > 0 {
 		ck := t.ClusteringKeys[0]
-		values = appendValue(ck.Type, r, p, values)
-		values = appendValue(ck.Type, r, p, values)
+		values = append(values, ck.Type.GenValue(r, p)...)
+		values = append(values, ck.Type.GenValue(r, p)...)
 	}
 	return &typedef.Stmt{
 		StmtCache:       stmtCache,

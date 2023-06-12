@@ -17,6 +17,7 @@ package utils
 import (
 	"encoding/hex"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -96,4 +97,16 @@ func UUIDFromTime(rnd *rand.Rand) string {
 		return gocql.TimeUUIDWith(rnd.Int63(), 0, []byte("127.0.0.1")).String()
 	}
 	return gocql.UUIDFromTime(RandTime(rnd)).String()
+}
+
+func RandIntLimited(rnd *rand.Rand, min, max int) int {
+	out := rnd.Intn(max)
+	if out < min {
+		out = min
+	}
+	multiplier := int(math.Pow(float64(out), float64(max)))
+	if multiplier > 100 {
+		out = min
+	}
+	return out
 }

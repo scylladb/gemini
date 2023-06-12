@@ -15,8 +15,6 @@
 package jobs
 
 import (
-	"math"
-
 	"github.com/scylladb/gocqlx/v2/qb"
 	"golang.org/x/exp/rand"
 
@@ -25,6 +23,42 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
+const (
+	GenSinglePartitionID = iota
+	GenSinglePartitionMvID
+	GenMultiplePartitionID
+	GenMultiplePartitionMvID
+	GenClusteringRangeID
+	GenClusteringRangeMvID
+	GenMultiplePartitionClusteringRangeID
+	GenMultiplePartitionClusteringRangeMvID
+	GenSingleIndexQueryID
+)
+
+var GenCheckStmtConditions = typedef.CasesConditions{
+	GenSinglePartitionID:                    func(table *typedef.Table) bool { return true },
+	GenSinglePartitionMvID:                  func(table *typedef.Table) bool { return table.HasMV() },
+	GenMultiplePartitionID:                  func(table *typedef.Table) bool { return true },
+	GenMultiplePartitionMvID:                func(table *typedef.Table) bool { return table.HasMV() },
+	GenClusteringRangeID:                    func(table *typedef.Table) bool { return table.HasClusteringKeys() },
+	GenClusteringRangeMvID:                  func(table *typedef.Table) bool { return table.HasClusteringKeys() && table.HasMV() },
+	GenMultiplePartitionClusteringRangeID:   func(table *typedef.Table) bool { return table.HasClusteringKeys() },
+	GenMultiplePartitionClusteringRangeMvID: func(table *typedef.Table) bool { return table.HasClusteringKeys() && table.HasMV() },
+	GenSingleIndexQueryID:                   func(table *typedef.Table) bool { return table.HasIndexes() },
+}
+
+var GenCheckStmtRatios = typedef.CasesRatios{
+	GenSinglePartitionID:                    20,
+	GenSinglePartitionMvID:                  20,
+	GenMultiplePartitionID:                  20,
+	GenMultiplePartitionMvID:                20,
+	GenClusteringRangeID:                    20,
+	GenClusteringRangeMvID:                  20,
+	GenMultiplePartitionClusteringRangeID:   20,
+	GenMultiplePartitionClusteringRangeMvID: 20,
+	GenSingleIndexQueryID:                   1,
+}
+
 func GenCheckStmt(
 	s *typedef.Schema,
 	table *typedef.Table,
@@ -32,82 +66,40 @@ func GenCheckStmt(
 	rnd *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 ) *typedef.Stmt {
-	n := 0
-	mvNum := -1
-	maxClusteringRels := 0
-	numQueryPKs := 0
-	if len(table.MaterializedViews) > 0 && rnd.Int()%2 == 0 {
-		mvNum = utils.RandInt2(rnd, 0, len(table.MaterializedViews))
-	}
+	switch table.AvailableFuncs.Check.RandomCase(rnd) {
+	case GenSinglePartitionID:
+		return genSinglePartitionQuery(s, table, g)
+	case GenMultiplePartitionID:
+		numQueryPKs := utils.RandIntLimited(rnd, 1, table.PartitionKeys.Len())
+		return genMultiplePartitionQuery(s, table, g, numQueryPKs)
+	case GenClusteringRangeID:
+		maxClusteringRels := utils.RandInt2(rnd, 1, table.ClusteringKeys.Len())
+		return genClusteringRangeQuery(s, table, g, rnd, p, maxClusteringRels)
+	case GenMultiplePartitionClusteringRangeID:
+		numQueryPKs := utils.RandIntLimited(rnd, 1, table.PartitionKeys.Len())
+		maxClusteringRels := utils.RandInt2(rnd, 1, table.ClusteringKeys.Len())
+		return genMultiplePartitionClusteringRangeQuery(s, table, g, rnd, p, numQueryPKs, maxClusteringRels)
+	case GenSinglePartitionMvID:
+		mvNum := utils.RandInt2(rnd, 0, table.MaterializedViews.Len())
+		return genSinglePartitionQueryMv(s, table, g, rnd, p, mvNum)
+	case GenMultiplePartitionMvID:
+		mvNum := utils.RandInt2(rnd, 0, table.MaterializedViews.Len())
+		numQueryPKs := utils.RandIntLimited(rnd, 1, table.PartitionKeys.Len())
+		return genMultiplePartitionQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs)
+	case GenClusteringRangeMvID:
+		mvNum := utils.RandInt2(rnd, 0, table.MaterializedViews.Len())
+		maxClusteringRels := utils.RandInt2(rnd, 1, table.ClusteringKeys.Len())
+		return genClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, maxClusteringRels)
+	case GenMultiplePartitionClusteringRangeMvID:
+		mvNum := utils.RandInt2(rnd, 0, table.MaterializedViews.Len())
+		numQueryPKs := utils.RandIntLimited(rnd, 1, table.PartitionKeys.Len())
+		maxClusteringRels := utils.RandInt2(rnd, 1, table.ClusteringKeys.Len())
+		return genMultiplePartitionClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs, maxClusteringRels)
+	case GenSingleIndexQueryID:
+		idxCount := utils.RandInt2(rnd, 0, table.Indexes.Len())
+		return genSingleIndexQuery(s, table, g, rnd, p, idxCount)
 
-	switch mvNum {
-	case -1:
-		if len(table.Indexes) > 0 {
-			n = rnd.Intn(5)
-		} else {
-			n = rnd.Intn(4)
-		}
-		switch n {
-		case 0:
-			return genSinglePartitionQuery(s, table, g)
-		case 1:
-			numQueryPKs = utils.RandInt2(rnd, 1, table.PartitionKeys.Len())
-			multiplier := int(math.Pow(float64(numQueryPKs), float64(table.PartitionKeys.Len())))
-			if multiplier > 100 {
-				numQueryPKs = 1
-			}
-			return genMultiplePartitionQuery(s, table, g, numQueryPKs)
-		case 2:
-			maxClusteringRels = utils.RandInt2(rnd, 0, table.ClusteringKeys.Len())
-			return genClusteringRangeQuery(s, table, g, rnd, p, maxClusteringRels)
-		case 3:
-			numQueryPKs = utils.RandInt2(rnd, 1, table.PartitionKeys.Len())
-			multiplier := int(math.Pow(float64(numQueryPKs), float64(table.PartitionKeys.Len())))
-			if multiplier > 100 {
-				numQueryPKs = 1
-			}
-			maxClusteringRels = utils.RandInt2(rnd, 0, table.ClusteringKeys.Len())
-			return genMultiplePartitionClusteringRangeQuery(s, table, g, rnd, p, numQueryPKs, maxClusteringRels)
-		case 4:
-			// Reducing the probability to hit these since they often take a long time to run
-			switch rnd.Intn(5) {
-			case 0:
-				idxCount := utils.RandInt2(rnd, 1, len(table.Indexes))
-				return genSingleIndexQuery(s, table, g, rnd, p, idxCount)
-			default:
-				return genSinglePartitionQuery(s, table, g)
-			}
-		}
-	default:
-		n = rnd.Intn(4)
-		switch n {
-		case 0:
-			return genSinglePartitionQueryMv(s, table, g, rnd, p, mvNum)
-		case 1:
-			lenPartitionKeys := table.MaterializedViews[mvNum].PartitionKeys.Len()
-			numQueryPKs = utils.RandInt2(rnd, 1, lenPartitionKeys)
-			multiplier := int(math.Pow(float64(numQueryPKs), float64(lenPartitionKeys)))
-			if multiplier > 100 {
-				numQueryPKs = 1
-			}
-			return genMultiplePartitionQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs)
-		case 2:
-			lenClusteringKeys := table.MaterializedViews[mvNum].ClusteringKeys.Len()
-			maxClusteringRels = utils.RandInt2(rnd, 0, lenClusteringKeys)
-			return genClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, maxClusteringRels)
-		case 3:
-			lenPartitionKeys := table.MaterializedViews[mvNum].PartitionKeys.Len()
-			numQueryPKs = utils.RandInt2(rnd, 1, lenPartitionKeys)
-			multiplier := int(math.Pow(float64(numQueryPKs), float64(lenPartitionKeys)))
-			if multiplier > 100 {
-				numQueryPKs = 1
-			}
-			lenClusteringKeys := table.MaterializedViews[mvNum].ClusteringKeys.Len()
-			maxClusteringRels = utils.RandInt2(rnd, 0, lenClusteringKeys)
-			return genMultiplePartitionClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs, maxClusteringRels)
-		}
 	}
-
 	return nil
 }
 
@@ -240,7 +232,7 @@ func genMultiplePartitionQueryMv(
 					return nil
 				}
 				if i == 0 {
-					values = appendValue(pk.Type, r, p, values)
+					values = append(values, pk.Type.GenValue(r, p)...)
 					typs = append(typs, pk.Type)
 				} else {
 					values = append(values, vs.Value[i-1])
