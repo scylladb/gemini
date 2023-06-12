@@ -16,6 +16,7 @@ package typedef_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -27,94 +28,7 @@ import (
 )
 
 func TestMarshalUnmarshal(t *testing.T) {
-	sc := &typedef.SchemaConfig{
-		MaxPartitionKeys:  3,
-		MinPartitionKeys:  2,
-		MaxClusteringKeys: 3,
-		MinClusteringKeys: 2,
-		MaxColumns:        3,
-		MinColumns:        2,
-		MaxTupleParts:     2,
-		MaxUDTParts:       2,
-	}
-	columns := typedef.Columns{
-		&typedef.ColumnDef{
-			Name: generators.GenColumnName("col", 0),
-			Type: generators.GenMapType(sc),
-		},
-		&typedef.ColumnDef{
-			Name: generators.GenColumnName("col", 1),
-			Type: generators.GenSetType(sc),
-		},
-		&typedef.ColumnDef{
-			Name: generators.GenColumnName("col", 2),
-			Type: generators.GenListType(sc),
-		},
-		&typedef.ColumnDef{
-			Name: generators.GenColumnName("col", 3),
-			Type: generators.GenTupleType(sc),
-		},
-		&typedef.ColumnDef{
-			Name: generators.GenColumnName("col", 4),
-			Type: generators.GenUDTType(sc),
-		},
-	}
-	s1 := &typedef.Schema{
-		Tables: []*typedef.Table{
-			{
-				Name: "table",
-				PartitionKeys: typedef.Columns{
-					&typedef.ColumnDef{
-						Name: generators.GenColumnName("pk", 0),
-						Type: generators.GenSimpleType(sc),
-					},
-				},
-				ClusteringKeys: typedef.Columns{
-					&typedef.ColumnDef{
-						Name: generators.GenColumnName("ck", 0),
-						Type: generators.GenSimpleType(sc),
-					},
-				},
-				Columns: columns,
-				Indexes: []typedef.IndexDef{
-					{
-						Name:   generators.GenIndexName("col", 0),
-						Column: columns[0],
-					},
-					{
-						Name:   generators.GenIndexName("col", 1),
-						Column: columns[1],
-					},
-				},
-				MaterializedViews: []typedef.MaterializedView{
-					{
-						Name: "table1_mv_0",
-						PartitionKeys: typedef.Columns{
-							&typedef.ColumnDef{
-								Name: "pk_mv_0",
-								Type: generators.GenListType(sc),
-							},
-							&typedef.ColumnDef{
-								Name: "pk_mv_1",
-								Type: generators.GenTupleType(sc),
-							},
-						},
-						ClusteringKeys: typedef.Columns{
-							&typedef.ColumnDef{
-								Name: "ck_mv_0",
-								Type: generators.GenSetType(sc),
-							},
-							&typedef.ColumnDef{
-								Name: "ck_mv_1",
-								Type: generators.GenUDTType(sc),
-							},
-						},
-						NonPrimaryKey: nil,
-					},
-				},
-			},
-		},
-	}
+	s1 := getTestSchema()
 
 	opts := cmp.Options{
 		cmp.AllowUnexported(typedef.Table{}, typedef.MaterializedView{}),
@@ -177,7 +91,7 @@ func TestPrimitives(t *testing.T) {
 		t.Errorf("%s != %s", colNames, "pk_mv_0,pk_mv_1")
 	}
 
-	cols = cols.Remove(2)
+	cols = cols.Remove(cols[2])
 	if cols.Len() != 2 {
 		t.Errorf("%d != %d", cols.Len(), 2)
 	}
@@ -186,7 +100,7 @@ func TestPrimitives(t *testing.T) {
 		t.Errorf("%s != %s", colNames, "pk_mv_0,pk_mv_1")
 	}
 
-	cols = cols.Remove(0)
+	cols = cols.Remove(cols[0])
 	if cols.Len() != 1 {
 		t.Errorf("%d != %d", cols.Len(), 1)
 	}
@@ -195,7 +109,7 @@ func TestPrimitives(t *testing.T) {
 		t.Errorf("%s != %s", colNames, "pk_mv_1")
 	}
 
-	cols = cols.Remove(0)
+	cols = cols.Remove(cols[0])
 	if cols.Len() != 0 {
 		t.Errorf("%d != %d", cols.Len(), 0)
 	}
@@ -203,4 +117,116 @@ func TestPrimitives(t *testing.T) {
 	if colNames != "" {
 		t.Errorf("%s != %s", colNames, "")
 	}
+}
+
+func TestValidColumnsForDelete(t *testing.T) {
+	s1 := getTestSchema()
+	expected := typedef.Columns{
+		s1.Tables[0].Columns[2],
+		s1.Tables[0].Columns[3],
+		s1.Tables[0].Columns[4],
+	}
+
+	validColsToDelete := s1.Tables[0].ValidColumnsForDelete()
+	if fmt.Sprintf("%v", expected) != fmt.Sprintf("%v", validColsToDelete) {
+		t.Errorf("wrong valid columns for delete. Expected:%v .Received:%v", expected, validColsToDelete)
+	}
+
+	s1.Tables[0].MaterializedViews[0].NonPrimaryKey = s1.Tables[0].Columns[4]
+	expected = typedef.Columns{
+		s1.Tables[0].Columns[2],
+		s1.Tables[0].Columns[3],
+	}
+	validColsToDelete = s1.Tables[0].ValidColumnsForDelete()
+	if fmt.Sprintf("%v", expected) != fmt.Sprintf("%v", validColsToDelete) {
+		t.Errorf("wrong valid columns for delete. Expected:%v .Received:%v", expected, validColsToDelete)
+	}
+
+	s1.Tables[0].MaterializedViews = append(s1.Tables[0].MaterializedViews, s1.Tables[0].MaterializedViews[0])
+	s1.Tables[0].MaterializedViews[1].NonPrimaryKey = s1.Tables[0].Columns[3]
+	s1.Tables[0].MaterializedViews = append(s1.Tables[0].MaterializedViews, s1.Tables[0].MaterializedViews[0])
+	s1.Tables[0].MaterializedViews[2].NonPrimaryKey = s1.Tables[0].Columns[2]
+
+	expected = typedef.Columns{}
+	validColsToDelete = s1.Tables[0].ValidColumnsForDelete()
+	if fmt.Sprintf("%v", expected) != fmt.Sprintf("%v", validColsToDelete) {
+		t.Errorf("wrong valid columns for delete. Expected:%v .Received:%v", expected, validColsToDelete)
+	}
+}
+
+func getTestSchema() *typedef.Schema {
+	sc := &typedef.SchemaConfig{
+		MaxPartitionKeys:  3,
+		MinPartitionKeys:  2,
+		MaxClusteringKeys: 3,
+		MinClusteringKeys: 2,
+		MaxColumns:        3,
+		MinColumns:        2,
+		MaxTupleParts:     2,
+		MaxUDTParts:       2,
+	}
+	columns := typedef.Columns{
+		&typedef.ColumnDef{
+			Name: generators.GenColumnName("col", 0),
+			Type: generators.GenMapType(sc),
+		},
+		&typedef.ColumnDef{
+			Name: generators.GenColumnName("col", 1),
+			Type: generators.GenSetType(sc),
+		},
+		&typedef.ColumnDef{
+			Name: generators.GenColumnName("col", 2),
+			Type: generators.GenListType(sc),
+		},
+		&typedef.ColumnDef{
+			Name: generators.GenColumnName("col", 3),
+			Type: generators.GenTupleType(sc),
+		},
+		&typedef.ColumnDef{
+			Name: generators.GenColumnName("col", 4),
+			Type: generators.GenUDTType(sc),
+		},
+	}
+
+	sch := &typedef.Schema{
+		Tables: []*typedef.Table{
+			{
+				Name: "table",
+				PartitionKeys: typedef.Columns{
+					&typedef.ColumnDef{
+						Name: generators.GenColumnName("pk", 0),
+						Type: generators.GenSimpleType(sc),
+					},
+				},
+				ClusteringKeys: typedef.Columns{
+					&typedef.ColumnDef{
+						Name: generators.GenColumnName("ck", 0),
+						Type: generators.GenSimpleType(sc),
+					},
+				},
+				Columns: columns,
+			},
+		},
+	}
+	sch.Tables[0].Indexes = []typedef.IndexDef{
+		{
+			Name:   generators.GenIndexName(sch.Tables[0].Name+"_col", 0),
+			Column: columns[0],
+		},
+		{
+			Name:   generators.GenIndexName(sch.Tables[0].Name+"_col", 1),
+			Column: columns[1],
+		},
+	}
+
+	sch.Tables[0].MaterializedViews = []typedef.MaterializedView{
+		{
+			Name:           sch.Tables[0].Name + "_mv_0",
+			PartitionKeys:  sch.Tables[0].PartitionKeys,
+			ClusteringKeys: sch.Tables[0].ClusteringKeys,
+			NonPrimaryKey:  nil,
+		},
+	}
+
+	return sch
 }

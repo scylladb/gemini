@@ -30,7 +30,7 @@ var ddlDataPath = "./test_expected_data/ddl/"
 func TestGenDropColumnStmt(t *testing.T) {
 	RunStmtTest(t, path.Join(ddlDataPath, "drop_column.json"), genDropColumnStmtCases, func(subT *testing.T, caseName string, expected *expectedStore) {
 		schema, _, _, _, opts := getAllForTestStmt(subT, caseName)
-		stmt, err := genDropColumnStmt(schema.Tables[0], schema.Keyspace.Name, opts.delNum)
+		stmt, err := genDropColumnStmt(schema.Tables[0], schema.Keyspace.Name, schema.Tables[0].Columns[opts.delNum])
 		validateStmt(subT, stmt, err)
 		expected.CompareOrStore(subT, caseName, stmt)
 	})
@@ -54,7 +54,7 @@ func BenchmarkGenDropColumnStmt(t *testing.B) {
 				schema, _, _, _, opts := getAllForTestStmt(subT, caseName)
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_, _ = genDropColumnStmt(schema.Tables[0], schema.Keyspace.Name, opts.delNum)
+					_, _ = genDropColumnStmt(schema.Tables[0], schema.Keyspace.Name, schema.Tables[0].Columns[opts.delNum])
 				}
 			})
 	}
