@@ -478,15 +478,13 @@ func createIdxFromColumns(t testInterface, table *typedef.Table, all bool) (inde
 		for i := range table.Columns {
 			var index typedef.IndexDef
 			index.Name = table.Columns[i].Name + "_idx"
-			index.Column = table.Columns[i].Name
-			index.ColumnIdx = i
+			index.Column = table.Columns[i]
 			indexes = append(indexes, index)
 		}
 	default:
 		var index typedef.IndexDef
 		index.Name = table.Columns[0].Name + "_idx"
-		index.Column = table.Columns[0].Name
-		index.ColumnIdx = 0
+		index.Column = table.Columns[0]
 		indexes = append(indexes, index)
 
 	}

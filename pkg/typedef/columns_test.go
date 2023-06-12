@@ -79,11 +79,11 @@ func TestMarshalUnmarshal(t *testing.T) {
 				Indexes: []typedef.IndexDef{
 					{
 						Name:   generators.GenIndexName("col", 0),
-						Column: columns[0].Name,
+						Column: columns[0],
 					},
 					{
 						Name:   generators.GenIndexName("col", 1),
-						Column: columns[1].Name,
+						Column: columns[1],
 					},
 				},
 				MaterializedViews: []typedef.MaterializedView{

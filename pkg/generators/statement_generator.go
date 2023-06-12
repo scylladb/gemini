@@ -74,19 +74,21 @@ func genTable(sc typedef.SchemaConfig, tableName string) *typedef.Table {
 	for i := 0; i < len(columns); i++ {
 		columns[i] = &typedef.ColumnDef{Name: GenColumnName("col", i), Type: GenColumnType(len(columns), &sc)}
 	}
+	table.Columns = columns
+
 	var indexes []typedef.IndexDef
 	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && len(columns) > 0 {
-		indexes = CreateIndexesForColumn(columns, tableName, utils.RandInt(1, len(columns)))
+		indexes = CreateIndexesForColumn(&table, utils.RandInt(1, len(columns)))
 	}
+	table.Indexes = indexes
 
 	var mvs []typedef.MaterializedView
 	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && len(clusteringKeys) > 0 {
 		mvs = CreateMaterializedViews(columns, table.Name, partitionKeys, clusteringKeys)
 	}
 
-	table.Columns = columns
 	table.MaterializedViews = mvs
-	table.Indexes = indexes
+
 	return &table
 }
 
@@ -104,7 +106,7 @@ func GetCreateSchema(s *typedef.Schema) []string {
 		createTable := GetCreateTable(t, s.Keyspace)
 		stmts = append(stmts, createTable)
 		for _, idef := range t.Indexes {
-			stmts = append(stmts, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s.%s (%s)", idef.Name, s.Keyspace.Name, t.Name, idef.Column))
+			stmts = append(stmts, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s.%s (%s)", idef.Name, s.Keyspace.Name, t.Name, idef.Column.Name))
 		}
 		for _, mv := range t.MaterializedViews {
 			var (
