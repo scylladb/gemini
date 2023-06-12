@@ -20,8 +20,6 @@ import (
 
 	"github.com/scylladb/gocqlx/v2/qb"
 
-	"github.com/scylladb/gemini/pkg/coltypes"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -34,19 +32,19 @@ func (c QueryCache) Reset() {
 }
 
 type Cache struct {
-	schema *testschema.Schema
-	table  *testschema.Table
+	schema *typedef.Schema
+	table  *typedef.Table
 	cache  QueryCache
 	mu     sync.RWMutex
 }
 
-func New(s *testschema.Schema) *Cache {
+func New(s *typedef.Schema) *Cache {
 	return &Cache{
 		schema: s,
 	}
 }
 
-func (c *Cache) BindToTable(t *testschema.Table) {
+func (c *Cache) BindToTable(t *typedef.Table) {
 	c.table = t
 }
 
@@ -75,7 +73,7 @@ func (c *Cache) GetQuery(qct typedef.StatementCacheType) *typedef.StmtCache {
 	return rec
 }
 
-type CacheBuilderFn func(s *testschema.Schema, t *testschema.Table) *typedef.StmtCache
+type CacheBuilderFn func(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache
 
 type CacheBuilderFnMap map[typedef.StatementCacheType]CacheBuilderFn
 
@@ -100,8 +98,8 @@ var CacheBuilders = CacheBuilderFnMap{
 }.ToList()
 
 func genInsertStmtCache(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 ) *typedef.StmtCache {
 	allTypes := make([]typedef.Type, 0, t.PartitionKeys.Len()+t.ClusteringKeys.Len()+t.Columns.Len())
 	builder := qb.Insert(s.Keyspace.Name + "." + t.Name)
@@ -115,7 +113,7 @@ func genInsertStmtCache(
 	}
 	for _, col := range t.Columns {
 		switch colType := col.Type.(type) {
-		case *coltypes.TupleType:
+		case *typedef.TupleType:
 			builder = builder.TupleColumn(col.Name, len(colType.Types))
 		default:
 			builder = builder.Columns(col.Name)
@@ -130,23 +128,23 @@ func genInsertStmtCache(
 }
 
 func genInsertIfNotExistsStmtCache(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 ) *typedef.StmtCache {
 	out := genInsertStmtCache(s, t)
 	out.Query = out.Query.(*qb.InsertBuilder).Unique()
 	return out
 }
 
-func genUpdateStmtCache(s *testschema.Schema, t *testschema.Table) *typedef.StmtCache {
+func genUpdateStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache {
 	var allTypes []typedef.Type
 	builder := qb.Update(s.Keyspace.Name + "." + t.Name)
 
 	for _, cdef := range t.Columns {
 		switch t := cdef.Type.(type) {
-		case *coltypes.TupleType:
+		case *typedef.TupleType:
 			builder = builder.SetTuple(cdef.Name, len(t.Types))
-		case *coltypes.CounterType:
+		case *typedef.CounterType:
 			builder = builder.SetLit(cdef.Name, cdef.Name+"+1")
 			continue
 		default:
@@ -170,7 +168,7 @@ func genUpdateStmtCache(s *testschema.Schema, t *testschema.Table) *typedef.Stmt
 	}
 }
 
-func genDeleteStmtCache(s *testschema.Schema, t *testschema.Table) *typedef.StmtCache {
+func genDeleteStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache {
 	var allTypes []typedef.Type
 	builder := qb.Delete(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {

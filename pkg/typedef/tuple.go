@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package coltypes
+package typedef
 
 import (
 	"strings"
-
-	"github.com/scylladb/gemini/pkg/typedef"
 
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
@@ -76,7 +74,7 @@ func (t *TupleType) Indexable() bool {
 	return true
 }
 
-func (t *TupleType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []interface{} {
+func (t *TupleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	out := make([]interface{}, 0, len(t.Types))
 	for _, tp := range t.Types {
 		out = append(out, tp.GenValue(r, p)...)

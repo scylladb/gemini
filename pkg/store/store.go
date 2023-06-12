@@ -22,8 +22,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/scylladb/gemini/pkg/testschema"
-
 	"go.uber.org/zap"
 
 	"github.com/gocql/gocql"
@@ -36,6 +34,8 @@ import (
 	"github.com/scylladb/gocqlx/v2/qb"
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
+
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 type loader interface {
@@ -56,7 +56,7 @@ type storeLoader interface {
 type Store interface {
 	Create(context.Context, qb.Builder, qb.Builder) error
 	Mutate(context.Context, qb.Builder, ...interface{}) error
-	Check(context.Context, *testschema.Table, qb.Builder, ...interface{}) error
+	Check(context.Context, *typedef.Table, qb.Builder, ...interface{}) error
 	Close() error
 }
 
@@ -66,7 +66,7 @@ type Config struct {
 	UseServerSideTimestamps bool
 }
 
-func New(schema *testschema.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut *os.File, logger *zap.Logger) Store {
+func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut *os.File, logger *zap.Logger) Store {
 	ops := promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gemini_cql_requests",
 		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
@@ -169,7 +169,7 @@ func mutate(ctx context.Context, s storeLoader, ts time.Time, builder qb.Builder
 	return nil
 }
 
-func (ds delegatingStore) Check(ctx context.Context, table *testschema.Table, builder qb.Builder, values ...interface{}) error {
+func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, builder qb.Builder, values ...interface{}) error {
 	testRows, err := load(ctx, ds.testStore, builder, values)
 	if err != nil {
 		return errors.Wrapf(err, "unable to load check data from the test store")

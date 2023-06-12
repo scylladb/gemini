@@ -19,13 +19,11 @@ import (
 	"strings"
 
 	"github.com/scylladb/gemini/pkg/builders"
-	"github.com/scylladb/gemini/pkg/coltypes"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
-func GenSchema(sc typedef.SchemaConfig) *testschema.Schema {
+func GenSchema(sc typedef.SchemaConfig) *typedef.Schema {
 	builder := builders.NewSchemaBuilder()
 	keyspace := typedef.Keyspace{
 		Name:              "ks1",
@@ -41,16 +39,16 @@ func GenSchema(sc typedef.SchemaConfig) *testschema.Schema {
 	return builder.Build()
 }
 
-func genTable(sc typedef.SchemaConfig, tableName string) *testschema.Table {
-	partitionKeys := make(testschema.Columns, utils.RandInt(sc.GetMinPartitionKeys(), sc.GetMaxPartitionKeys()))
+func genTable(sc typedef.SchemaConfig, tableName string) *typedef.Table {
+	partitionKeys := make(typedef.Columns, utils.RandInt(sc.GetMinPartitionKeys(), sc.GetMaxPartitionKeys()))
 	for i := 0; i < len(partitionKeys); i++ {
-		partitionKeys[i] = &testschema.ColumnDef{Name: GenColumnName("pk", i), Type: GenPartitionKeyColumnType()}
+		partitionKeys[i] = &typedef.ColumnDef{Name: GenColumnName("pk", i), Type: GenPartitionKeyColumnType()}
 	}
-	clusteringKeys := make(testschema.Columns, utils.RandInt(sc.GetMinClusteringKeys(), sc.GetMaxClusteringKeys()))
+	clusteringKeys := make(typedef.Columns, utils.RandInt(sc.GetMinClusteringKeys(), sc.GetMaxClusteringKeys()))
 	for i := 0; i < len(clusteringKeys); i++ {
-		clusteringKeys[i] = &testschema.ColumnDef{Name: GenColumnName("ck", i), Type: GenPrimaryKeyColumnType()}
+		clusteringKeys[i] = &typedef.ColumnDef{Name: GenColumnName("ck", i), Type: GenPrimaryKeyColumnType()}
 	}
-	table := testschema.Table{
+	table := typedef.Table{
 		Name:           tableName,
 		PartitionKeys:  partitionKeys,
 		ClusteringKeys: clusteringKeys,
@@ -62,28 +60,28 @@ func genTable(sc typedef.SchemaConfig, tableName string) *testschema.Table {
 		table.TableOptions = append(table.TableOptions, option.ToCQL())
 	}
 	if sc.UseCounters {
-		table.Columns = testschema.Columns{
+		table.Columns = typedef.Columns{
 			{
 				Name: GenColumnName("col", 0),
-				Type: &coltypes.CounterType{
+				Type: &typedef.CounterType{
 					Value: 0,
 				},
 			},
 		}
 		return &table
 	}
-	columns := make(testschema.Columns, utils.RandInt(sc.GetMinColumns(), sc.GetMaxColumns()))
+	columns := make(typedef.Columns, utils.RandInt(sc.GetMinColumns(), sc.GetMaxColumns()))
 	for i := 0; i < len(columns); i++ {
-		columns[i] = &testschema.ColumnDef{Name: GenColumnName("col", i), Type: GenColumnType(len(columns), &sc)}
+		columns[i] = &typedef.ColumnDef{Name: GenColumnName("col", i), Type: GenColumnType(len(columns), &sc)}
 	}
 	var indexes []typedef.IndexDef
 	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && len(columns) > 0 {
 		indexes = CreateIndexesForColumn(columns, tableName, utils.RandInt(1, len(columns)))
 	}
 
-	var mvs []testschema.MaterializedView
+	var mvs []typedef.MaterializedView
 	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && len(clusteringKeys) > 0 {
-		mvs = columns.CreateMaterializedViews(table.Name, partitionKeys, clusteringKeys)
+		mvs = CreateMaterializedViews(columns, table.Name, partitionKeys, clusteringKeys)
 	}
 
 	table.Columns = columns
@@ -92,12 +90,12 @@ func genTable(sc typedef.SchemaConfig, tableName string) *testschema.Table {
 	return &table
 }
 
-func GetCreateKeyspaces(s *testschema.Schema) (string, string) {
+func GetCreateKeyspaces(s *typedef.Schema) (string, string) {
 	return fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = %s", s.Keyspace.Name, s.Keyspace.Replication.ToCQL()),
 		fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = %s", s.Keyspace.Name, s.Keyspace.OracleReplication.ToCQL())
 }
 
-func GetCreateSchema(s *testschema.Schema) []string {
+func GetCreateSchema(s *typedef.Schema) []string {
 	var stmts []string
 
 	for _, t := range s.Tables {
@@ -136,8 +134,33 @@ func GetCreateSchema(s *testschema.Schema) []string {
 	return stmts
 }
 
-func GetDropSchema(s *testschema.Schema) []string {
+func GetDropSchema(s *typedef.Schema) []string {
 	return []string{
 		fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", s.Keyspace.Name),
 	}
+}
+
+func CreateMaterializedViews(c typedef.Columns, tableName string, partitionKeys, clusteringKeys typedef.Columns) []typedef.MaterializedView {
+	validColumns := c.ValidColumnsForPrimaryKey()
+	var mvs []typedef.MaterializedView
+	numMvs := 1
+	for i := 0; i < numMvs; i++ {
+		col := validColumns.Random()
+		if col == nil {
+			fmt.Printf("unable to generate valid columns for materialized view")
+			continue
+		}
+
+		cols := typedef.Columns{
+			col,
+		}
+		mv := typedef.MaterializedView{
+			Name:           fmt.Sprintf("%s_mv_%d", tableName, i),
+			PartitionKeys:  append(cols, partitionKeys...),
+			ClusteringKeys: clusteringKeys,
+			NonPrimaryKey:  col,
+		}
+		mvs = append(mvs, mv)
+	}
+	return mvs
 }

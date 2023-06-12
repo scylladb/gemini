@@ -17,7 +17,6 @@ package jobs
 import (
 	"flag"
 
-	. "github.com/scylladb/gemini/pkg/coltypes"
 	. "github.com/scylladb/gemini/pkg/typedef"
 )
 

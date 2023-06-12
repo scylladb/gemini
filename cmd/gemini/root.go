@@ -34,7 +34,6 @@ import (
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/tableopts"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 
@@ -111,13 +110,13 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-func readSchema(confFile string) (*testschema.Schema, error) {
+func readSchema(confFile string) (*typedef.Schema, error) {
 	byteValue, err := os.ReadFile(confFile)
 	if err != nil {
 		return nil, err
 	}
 
-	var shm testschema.Schema
+	var shm typedef.Schema
 
 	err = json.Unmarshal(byteValue, &shm)
 	if err != nil {
@@ -191,7 +190,7 @@ func run(_ *cobra.Command, _ []string) error {
 	if err = schemaConfig.Valid(); err != nil {
 		return errors.Wrap(err, "invalid schema configuration")
 	}
-	var schema *testschema.Schema
+	var schema *typedef.Schema
 	if len(schemaFile) > 0 {
 		schema, err = readSchema(schemaFile)
 		if err != nil {

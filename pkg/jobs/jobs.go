@@ -23,7 +23,6 @@ import (
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/store"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 
 	"github.com/scylladb/gemini/pkg/joberror"
@@ -67,9 +66,9 @@ type job struct {
 	function func(
 		context.Context,
 		<-chan time.Duration,
-		*testschema.Schema,
+		*typedef.Schema,
 		typedef.SchemaConfig,
-		*testschema.Table,
+		*typedef.Table,
 		store.Store,
 		*rand.Rand,
 		*typedef.PartitionRangeConfig,
@@ -107,7 +106,7 @@ func ListFromMode(mode string, duration time.Duration, workers uint64) List {
 
 func (l List) Run(
 	ctx context.Context,
-	schema *testschema.Schema,
+	schema *typedef.Schema,
 	schemaConfig typedef.SchemaConfig,
 	s store.Store,
 	pump <-chan time.Duration,
@@ -156,9 +155,9 @@ func (l List) Run(
 func mutationJob(
 	ctx context.Context,
 	pump <-chan time.Duration,
-	schema *testschema.Schema,
+	schema *typedef.Schema,
 	schemaCfg typedef.SchemaConfig,
-	table *testschema.Table,
+	table *typedef.Table,
 	s store.Store,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -207,9 +206,9 @@ func mutationJob(
 func validationJob(
 	ctx context.Context,
 	pump <-chan time.Duration,
-	schema *testschema.Schema,
+	schema *typedef.Schema,
 	schemaCfg typedef.SchemaConfig,
-	table *testschema.Table,
+	table *typedef.Table,
 	s store.Store,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -263,9 +262,9 @@ func validationJob(
 func warmupJob(
 	ctx context.Context,
 	_ <-chan time.Duration,
-	schema *testschema.Schema,
+	schema *typedef.Schema,
 	schemaCfg typedef.SchemaConfig,
-	table *testschema.Table,
+	table *typedef.Table,
 	s store.Store,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -303,9 +302,9 @@ func warmupJob(
 
 func ddl(
 	ctx context.Context,
-	schema *testschema.Schema,
+	schema *typedef.Schema,
 	sc *typedef.SchemaConfig,
-	table *testschema.Table,
+	table *typedef.Table,
 	s store.Store,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -359,9 +358,9 @@ func ddl(
 
 func mutation(
 	ctx context.Context,
-	schema *testschema.Schema,
+	schema *typedef.Schema,
 	_ *typedef.SchemaConfig,
-	table *testschema.Table,
+	table *typedef.Table,
 	s store.Store,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -407,7 +406,7 @@ func mutation(
 func validation(
 	ctx context.Context,
 	sc *typedef.SchemaConfig,
-	table *testschema.Table,
+	table *typedef.Table,
 	s store.Store,
 	stmt *typedef.Stmt,
 	g *generators.Generator,

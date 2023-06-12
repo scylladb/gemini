@@ -21,14 +21,13 @@ import (
 	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
 func GenCheckStmt(
-	s *testschema.Schema,
-	table *testschema.Table,
+	s *typedef.Schema,
+	table *typedef.Table,
 	g generators.GeneratorInterface,
 	rnd *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -113,8 +112,8 @@ func GenCheckStmt(
 }
 
 func genSinglePartitionQuery(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 	g generators.GeneratorInterface,
 ) *typedef.Stmt {
 	t.RLock()
@@ -140,8 +139,8 @@ func genSinglePartitionQuery(
 }
 
 func genSinglePartitionQueryMv(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 	g generators.GeneratorInterface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -176,8 +175,8 @@ func genSinglePartitionQueryMv(
 }
 
 func genMultiplePartitionQuery(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 	g generators.GeneratorInterface,
 	numQueryPKs int,
 ) *typedef.Stmt {
@@ -205,8 +204,8 @@ func genMultiplePartitionQuery(
 }
 
 func genMultiplePartitionQueryMv(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 	g generators.GeneratorInterface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -257,8 +256,8 @@ func genMultiplePartitionQueryMv(
 }
 
 func genClusteringRangeQuery(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 	g generators.GeneratorInterface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -297,8 +296,8 @@ func genClusteringRangeQuery(
 }
 
 func genClusteringRangeQueryMv(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 	g generators.GeneratorInterface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -344,8 +343,8 @@ func genClusteringRangeQueryMv(
 }
 
 func genMultiplePartitionClusteringRangeQuery(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 	g generators.GeneratorInterface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -396,8 +395,8 @@ func genMultiplePartitionClusteringRangeQuery(
 }
 
 func genMultiplePartitionClusteringRangeQueryMv(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 	g generators.GeneratorInterface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
@@ -467,8 +466,8 @@ func genMultiplePartitionClusteringRangeQueryMv(
 }
 
 func genSingleIndexQuery(
-	s *testschema.Schema,
-	t *testschema.Table,
+	s *typedef.Schema,
+	t *typedef.Table,
 	_ generators.GeneratorInterface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,

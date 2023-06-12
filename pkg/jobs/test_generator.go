@@ -20,19 +20,18 @@ import (
 	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/routingkey"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 type MockGenerator struct {
-	table             *testschema.Table
+	table             *typedef.Table
 	rand              *rand.Rand
 	partitionsConfig  *typedef.PartitionRangeConfig
 	routingKeyCreator *routingkey.Creator
 }
 
 func NewTestGenerator(
-	table *testschema.Table,
+	table *typedef.Table,
 	rnd *rand.Rand,
 	partitionsConfig *typedef.PartitionRangeConfig,
 	routingKeyCreator *routingkey.Creator,

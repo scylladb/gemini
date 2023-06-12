@@ -12,11 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package testschema
-
-import (
-	"github.com/scylladb/gemini/pkg/typedef"
-)
+package typedef
 
 type MaterializedView struct {
 	NonPrimaryKey          *ColumnDef
@@ -27,8 +23,8 @@ type MaterializedView struct {
 }
 
 type Schema struct {
-	Keyspace typedef.Keyspace `json:"keyspace"`
-	Tables   []*Table         `json:"tables"`
+	Keyspace Keyspace `json:"keyspace"`
+	Tables   []*Table `json:"tables"`
 }
 
 func (m *MaterializedView) HaveNonPrimaryKey() bool {

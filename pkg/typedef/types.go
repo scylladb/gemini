@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package coltypes
+package typedef
 
 import (
 	"fmt"
@@ -23,7 +23,6 @@ import (
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
 
-	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
@@ -68,36 +67,36 @@ var (
 )
 
 var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
-	gocql.TypeAscii:     gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeAscii, ""),
-	gocql.TypeBigInt:    gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeBigInt, ""),
-	gocql.TypeBlob:      gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeBlob, ""),
-	gocql.TypeBoolean:   gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeBoolean, ""),
-	gocql.TypeDate:      gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeDate, ""),
-	gocql.TypeDecimal:   gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeDecimal, ""),
-	gocql.TypeDouble:    gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeDouble, ""),
-	gocql.TypeDuration:  gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeDuration, ""),
-	gocql.TypeFloat:     gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeFloat, ""),
-	gocql.TypeInet:      gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeInet, ""),
-	gocql.TypeInt:       gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeInt, ""),
-	gocql.TypeSmallInt:  gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeSmallInt, ""),
-	gocql.TypeText:      gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeText, ""),
-	gocql.TypeTime:      gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeTime, ""),
-	gocql.TypeTimestamp: gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeTimestamp, ""),
-	gocql.TypeTimeUUID:  gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeTimeUUID, ""),
-	gocql.TypeTinyInt:   gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeTinyInt, ""),
-	gocql.TypeUUID:      gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeUUID, ""),
-	gocql.TypeVarchar:   gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeVarchar, ""),
-	gocql.TypeVarint:    gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeVarint, ""),
+	gocql.TypeAscii:     gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeAscii, ""),
+	gocql.TypeBigInt:    gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeBigInt, ""),
+	gocql.TypeBlob:      gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeBlob, ""),
+	gocql.TypeBoolean:   gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeBoolean, ""),
+	gocql.TypeDate:      gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeDate, ""),
+	gocql.TypeDecimal:   gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeDecimal, ""),
+	gocql.TypeDouble:    gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeDouble, ""),
+	gocql.TypeDuration:  gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeDuration, ""),
+	gocql.TypeFloat:     gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeFloat, ""),
+	gocql.TypeInet:      gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeInet, ""),
+	gocql.TypeInt:       gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeInt, ""),
+	gocql.TypeSmallInt:  gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeSmallInt, ""),
+	gocql.TypeText:      gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeText, ""),
+	gocql.TypeTime:      gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeTime, ""),
+	gocql.TypeTimestamp: gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeTimestamp, ""),
+	gocql.TypeTimeUUID:  gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeTimeUUID, ""),
+	gocql.TypeTinyInt:   gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeTinyInt, ""),
+	gocql.TypeUUID:      gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeUUID, ""),
+	gocql.TypeVarchar:   gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeVarchar, ""),
+	gocql.TypeVarint:    gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeVarint, ""),
 
 	// Complex coltypes
-	gocql.TypeList:  gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeList, ""),
-	gocql.TypeMap:   gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeMap, ""),
-	gocql.TypeSet:   gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeSet, ""),
-	gocql.TypeTuple: gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeTuple, ""),
-	gocql.TypeUDT:   gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeUDT, ""),
+	gocql.TypeList:  gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeList, ""),
+	gocql.TypeMap:   gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeMap, ""),
+	gocql.TypeSet:   gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeSet, ""),
+	gocql.TypeTuple: gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeTuple, ""),
+	gocql.TypeUDT:   gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeUDT, ""),
 
 	// Special coltypes
-	gocql.TypeCounter: gocql.NewNativeType(typedef.GoCQLProtoVersion4, gocql.TypeCounter, ""),
+	gocql.TypeCounter: gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeCounter, ""),
 }
 
 type MapType struct {
@@ -136,7 +135,7 @@ func (mt *MapType) CQLPretty(query string, value []interface{}) (string, int) {
 	return strings.Replace(query, "?", vv, 1), 1
 }
 
-func (mt *MapType) GenValue(r *rand.Rand, p *typedef.PartitionRangeConfig) []interface{} {
+func (mt *MapType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	count := r.Intn(9) + 1
 	vals := make(map[interface{}]interface{})
 	for i := 0; i < count; i++ {
@@ -180,7 +179,7 @@ func (ct *CounterType) CQLPretty(query string, value []interface{}) (string, int
 	return strings.Replace(query, "?", fmt.Sprintf("%d", value[0]), 1), 1
 }
 
-func (ct *CounterType) GenValue(r *rand.Rand, _ *typedef.PartitionRangeConfig) []interface{} {
+func (ct *CounterType) GenValue(r *rand.Rand, _ *PartitionRangeConfig) []interface{} {
 	if utils.UnderTest {
 		return []interface{}{r.Int63()}
 	}

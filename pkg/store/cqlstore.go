@@ -19,8 +19,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/scylladb/gemini/pkg/testschema"
-
 	errs "errors"
 
 	"github.com/gocql/gocql"
@@ -29,11 +27,13 @@ import (
 	"github.com/scylladb/gocqlx/v2/qb"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 type cqlStore struct {
 	session                 *gocql.Session
-	schema                  *testschema.Schema
+	schema                  *typedef.Schema
 	ops                     *prometheus.CounterVec
 	logger                  *zap.Logger
 	system                  string

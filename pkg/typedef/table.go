@@ -12,17 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package testschema
+package typedef
 
 import (
 	"sync"
-
-	"github.com/scylladb/gemini/pkg/coltypes"
-	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 type QueryCache interface {
-	GetQuery(qct typedef.StatementCacheType) *typedef.StmtCache
+	GetQuery(qct StatementCacheType) *StmtCache
 	Reset()
 	BindToTable(t *Table)
 }
@@ -36,7 +33,7 @@ type Table struct {
 	PartitionKeys          Columns            `json:"partition_keys"`
 	ClusteringKeys         Columns            `json:"clustering_keys"`
 	Columns                Columns            `json:"columns"`
-	Indexes                []typedef.IndexDef `json:"indexes,omitempty"`
+	Indexes                []IndexDef         `json:"indexes,omitempty"`
 	MaterializedViews      []MaterializedView `json:"materialized_views,omitempty"`
 	KnownIssues            KnownIssues        `json:"known_issues"`
 	TableOptions           []string           `json:"table_options,omitempty"`
@@ -57,7 +54,7 @@ func (t *Table) IsCounterTable() bool {
 	if len(t.Columns) != 1 {
 		return false
 	}
-	_, ok := t.Columns[0].Type.(*coltypes.CounterType)
+	_, ok := t.Columns[0].Type.(*CounterType)
 	return ok
 }
 
@@ -77,7 +74,7 @@ func (t *Table) RUnlock() {
 	t.mu.RUnlock()
 }
 
-func (t *Table) GetQueryCache(st typedef.StatementCacheType) *typedef.StmtCache {
+func (t *Table) GetQueryCache(st StatementCacheType) *StmtCache {
 	return t.queryCache.GetQuery(st)
 }
 

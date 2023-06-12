@@ -20,12 +20,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scylladb/gemini/pkg/testschema"
-
 	"github.com/gocql/gocql"
+
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func pks(t *testschema.Table, rows []map[string]interface{}) []string {
+func pks(t *typedef.Table, rows []map[string]interface{}) []string {
 	var keySet []string
 	for _, row := range rows {
 		keys := make([]string, 0, len(t.PartitionKeys)+len(t.ClusteringKeys))
@@ -36,7 +36,7 @@ func pks(t *testschema.Table, rows []map[string]interface{}) []string {
 	return keySet
 }
 
-func extractRowValues(values []string, columns testschema.Columns, row map[string]interface{}) []string {
+func extractRowValues(values []string, columns typedef.Columns, row map[string]interface{}) []string {
 	for _, pk := range columns {
 		values = append(values, fmt.Sprintf(pk.Name+"=%v", row[pk.Name]))
 	}

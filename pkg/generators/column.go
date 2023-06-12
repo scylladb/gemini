@@ -15,16 +15,14 @@
 package generators
 
 import (
-	"github.com/scylladb/gemini/pkg/coltypes"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func CreateIndexesForColumn(c testschema.Columns, tableName string, maxIndexes int) []typedef.IndexDef {
+func CreateIndexesForColumn(c typedef.Columns, tableName string, maxIndexes int) []typedef.IndexDef {
 	createdCount := 0
 	indexes := make([]typedef.IndexDef, 0, maxIndexes)
 	for i, col := range c {
-		if col.Type.Indexable() && coltypes.TypesForIndex.Contains(col.Type) {
+		if col.Type.Indexable() && typedef.TypesForIndex.Contains(col.Type) {
 			indexes = append(indexes, typedef.IndexDef{Name: GenIndexName(tableName+"_col", i), Column: col.Name, ColumnIdx: i})
 			createdCount++
 		}

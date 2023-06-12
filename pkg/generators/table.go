@@ -18,12 +18,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/scylladb/gemini/pkg/coltypes"
-	"github.com/scylladb/gemini/pkg/testschema"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func GetCreateTable(t *testschema.Table, ks typedef.Keyspace) string {
+func GetCreateTable(t *typedef.Table, ks typedef.Keyspace) string {
 	t.RLock()
 	defer t.RUnlock()
 
@@ -58,13 +56,13 @@ func GetCreateTable(t *testschema.Table, ks typedef.Keyspace) string {
 	return stmt
 }
 
-func GetCreateTypes(t *testschema.Table, keyspace typedef.Keyspace) []string {
+func GetCreateTypes(t *typedef.Table, keyspace typedef.Keyspace) []string {
 	t.RLock()
 	defer t.RUnlock()
 
 	var stmts []string
 	for _, column := range t.Columns {
-		c, ok := column.Type.(*coltypes.UDTType)
+		c, ok := column.Type.(*typedef.UDTType)
 		if !ok {
 			continue
 		}

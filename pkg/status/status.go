@@ -23,7 +23,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/scylladb/gemini/pkg/joberror"
-	"github.com/scylladb/gemini/pkg/testschema"
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 type Uint64 struct {
@@ -56,7 +56,7 @@ func (gs *GlobalStatus) AddReadError(err *joberror.JobError) {
 	gs.ReadErrors.Add(1)
 }
 
-func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *testschema.Schema, version string) error {
+func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, version string) error {
 	result := map[string]interface{}{
 		"result":         gs,
 		"gemini_version": version,
@@ -80,7 +80,7 @@ func (gs *GlobalStatus) HasErrors() bool {
 	return gs.WriteErrors.Load() > 0 || gs.ReadErrors.Load() > 0
 }
 
-func (gs *GlobalStatus) PrintResult(w io.Writer, schema *testschema.Schema, version string) {
+func (gs *GlobalStatus) PrintResult(w io.Writer, schema *typedef.Schema, version string) {
 	if err := gs.PrintResultAsJSON(w, schema, version); err != nil {
 		// In case there has been it has been a long run we want to display it anyway...
 		fmt.Printf("Unable to print result as json, using plain text to stdout, error=%s\n", err)
