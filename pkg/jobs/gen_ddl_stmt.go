@@ -29,15 +29,14 @@ import (
 func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, _ *typedef.PartitionRangeConfig, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
 	maxVariant := 1
 	validCols := t.ValidColumnsForDelete()
-	if len(t.Columns) > 0 && len(validCols) > 0 {
+	if validCols.Len() > 0 {
 		maxVariant = 2
 	}
 	switch n := r.Intn(maxVariant + 2); n {
 	// case 0: // Alter column not supported in Cassandra from 3.0.11
 	//	return t.alterColumn(s.Keyspace.Name)
 	case 2:
-		num := r.Intn(len(validCols))
-		return genDropColumnStmt(t, s.Keyspace.Name, validCols[num])
+		return genDropColumnStmt(t, s.Keyspace.Name, validCols.Random())
 	default:
 		column := typedef.ColumnDef{Name: generators.GenColumnName("col", len(t.Columns)+1), Type: generators.GenColumnType(len(t.Columns)+1, sc)}
 		return genAddColumnStmt(t, s.Keyspace.Name, &column)
@@ -112,10 +111,9 @@ func alterColumn(t *typedef.Table, keyspace string) ([]*typedef.Stmt, func(), er
 	}, nil
 }
 
-func genDropColumnStmt(t *typedef.Table, keyspace string, colNum int) (*typedef.Stmts, error) {
+func genDropColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnDef) (*typedef.Stmts, error) {
 	var stmts []*typedef.Stmt
 
-	column := t.Columns[colNum]
 	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " DROP " + column.Name
 	stmts = append(stmts, &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
@@ -128,7 +126,7 @@ func genDropColumnStmt(t *typedef.Table, keyspace string, colNum int) (*typedef.
 	return &typedef.Stmts{
 		List: stmts,
 		PostStmtHook: func() {
-			t.Columns = t.Columns.Remove(colNum)
+			t.Columns = t.Columns.Remove(column)
 			t.ResetQueryCache()
 		},
 	}, nil

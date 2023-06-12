@@ -89,19 +89,16 @@ func (t *Table) Init(s *Schema, c QueryCache) {
 	t.queryCache.BindToTable(t)
 }
 
-func (t *Table) ValidColumnsForDelete() []int {
+func (t *Table) ValidColumnsForDelete() Columns {
 	if t.Columns.Len() == 0 {
 		return nil
 	}
-	validColsLen := t.Columns.Len()
-	validCols := make([]int, 0, validColsLen)
-	for i := 0; i < validColsLen; i++ {
-		validCols = append(validCols, i)
-	}
+	validCols := make(Columns, 0, len(t.Columns))
+	validCols = append(validCols, t.Columns...)
 	if len(t.Indexes) != 0 {
 		for _, idx := range t.Indexes {
 			for j := range validCols {
-				if t.Columns[validCols[j]].Name == idx.Column {
+				if validCols[j].Name == idx.Column.Name {
 					validCols = append(validCols[:j], validCols[j+1:]...)
 					break
 				}
@@ -112,7 +109,7 @@ func (t *Table) ValidColumnsForDelete() []int {
 		for _, mv := range t.MaterializedViews {
 			if mv.HaveNonPrimaryKey() {
 				for j := range validCols {
-					if t.Columns[validCols[j]].Name == mv.NonPrimaryKey.Name {
+					if validCols[j].Name == mv.NonPrimaryKey.Name {
 						validCols = append(validCols[:j], validCols[j+1:]...)
 						break
 					}

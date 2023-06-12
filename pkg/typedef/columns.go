@@ -81,11 +81,17 @@ func (c Columns) Names() []string {
 	return names
 }
 
-func (c Columns) Remove(idx int) Columns {
+func (c Columns) Remove(column *ColumnDef) Columns {
 	out := c
-	copy(out[idx:], out[idx+1:])
-	out[len(out)-1] = nil
-	return out[:len(c)-1]
+	for idx := range c {
+		if c[idx].Name == column.Name {
+			copy(out[idx:], out[idx+1:])
+			out[len(out)-1] = nil
+			out = out[:len(c)-1]
+			break
+		}
+	}
+	return out
 }
 
 func (c Columns) ToJSONMap(values map[string]interface{}, r *rand.Rand, p *PartitionRangeConfig) map[string]interface{} {
