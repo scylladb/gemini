@@ -16,7 +16,6 @@ package typedef
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
@@ -96,31 +95,7 @@ func (c Columns) Remove(column *ColumnDef) Columns {
 
 func (c Columns) ToJSONMap(values map[string]interface{}, r *rand.Rand, p *PartitionRangeConfig) map[string]interface{} {
 	for _, k := range c {
-		switch t := k.Type.(type) {
-		case SimpleType:
-			if t != TYPE_BLOB {
-				values[k.Name] = t.GenValue(r, p)[0]
-				continue
-			}
-			v, ok := t.GenValue(r, p)[0].(string)
-			if ok {
-				values[k.Name] = "0x" + v
-			}
-		case *TupleType:
-			vv := t.GenValue(r, p)
-			for i, val := range vv {
-				if t.Types[i] == TYPE_BLOB {
-					v, ok := val.(string)
-					if ok {
-						v = "0x" + v
-					}
-					vv[i] = v
-				}
-			}
-			values[k.Name] = vv
-		default:
-			panic(fmt.Sprintf("unknown type: %s", t.Name()))
-		}
+		values[k.Name] = k.Type.GenJSONValue(r, p)
 	}
 	return values
 }

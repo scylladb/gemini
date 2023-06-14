@@ -25,6 +25,7 @@ type JobError struct {
 	Timestamp time.Time `json:"timestamp"`
 	Message   string    `json:"message"`
 	Query     string    `json:"query"`
+	StmtType  string    `json:"stmt-type"`
 }
 
 type ErrorList struct {

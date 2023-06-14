@@ -174,7 +174,7 @@ func genInsertJSONStmt(
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
 			Types:     []typedef.Type{typedef.TYPE_TEXT},
-			QueryType: typedef.InsertStatement,
+			QueryType: typedef.InsertJSONStatementType,
 		},
 		ValuesWithToken: valuesWithToken,
 		Values:          []interface{}{string(jsonString)},

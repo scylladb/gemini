@@ -135,6 +135,15 @@ func (mt *MapType) CQLPretty(query string, value []interface{}) (string, int) {
 	return strings.Replace(query, "?", vv, 1), 1
 }
 
+func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
+	count := r.Intn(9) + 1
+	vals := make(map[interface{}]interface{})
+	for i := 0; i < count; i++ {
+		vals[mt.KeyType.GenJSONValue(r, p)] = mt.ValueType.GenJSONValue(r, p)
+	}
+	return vals
+}
+
 func (mt *MapType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	count := r.Intn(9) + 1
 	vals := make(map[interface{}]interface{})
@@ -177,6 +186,13 @@ func (ct *CounterType) CQLHolder() string {
 
 func (ct *CounterType) CQLPretty(query string, value []interface{}) (string, int) {
 	return strings.Replace(query, "?", fmt.Sprintf("%d", value[0]), 1), 1
+}
+
+func (ct *CounterType) GenJSONValue(r *rand.Rand, _ *PartitionRangeConfig) interface{} {
+	if utils.UnderTest {
+		return r.Int63()
+	}
+	return atomic.AddInt64(&ct.Value, 1)
 }
 
 func (ct *CounterType) GenValue(r *rand.Rand, _ *PartitionRangeConfig) []interface{} {

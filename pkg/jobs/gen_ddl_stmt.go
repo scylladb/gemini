@@ -73,7 +73,8 @@ func genAddColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnD
 		},
 	})
 	return &typedef.Stmts{
-		List: stmts,
+		List:      stmts,
+		QueryType: typedef.AddColumnStatementType,
 		PostStmtHook: func() {
 			t.Columns = append(t.Columns, column)
 			t.ResetQueryCache()
@@ -124,7 +125,8 @@ func genDropColumnStmt(t *typedef.Table, keyspace string, column *typedef.Column
 		},
 	})
 	return &typedef.Stmts{
-		List: stmts,
+		List:      stmts,
+		QueryType: typedef.DropColumnStatementType,
 		PostStmtHook: func() {
 			t.Columns = t.Columns.Remove(column)
 			t.ResetQueryCache()

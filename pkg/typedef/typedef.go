@@ -52,6 +52,7 @@ type (
 type Stmts struct {
 	PostStmtHook func()
 	List         []*Stmt
+	QueryType    StatementType
 }
 
 type StmtCache struct {
@@ -86,6 +87,35 @@ func (s *Stmt) PrettyCQL() string {
 }
 
 type StatementType uint8
+
+func (st StatementType) ToString() string {
+	switch st {
+	case SelectStatementType:
+		return "SelectStatement"
+	case SelectRangeStatementType:
+		return "SelectRangeStatement"
+	case SelectByIndexStatementType:
+		return "SelectByIndexStatement"
+	case SelectFromMaterializedViewStatementType:
+		return "SelectFromMaterializedViewStatement"
+	case DeleteStatementType:
+		return "DeleteStatement"
+	case InsertStatementType:
+		return "InsertStatement"
+	case InsertJSONStatementType:
+		return "InsertJSONStatement"
+	case UpdateStatementType:
+		return "UpdateStatement"
+	case AlterColumnStatementType:
+		return "AlterColumnStatement"
+	case DropColumnStatementType:
+		return "DropColumnStatement"
+	case AddColumnStatementType:
+		return "AddColumnStatement"
+	default:
+		panic(fmt.Sprintf("unknown statement type %d", st))
+	}
+}
 
 func (st StatementType) PossibleAsyncOperation() bool {
 	switch st {
