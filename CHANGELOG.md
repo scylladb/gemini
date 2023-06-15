@@ -1,4 +1,11 @@
 # Changelog
+## [1.8.3] - 2023-06-015
+
+- Pause generator when partitions are full ([#332](https://github.com/scylladb/gemini/pull/332))
+- Fix TYPE_TIME value generations ([#337](https://github.com/scylladb/gemini/pull/337))
+- Make validation retry on SelectFromMaterializedViewStatementType ([#347](https://github.com/scylladb/gemini/pull/347))
+- Make gemini avoid running DROP COLUMN when it is not supported ([#350](https://github.com/scylladb/gemini/pull/350))
+- Fix UDT value generations ([357](https://github.com/scylladb/gemini/pull/357))
 
 ## [1.8.2] - 2023-06-01
 
