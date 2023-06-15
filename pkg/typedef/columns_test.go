@@ -27,6 +27,87 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
+var allSimpleTypes = []typedef.SimpleType{
+	typedef.TYPE_ASCII,
+	typedef.TYPE_BIGINT,
+	typedef.TYPE_BLOB,
+	typedef.TYPE_BOOLEAN,
+	typedef.TYPE_DATE,
+	typedef.TYPE_DECIMAL,
+	typedef.TYPE_DOUBLE,
+	typedef.TYPE_DURATION,
+	typedef.TYPE_FLOAT,
+	typedef.TYPE_INET,
+	typedef.TYPE_INT,
+	typedef.TYPE_SMALLINT,
+	typedef.TYPE_TEXT,
+	typedef.TYPE_TIME,
+	typedef.TYPE_TIMESTAMP,
+	typedef.TYPE_TIMEUUID,
+	typedef.TYPE_TINYINT,
+	typedef.TYPE_UUID,
+	typedef.TYPE_VARCHAR,
+	typedef.TYPE_VARINT,
+}
+
+func TestColumnMarshalUnmarshal(t *testing.T) {
+	t.Parallel()
+	type testCase struct {
+		def      typedef.ColumnDef
+		expected string
+	}
+	var testCases []testCase
+	for _, simpleType := range allSimpleTypes {
+		testCases = append(testCases, testCase{def: typedef.ColumnDef{
+			Name: simpleType.Name(),
+			Type: simpleType,
+		}, expected: fmt.Sprintf("{\"type\":\"%s\",\"name\":\"%s\"}", simpleType.Name(), simpleType.Name())})
+	}
+	udtTypes := map[string]typedef.SimpleType{}
+
+	for _, simpleType := range allSimpleTypes {
+		udtTypes["col_"+simpleType.Name()] = simpleType
+	}
+
+	testCases = append(testCases, testCase{
+		def: typedef.ColumnDef{
+			Type: &typedef.UDTType{
+				TypeName: "udt1",
+				Types:    udtTypes,
+			},
+			Name: "udt1",
+		},
+		//nolint:lll
+		expected: "{\"type\":{\"coltypes\":{\"col_ascii\":\"ascii\",\"col_bigint\":\"bigint\",\"col_blob\":\"blob\",\"col_boolean\":\"boolean\",\"col_date\":\"date\",\"col_decimal\":\"decimal\",\"col_double\":\"double\",\"col_duration\":\"duration\",\"col_float\":\"float\",\"col_inet\":\"inet\",\"col_int\":\"int\",\"col_smallint\":\"smallint\",\"col_text\":\"text\",\"col_time\":\"time\",\"col_timestamp\":\"timestamp\",\"col_timeuuid\":\"timeuuid\",\"col_tinyint\":\"tinyint\",\"col_uuid\":\"uuid\",\"col_varchar\":\"varchar\",\"col_varint\":\"varint\"},\"type_name\":\"udt1\",\"frozen\":false},\"name\":\"udt1\"}",
+	})
+
+	for id := range testCases {
+		tcase := testCases[id]
+		t.Run(tcase.def.Name, func(t *testing.T) {
+			t.Parallel()
+			marshaledData, err := json.Marshal(tcase.def)
+			if err != nil {
+				t.Fatal(err.Error())
+			}
+			fmt.Println(tcase.expected)
+
+			if diff := cmp.Diff(string(marshaledData), tcase.expected); diff != "" {
+				t.Errorf(diff)
+			}
+			var unmarshaledDef typedef.ColumnDef
+
+			err = json.Unmarshal(marshaledData, &unmarshaledDef)
+			if err != nil {
+				t.Fatal(err.Error())
+			}
+
+			if diff := cmp.Diff(tcase.def, unmarshaledDef); diff != "" {
+				t.Errorf(diff)
+			}
+		})
+	}
+}
+
 func TestMarshalUnmarshal(t *testing.T) {
 	s1 := getTestSchema()
 
