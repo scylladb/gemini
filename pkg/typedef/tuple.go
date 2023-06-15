@@ -74,6 +74,14 @@ func (t *TupleType) Indexable() bool {
 	return true
 }
 
+func (t *TupleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
+	out := make([]interface{}, 0, len(t.Types))
+	for _, tp := range t.Types {
+		out = append(out, tp.GenJSONValue(r, p))
+	}
+	return out
+}
+
 func (t *TupleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	out := make([]interface{}, 0, len(t.Types))
 	for _, tp := range t.Types {

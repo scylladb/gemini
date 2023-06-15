@@ -30,10 +30,12 @@ const (
 	SelectByIndexStatementType
 	SelectFromMaterializedViewStatementType
 	DeleteStatementType
-	InsertStatement
-	Updatetatement
+	InsertStatementType
+	InsertJSONStatementType
+	UpdateStatementType
 	AlterColumnStatementType
 	DropColumnStatementType
+	AddColumnStatementType
 )
 
 //nolint:revive

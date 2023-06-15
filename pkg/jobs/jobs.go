@@ -243,6 +243,7 @@ func validationJob(
 			if err := validation(ctx, schemaConfig, table, s, stmt, g, globalStatus, logger); err != nil {
 				globalStatus.AddReadError(&joberror.JobError{
 					Timestamp: time.Now(),
+					StmtType:  stmt.QueryType.ToString(),
 					Message:   "Validation failed: " + err.Error(),
 					Query:     stmt.PrettyCQL(),
 				})
@@ -341,6 +342,7 @@ func ddl(
 		if err = s.Mutate(ctx, ddlStmt.Query); err != nil {
 			globalStatus.AddWriteError(&joberror.JobError{
 				Timestamp: time.Now(),
+				StmtType:  ddlStmts.QueryType.ToString(),
 				Message:   "DDL failed: " + err.Error(),
 				Query:     ddlStmt.PrettyCQL(),
 			})
@@ -394,6 +396,7 @@ func mutation(
 	if err = s.Mutate(ctx, mutateQuery, mutateValues...); err != nil {
 		globalStatus.AddWriteError(&joberror.JobError{
 			Timestamp: time.Now(),
+			StmtType:  mutateStmt.QueryType.ToString(),
 			Message:   "Mutation failed: " + err.Error(),
 			Query:     mutateStmt.PrettyCQL(),
 		})

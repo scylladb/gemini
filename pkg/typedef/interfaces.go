@@ -25,6 +25,7 @@ type Type interface {
 	CQLHolder() string
 	CQLPretty(string, []interface{}) (string, int)
 	GenValue(*rand.Rand, *PartitionRangeConfig) []interface{}
+	GenJSONValue(*rand.Rand, *PartitionRangeConfig) interface{}
 	LenValue() int
 	Indexable() bool
 	CQLType() gocql.TypeInfo

@@ -156,49 +156,57 @@ func (st SimpleType) Indexable() bool {
 	return st != TYPE_DURATION
 }
 
+func (st SimpleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
+	if st == TYPE_BLOB {
+		ln := r.Intn(p.MaxBlobLength) + p.MinBlobLength
+		return "0x" + hex.EncodeToString([]byte(utils.RandString(r, ln)))
+	}
+	return st.genValue(r, p)
+}
+
 func (st SimpleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
-	var val interface{}
+	return []interface{}{st.genValue(r, p)}
+}
+
+func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
 		ln := r.Intn(p.MaxStringLength) + p.MinStringLength
-		val = utils.RandString(r, ln)
+		return utils.RandString(r, ln)
 	case TYPE_BLOB:
 		ln := r.Intn(p.MaxBlobLength) + p.MinBlobLength
-		val = hex.EncodeToString([]byte(utils.RandString(r, ln)))
+		return hex.EncodeToString([]byte(utils.RandString(r, ln)))
 	case TYPE_BIGINT:
-		val = r.Int63()
+		return r.Int63()
 	case TYPE_BOOLEAN:
-		val = r.Int()%2 == 0
+		return r.Int()%2 == 0
 	case TYPE_DATE:
-		val = utils.RandDate(r)
+		return utils.RandDate(r)
 	case TYPE_TIME:
-		val = utils.RandTime(r).UnixNano()
+		return utils.RandTime(r).UnixNano()
 	case TYPE_TIMESTAMP:
-		val = utils.RandTime(r)
+		return utils.RandTime(r)
 	case TYPE_DECIMAL:
-		val = inf.NewDec(r.Int63(), 3)
+		return inf.NewDec(r.Int63(), 3)
 	case TYPE_DOUBLE:
-		val = r.Float64()
+		return r.Float64()
 	case TYPE_DURATION:
-		val = (time.Minute * time.Duration(r.Intn(100))).String()
+		return (time.Minute * time.Duration(r.Intn(100))).String()
 	case TYPE_FLOAT:
-		val = r.Float32()
+		return r.Float32()
 	case TYPE_INET:
-		val = net.ParseIP(utils.RandIPV4Address(r, r.Intn(255), 2)).String()
+		return net.ParseIP(utils.RandIPV4Address(r, r.Intn(255), 2)).String()
 	case TYPE_INT:
-		val = r.Int31()
+		return r.Int31()
 	case TYPE_SMALLINT:
-		val = int16(r.Int31())
+		return int16(r.Int31())
 	case TYPE_TIMEUUID, TYPE_UUID:
-		val = utils.UUIDFromTime(r)
+		return utils.UUIDFromTime(r)
 	case TYPE_TINYINT:
-		val = int8(r.Int31())
+		return int8(r.Int31())
 	case TYPE_VARINT:
-		val = big.NewInt(r.Int63())
+		return big.NewInt(r.Int63())
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", st))
-	}
-	return []interface{}{
-		val,
 	}
 }

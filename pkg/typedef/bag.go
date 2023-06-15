@@ -87,6 +87,15 @@ func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{}
 	return []interface{}{out}
 }
 
+func (ct *BagType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
+	count := r.Intn(9) + 1
+	out := make([]interface{}, count)
+	for i := 0; i < count; i++ {
+		out[i] = ct.Type.GenJSONValue(r, p)
+	}
+	return out
+}
+
 func (ct *BagType) LenValue() int {
 	return 1
 }

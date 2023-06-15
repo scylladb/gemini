@@ -29,14 +29,14 @@
         {
           "name": "col0",
           "type": {
-            "types": {
+            "type_name": "udt_672245080",
+            "frozen": true,
+            "coltypes": {
               "udt_672245080_0": "ascii",
               "udt_672245080_1": "boolean",
               "udt_672245080_2": "bigint",
               "udt_672245080_3": "blob"
-            },
-            "type_name": "udt_672245080",
-            "frozen": true
+            }
           }
         },
         {

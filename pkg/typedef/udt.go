@@ -73,6 +73,14 @@ func (t *UDTType) Indexable() bool {
 	return true
 }
 
+func (t *UDTType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
+	vals := make(map[string]interface{})
+	for name, typ := range t.Types {
+		vals[name] = typ.GenJSONValue(r, p)
+	}
+	return vals
+}
+
 func (t *UDTType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	vals := make(map[string]interface{})
 	for name, typ := range t.Types {

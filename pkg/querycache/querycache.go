@@ -123,7 +123,7 @@ func genInsertStmtCache(
 	return &typedef.StmtCache{
 		Query:     builder,
 		Types:     allTypes,
-		QueryType: typedef.InsertStatement,
+		QueryType: typedef.InsertStatementType,
 	}
 }
 
@@ -164,7 +164,7 @@ func genUpdateStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache 
 	return &typedef.StmtCache{
 		Query:     builder,
 		Types:     allTypes,
-		QueryType: typedef.Updatetatement,
+		QueryType: typedef.UpdateStatementType,
 	}
 }
 

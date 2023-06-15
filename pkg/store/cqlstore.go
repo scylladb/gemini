@@ -140,8 +140,8 @@ func ignore(err error) bool {
 		return true
 	}
 	//nolint:errorlint
-	switch err {
-	case context.Canceled, context.DeadlineExceeded:
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 		return true
 	default:
 		return false
