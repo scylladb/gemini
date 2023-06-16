@@ -28,6 +28,15 @@ import (
 
 // nolint:revive
 const (
+	TYPE_UDT   = "udt"
+	TYPE_MAP   = "map"
+	TYPE_LIST  = "list"
+	TYPE_SET   = "set"
+	TYPE_TUPLE = "tuple"
+)
+
+// nolint:revive
+const (
 	TYPE_ASCII     = SimpleType("ascii")
 	TYPE_BIGINT    = SimpleType("bigint")
 	TYPE_BLOB      = SimpleType("blob")

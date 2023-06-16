@@ -114,7 +114,7 @@ func genInsertStmtCache(
 	for _, col := range t.Columns {
 		switch colType := col.Type.(type) {
 		case *typedef.TupleType:
-			builder = builder.TupleColumn(col.Name, len(colType.Types))
+			builder = builder.TupleColumn(col.Name, len(colType.ValueTypes))
 		default:
 			builder = builder.Columns(col.Name)
 		}
@@ -143,7 +143,7 @@ func genUpdateStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache 
 	for _, cdef := range t.Columns {
 		switch t := cdef.Type.(type) {
 		case *typedef.TupleType:
-			builder = builder.SetTuple(cdef.Name, len(t.Types))
+			builder = builder.SetTuple(cdef.Name, len(t.ValueTypes))
 		case *typedef.CounterType:
 			builder = builder.SetLit(cdef.Name, cdef.Name+"+1")
 			continue

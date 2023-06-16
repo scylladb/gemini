@@ -59,7 +59,7 @@ func GenTupleType(sc *typedef.SchemaConfig) typedef.Type {
 	}
 	return &typedef.TupleType{
 		ComplexType: typedef.TYPE_TUPLE,
-		Types:       typeList,
+		ValueTypes:  typeList,
 		Frozen:      rand.Uint32()%2 == 0,
 	}
 }
@@ -75,7 +75,7 @@ func GenUDTType(sc *typedef.SchemaConfig) *typedef.UDTType {
 
 	return &typedef.UDTType{
 		ComplexType: typedef.TYPE_UDT,
-		Types:       ts,
+		ValueTypes:  ts,
 		TypeName:    typeName,
 		Frozen:      true,
 	}
@@ -99,7 +99,7 @@ func genBagType(kind string, sc *typedef.SchemaConfig) *typedef.BagType {
 	}
 	return &typedef.BagType{
 		ComplexType: kind,
-		Type:        t,
+		ValueType:   t,
 		Frozen:      rand.Uint32()%2 == 0,
 	}
 }

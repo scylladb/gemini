@@ -144,9 +144,9 @@ func genInsertJSONStmt(
 				values[pk.Name] = "0x" + v
 			}
 		case *typedef.TupleType:
-			tupVals := make([]interface{}, len(t.Types))
-			for j := 0; j < len(t.Types); j++ {
-				if t.Types[j] == typedef.TYPE_BLOB {
+			tupVals := make([]interface{}, len(t.ValueTypes))
+			for j := 0; j < len(t.ValueTypes); j++ {
+				if t.ValueTypes[j] == typedef.TYPE_BLOB {
 					v, ok = vs[i+j].(string)
 					if ok {
 						v = "0x" + v

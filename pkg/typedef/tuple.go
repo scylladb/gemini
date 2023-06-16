@@ -23,7 +23,7 @@ import (
 
 type TupleType struct {
 	ComplexType string       `json:"complex_type"`
-	Types       []SimpleType `json:"coltypes"`
+	ValueTypes  []SimpleType `json:"value_types"`
 	Frozen      bool         `json:"frozen"`
 }
 
@@ -32,16 +32,16 @@ func (t *TupleType) CQLType() gocql.TypeInfo {
 }
 
 func (t *TupleType) Name() string {
-	names := make([]string, len(t.Types))
-	for i, tp := range t.Types {
+	names := make([]string, len(t.ValueTypes))
+	for i, tp := range t.ValueTypes {
 		names[i] = tp.Name()
 	}
 	return "Type: " + strings.Join(names, ",")
 }
 
 func (t *TupleType) CQLDef() string {
-	names := make([]string, len(t.Types))
-	for i, tp := range t.Types {
+	names := make([]string, len(t.ValueTypes))
+	for i, tp := range t.ValueTypes {
 		names[i] = tp.CQLDef()
 	}
 	if t.Frozen {
@@ -51,7 +51,7 @@ func (t *TupleType) CQLDef() string {
 }
 
 func (t *TupleType) CQLHolder() string {
-	return "(" + strings.TrimRight(strings.Repeat("?,", len(t.Types)), ",") + ")"
+	return "(" + strings.TrimRight(strings.Repeat("?,", len(t.ValueTypes)), ",") + ")"
 }
 
 func (t *TupleType) CQLPretty(query string, value []interface{}) (string, int) {
@@ -59,7 +59,7 @@ func (t *TupleType) CQLPretty(query string, value []interface{}) (string, int) {
 		return query, 0
 	}
 	var cnt, tmp int
-	for i, tp := range t.Types {
+	for i, tp := range t.ValueTypes {
 		query, tmp = tp.CQLPretty(query, value[i:])
 		cnt += tmp
 	}
@@ -67,7 +67,7 @@ func (t *TupleType) CQLPretty(query string, value []interface{}) (string, int) {
 }
 
 func (t *TupleType) Indexable() bool {
-	for _, t := range t.Types {
+	for _, t := range t.ValueTypes {
 		if t == TYPE_DURATION {
 			return false
 		}
@@ -76,16 +76,16 @@ func (t *TupleType) Indexable() bool {
 }
 
 func (t *TupleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
-	out := make([]interface{}, 0, len(t.Types))
-	for _, tp := range t.Types {
+	out := make([]interface{}, 0, len(t.ValueTypes))
+	for _, tp := range t.ValueTypes {
 		out = append(out, tp.GenJSONValue(r, p))
 	}
 	return out
 }
 
 func (t *TupleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
-	out := make([]interface{}, 0, len(t.Types))
-	for _, tp := range t.Types {
+	out := make([]interface{}, 0, len(t.ValueTypes))
+	for _, tp := range t.ValueTypes {
 		out = append(out, tp.GenValue(r, p)...)
 	}
 	return out
@@ -93,7 +93,7 @@ func (t *TupleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{
 
 func (t *TupleType) LenValue() int {
 	out := 0
-	for _, tp := range t.Types {
+	for _, tp := range t.ValueTypes {
 		out += tp.LenValue()
 	}
 	return out

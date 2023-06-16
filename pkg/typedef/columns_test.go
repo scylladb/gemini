@@ -74,12 +74,12 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 			Type: &typedef.UDTType{
 				ComplexType: typedef.TYPE_UDT,
 				TypeName:    "udt1",
-				Types:       udtTypes,
+				ValueTypes:  udtTypes,
 			},
 			Name: "udt1",
 		},
 		//nolint:lll
-		expected: "{\"type\":{\"complex_type\":\"udt\",\"coltypes\":{\"col_ascii\":\"ascii\",\"col_bigint\":\"bigint\",\"col_blob\":\"blob\",\"col_boolean\":\"boolean\",\"col_date\":\"date\",\"col_decimal\":\"decimal\",\"col_double\":\"double\",\"col_duration\":\"duration\",\"col_float\":\"float\",\"col_inet\":\"inet\",\"col_int\":\"int\",\"col_smallint\":\"smallint\",\"col_text\":\"text\",\"col_time\":\"time\",\"col_timestamp\":\"timestamp\",\"col_timeuuid\":\"timeuuid\",\"col_tinyint\":\"tinyint\",\"col_uuid\":\"uuid\",\"col_varchar\":\"varchar\",\"col_varint\":\"varint\"},\"type_name\":\"udt1\",\"frozen\":false},\"name\":\"udt1\"}",
+		expected: "{\"type\":{\"complex_type\":\"udt\",\"value_types\":{\"col_ascii\":\"ascii\",\"col_bigint\":\"bigint\",\"col_blob\":\"blob\",\"col_boolean\":\"boolean\",\"col_date\":\"date\",\"col_decimal\":\"decimal\",\"col_double\":\"double\",\"col_duration\":\"duration\",\"col_float\":\"float\",\"col_inet\":\"inet\",\"col_int\":\"int\",\"col_smallint\":\"smallint\",\"col_text\":\"text\",\"col_time\":\"time\",\"col_timestamp\":\"timestamp\",\"col_timeuuid\":\"timeuuid\",\"col_tinyint\":\"tinyint\",\"col_uuid\":\"uuid\",\"col_varchar\":\"varchar\",\"col_varint\":\"varint\"},\"type_name\":\"udt1\",\"frozen\":false},\"name\":\"udt1\"}",
 	})
 
 	for id := range testCases {
@@ -96,9 +96,10 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 				t.Errorf(diff)
 			}
 			var unmarshaledDef typedef.ColumnDef
-
 			err = json.Unmarshal(marshaledData, &unmarshaledDef)
 			if err != nil {
+				fmt.Printf("_______%s", marshaledData)
+				fmt.Printf("_______%s", unmarshaledDef)
 				t.Fatal(err.Error())
 			}
 
