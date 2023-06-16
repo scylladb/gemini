@@ -100,9 +100,10 @@ var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
 }
 
 type MapType struct {
-	KeyType   SimpleType `json:"key_type"`
-	ValueType SimpleType `json:"value_type"`
-	Frozen    bool       `json:"frozen"`
+	ComplexType string     `json:"complex_type"`
+	KeyType     SimpleType `json:"key_type"`
+	ValueType   SimpleType `json:"value_type"`
+	Frozen      bool       `json:"frozen"`
 }
 
 func (mt *MapType) CQLType() gocql.TypeInfo {

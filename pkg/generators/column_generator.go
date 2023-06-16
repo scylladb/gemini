@@ -58,8 +58,9 @@ func GenTupleType(sc *typedef.SchemaConfig) typedef.Type {
 		typeList[i] = GenSimpleType(sc)
 	}
 	return &typedef.TupleType{
-		Types:  typeList,
-		Frozen: rand.Uint32()%2 == 0,
+		ComplexType: typedef.TYPE_TUPLE,
+		Types:       typeList,
+		Frozen:      rand.Uint32()%2 == 0,
 	}
 }
 
@@ -73,18 +74,19 @@ func GenUDTType(sc *typedef.SchemaConfig) *typedef.UDTType {
 	}
 
 	return &typedef.UDTType{
-		Types:    ts,
-		TypeName: typeName,
-		Frozen:   true,
+		ComplexType: typedef.TYPE_UDT,
+		Types:       ts,
+		TypeName:    typeName,
+		Frozen:      true,
 	}
 }
 
 func GenSetType(sc *typedef.SchemaConfig) *typedef.BagType {
-	return genBagType("set", sc)
+	return genBagType(typedef.TYPE_SET, sc)
 }
 
 func GenListType(sc *typedef.SchemaConfig) *typedef.BagType {
-	return genBagType("list", sc)
+	return genBagType(typedef.TYPE_LIST, sc)
 }
 
 func genBagType(kind string, sc *typedef.SchemaConfig) *typedef.BagType {
@@ -96,9 +98,9 @@ func genBagType(kind string, sc *typedef.SchemaConfig) *typedef.BagType {
 		}
 	}
 	return &typedef.BagType{
-		Kind:   kind,
-		Type:   t,
-		Frozen: rand.Uint32()%2 == 0,
+		ComplexType: kind,
+		Type:        t,
+		Frozen:      rand.Uint32()%2 == 0,
 	}
 }
 
@@ -111,9 +113,10 @@ func GenMapType(sc *typedef.SchemaConfig) *typedef.MapType {
 		t = GenSimpleType(sc)
 	}
 	return &typedef.MapType{
-		KeyType:   t,
-		ValueType: GenSimpleType(sc),
-		Frozen:    rand.Uint32()%2 == 0,
+		ComplexType: typedef.TYPE_MAP,
+		KeyType:     t,
+		ValueType:   GenSimpleType(sc),
+		Frozen:      rand.Uint32()%2 == 0,
 	}
 }
 

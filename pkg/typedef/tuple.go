@@ -22,8 +22,9 @@ import (
 )
 
 type TupleType struct {
-	Types  []SimpleType `json:"coltypes"`
-	Frozen bool         `json:"frozen"`
+	ComplexType string       `json:"complex_type"`
+	Types       []SimpleType `json:"coltypes"`
+	Frozen      bool         `json:"frozen"`
 }
 
 func (t *TupleType) CQLType() gocql.TypeInfo {

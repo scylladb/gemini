@@ -29,6 +29,7 @@
         {
           "name": "col0",
           "type": {
+            "complex_type": "udt",
             "type_name": "udt_672245080",
             "frozen": true,
             "coltypes": {
@@ -54,6 +55,7 @@
         {
           "name": "col4",
           "type": {
+            "complex_type": "map",
             "key_type": "boolean",
             "value_type": "duration",
             "frozen": false
@@ -62,7 +64,8 @@
         {
           "name": "col5",
           "type": {
-            "types": [
+            "complex_type": "tuple",
+            "coltypes": [
               "varchar",
               "smallint"
             ],
@@ -72,7 +75,15 @@
         {
           "name": "col6",
           "type": {
-            "kind": "list",
+            "complex_type": "list",
+            "type": "int",
+            "frozen": true
+          }
+        },
+        {
+          "name": "col7",
+          "type": {
+            "complex_type": "set",
             "type": "int",
             "frozen": true
           }

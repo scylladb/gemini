@@ -24,14 +24,14 @@ import (
 )
 
 type BagType struct {
-	Kind   string     `json:"kind"` // We need to differentiate between sets and lists
-	Type   SimpleType `json:"type"`
-	Frozen bool       `json:"frozen"`
+	ComplexType string     `json:"complex_type"` // We need to differentiate between sets and lists
+	Type        SimpleType `json:"type"`
+	Frozen      bool       `json:"frozen"`
 }
 
 func (ct *BagType) CQLType() gocql.TypeInfo {
-	switch ct.Kind {
-	case "set":
+	switch ct.ComplexType {
+	case TYPE_SET:
 		return goCQLTypeMap[gocql.TypeSet]
 	default:
 		return goCQLTypeMap[gocql.TypeList]
@@ -40,16 +40,16 @@ func (ct *BagType) CQLType() gocql.TypeInfo {
 
 func (ct *BagType) Name() string {
 	if ct.Frozen {
-		return "frozen<" + ct.Kind + "<" + ct.Type.Name() + ">>"
+		return "frozen<" + ct.ComplexType + "<" + ct.Type.Name() + ">>"
 	}
-	return ct.Kind + "<" + ct.Type.Name() + ">"
+	return ct.ComplexType + "<" + ct.Type.Name() + ">"
 }
 
 func (ct *BagType) CQLDef() string {
 	if ct.Frozen {
-		return "frozen<" + ct.Kind + "<" + ct.Type.Name() + ">>"
+		return "frozen<" + ct.ComplexType + "<" + ct.Type.Name() + ">>"
 	}
-	return ct.Kind + "<" + ct.Type.Name() + ">"
+	return ct.ComplexType + "<" + ct.Type.Name() + ">"
 }
 
 func (ct *BagType) CQLHolder() string {
@@ -65,7 +65,7 @@ func (ct *BagType) CQLPretty(query string, value []interface{}) (string, int) {
 	}
 	s := reflect.ValueOf(value[0])
 	op, cl := "[", "]"
-	if ct.Kind == "set" {
+	if ct.ComplexType == TYPE_SET {
 		op, cl = "{", "}"
 	}
 	vv := op

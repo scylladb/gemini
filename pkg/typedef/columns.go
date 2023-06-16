@@ -16,6 +16,7 @@ package typedef
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
@@ -27,6 +28,8 @@ type ColumnDef struct {
 	Type Type   `json:"type"`
 	Name string `json:"name"`
 }
+
+var ErrorWrongColTypeDefinition = errors.New("wrong column type definition")
 
 func (cd *ColumnDef) IsValidForPrimaryKey() bool {
 	for _, pkType := range PkTypes {
@@ -42,21 +45,34 @@ func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &dataMap); err != nil {
 		return err
 	}
-
 	t, err := GetSimpleTypeColumn(dataMap)
 	if err != nil {
-		t, err = GetUDTTypeColumn(dataMap)
-		if err != nil {
+		typeMap, typeOk := dataMap["type"]
+		if !typeOk {
+			return errors.Wrap(ErrorWrongColTypeDefinition, fmt.Sprintf("input: %s\n", dataMap))
+		}
+		complexTypeMap, typeMapOk := typeMap.(map[string]interface{})
+		if !typeMapOk {
+			return errors.Wrap(ErrorWrongColTypeDefinition, fmt.Sprintf("input: %s\n", typeMap))
+		}
+		complexType, complexTypeOk := complexTypeMap["complex_type"]
+		if !complexTypeOk {
+			return errors.Wrap(ErrorWrongColTypeDefinition, fmt.Sprintf("input: %s\n", complexTypeMap))
+		}
+		switch complexType {
+		case TYPE_LIST, TYPE_SET:
+			t, err = GetBagTypeColumn(dataMap)
+		case TYPE_MAP:
+			t, err = GetMapTypeColumn(dataMap)
+		case TYPE_TUPLE:
 			t, err = GetTupleTypeColumn(dataMap)
-			if err != nil {
-				t, err = GetMapTypeColumn(dataMap)
-				if err != nil {
-					t, err = GetBagTypeColumn(dataMap)
-					if err != nil {
-						return err
-					}
-				}
-			}
+		case TYPE_UDT:
+			t, err = GetUDTTypeColumn(dataMap)
+		default:
+			return errors.Wrap(ErrorWrongColTypeDefinition, fmt.Sprintf("input: %s\n", complexType))
+		}
+		if err != nil {
+			return err
 		}
 	}
 	*cd = ColumnDef{
@@ -169,9 +185,10 @@ func GetMapTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	return &ColumnDef{
 		Name: st.Name,
 		Type: &MapType{
-			Frozen:    frozen,
-			ValueType: valueType,
-			KeyType:   keyType,
+			ComplexType: TYPE_MAP,
+			Frozen:      frozen,
+			ValueType:   valueType,
+			KeyType:     keyType,
 		},
 	}, err
 }
@@ -185,9 +202,8 @@ func GetBagTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	if err = mapstructure.Decode(data, &st); err != nil {
 		return nil, errors.Wrapf(err, "can't decode string value for BagType, value=%+v", data)
 	}
-
-	var kind string
-	if err = mapstructure.Decode(st.Type["kind"], &kind); err != nil {
+	var complexType string
+	if err = mapstructure.Decode(st.Type["complex_type"], &complexType); err != nil {
 		return nil, errors.Wrapf(err, "can't decode string value for BagType::Frozen, value=%v", st)
 	}
 	var frozen bool
@@ -201,9 +217,9 @@ func GetBagTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	return &ColumnDef{
 		Name: st.Name,
 		Type: &BagType{
-			Kind:   kind,
-			Frozen: frozen,
-			Type:   typ,
+			ComplexType: complexType,
+			Frozen:      frozen,
+			Type:        typ,
 		},
 	}, err
 }
@@ -233,8 +249,9 @@ func GetTupleTypeColumn(data map[string]interface{}) (out *ColumnDef, err error)
 	return &ColumnDef{
 		Name: st.Name,
 		Type: &TupleType{
-			Types:  dbTypes,
-			Frozen: frozen,
+			ComplexType: TYPE_TUPLE,
+			Types:       dbTypes,
+			Frozen:      frozen,
 		},
 	}, nil
 }
@@ -271,9 +288,10 @@ func GetUDTTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	return &ColumnDef{
 		Name: st.Name,
 		Type: &UDTType{
-			Types:    dbTypes,
-			TypeName: typeName,
-			Frozen:   frozen,
+			ComplexType: TYPE_UDT,
+			Types:       dbTypes,
+			TypeName:    typeName,
+			Frozen:      frozen,
 		},
 	}, nil
 }

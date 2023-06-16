@@ -155,9 +155,9 @@ var prettytests = []struct {
 	},
 	{
 		typ: &typedef.BagType{
-			Kind:   "set",
-			Type:   typedef.TYPE_ASCII,
-			Frozen: false,
+			ComplexType: typedef.TYPE_SET,
+			Type:        typedef.TYPE_ASCII,
+			Frozen:      false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{[]string{"a", "b"}},
@@ -165,9 +165,9 @@ var prettytests = []struct {
 	},
 	{
 		typ: &typedef.BagType{
-			Kind:   "list",
-			Type:   typedef.TYPE_ASCII,
-			Frozen: false,
+			ComplexType: "list",
+			Type:        typedef.TYPE_ASCII,
+			Frozen:      false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{[]string{"a", "b"}},

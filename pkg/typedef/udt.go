@@ -22,10 +22,20 @@ import (
 	"golang.org/x/exp/rand"
 )
 
+// nolint:revive
+const (
+	TYPE_UDT   = "udt"
+	TYPE_MAP   = "map"
+	TYPE_LIST  = "list"
+	TYPE_SET   = "set"
+	TYPE_TUPLE = "tuple"
+)
+
 type UDTType struct {
-	Types    map[string]SimpleType `json:"coltypes"`
-	TypeName string                `json:"type_name"`
-	Frozen   bool                  `json:"frozen"`
+	ComplexType string                `json:"complex_type"`
+	Types       map[string]SimpleType `json:"coltypes"`
+	TypeName    string                `json:"type_name"`
+	Frozen      bool                  `json:"frozen"`
 }
 
 func (t *UDTType) CQLType() gocql.TypeInfo {
