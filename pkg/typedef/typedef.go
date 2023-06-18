@@ -34,8 +34,9 @@ type (
 	}
 
 	IndexDef struct {
-		Column *ColumnDef
-		Name   string `json:"name"`
+		Column     *ColumnDef
+		IndexName  string `json:"index_name"`
+		ColumnName string `json:"column_name"`
 	}
 
 	PartitionRangeConfig struct {

@@ -476,15 +476,19 @@ func createIdxFromColumns(t testInterface, table *typedef.Table, all bool) (inde
 	switch all {
 	case true:
 		for i := range table.Columns {
-			var index typedef.IndexDef
-			index.Name = table.Columns[i].Name + "_idx"
-			index.Column = table.Columns[i]
+			index := typedef.IndexDef{
+				IndexName:  table.Columns[i].Name + "_idx",
+				ColumnName: table.Columns[i].Name,
+				Column:     table.Columns[i],
+			}
 			indexes = append(indexes, index)
 		}
 	default:
-		var index typedef.IndexDef
-		index.Name = table.Columns[0].Name + "_idx"
-		index.Column = table.Columns[0]
+		index := typedef.IndexDef{
+			IndexName:  table.Columns[0].Name + "_idx",
+			ColumnName: table.Columns[0].Name,
+			Column:     table.Columns[0],
+		}
 		indexes = append(indexes, index)
 
 	}

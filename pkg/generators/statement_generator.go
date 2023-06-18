@@ -106,7 +106,7 @@ func GetCreateSchema(s *typedef.Schema) []string {
 		createTable := GetCreateTable(t, s.Keyspace)
 		stmts = append(stmts, createTable)
 		for _, idef := range t.Indexes {
-			stmts = append(stmts, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s.%s (%s)", idef.Name, s.Keyspace.Name, t.Name, idef.Column.Name))
+			stmts = append(stmts, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s.%s (%s)", idef.IndexName, s.Keyspace.Name, t.Name, idef.ColumnName))
 		}
 		for _, mv := range t.MaterializedViews {
 			var (

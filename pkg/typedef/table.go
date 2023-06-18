@@ -98,7 +98,7 @@ func (t *Table) ValidColumnsForDelete() Columns {
 	if len(t.Indexes) != 0 {
 		for _, idx := range t.Indexes {
 			for j := range validCols {
-				if validCols[j].Name == idx.Column.Name {
+				if validCols[j].Name == idx.ColumnName {
 					validCols = append(validCols[:j], validCols[j+1:]...)
 					break
 				}

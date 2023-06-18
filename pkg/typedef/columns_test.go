@@ -17,6 +17,7 @@ package typedef_test
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -41,7 +42,8 @@ var allSimpleTypes = []typedef.SimpleType{
 	typedef.TYPE_INT,
 	typedef.TYPE_SMALLINT,
 	typedef.TYPE_TEXT,
-	typedef.TYPE_TIME,
+	// TODO: Add support for time when gocql bug is fixed.
+	// typedef.TYPE_TIME,
 	typedef.TYPE_TIMESTAMP,
 	typedef.TYPE_TIMEUUID,
 	typedef.TYPE_TINYINT,
@@ -79,7 +81,7 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 			Name: "udt1",
 		},
 		//nolint:lll
-		expected: "{\"type\":{\"complex_type\":\"udt\",\"value_types\":{\"col_ascii\":\"ascii\",\"col_bigint\":\"bigint\",\"col_blob\":\"blob\",\"col_boolean\":\"boolean\",\"col_date\":\"date\",\"col_decimal\":\"decimal\",\"col_double\":\"double\",\"col_duration\":\"duration\",\"col_float\":\"float\",\"col_inet\":\"inet\",\"col_int\":\"int\",\"col_smallint\":\"smallint\",\"col_text\":\"text\",\"col_time\":\"time\",\"col_timestamp\":\"timestamp\",\"col_timeuuid\":\"timeuuid\",\"col_tinyint\":\"tinyint\",\"col_uuid\":\"uuid\",\"col_varchar\":\"varchar\",\"col_varint\":\"varint\"},\"type_name\":\"udt1\",\"frozen\":false},\"name\":\"udt1\"}",
+		expected: "{\"type\":{\"complex_type\":\"udt\",\"value_types\":{\"col_ascii\":\"ascii\",\"col_bigint\":\"bigint\",\"col_blob\":\"blob\",\"col_boolean\":\"boolean\",\"col_date\":\"date\",\"col_decimal\":\"decimal\",\"col_double\":\"double\",\"col_duration\":\"duration\",\"col_float\":\"float\",\"col_inet\":\"inet\",\"col_int\":\"int\",\"col_smallint\":\"smallint\",\"col_text\":\"text\",\"col_timestamp\":\"timestamp\",\"col_timeuuid\":\"timeuuid\",\"col_tinyint\":\"tinyint\",\"col_uuid\":\"uuid\",\"col_varchar\":\"varchar\",\"col_varint\":\"varint\"},\"type_name\":\"udt1\",\"frozen\":false},\"name\":\"udt1\"}",
 	})
 
 	for id := range testCases {
@@ -98,8 +100,6 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 			var unmarshaledDef typedef.ColumnDef
 			err = json.Unmarshal(marshaledData, &unmarshaledDef)
 			if err != nil {
-				fmt.Printf("_______%s", marshaledData)
-				fmt.Printf("_______%s", unmarshaledDef)
 				t.Fatal(err.Error())
 			}
 
@@ -129,6 +129,42 @@ func TestMarshalUnmarshal(t *testing.T) {
 	}
 
 	if diff := cmp.Diff(s1, s2, opts); diff != "" {
+		t.Errorf("schema not the same after marshal/unmarshal, diff=%s", diff)
+	}
+}
+
+func TestMarshalUnmarshalSchemaExample(t *testing.T) {
+	filePath := "cmd/gemini/schema.json"
+	dir, _ := os.Getwd()
+	dir, _, _ = strings.Cut(dir, "pkg")
+	filePath = dir + filePath
+
+	testSchemaLoaded, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to open schema example json file %s, error:%s", filePath, err)
+	}
+
+	var testSchema typedef.Schema
+	err = json.Unmarshal(testSchemaLoaded, &testSchema)
+	if err != nil {
+		t.Fatalf("failed to unmarshal schema example from json file %s, error:%s", filePath, err)
+	}
+
+	opts := cmp.Options{
+		cmp.AllowUnexported(typedef.Table{}, typedef.MaterializedView{}),
+		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}),
+	}
+
+	testSchemaMarshaled, err := json.MarshalIndent(testSchema, "  ", "  ")
+	if err != nil {
+		t.Fatalf("unable to marshal schema example json, error=%s\n", err)
+	}
+	testSchemaUnMarshaled := typedef.Schema{}
+	if err = json.Unmarshal(testSchemaMarshaled, &testSchemaUnMarshaled); err != nil {
+		t.Fatalf("unable to unmarshal json, error=%s\n", err)
+	}
+
+	if diff := cmp.Diff(testSchema, testSchemaUnMarshaled, opts); diff != "" {
 		t.Errorf("schema not the same after marshal/unmarshal, diff=%s", diff)
 	}
 }
@@ -293,12 +329,14 @@ func getTestSchema() *typedef.Schema {
 	}
 	sch.Tables[0].Indexes = []typedef.IndexDef{
 		{
-			Name:   generators.GenIndexName(sch.Tables[0].Name+"_col", 0),
-			Column: columns[0],
+			IndexName:  generators.GenIndexName(sch.Tables[0].Name+"_col", 0),
+			ColumnName: columns[0].Name,
+			Column:     columns[0],
 		},
 		{
-			Name:   generators.GenIndexName(sch.Tables[0].Name+"_col", 1),
-			Column: columns[1],
+			IndexName:  generators.GenIndexName(sch.Tables[0].Name+"_col", 1),
+			ColumnName: columns[1].Name,
+			Column:     columns[1],
 		},
 	}
 

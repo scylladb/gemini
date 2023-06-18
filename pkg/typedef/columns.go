@@ -16,11 +16,9 @@ package typedef
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
-
 	"golang.org/x/exp/rand"
 )
 
@@ -29,7 +27,7 @@ type ColumnDef struct {
 	Name string `json:"name"`
 }
 
-var ErrorWrongColTypeDefinition = errors.New("wrong column type definition")
+var ErrSchemaValidation = errors.New("validation failed")
 
 func (cd *ColumnDef) IsValidForPrimaryKey() bool {
 	for _, pkType := range PkTypes {
@@ -49,15 +47,15 @@ func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		typeMap, typeOk := dataMap["type"]
 		if !typeOk {
-			return errors.Wrap(ErrorWrongColTypeDefinition, fmt.Sprintf("input: %s\n", dataMap))
+			return errors.Wrapf(ErrSchemaValidation, "missing definition of column 'type': [%T]%+[1]v", dataMap)
 		}
 		complexTypeMap, typeMapOk := typeMap.(map[string]interface{})
 		if !typeMapOk {
-			return errors.Wrap(ErrorWrongColTypeDefinition, fmt.Sprintf("input: %s\n", typeMap))
+			return errors.Wrapf(ErrSchemaValidation, "unknown definition column 'type': [%T]%+[1]v", typeMap)
 		}
 		complexType, complexTypeOk := complexTypeMap["complex_type"]
 		if !complexTypeOk {
-			return errors.Wrap(ErrorWrongColTypeDefinition, fmt.Sprintf("input: %s\n", complexTypeMap))
+			return errors.Wrapf(ErrSchemaValidation, "missing definition of column 'complex_type': [%T]%+[1]v", complexTypeMap)
 		}
 		switch complexType {
 		case TYPE_LIST, TYPE_SET:
@@ -69,7 +67,7 @@ func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
 		case TYPE_UDT:
 			t, err = GetUDTTypeColumn(dataMap)
 		default:
-			return errors.Wrap(ErrorWrongColTypeDefinition, fmt.Sprintf("input: %s\n", complexType))
+			return errors.Wrapf(ErrSchemaValidation, "unknown 'complex_type': [%T]%+[1]v", complexType)
 		}
 		if err != nil {
 			return err
@@ -304,6 +302,22 @@ func GetSimpleTypeColumn(data map[string]interface{}) (*ColumnDef, error) {
 	err := mapstructure.Decode(data, &st)
 	if err != nil {
 		return nil, err
+	}
+	if st.Name == "" {
+		return nil, errors.Wrapf(ErrSchemaValidation, "wrong definition of column 'name' [%T]%+[1]v", data)
+	}
+	if st.Type == "" {
+		return nil, errors.Wrapf(ErrSchemaValidation, "empty definition of column 'type' [%T]%+[1]v", data)
+	}
+
+	knownType := false
+	for _, sType := range AllTypes {
+		if sType == st.Type {
+			knownType = true
+		}
+	}
+	if !knownType {
+		return nil, errors.Wrapf(ErrSchemaValidation, "not simple type in column 'type' [%T]%+[1]v", data)
 	}
 	return &ColumnDef{
 		Name: st.Name,
