@@ -14,19 +14,37 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
+	"runtime/debug"
 )
 
+//go:generate sh -c "git describe --tags --abbrev=0 | tr -d '\n' > ./Version"
+//go:embed Version
+var version string
+
 var (
-	commit  = "none"
-	version = "dev"
-	date    = "unknown"
+	commit = "none"
+	date   = "unknown"
 )
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
+	}
+}
+
+func init() {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			switch setting.Key {
+			case "vcs.revision":
+				commit = setting.Value
+			case "vcs.time":
+				date = setting.Value
+			}
+		}
 	}
 }
