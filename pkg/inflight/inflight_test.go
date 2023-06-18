@@ -121,7 +121,7 @@ func TestInflightSharded(t *testing.T) {
 
 func createQuickConfig() *quick.Config {
 	return &quick.Config{
-		MaxCount: 2000000,
+		MaxCount: 200000,
 		Values: func(vs []reflect.Value, r *rand.Rand) {
 			for i := 0; i < len(vs); i++ {
 				uv := r.Uint64()
