@@ -51,8 +51,6 @@ var (
 	warmup   = job{name: warmupName, function: warmupJob}
 	validate = job{name: validateName, function: validationJob}
 	mutate   = job{name: mutateName, function: mutationJob}
-
-	errorJobTerminated = errors.New("job terminated")
 )
 
 type List struct {
@@ -183,21 +181,17 @@ func mutationJob(
 			return nil
 		case hb := <-pump:
 			time.Sleep(hb)
-			ind := r.Intn(1000000)
-			if ind%100000 == 0 {
-				if err := ddl(ctx, schema, schemaConfig, table, s, r, p, globalStatus, logger, verbose); err != nil {
-					return err
-				}
-			} else {
-				if err := mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, true, logger); err != nil {
-					return err
-				}
-			}
-			if failFast && globalStatus.HasErrors() {
-				return errorJobTerminated
-			}
 		}
-
+		ind := r.Intn(1000000)
+		if ind%100000 == 0 {
+			_ = ddl(ctx, schema, schemaConfig, table, s, r, p, globalStatus, logger, verbose)
+		} else {
+			_ = mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, true, logger)
+		}
+		if failFast && globalStatus.HasErrors() {
+			stopFlag.SetSoft()
+			return nil
+		}
 	}
 }
 
@@ -234,26 +228,31 @@ func validationJob(
 			return nil
 		case hb := <-pump:
 			time.Sleep(hb)
-			stmt := GenCheckStmt(schema, table, g, r, p)
-			if stmt == nil {
-				logger.Info("Validation. No statement generated from GenCheckStmt.")
-				continue
-			}
+		}
+		stmt := GenCheckStmt(schema, table, g, r, p)
+		if stmt == nil {
+			logger.Info("Validation. No statement generated from GenCheckStmt.")
+			continue
+		}
 
-			if err := validation(ctx, schemaConfig, table, s, stmt, g, globalStatus, logger); err != nil {
-				globalStatus.AddReadError(&joberror.JobError{
-					Timestamp: time.Now(),
-					StmtType:  stmt.QueryType.ToString(),
-					Message:   "Validation failed: " + err.Error(),
-					Query:     stmt.PrettyCQL(),
-				})
-			} else {
-				globalStatus.ReadOps.Add(1)
-			}
+		err := validation(ctx, schemaConfig, table, s, stmt, g, globalStatus, logger)
+		switch {
+		case err == nil:
+			globalStatus.ReadOps.Add(1)
+		case errors.Is(err, context.Canceled):
+			return nil
+		default:
+			globalStatus.AddReadError(&joberror.JobError{
+				Timestamp: time.Now(),
+				StmtType:  stmt.QueryType.ToString(),
+				Message:   "Validation failed: " + err.Error(),
+				Query:     stmt.PrettyCQL(),
+			})
+		}
 
-			if failFast && globalStatus.HasErrors() {
-				return errorJobTerminated
-			}
+		if failFast && globalStatus.HasErrors() {
+			stopFlag.SetSoft()
+			return nil
 		}
 	}
 }
@@ -283,20 +282,19 @@ func warmupJob(
 	}()
 	for {
 		if stopFlag.IsHardOrSoft() {
-			logger.Debug("warmup job terminated")
 			return nil
 		}
 		select {
 		case <-ctx.Done():
 			logger.Debug("warmup job terminated")
 			return nil
-
 		default:
-			// Do we care about errors during warmup?
-			_ = mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
-			if failFast && globalStatus.HasErrors() {
-				return errorJobTerminated
-			}
+		}
+		// Do we care about errors during warmup?
+		_ = mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
+		if failFast && globalStatus.HasErrors() {
+			stopFlag.SetSoft()
+			return nil
 		}
 	}
 }
@@ -340,6 +338,9 @@ func ddl(
 			w.Write(zap.String("pretty_cql", ddlStmt.PrettyCQL()))
 		}
 		if err = s.Mutate(ctx, ddlStmt.Query); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
 			globalStatus.AddWriteError(&joberror.JobError{
 				Timestamp: time.Now(),
 				StmtType:  ddlStmts.QueryType.ToString(),
@@ -394,6 +395,9 @@ func mutation(
 		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
 	}
 	if err = s.Mutate(ctx, mutateQuery, mutateValues...); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
 		globalStatus.AddWriteError(&joberror.JobError{
 			Timestamp: time.Now(),
 			StmtType:  mutateStmt.QueryType.ToString(),
@@ -446,6 +450,11 @@ func validation(
 				logger.Info(fmt.Sprintf("Validation successfully completed on %d attempt.", attempt))
 			}
 			return nil
+		}
+		if errors.Is(err, context.Canceled) {
+			// When context is canceled it means that test was commanded to stop
+			// to skip logging part it is returned here
+			return err
 		}
 		if attempt == maxAttempts {
 			break
