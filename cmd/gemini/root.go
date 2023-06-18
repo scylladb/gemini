@@ -225,7 +225,10 @@ func run(_ *cobra.Command, _ []string) error {
 			defer utils.IgnoreError(tracingFile.Sync)
 		}
 	}
-	st := store.New(schema, testCluster, oracleCluster, storeConfig, tracingFile, logger)
+	st, err := store.New(schema, testCluster, oracleCluster, storeConfig, tracingFile, logger)
+	if err != nil {
+		return err
+	}
 	defer utils.IgnoreError(st.Close)
 
 	if dropSchema && mode != jobs.ReadMode {

@@ -66,7 +66,7 @@ type Config struct {
 	UseServerSideTimestamps bool
 }
 
-func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut *os.File, logger *zap.Logger) Store {
+func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut *os.File, logger *zap.Logger) (Store, error) {
 	ops := promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gemini_cql_requests",
 		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
@@ -76,8 +76,12 @@ func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig
 	var oracleStore storeLoader
 	var validations bool
 	if oracleCluster != nil {
+		oracleSession, err := newSession(oracleCluster, traceOut)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to connect to oracle cluster")
+		}
 		oracleStore = &cqlStore{
-			session:                 newSession(oracleCluster, traceOut),
+			session:                 oracleSession,
 			schema:                  schema,
 			system:                  "oracle",
 			ops:                     ops,
@@ -93,9 +97,14 @@ func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig
 		}
 	}
 
+	testSession, err := newSession(testCluster, traceOut)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to connect to oracle cluster")
+	}
+
 	return &delegatingStore{
 		testStore: &cqlStore{
-			session:                 newSession(testCluster, traceOut),
+			session:                 testSession,
 			schema:                  schema,
 			system:                  "test",
 			ops:                     ops,
@@ -107,7 +116,7 @@ func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig
 		oracleStore: oracleStore,
 		validations: validations,
 		logger:      logger.Named("delegating_store"),
-	}
+	}, nil
 }
 
 type noOpStore struct {

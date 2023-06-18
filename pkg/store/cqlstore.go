@@ -124,15 +124,15 @@ func (cs cqlStore) close() error {
 	return nil
 }
 
-func newSession(cluster *gocql.ClusterConfig, out *os.File) *gocql.Session {
+func newSession(cluster *gocql.ClusterConfig, out *os.File) (*gocql.Session, error) {
 	session, err := cluster.CreateSession()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	if out != nil {
 		session.SetTrace(gocql.NewTraceWriter(session, out))
 	}
-	return session
+	return session, nil
 }
 
 func ignore(err error) bool {
