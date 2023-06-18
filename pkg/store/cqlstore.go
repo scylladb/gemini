@@ -25,7 +25,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/scylladb/gocqlx/v2/qb"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -76,16 +75,6 @@ func (cs *cqlStore) doMutate(ctx context.Context, builder qb.Builder, ts time.Ti
 		query = query.WithTimestamp(ts.UnixNano() / 1000)
 	}
 
-	/*
-		key, _ := query.GetRoutingKey()
-		if len(values) >= 2 {
-			v := values[:2]
-			s := strings.TrimRight(strings.Repeat("%v,", 2), ",")
-			format := fmt.Sprintf("{\nvalues: []interface{}{%s},\nwant: createOne(\"%s\"),\n},\n", s, hex.EncodeToString(key))
-			fmt.Printf(format, v...)
-		}
-		if err := query.Exec(); err != nil {
-	*/
 	if err := query.Exec(); err != nil {
 		if errs.Is(err, context.DeadlineExceeded) {
 			if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for mutation query"); w != nil {
@@ -103,20 +92,7 @@ func (cs *cqlStore) load(ctx context.Context, builder qb.Builder, values []inter
 	query, _ := builder.ToCql()
 	iter := cs.session.Query(query, values...).WithContext(ctx).Iter()
 	cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
-	defer func() {
-		if e := iter.Close(); e != nil {
-			if errs.Is(e, context.DeadlineExceeded) {
-				if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for load query"); w != nil {
-					w.Write(zap.String("system", cs.system), zap.String("query", query), zap.Error(e))
-				}
-			}
-			if !ignore(e) {
-				err = multierr.Append(err, errors.Errorf("system failed: %s", e.Error()))
-			}
-		}
-	}()
-	result = loadSet(iter)
-	return
+	return loadSet(iter), iter.Close()
 }
 
 func (cs cqlStore) close() error {

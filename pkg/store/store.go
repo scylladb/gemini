@@ -179,11 +179,11 @@ func mutate(ctx context.Context, s storeLoader, ts time.Time, builder qb.Builder
 }
 
 func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, builder qb.Builder, values ...interface{}) error {
-	testRows, err := load(ctx, ds.testStore, builder, values)
+	testRows, err := ds.testStore.load(ctx, builder, values)
 	if err != nil {
 		return errors.Wrapf(err, "unable to load check data from the test store")
 	}
-	oracleRows, err := load(ctx, ds.oracleStore, builder, values)
+	oracleRows, err := ds.oracleStore.load(ctx, builder, values)
 	if err != nil {
 		return errors.Wrapf(err, "unable to load check data from the oracle store")
 	}
@@ -221,10 +221,6 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, build
 		}
 	}
 	return nil
-}
-
-func load(ctx context.Context, l loader, builder qb.Builder, values []interface{}) ([]map[string]interface{}, error) {
-	return l.load(ctx, builder, values)
 }
 
 func (ds delegatingStore) Close() (err error) {
