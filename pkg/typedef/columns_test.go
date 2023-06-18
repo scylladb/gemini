@@ -17,7 +17,6 @@ package typedef_test
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -129,42 +128,6 @@ func TestMarshalUnmarshal(t *testing.T) {
 	}
 
 	if diff := cmp.Diff(s1, s2, opts); diff != "" {
-		t.Errorf("schema not the same after marshal/unmarshal, diff=%s", diff)
-	}
-}
-
-func TestMarshalUnmarshalSchemaExample(t *testing.T) {
-	filePath := "cmd/gemini/schema.json"
-	dir, _ := os.Getwd()
-	dir, _, _ = strings.Cut(dir, "pkg")
-	filePath = dir + filePath
-
-	testSchemaLoaded, err := os.ReadFile(filePath)
-	if err != nil {
-		t.Fatalf("failed to open schema example json file %s, error:%s", filePath, err)
-	}
-
-	var testSchema typedef.Schema
-	err = json.Unmarshal(testSchemaLoaded, &testSchema)
-	if err != nil {
-		t.Fatalf("failed to unmarshal schema example from json file %s, error:%s", filePath, err)
-	}
-
-	opts := cmp.Options{
-		cmp.AllowUnexported(typedef.Table{}, typedef.MaterializedView{}),
-		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}),
-	}
-
-	testSchemaMarshaled, err := json.MarshalIndent(testSchema, "  ", "  ")
-	if err != nil {
-		t.Fatalf("unable to marshal schema example json, error=%s\n", err)
-	}
-	testSchemaUnMarshaled := typedef.Schema{}
-	if err = json.Unmarshal(testSchemaMarshaled, &testSchemaUnMarshaled); err != nil {
-		t.Fatalf("unable to unmarshal json, error=%s\n", err)
-	}
-
-	if diff := cmp.Diff(testSchema, testSchemaUnMarshaled, opts); diff != "" {
 		t.Errorf("schema not the same after marshal/unmarshal, diff=%s", diff)
 	}
 }

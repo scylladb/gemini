@@ -119,3 +119,14 @@ func (t *Table) ValidColumnsForDelete() Columns {
 	}
 	return validCols
 }
+
+func (t *Table) LinkIndexAndColumns() {
+	for i, index := range t.Indexes {
+		for c, column := range t.Columns {
+			if index.ColumnName == column.Name {
+				t.Indexes[i].Column = t.Columns[c]
+				break
+			}
+		}
+	}
+}

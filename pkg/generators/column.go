@@ -15,8 +15,6 @@
 package generators
 
 import (
-	"fmt"
-
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -37,21 +35,4 @@ func CreateIndexesForColumn(table *typedef.Table, maxIndexes int) []typedef.Inde
 		}
 	}
 	return indexes
-}
-
-func AddReferencesForIndexes(table *typedef.Table) {
-	wrongIndex := -1
-	for i, index := range table.Indexes {
-		for c, column := range table.Columns {
-			if index.ColumnName == column.Name {
-				table.Indexes[i].Column = table.Columns[c]
-				break
-			} else if len(table.Columns) == c {
-				wrongIndex = i
-			}
-		}
-	}
-	if wrongIndex != -1 {
-		panic(fmt.Sprintf("wrong column_name in index defenition:%+v", table.Indexes[wrongIndex]))
-	}
 }

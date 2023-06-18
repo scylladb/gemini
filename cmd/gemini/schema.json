@@ -163,19 +163,19 @@
       ],
       "indexes": [
         {
-          "index_name": "col0_idx",
-          "column_name": "col56"
+          "index_name": "col5_idx",
+          "column_name": "col5"
         },
         {
-          "index_name": "col1_idx",
+          "index_name": "col6_idx",
           "column_name": "col6"
         },
         {
-          "index_name": "col2_idx",
+          "index_name": "col7_idx",
           "column_name": "col7"
         },
         {
-          "index_name": "col3_idx",
+          "index_name": "col8_idx",
           "column_name": "col8"
         }
       ],

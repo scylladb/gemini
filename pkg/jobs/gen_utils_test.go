@@ -223,7 +223,7 @@ func (r *Result) Diff(t *testing.T, received *Result) {
 	getErrorMsgIfDifferent(t, r.Query, received.Query, " error: value stmt.Query.ToCql().stmt expected and received are different:")
 	getErrorMsgIfDifferent(t, r.Names, received.Names, " error: value stmt.Query.ToCql().Names expected and received are different:")
 	getErrorMsgIfDifferent(t, r.Values, received.Values, " error: value stmt.Values expected and received are different:")
-	getErrorMsgIfDifferent(t, r.Types, received.Types, " error: value stmt.ValueTypes expected and received are different:")
+	getErrorMsgIfDifferent(t, r.Types, received.Types, " error: value stmt.Types expected and received are different:")
 	getErrorMsgIfDifferent(t, r.Values, received.Values, " error: value stmt.Values expected and received are different:")
 	getErrorMsgIfDifferent(t, r.QueryType, received.QueryType, " error: value stmt.QueryType expected and received are different:")
 }

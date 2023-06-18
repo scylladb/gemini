@@ -325,7 +325,7 @@ func ddl(
 	defer table.Unlock()
 	ddlStmts, err := GenDDLStmt(schema, table, r, p, sc)
 	if err != nil {
-		logger.Error("Failed! DDl Mutation statement generation failed", zap.Error(err))
+		logger.Error("Failed! DDL Mutation statement generation failed", zap.Error(err))
 		globalStatus.WriteErrors.Add(1)
 		return err
 	}
