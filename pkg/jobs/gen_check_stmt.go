@@ -521,7 +521,7 @@ func genSingleIndexQuery(
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 	builder.AllowFiltering()
 	for i := 0; i < idxCount; i++ {
-		builder = builder.Where(qb.Eq(t.Indexes[i].Column.Name))
+		builder = builder.Where(qb.Eq(t.Indexes[i].ColumnName))
 		values = append(values, t.Indexes[i].Column.Type.GenValue(r, p)...)
 		typs = append(typs, t.Indexes[i].Column.Type)
 	}

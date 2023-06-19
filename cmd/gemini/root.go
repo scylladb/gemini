@@ -125,7 +125,8 @@ func readSchema(confFile string) (*typedef.Schema, error) {
 
 	schemaBuilder := builders.NewSchemaBuilder()
 	schemaBuilder.Keyspace(shm.Keyspace)
-	for _, tbl := range shm.Tables {
+	for t, tbl := range shm.Tables {
+		shm.Tables[t].LinkIndexAndColumns()
 		schemaBuilder.Table(tbl)
 	}
 	return schemaBuilder.Build(), nil

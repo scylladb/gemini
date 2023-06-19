@@ -155,9 +155,9 @@ var prettytests = []struct {
 	},
 	{
 		typ: &typedef.BagType{
-			Kind:   "set",
-			Type:   typedef.TYPE_ASCII,
-			Frozen: false,
+			ComplexType: typedef.TYPE_SET,
+			ValueType:   typedef.TYPE_ASCII,
+			Frozen:      false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{[]string{"a", "b"}},
@@ -165,9 +165,9 @@ var prettytests = []struct {
 	},
 	{
 		typ: &typedef.BagType{
-			Kind:   "list",
-			Type:   typedef.TYPE_ASCII,
-			Frozen: false,
+			ComplexType: typedef.TYPE_LIST,
+			ValueType:   typedef.TYPE_ASCII,
+			Frozen:      false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{[]string{"a", "b"}},
@@ -195,8 +195,8 @@ var prettytests = []struct {
 	},
 	{
 		typ: &typedef.TupleType{
-			Types:  []typedef.SimpleType{typedef.TYPE_ASCII},
-			Frozen: false,
+			ValueTypes: []typedef.SimpleType{typedef.TYPE_ASCII},
+			Frozen:     false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []interface{}{"a"},
@@ -204,8 +204,8 @@ var prettytests = []struct {
 	},
 	{
 		typ: &typedef.TupleType{
-			Types:  []typedef.SimpleType{typedef.TYPE_ASCII, typedef.TYPE_ASCII},
-			Frozen: false,
+			ValueTypes: []typedef.SimpleType{typedef.TYPE_ASCII, typedef.TYPE_ASCII},
+			Frozen:     false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0={?,?}",
 		values:   []interface{}{"a", "b"},

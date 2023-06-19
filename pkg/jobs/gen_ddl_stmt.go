@@ -52,7 +52,7 @@ func genAddColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnD
 	if c, ok := column.Type.(*typedef.UDTType); ok {
 		createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s);"
 		var typs []string
-		for name, typ := range c.Types {
+		for name, typ := range c.ValueTypes {
 			typs = append(typs, name+" "+typ.CQLDef())
 		}
 		stmt := fmt.Sprintf(createType, keyspace, c.TypeName, strings.Join(typs, ","))

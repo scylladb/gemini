@@ -15,13 +15,15 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 
-	"github.com/scylladb/gemini/pkg/replication"
-
 	"github.com/google/go-cmp/cmp"
-
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"go.uber.org/zap"
+
+	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 func TestGetReplicationStrategy(t *testing.T) {
@@ -55,5 +57,32 @@ func TestGetReplicationStrategy(t *testing.T) {
 				t.Errorf("expected=%s, got=%s,diff=%s", tc.strategy, got.ToCQL(), diff)
 			}
 		})
+	}
+}
+
+func TestReadSchema(t *testing.T) {
+	filePath := "schema.json"
+
+	testSchema, err := readSchema(filePath)
+	if err != nil {
+		t.Fatalf("failed to open schema example json file %s, error:%s", filePath, err)
+	}
+
+	opts := cmp.Options{
+		cmp.AllowUnexported(typedef.Table{}, typedef.MaterializedView{}),
+		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}),
+	}
+
+	testSchemaMarshaled, err := json.MarshalIndent(testSchema, "  ", "  ")
+	if err != nil {
+		t.Fatalf("unable to marshal schema example json, error=%s\n", err)
+	}
+	testSchemaUnMarshaled := typedef.Schema{}
+	if err = json.Unmarshal(testSchemaMarshaled, &testSchemaUnMarshaled); err != nil {
+		t.Fatalf("unable to unmarshal json, error=%s\n", err)
+	}
+
+	if diff := cmp.Diff(*testSchema, testSchemaUnMarshaled, opts); diff != "" {
+		t.Errorf("schema not the same after marshal/unmarshal, diff=%s", diff)
 	}
 }

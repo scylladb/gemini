@@ -41,7 +41,8 @@ var allSimpleTypes = []typedef.SimpleType{
 	typedef.TYPE_INT,
 	typedef.TYPE_SMALLINT,
 	typedef.TYPE_TEXT,
-	typedef.TYPE_TIME,
+	// TODO: Add support for time when gocql bug is fixed.
+	// typedef.TYPE_TIME,
 	typedef.TYPE_TIMESTAMP,
 	typedef.TYPE_TIMEUUID,
 	typedef.TYPE_TINYINT,
@@ -72,13 +73,14 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 	testCases = append(testCases, testCase{
 		def: typedef.ColumnDef{
 			Type: &typedef.UDTType{
-				TypeName: "udt1",
-				Types:    udtTypes,
+				ComplexType: typedef.TYPE_UDT,
+				TypeName:    "udt1",
+				ValueTypes:  udtTypes,
 			},
 			Name: "udt1",
 		},
 		//nolint:lll
-		expected: "{\"type\":{\"coltypes\":{\"col_ascii\":\"ascii\",\"col_bigint\":\"bigint\",\"col_blob\":\"blob\",\"col_boolean\":\"boolean\",\"col_date\":\"date\",\"col_decimal\":\"decimal\",\"col_double\":\"double\",\"col_duration\":\"duration\",\"col_float\":\"float\",\"col_inet\":\"inet\",\"col_int\":\"int\",\"col_smallint\":\"smallint\",\"col_text\":\"text\",\"col_time\":\"time\",\"col_timestamp\":\"timestamp\",\"col_timeuuid\":\"timeuuid\",\"col_tinyint\":\"tinyint\",\"col_uuid\":\"uuid\",\"col_varchar\":\"varchar\",\"col_varint\":\"varint\"},\"type_name\":\"udt1\",\"frozen\":false},\"name\":\"udt1\"}",
+		expected: "{\"type\":{\"complex_type\":\"udt\",\"value_types\":{\"col_ascii\":\"ascii\",\"col_bigint\":\"bigint\",\"col_blob\":\"blob\",\"col_boolean\":\"boolean\",\"col_date\":\"date\",\"col_decimal\":\"decimal\",\"col_double\":\"double\",\"col_duration\":\"duration\",\"col_float\":\"float\",\"col_inet\":\"inet\",\"col_int\":\"int\",\"col_smallint\":\"smallint\",\"col_text\":\"text\",\"col_timestamp\":\"timestamp\",\"col_timeuuid\":\"timeuuid\",\"col_tinyint\":\"tinyint\",\"col_uuid\":\"uuid\",\"col_varchar\":\"varchar\",\"col_varint\":\"varint\"},\"type_name\":\"udt1\",\"frozen\":false},\"name\":\"udt1\"}",
 	})
 
 	for id := range testCases {
@@ -95,7 +97,6 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 				t.Errorf(diff)
 			}
 			var unmarshaledDef typedef.ColumnDef
-
 			err = json.Unmarshal(marshaledData, &unmarshaledDef)
 			if err != nil {
 				t.Fatal(err.Error())
@@ -291,12 +292,14 @@ func getTestSchema() *typedef.Schema {
 	}
 	sch.Tables[0].Indexes = []typedef.IndexDef{
 		{
-			Name:   generators.GenIndexName(sch.Tables[0].Name+"_col", 0),
-			Column: columns[0],
+			IndexName:  generators.GenIndexName(sch.Tables[0].Name+"_col", 0),
+			ColumnName: columns[0].Name,
+			Column:     columns[0],
 		},
 		{
-			Name:   generators.GenIndexName(sch.Tables[0].Name+"_col", 1),
-			Column: columns[1],
+			IndexName:  generators.GenIndexName(sch.Tables[0].Name+"_col", 1),
+			ColumnName: columns[1].Name,
+			Column:     columns[1],
 		},
 	}
 

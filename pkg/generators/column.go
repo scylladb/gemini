@@ -23,7 +23,11 @@ func CreateIndexesForColumn(table *typedef.Table, maxIndexes int) []typedef.Inde
 	indexes := make([]typedef.IndexDef, 0, maxIndexes)
 	for i, col := range table.Columns {
 		if col.Type.Indexable() && typedef.TypesForIndex.Contains(col.Type) {
-			indexes = append(indexes, typedef.IndexDef{Name: GenIndexName(table.Name+"_col", i), Column: table.Columns[i]})
+			indexes = append(indexes, typedef.IndexDef{
+				IndexName:  GenIndexName(table.Name+"_col", i),
+				ColumnName: table.Columns[i].Name,
+				Column:     table.Columns[i],
+			})
 			createdCount++
 		}
 		if createdCount == maxIndexes {

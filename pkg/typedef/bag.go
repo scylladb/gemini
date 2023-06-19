@@ -24,14 +24,14 @@ import (
 )
 
 type BagType struct {
-	Kind   string     `json:"kind"` // We need to differentiate between sets and lists
-	Type   SimpleType `json:"type"`
-	Frozen bool       `json:"frozen"`
+	ComplexType string     `json:"complex_type"` // We need to differentiate between sets and lists
+	ValueType   SimpleType `json:"value_type"`
+	Frozen      bool       `json:"frozen"`
 }
 
 func (ct *BagType) CQLType() gocql.TypeInfo {
-	switch ct.Kind {
-	case "set":
+	switch ct.ComplexType {
+	case TYPE_SET:
 		return goCQLTypeMap[gocql.TypeSet]
 	default:
 		return goCQLTypeMap[gocql.TypeList]
@@ -40,16 +40,16 @@ func (ct *BagType) CQLType() gocql.TypeInfo {
 
 func (ct *BagType) Name() string {
 	if ct.Frozen {
-		return "frozen<" + ct.Kind + "<" + ct.Type.Name() + ">>"
+		return "frozen<" + ct.ComplexType + "<" + ct.ValueType.Name() + ">>"
 	}
-	return ct.Kind + "<" + ct.Type.Name() + ">"
+	return ct.ComplexType + "<" + ct.ValueType.Name() + ">"
 }
 
 func (ct *BagType) CQLDef() string {
 	if ct.Frozen {
-		return "frozen<" + ct.Kind + "<" + ct.Type.Name() + ">>"
+		return "frozen<" + ct.ComplexType + "<" + ct.ValueType.Name() + ">>"
 	}
-	return ct.Kind + "<" + ct.Type.Name() + ">"
+	return ct.ComplexType + "<" + ct.ValueType.Name() + ">"
 }
 
 func (ct *BagType) CQLHolder() string {
@@ -65,7 +65,7 @@ func (ct *BagType) CQLPretty(query string, value []interface{}) (string, int) {
 	}
 	s := reflect.ValueOf(value[0])
 	op, cl := "[", "]"
-	if ct.Kind == "set" {
+	if ct.ComplexType == TYPE_SET {
 		op, cl = "{", "}"
 	}
 	vv := op
@@ -73,7 +73,7 @@ func (ct *BagType) CQLPretty(query string, value []interface{}) (string, int) {
 	vv = strings.TrimRight(vv, ",")
 	vv += cl
 	for i := 0; i < s.Len(); i++ {
-		vv, _ = ct.Type.CQLPretty(vv, []interface{}{s.Index(i).Interface()})
+		vv, _ = ct.ValueType.CQLPretty(vv, []interface{}{s.Index(i).Interface()})
 	}
 	return strings.Replace(query, "?", vv, 1), 1
 }
@@ -82,7 +82,7 @@ func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{}
 	count := r.Intn(9) + 1
 	out := make([]interface{}, count)
 	for i := 0; i < count; i++ {
-		out[i] = ct.Type.GenValue(r, p)[0]
+		out[i] = ct.ValueType.GenValue(r, p)[0]
 	}
 	return []interface{}{out}
 }
@@ -91,7 +91,7 @@ func (ct *BagType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface
 	count := r.Intn(9) + 1
 	out := make([]interface{}, count)
 	for i := 0; i < count; i++ {
-		out[i] = ct.Type.GenJSONValue(r, p)
+		out[i] = ct.ValueType.GenJSONValue(r, p)
 	}
 	return out
 }

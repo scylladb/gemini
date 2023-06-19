@@ -1,6 +1,14 @@
 {
   "keyspace": {
-    "name": "ks1"
+    "name": "ks1",
+    "replication": {
+      "class": "SimpleStrategy",
+      "replication_factor": 1
+    },
+    "oracle_replication": {
+      "class": "SimpleStrategy",
+      "replication_factor": 1
+    }
   },
   "tables": [
     {
@@ -29,9 +37,10 @@
         {
           "name": "col0",
           "type": {
+            "complex_type": "udt",
             "type_name": "udt_672245080",
             "frozen": true,
-            "coltypes": {
+            "value_types": {
               "udt_672245080_0": "ascii",
               "udt_672245080_1": "boolean",
               "udt_672245080_2": "bigint",
@@ -41,28 +50,18 @@
         },
         {
           "name": "col1",
-          "type": "timestamp"
-        },
-        {
-          "name": "col2",
-          "type": "decimal"
-        },
-        {
-          "name": "col3",
-          "type": "uuid"
-        },
-        {
-          "name": "col4",
           "type": {
+            "complex_type": "map",
             "key_type": "boolean",
             "value_type": "duration",
             "frozen": false
           }
         },
         {
-          "name": "col5",
+          "name": "col2",
           "type": {
-            "types": [
+            "complex_type": "tuple",
+            "value_types": [
               "varchar",
               "smallint"
             ],
@@ -70,30 +69,114 @@
           }
         },
         {
-          "name": "col6",
+          "name": "col3",
           "type": {
-            "kind": "list",
-            "type": "int",
+            "complex_type": "list",
+            "value_type": "int",
             "frozen": true
           }
+        },
+        {
+          "name": "col4",
+          "type": {
+            "complex_type": "set",
+            "value_type": "int",
+            "frozen": true
+          }
+        },
+        {
+          "name": "col5",
+          "type": "ascii"
+        },
+        {
+          "name": "col6",
+          "type": "bigint"
+        },
+        {
+          "name": "col7",
+          "type": "blob"
+        },
+        {
+          "name": "col8",
+          "type": "boolean"
+        },
+        {
+          "name": "col9",
+          "type": "date"
+        },
+        {
+          "name": "col10",
+          "type": "decimal"
+        },
+        {
+          "name": "col11",
+          "type": "double"
+        },
+        {
+          "name": "col12",
+          "type": "duration"
+        },
+        {
+          "name": "col13",
+          "type": "float"
+        },
+        {
+          "name": "col14",
+          "type": "inet"
+        },
+        {
+          "name": "col15",
+          "type": "int"
+        },
+        {
+          "name": "col16",
+          "type": "smallint"
+        },
+        {
+          "name": "col17",
+          "type": "text"
+        },
+        {
+          "name": "col19",
+          "type": "timestamp"
+        },
+        {
+          "name": "col20",
+          "type": "timeuuid"
+        },
+        {
+          "name": "col21",
+          "type": "tinyint"
+        },
+        {
+          "name": "col22",
+          "type": "uuid"
+        },
+        {
+          "name": "col23",
+          "type": "varchar"
+        },
+        {
+          "name": "col24",
+          "type": "varint"
         }
       ],
       "indexes": [
         {
-          "name": "col0_idx",
-          "column": "col0"
+          "index_name": "col5_idx",
+          "column_name": "col5"
         },
         {
-          "name": "col1_idx",
-          "column": "col1"
+          "index_name": "col6_idx",
+          "column_name": "col6"
         },
         {
-          "name": "col2_idx",
-          "column": "col2"
+          "index_name": "col7_idx",
+          "column_name": "col7"
         },
         {
-          "name": "col3_idx",
-          "column": "col3"
+          "index_name": "col8_idx",
+          "column_name": "col8"
         }
       ],
       "known_issues": {

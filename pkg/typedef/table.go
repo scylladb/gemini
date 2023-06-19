@@ -98,7 +98,7 @@ func (t *Table) ValidColumnsForDelete() Columns {
 	if len(t.Indexes) != 0 {
 		for _, idx := range t.Indexes {
 			for j := range validCols {
-				if validCols[j].Name == idx.Column.Name {
+				if validCols[j].Name == idx.ColumnName {
 					validCols = append(validCols[:j], validCols[j+1:]...)
 					break
 				}
@@ -118,4 +118,15 @@ func (t *Table) ValidColumnsForDelete() Columns {
 		}
 	}
 	return validCols
+}
+
+func (t *Table) LinkIndexAndColumns() {
+	for i, index := range t.Indexes {
+		for c, column := range t.Columns {
+			if index.ColumnName == column.Name {
+				t.Indexes[i].Column = t.Columns[c]
+				break
+			}
+		}
+	}
 }

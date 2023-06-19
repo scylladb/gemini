@@ -28,6 +28,15 @@ import (
 
 // nolint:revive
 const (
+	TYPE_UDT   = "udt"
+	TYPE_MAP   = "map"
+	TYPE_LIST  = "list"
+	TYPE_SET   = "set"
+	TYPE_TUPLE = "tuple"
+)
+
+// nolint:revive
+const (
 	TYPE_ASCII     = SimpleType("ascii")
 	TYPE_BIGINT    = SimpleType("bigint")
 	TYPE_BLOB      = SimpleType("blob")
@@ -100,9 +109,10 @@ var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
 }
 
 type MapType struct {
-	KeyType   SimpleType `json:"key_type"`
-	ValueType SimpleType `json:"value_type"`
-	Frozen    bool       `json:"frozen"`
+	ComplexType string     `json:"complex_type"`
+	KeyType     SimpleType `json:"key_type"`
+	ValueType   SimpleType `json:"value_type"`
+	Frozen      bool       `json:"frozen"`
 }
 
 func (mt *MapType) CQLType() gocql.TypeInfo {
