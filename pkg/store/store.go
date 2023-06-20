@@ -190,6 +190,9 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, build
 	if !ds.validations {
 		return nil
 	}
+	if len(testRows) == 0 && len(oracleRows) == 0 {
+		return nil
+	}
 	if len(testRows) != len(oracleRows) {
 		testSet := strset.New(pks(table, testRows)...)
 		oracleSet := strset.New(pks(table, oracleRows)...)
