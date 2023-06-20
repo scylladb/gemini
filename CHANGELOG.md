@@ -1,5 +1,11 @@
 # Changelog
-## [1.8.3] - 2023-06-015
+## [1.8.4] - 2023-06-20
+
+- Populate version info ([#361](https://github.com/scylladb/gemini/pull/361))
+- Fix false-positives when test cycle is getting terminated ([#363](https://github.com/scylladb/gemini/pull/363))
+- Fix schema loading to support complex types ([#360](https://github.com/scylladb/gemini/pull/360))
+
+## [1.8.3] - 2023-06-15
 
 - Pause generator when partitions are full ([#332](https://github.com/scylladb/gemini/pull/332))
 - Fix TYPE_TIME value generations ([#337](https://github.com/scylladb/gemini/pull/337))
