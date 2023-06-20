@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/briandowns/spinner v1.23.0
-	github.com/gocql/gocql v0.0.0-20211015133455-b225f9b53fa1
+	github.com/gocql/gocql v1.8.0
 	github.com/google/go-cmp v0.5.9
 	github.com/hailocab/go-hostpool v0.0.0-20160125115350-e80d13ce29ed
 	github.com/mitchellh/mapstructure v1.5.0
@@ -29,6 +29,7 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.0.3 // indirect
 	github.com/mattn/go-colorable v0.1.2 // indirect
 	github.com/mattn/go-isatty v0.0.8 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
@@ -44,4 +45,4 @@ require (
 	google.golang.org/protobuf v1.30.0 // indirect
 )
 
-replace github.com/gocql/gocql => github.com/scylladb/gocql v1.7.3
+replace github.com/gocql/gocql => github.com/scylladb/gocql v1.8.0
