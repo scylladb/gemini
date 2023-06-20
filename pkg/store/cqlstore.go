@@ -59,7 +59,7 @@ func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time
 		case <-time.After(cs.maxRetriesMutateSleep):
 		}
 	}
-	if w := cs.logger.Check(zap.InfoLevel, "failed to apply mutation"); w != nil {
+	if w := cs.logger.Check(zap.ErrorLevel, "failed to apply mutation"); w != nil {
 		w.Write(zap.Int("attempts", i), zap.Error(err))
 	}
 	return err
