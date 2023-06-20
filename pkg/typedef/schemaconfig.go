@@ -47,13 +47,13 @@ type SchemaConfig struct {
 
 func (sc *SchemaConfig) Valid() error {
 	if sc.MaxPartitionKeys <= sc.MinPartitionKeys {
-		return ErrSchemaConfigInvalidPK
+		return ErrSchemaConfigInvalidRangePK
 	}
 	if sc.MaxClusteringKeys <= sc.MinClusteringKeys {
-		return ErrSchemaConfigInvalidCK
+		return ErrSchemaConfigInvalidRangeCK
 	}
-	if sc.MaxColumns <= sc.MinClusteringKeys {
-		return ErrSchemaConfigInvalidCols
+	if sc.MaxColumns <= sc.MinColumns {
+		return ErrSchemaConfigInvalidRangeCols
 	}
 	return nil
 }

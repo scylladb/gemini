@@ -17,7 +17,7 @@ package typedef
 import "github.com/pkg/errors"
 
 var (
-	ErrSchemaConfigInvalidPK   = errors.New("max number of partition keys must be bigger than min number of partition keys")
-	ErrSchemaConfigInvalidCK   = errors.New("max number of clustering keys must be bigger than min number of clustering keys")
-	ErrSchemaConfigInvalidCols = errors.New("max number of columns must be bigger than min number of columns")
+	ErrSchemaConfigInvalidRangePK   = errors.New("max number of partition keys must be bigger than min number of partition keys")
+	ErrSchemaConfigInvalidRangeCK   = errors.New("max number of clustering keys must be bigger than min number of clustering keys")
+	ErrSchemaConfigInvalidRangeCols = errors.New("max number of columns must be bigger than min number of columns")
 )
