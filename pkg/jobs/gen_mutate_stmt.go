@@ -17,10 +17,10 @@ package jobs
 import (
 	"encoding/json"
 	"fmt"
-
-	"golang.org/x/exp/rand"
+	"time"
 
 	"github.com/scylladb/gocqlx/v2/qb"
+	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -125,8 +125,6 @@ func genInsertJSONStmt(
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 ) (*typedef.Stmt, error) {
-	var v string
-	var ok bool
 	if table.IsCounterTable() {
 		return nil, nil
 	}
@@ -135,25 +133,11 @@ func genInsertJSONStmt(
 	for i, pk := range table.PartitionKeys {
 		switch t := pk.Type.(type) {
 		case typedef.SimpleType:
-			if t != typedef.TYPE_BLOB {
-				values[pk.Name] = vs[i]
-				continue
-			}
-			v, ok = vs[i].(string)
-			if ok {
-				values[pk.Name] = "0x" + v
-			}
+			values[pk.Name] = convertForJSON(t, vs[i])
 		case *typedef.TupleType:
 			tupVals := make([]interface{}, len(t.ValueTypes))
 			for j := 0; j < len(t.ValueTypes); j++ {
-				if t.ValueTypes[j] == typedef.TYPE_BLOB {
-					v, ok = vs[i+j].(string)
-					if ok {
-						v = "0x" + v
-					}
-					vs[i+j] = v
-				}
-				tupVals[i] = vs[i+j]
+				tupVals[i] = convertForJSON(t, vs[i])
 				i++
 			}
 			values[pk.Name] = tupVals
@@ -194,4 +178,16 @@ func genDeleteRows(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef
 		ValuesWithToken: valuesWithToken,
 		Values:          values,
 	}, nil
+}
+
+func convertForJSON(vType typedef.Type, value interface{}) interface{} {
+	switch vType {
+	case typedef.TYPE_BLOB:
+		val, _ := value.(string)
+		return "0x" + val
+	case typedef.TYPE_TIME:
+		val, _ := value.(int64)
+		return time.Unix(0, val).UTC().Format("15:04:05.000000000")
+	}
+	return value
 }

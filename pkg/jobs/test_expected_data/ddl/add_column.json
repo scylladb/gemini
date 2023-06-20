@@ -36,7 +36,7 @@
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_11 ADD col2 timestamp",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_11 ADD col2 time",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
@@ -47,7 +47,7 @@
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_12 ADD col2 timeuuid",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_12 ADD col2 timestamp",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
@@ -58,7 +58,7 @@
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_13 ADD col2 tinyint",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_13 ADD col2 timeuuid",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
@@ -69,7 +69,7 @@
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_14 ADD col2 uuid",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_14 ADD col2 tinyint",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
@@ -80,7 +80,7 @@
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_15 ADD col2 varchar",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_15 ADD col2 uuid",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
@@ -91,7 +91,7 @@
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_16 ADD col2 varint",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_16 ADD col2 varchar",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
@@ -102,7 +102,7 @@
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_17 ADD col2 boolean",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_17 ADD col2 varint",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
@@ -113,7 +113,7 @@
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_18 ADD col2 duration",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_18 ADD col2 boolean",
       "Names": "[]",
       "Values": "[]",
       "Types": "",

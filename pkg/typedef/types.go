@@ -59,7 +59,6 @@ const (
 	TYPE_VARINT    = SimpleType("varint")
 )
 
-// TODO: Add support for time when gocql bug is fixed.
 var (
 	TypesMapKeyBlacklist = map[SimpleType]struct{}{
 		TYPE_BLOB:     {},
@@ -69,7 +68,7 @@ var (
 	PartitionKeyTypes = SimpleTypes{TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT, TYPE_VARINT}
 	PkTypes           = SimpleTypes{
 		TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE,
-		TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT /*TYPE_TIME,*/, TYPE_TIMESTAMP, TYPE_TIMEUUID,
+		TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT, TYPE_TIME, TYPE_TIMESTAMP, TYPE_TIMEUUID,
 		TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT,
 	}
 	AllTypes = append(append(SimpleTypes{}, PkTypes...), TYPE_BOOLEAN, TYPE_DURATION)

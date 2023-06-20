@@ -146,13 +146,20 @@ func getErrorMsgIfDifferent(t *testing.T, expected, received, errMsg string) {
 		return
 	}
 	errMsgList := make([]string, 0)
-	switch len(expected) == len(received) {
+	subString := " "
+	if strings.Count(expected, ",\"") > strings.Count(expected, subString) {
+		subString = ",\""
+	}
+	tmpExpected := strings.Split(expected, subString)
+	tmpReceived := strings.Split(received, subString)
+	switch len(tmpExpected) == len(tmpReceived) {
 	case true:
 		// Inject nice row that highlights differences if length is not changed
+		expected, received = addDiffHighlight(tmpExpected, tmpReceived, subString)
 		errMsgList = []string{
 			errMsg,
 			fmt.Sprintf("Expected   %s", expected),
-			"           " + diffHighlightString(expected, received),
+			diffHighlightString([]rune(expected), []rune(received)),
 			fmt.Sprintf("Received   %s", received),
 			"-------------------------------------------",
 		}
@@ -167,8 +174,8 @@ func getErrorMsgIfDifferent(t *testing.T, expected, received, errMsg string) {
 	t.Error(strings.Join(errMsgList, "\n"))
 }
 
-func diffHighlightString(expected, received string) string {
-	out := ""
+func diffHighlightString(expected, received []rune) string {
+	out := "Difference "
 	for idx := range expected {
 		if expected[idx] == received[idx] {
 			out += " "
@@ -177,6 +184,19 @@ func diffHighlightString(expected, received string) string {
 		}
 	}
 	return out
+}
+
+func addDiffHighlight(expected, received []string, subString string) (string, string) {
+	for idx := range expected {
+		delta := len(expected[idx]) - len(received[idx])
+		if delta > 0 {
+			received[idx] += strings.Repeat("↔", delta)
+		}
+		if delta < 0 {
+			expected[idx] += strings.Repeat("↔", -delta)
+		}
+	}
+	return strings.Join(expected, subString), strings.Join(received, subString)
 }
 
 func convertStmtsToResults(stmt interface{}) Results {

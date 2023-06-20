@@ -25,16 +25,28 @@ import (
 	"golang.org/x/exp/rand"
 )
 
-func RandDate(rnd *rand.Rand) string {
-	return RandTime(rnd).Format("2006-01-02")
+var maxDateMs = time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC).UTC().UnixMilli()
+
+// RandDateStr generates time in string representation
+// it is done in such way because we wanted to make JSON statement to work
+// but scylla supports only string representation of date in JSON format
+func RandDateStr(rnd *rand.Rand) string {
+	return time.UnixMilli(rnd.Int63n(maxDateMs)).UTC().Format("2006-01-02")
 }
 
-func RandTime(rnd *rand.Rand) time.Time {
-	min := time.Date(1970, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
-	max := time.Date(2024, 1, 0, 0, 0, 0, 0, time.UTC).Unix()
+func RandTimestamp(rnd *rand.Rand) int64 {
+	return rnd.Int63()
+}
 
-	sec := rnd.Int63n(max-min) + min
-	return time.Unix(sec, 0).UTC()
+func RandDate(rnd *rand.Rand) time.Time {
+	return time.Unix(rnd.Int63n(1<<63-2), rnd.Int63n(999999999)).UTC()
+}
+
+// RandTime generates time in string representation
+// it is done in such way because we wanted to make JSON statement to work
+// but scylla supports only string representation of time in JSON format
+func RandTime(rnd *rand.Rand) int64 {
+	return rnd.Int63()
 }
 
 func RandIPV4Address(rnd *rand.Rand, v, pos int) string {
@@ -95,5 +107,5 @@ func UUIDFromTime(rnd *rand.Rand) string {
 	if UnderTest {
 		return gocql.TimeUUIDWith(rnd.Int63(), 0, []byte("127.0.0.1")).String()
 	}
-	return gocql.UUIDFromTime(RandTime(rnd)).String()
+	return gocql.UUIDFromTime(RandDate(rnd)).String()
 }
