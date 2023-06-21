@@ -259,7 +259,8 @@ func run(_ *cobra.Command, _ []string) error {
 	stop.StartOsSignalsTransmitter(logger, &warmupStopFlag, &workStopFlag)
 	pump := jobs.NewPump(ctx, logger)
 
-	generators := createGenerators(ctx, schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
+	genCtx, genCancel := context.WithCancel(context.Background())
+	generators := createGenerators(genCtx, schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
 
 	if !nonInteractive {
 		sp := createSpinner(interactive())
@@ -294,8 +295,13 @@ func run(_ *cobra.Command, _ []string) error {
 		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, generators, globalStatus, logger, seed, &workStopFlag, failFast, verbose); err != nil {
 			logger.Debug("error detected", zap.Error(err))
 		}
-
 	}
+
+	// stop generators, this needs to be done after jobs finish
+	// because otherwise they can deadlock in pick() func waiting
+	// for more values to be generated
+	genCancel()
+
 	logger.Info("test finished")
 	globalStatus.PrintResult(outFile, schema, version)
 	if globalStatus.HasErrors() {
