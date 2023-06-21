@@ -20,6 +20,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ type expectedStore struct {
 	list     ExpectedList
 	filePath string
 	update   bool
+	listLock sync.RWMutex
 }
 
 // Result description:
@@ -87,10 +89,14 @@ func (f *expectedStore) CompareOrStore(t *testing.T, caseName string, stmt inter
 	received := convertStmtsToResults(stmt)
 
 	if f.update {
+		f.listLock.Lock()
 		f.list[caseName] = received
+		f.listLock.Unlock()
 		return
 	}
+	f.listLock.RLock()
 	expected := f.list[caseName]
+	f.listLock.RUnlock()
 	if len(expected) != len(received) {
 		t.Fatalf("error: len received = %d , len expected = %d are different", len(received), len(expected))
 	}
@@ -102,7 +108,9 @@ func (f *expectedStore) CompareOrStore(t *testing.T, caseName string, stmt inter
 func (f *expectedStore) updateExpected(t *testing.T) {
 	t.Helper()
 	if f.update {
+		f.listLock.RLock()
 		data, err := json.MarshalIndent(f.list, "", "  ")
+		f.listLock.RUnlock()
 		if err != nil {
 			t.Fatalf("Marshal funcStmtTests error:%v", err)
 		}
