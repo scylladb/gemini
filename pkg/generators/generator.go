@@ -162,7 +162,7 @@ func (g *Generator) start() {
 			g.fillAllPartitions()
 			select {
 			case <-gCtx.Done():
-				g.logger.Debug("stopping partition key generation loop",
+				g.logger.Info("stopping partition key generation loop",
 					zap.Uint64("keys_created", g.cntCreated),
 					zap.Uint64("keys_emitted", g.cntEmitted))
 				return gCtx.Err()

@@ -177,7 +177,7 @@ func mutationJob(
 		}
 		select {
 		case <-ctx.Done():
-			logger.Debug("mutation job terminated")
+			logger.Info("mutation job terminated")
 			return nil
 		case hb := <-pump:
 			time.Sleep(hb)
@@ -286,7 +286,7 @@ func warmupJob(
 		}
 		select {
 		case <-ctx.Done():
-			logger.Debug("warmup job terminated")
+			logger.Info("warmup job terminated")
 			return nil
 		default:
 		}
