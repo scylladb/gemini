@@ -157,9 +157,12 @@ func (st SimpleType) Indexable() bool {
 }
 
 func (st SimpleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
-	if st == TYPE_BLOB {
+	switch st {
+	case TYPE_BLOB:
 		ln := r.Intn(p.MaxBlobLength) + p.MinBlobLength
 		return "0x" + hex.EncodeToString([]byte(utils.RandString(r, ln)))
+	case TYPE_TIME:
+		return time.Unix(0, utils.RandTime(r)).UTC().Format("15:04:05.000000000")
 	}
 	return st.genValue(r, p)
 }
@@ -181,11 +184,11 @@ func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) interface{}
 	case TYPE_BOOLEAN:
 		return r.Int()%2 == 0
 	case TYPE_DATE:
-		return utils.RandDate(r)
+		return utils.RandDateStr(r)
 	case TYPE_TIME:
-		return utils.RandTime(r).UnixNano()
-	case TYPE_TIMESTAMP:
 		return utils.RandTime(r)
+	case TYPE_TIMESTAMP:
+		return utils.RandTimestamp(r)
 	case TYPE_DECIMAL:
 		return inf.NewDec(r.Int63(), 3)
 	case TYPE_DOUBLE:
