@@ -15,8 +15,11 @@
 package stop
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 
@@ -24,46 +27,164 @@ import (
 )
 
 const (
-	signalNoSignal uint32 = iota
-	signalSoftStop
-	signalHardStop
+	SignalNoop uint32 = iota
+	SignalSoftStop
+	SignalHardStop
 )
 
+type SignalChannel chan uint32
+
+var closedChan = createClosedChan()
+
+func createClosedChan() SignalChannel {
+	ch := make(SignalChannel)
+	close(ch)
+	return ch
+}
+
+type SyncList[T any] struct {
+	children     []T
+	childrenLock sync.RWMutex
+}
+
+func (f *SyncList[T]) Append(el T) {
+	f.childrenLock.Lock()
+	defer f.childrenLock.Unlock()
+	f.children = append(f.children, el)
+}
+
+func (f *SyncList[T]) Get() []T {
+	f.childrenLock.RLock()
+	defer f.childrenLock.RUnlock()
+	return f.children
+}
+
+type logger interface {
+	Debug(msg string, fields ...zap.Field)
+}
+
 type Flag struct {
-	hardStopHandler func()
-	val             atomic.Uint32 // 1 - "soft stop";2 - "hard stop"
+	name         string
+	log          logger
+	ch           atomic.Pointer[SignalChannel]
+	parent       *Flag
+	children     SyncList[*Flag]
+	stopHandlers SyncList[func(signal uint32)]
+	val          atomic.Uint32
 }
 
-func (s *Flag) SetSoft() bool {
-	return s.val.CompareAndSwap(signalNoSignal, signalSoftStop)
+func (s *Flag) Name() string {
+	return s.name
 }
 
-func (s *Flag) SetHard() bool {
-	out := s.val.CompareAndSwap(signalNoSignal, signalHardStop)
-	if out && s.hardStopHandler != nil {
-		s.hardStopHandler()
+func (s *Flag) closeChannel() {
+	ch := s.ch.Swap(&closedChan)
+	if ch != &closedChan {
+		close(*ch)
+	}
+}
+
+func (s *Flag) sendSignal(signal uint32, sendToParent bool) bool {
+	s.log.Debug(fmt.Sprintf("flag %s received signal %s", s.name, GetStateName(signal)))
+	s.closeChannel()
+	out := s.val.CompareAndSwap(SignalNoop, signal)
+	if !out {
+		return false
+	}
+
+	for _, handler := range s.stopHandlers.Get() {
+		handler(signal)
+	}
+
+	for _, child := range s.children.Get() {
+		child.sendSignal(signal, sendToParent)
+	}
+	if sendToParent && s.parent != nil {
+		s.parent.sendSignal(signal, sendToParent)
 	}
 	return out
 }
 
+func (s *Flag) SetHard(sendToParent bool) bool {
+	return s.sendSignal(SignalHardStop, sendToParent)
+}
+
+func (s *Flag) SetSoft(sendToParent bool) bool {
+	return s.sendSignal(SignalSoftStop, sendToParent)
+}
+
+func (s *Flag) CreateChild(name string) *Flag {
+	child := newFlag(name, s)
+	s.children.Append(child)
+	val := s.val.Load()
+	switch val {
+	case SignalSoftStop, SignalHardStop:
+		child.sendSignal(val, false)
+	}
+	return child
+}
+
+func (s *Flag) SignalChannel() SignalChannel {
+	return *s.ch.Load()
+}
+
 func (s *Flag) IsSoft() bool {
-	return s.val.Load() == signalSoftStop
+	return s.val.Load() == SignalSoftStop
 }
 
 func (s *Flag) IsHard() bool {
-	return s.val.Load() == signalHardStop
+	return s.val.Load() == SignalHardStop
 }
 
 func (s *Flag) IsHardOrSoft() bool {
-	return s.val.Load() != signalNoSignal
+	return s.val.Load() != SignalNoop
 }
 
-func (s *Flag) SetOnHardStopHandler(function func()) {
-	s.hardStopHandler = function
+func (s *Flag) AddHandler(handler func(signal uint32)) {
+	s.stopHandlers.Append(handler)
+	val := s.val.Load()
+	switch val {
+	case SignalSoftStop, SignalHardStop:
+		handler(val)
+	}
 }
 
-func NewFlag() Flag {
-	return Flag{}
+func (s *Flag) AddHandler2(handler func(), expectedSignal uint32) {
+	s.AddHandler(func(signal uint32) {
+		switch expectedSignal {
+		case SignalNoop:
+			handler()
+		default:
+			if signal == expectedSignal {
+				handler()
+			}
+		}
+	})
+}
+
+func (s *Flag) CancelContextOnSignal(ctx context.Context, expectedSignal uint32) context.Context {
+	ctx, cancel := context.WithCancel(ctx)
+	s.AddHandler2(cancel, expectedSignal)
+	return ctx
+}
+
+func (s *Flag) SetLogger(log logger) {
+	s.log = log
+}
+
+func NewFlag(name string) *Flag {
+	return newFlag(name, nil)
+}
+
+func newFlag(name string, parent *Flag) *Flag {
+	out := Flag{
+		name:   name,
+		parent: parent,
+		log:    zap.NewNop(),
+	}
+	ch := make(SignalChannel)
+	out.ch.Store(&ch)
+	return &out
 }
 
 func StartOsSignalsTransmitter(logger *zap.Logger, flags ...*Flag) {
@@ -74,14 +195,27 @@ func StartOsSignalsTransmitter(logger *zap.Logger, flags ...*Flag) {
 		switch sig {
 		case syscall.SIGINT:
 			for i := range flags {
-				flags[i].SetSoft()
+				flags[i].SetSoft(true)
 			}
 			logger.Info("Get SIGINT signal, begin soft stop.")
 		default:
 			for i := range flags {
-				flags[i].SetHard()
+				flags[i].SetHard(true)
 			}
 			logger.Info("Get SIGTERM signal, begin hard stop.")
 		}
 	}()
+}
+
+func GetStateName(state uint32) string {
+	switch state {
+	case SignalSoftStop:
+		return "soft"
+	case SignalHardStop:
+		return "hard"
+	case SignalNoop:
+		return "no-signal"
+	default:
+		panic(fmt.Sprintf("unexpected signal %d", state))
+	}
 }

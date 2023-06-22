@@ -15,18 +15,19 @@
 package generators
 
 import (
-	"context"
+	"sync"
 
 	"github.com/scylladb/gemini/pkg/inflight"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 type Partition struct {
-	ctx          context.Context
 	values       chan *typedef.ValueWithToken
 	oldValues    chan *typedef.ValueWithToken
 	inFlight     inflight.InFlight
 	wakeUpSignal chan<- struct{} // wakes up generator
+	closed       bool
+	lock         sync.RWMutex
 }
 
 // get returns a new value and ensures that it's corresponding token
@@ -44,8 +45,6 @@ func (s *Partition) get() *typedef.ValueWithToken {
 // the old queue is empty.
 func (s *Partition) getOld() *typedef.ValueWithToken {
 	select {
-	case <-s.ctx.Done():
-		return nil
 	case v := <-s.oldValues:
 		return v
 	default:
@@ -57,8 +56,12 @@ func (s *Partition) getOld() *typedef.ValueWithToken {
 // is empty in which case it removes the corresponding token from the
 // in-flight tracking.
 func (s *Partition) giveOld(v *typedef.ValueWithToken) {
+	ch := s.safelyGetOldValuesChannel()
+	if ch == nil {
+		return
+	}
 	select {
-	case s.oldValues <- v:
+	case ch <- v:
 	default:
 		// Old partition buffer is full, just drop the value
 	}
@@ -87,4 +90,52 @@ func (s *Partition) pick() *typedef.ValueWithToken {
 		s.wakeUp() // channel empty, need to wait for new values
 		return <-s.values
 	}
+}
+
+func (s *Partition) safelyGetOldValuesChannel() chan *typedef.ValueWithToken {
+	s.lock.RLock()
+	if s.closed {
+		// Since only giveOld could have been potentially called after partition is closed
+		// we need to protect it against writing to closed channel
+		return nil
+	}
+	defer s.lock.RUnlock()
+	return s.oldValues
+}
+
+func (s *Partition) safelyCloseOldValuesChannel() {
+	s.lock.Lock()
+	s.closed = true
+	close(s.oldValues)
+	s.lock.Unlock()
+}
+
+func (s *Partition) Close() {
+	close(s.values)
+	s.safelyCloseOldValuesChannel()
+}
+
+type Partitions []*Partition
+
+func (p Partitions) CloseAll() {
+	for _, part := range p {
+		part.Close()
+	}
+}
+
+func (p Partitions) GetPartitionForToken(token TokenIndex) *Partition {
+	return p[uint64(token)%uint64(len(p))]
+}
+
+func NewPartitions(count, pkBufferSize int, wakeUpSignal chan struct{}) Partitions {
+	partitions := make(Partitions, count)
+	for i := 0; i < len(partitions); i++ {
+		partitions[i] = &Partition{
+			values:       make(chan *typedef.ValueWithToken, pkBufferSize),
+			oldValues:    make(chan *typedef.ValueWithToken, pkBufferSize),
+			inFlight:     inflight.New(),
+			wakeUpSignal: wakeUpSignal,
+		}
+	}
+	return partitions
 }

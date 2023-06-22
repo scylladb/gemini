@@ -14,8 +14,6 @@
 package main
 
 import (
-	"context"
-
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/typedef"
 
@@ -23,13 +21,12 @@ import (
 )
 
 func createGenerators(
-	ctx context.Context,
 	schema *typedef.Schema,
 	schemaConfig typedef.SchemaConfig,
 	distributionFunc generators.DistributionFunc,
 	_, distributionSize uint64,
 	logger *zap.Logger,
-) []*generators.Generator {
+) generators.Generators {
 	partitionRangeConfig := typedef.PartitionRangeConfig{
 		MaxBlobLength:   schemaConfig.MaxBlobLength,
 		MinBlobLength:   schemaConfig.MinBlobLength,
@@ -47,7 +44,7 @@ func createGenerators(
 			Seed:                       seed,
 			PkUsedBufferSize:           pkBufferReuseSize,
 		}
-		g := generators.NewGenerator(ctx, table, gCfg, logger.Named("generators"))
+		g := generators.NewGenerator(table, gCfg, logger.Named("generators"))
 		gs = append(gs, g)
 	}
 	return gs
