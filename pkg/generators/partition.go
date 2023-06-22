@@ -22,14 +22,11 @@ import (
 )
 
 type Partition struct {
-	ctx       context.Context
-	values    chan *typedef.ValueWithToken
-	oldValues chan *typedef.ValueWithToken
-	inFlight  inflight.InFlight
-}
-
-func (s *Partition) NeedMoreValues() bool {
-	return len(s.values) < cap(s.values)-30
+	ctx          context.Context
+	values       chan *typedef.ValueWithToken
+	oldValues    chan *typedef.ValueWithToken
+	inFlight     inflight.InFlight
+	wakeUpSignal chan<- struct{} // wakes up generator
 }
 
 // get returns a new value and ensures that it's corresponding token
@@ -72,17 +69,22 @@ func (s *Partition) releaseToken(token uint64) {
 	s.inFlight.Delete(token)
 }
 
-func (s *Partition) pick() *typedef.ValueWithToken {
-	return <-s.values
+func (s *Partition) wakeUp() {
+	select {
+	case s.wakeUpSignal <- struct{}{}:
+	default:
+	}
 }
 
-type Partitions []*Partition
-
-func (p Partitions) NeedMoreValues() bool {
-	for _, part := range p {
-		if part.NeedMoreValues() {
-			return true
+func (s *Partition) pick() *typedef.ValueWithToken {
+	select {
+	case val := <-s.values:
+		if len(s.values) <= cap(s.values)/4 {
+			s.wakeUp() // channel at 25% capacity, trigger generator
 		}
+		return val
+	default:
+		s.wakeUp() // channel empty, need to wait for new values
+		return <-s.values
 	}
-	return false
 }

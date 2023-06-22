@@ -49,16 +49,23 @@ type GeneratorInterface interface {
 }
 
 type Generator struct {
-	wakeUpSignal     chan struct{}
-	ctx              context.Context
-	logger           *zap.Logger
-	table            *typedef.Table
-	idxFunc          DistributionFunc
-	partitions       Partitions
-	partitionsConfig typedef.PartitionRangeConfig
-	partitionCount   uint64
-	seed             uint64
+	ctx               context.Context
+	logger            *zap.Logger
+	table             *typedef.Table
+	routingKeyCreator *routingkey.Creator
+	r                 *rand.Rand
+	wakeUpSignal      <-chan struct{}
+	idxFunc           DistributionFunc
+	partitions        Partitions
+	partitionsConfig  typedef.PartitionRangeConfig
+	partitionCount    uint64
+	seed              uint64
+
+	cntCreated uint64
+	cntEmitted uint64
 }
+
+type Partitions []*Partition
 
 func (g *Generator) PartitionCount() uint64 {
 	return g.partitionCount
@@ -73,13 +80,15 @@ type Config struct {
 }
 
 func NewGenerator(ctx context.Context, table *typedef.Table, config *Config, logger *zap.Logger) *Generator {
+	wakeUpSignal := make(chan struct{})
 	partitions := make([]*Partition, config.PartitionsCount)
 	for i := 0; i < len(partitions); i++ {
 		partitions[i] = &Partition{
-			ctx:       ctx,
-			values:    make(chan *typedef.ValueWithToken, config.PkUsedBufferSize),
-			oldValues: make(chan *typedef.ValueWithToken, config.PkUsedBufferSize),
-			inFlight:  inflight.New(),
+			ctx:          ctx,
+			values:       make(chan *typedef.ValueWithToken, config.PkUsedBufferSize),
+			oldValues:    make(chan *typedef.ValueWithToken, config.PkUsedBufferSize),
+			inFlight:     inflight.New(),
+			wakeUpSignal: wakeUpSignal,
 		}
 	}
 	gs := &Generator{
@@ -91,7 +100,7 @@ func NewGenerator(ctx context.Context, table *typedef.Table, config *Config, log
 		seed:             config.Seed,
 		idxFunc:          config.PartitionsDistributionFunc,
 		logger:           logger,
-		wakeUpSignal:     make(chan struct{}),
+		wakeUpSignal:     wakeUpSignal,
 	}
 	gs.start()
 	return gs
@@ -111,21 +120,7 @@ func (g *Generator) Get() *typedef.ValueWithToken {
 		return nil
 	}
 	partition := g.partitions[uint64(g.idxFunc())%g.partitionCount]
-	if partition.NeedMoreValues() {
-		g.wakeupGenerator()
-	}
 	return partition.get()
-}
-
-func (g *Generator) wakeupGenerator() {
-	select {
-	case g.wakeUpSignal <- struct{}{}:
-	default:
-	}
-}
-
-func (g *Generator) waitForMoreValuesNeeded() {
-	<-g.wakeUpSignal
 }
 
 // GetOld returns a previously used value and token or a new if
@@ -161,47 +156,62 @@ func (g *Generator) start() {
 	}
 	grp.Go(func() error {
 		g.logger.Info("starting partition key generation loop")
-		routingKeyCreator := &routingkey.Creator{}
-		r := rand.New(rand.NewSource(g.seed))
-		var (
-			cntCreated uint64
-			cntEmitted uint64
-		)
+		g.routingKeyCreator = &routingkey.Creator{}
+		g.r = rand.New(rand.NewSource(g.seed))
 		for {
-			values := g.createPartitionKeyValues(r)
-			token, err := routingKeyCreator.GetHash(g.table, values)
-			if err != nil {
-				g.logger.Panic(errors.Wrap(err, "failed to get primary key hash").Error())
-			}
-			idx := token % g.partitionCount
-			partition := g.partitions[idx]
-			cntCreated++
+			g.fillAllPartitions()
 			select {
-			case partition.values <- &typedef.ValueWithToken{Token: token, Value: values}:
-				cntEmitted++
 			case <-gCtx.Done():
 				g.logger.Debug("stopping partition key generation loop",
-					zap.Uint64("keys_created", cntCreated),
-					zap.Uint64("keys_emitted", cntEmitted))
+					zap.Uint64("keys_created", g.cntCreated),
+					zap.Uint64("keys_emitted", g.cntEmitted))
 				return gCtx.Err()
-			default:
-				// This part is only get triggered when partition is full of values
-				// Which is signal to stop generating
-				// But if partitions values are not balanced, you can have case when one partition is full
-				// While other partitions are low on values
-				// To address this case before pausing generation we need to make sure that all partition are above the limit
-				if g.partitions.NeedMoreValues() {
-					g.waitForMoreValuesNeeded()
-				}
+			case <-g.wakeUpSignal:
 			}
 		}
 	})
 }
 
-func (g *Generator) createPartitionKeyValues(r *rand.Rand) []interface{} {
+// fillAllPartitions guarantees that each partition was tested to be full
+// at least once since the function started and before it ended.
+// In other words no partition will be starved.
+func (g *Generator) fillAllPartitions() {
+	pFilled := make([]bool, len(g.partitions))
+	allFilled := func() bool {
+		for _, filled := range pFilled {
+			if !filled {
+				return false
+			}
+		}
+		return true
+	}
+	for {
+		values := g.createPartitionKeyValues()
+		token, err := g.routingKeyCreator.GetHash(g.table, values)
+		if err != nil {
+			g.logger.Panic(errors.Wrap(err, "failed to get primary key hash").Error())
+		}
+		g.cntCreated++
+		idx := token % g.partitionCount
+		partition := g.partitions[idx]
+		select {
+		case partition.values <- &typedef.ValueWithToken{Token: token, Value: values}:
+			g.cntEmitted++
+		default:
+			if !pFilled[idx] {
+				pFilled[idx] = true
+				if allFilled() {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (g *Generator) createPartitionKeyValues() []interface{} {
 	values := make([]interface{}, 0, g.table.PartitionKeysLenValues())
 	for _, pk := range g.table.PartitionKeys {
-		values = append(values, pk.Type.GenValue(r, &g.partitionsConfig)...)
+		values = append(values, pk.Type.GenValue(g.r, &g.partitionsConfig)...)
 	}
 	return values
 }
