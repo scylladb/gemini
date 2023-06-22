@@ -75,6 +75,8 @@ func lt(mi, mj map[string]interface{}) bool {
 	case *big.Int:
 		mjs, _ := mj["pk0"].(*big.Int)
 		return mis.Cmp(mjs) < 0
+	case nil:
+		return true
 	default:
 		msg := fmt.Sprintf("unhandled type %T\n", mis)
 		time.Sleep(time.Second)
