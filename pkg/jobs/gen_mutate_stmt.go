@@ -42,11 +42,11 @@ func GenMutateStmt(s *typedef.Schema, t *typedef.Table, g generators.GeneratorIn
 	if !deletes {
 		return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, useLWT)
 	}
-	switch n := rand.Intn(1000); n {
+	switch n := r.Intn(1000); n {
 	case 10, 100:
 		return genDeleteRows(s, t, valuesWithToken, r, p)
 	default:
-		switch rand.Intn(2) {
+		switch r.Intn(2) {
 		case 0:
 			if t.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
 				return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, useLWT)
