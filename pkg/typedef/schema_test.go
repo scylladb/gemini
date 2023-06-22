@@ -28,7 +28,7 @@ func TestSchemaConfigValidate(t *testing.T) {
 	}{
 		"empty": {
 			config: &SchemaConfig{},
-			want:   ErrSchemaConfigInvalidPK,
+			want:   ErrSchemaConfigInvalidRangePK,
 		},
 		"valid": {
 			config: &SchemaConfig{
@@ -46,14 +46,14 @@ func TestSchemaConfigValidate(t *testing.T) {
 				MaxPartitionKeys: 2,
 				MinPartitionKeys: 3,
 			},
-			want: ErrSchemaConfigInvalidPK,
+			want: ErrSchemaConfigInvalidRangePK,
 		},
 		"ck_missing": {
 			config: &SchemaConfig{
 				MaxPartitionKeys: 3,
 				MinPartitionKeys: 2,
 			},
-			want: ErrSchemaConfigInvalidCK,
+			want: ErrSchemaConfigInvalidRangeCK,
 		},
 		"min_ck_gt_than_max_ck": {
 			config: &SchemaConfig{
@@ -62,7 +62,7 @@ func TestSchemaConfigValidate(t *testing.T) {
 				MaxClusteringKeys: 2,
 				MinClusteringKeys: 3,
 			},
-			want: ErrSchemaConfigInvalidCK,
+			want: ErrSchemaConfigInvalidRangeCK,
 		},
 		"columns_missing": {
 			config: &SchemaConfig{
@@ -71,7 +71,7 @@ func TestSchemaConfigValidate(t *testing.T) {
 				MaxClusteringKeys: 3,
 				MinClusteringKeys: 2,
 			},
-			want: ErrSchemaConfigInvalidCols,
+			want: ErrSchemaConfigInvalidRangeCols,
 		},
 		"min_cols_gt_than_max_cols": {
 			config: &SchemaConfig{
@@ -82,7 +82,7 @@ func TestSchemaConfigValidate(t *testing.T) {
 				MaxColumns:        2,
 				MinColumns:        3,
 			},
-			want: ErrSchemaConfigInvalidCols,
+			want: ErrSchemaConfigInvalidRangeCols,
 		},
 	}
 	cmp.AllowUnexported()
