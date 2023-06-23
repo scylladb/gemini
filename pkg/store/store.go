@@ -43,7 +43,7 @@ type loader interface {
 }
 
 type storer interface {
-	mutate(context.Context, qb.Builder, time.Time, ...interface{}) error
+	mutate(context.Context, qb.Builder, ...interface{}) error
 }
 
 type storeLoader interface {
@@ -123,7 +123,7 @@ type noOpStore struct {
 	system string
 }
 
-func (n *noOpStore) mutate(context.Context, qb.Builder, time.Time, ...interface{}) error {
+func (n *noOpStore) mutate(context.Context, qb.Builder, ...interface{}) error {
 	return nil
 }
 
@@ -151,28 +151,26 @@ type delegatingStore struct {
 }
 
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder qb.Builder) error {
-	ts := time.Now()
-	if err := mutate(ctx, ds.oracleStore, ts, oracleBuilder, []interface{}{}); err != nil {
+	if err := mutate(ctx, ds.oracleStore, oracleBuilder, []interface{}{}); err != nil {
 		return errors.Wrap(err, "oracle failed store creation")
 	}
-	if err := mutate(ctx, ds.testStore, ts, testBuilder, []interface{}{}); err != nil {
+	if err := mutate(ctx, ds.testStore, testBuilder, []interface{}{}); err != nil {
 		return errors.Wrap(err, "test failed store creation")
 	}
 	return nil
 }
 
 func (ds delegatingStore) Mutate(ctx context.Context, builder qb.Builder, values ...interface{}) error {
-	ts := time.Now()
-	if err := mutate(ctx, ds.oracleStore, ts, builder, values...); err != nil {
+	if err := mutate(ctx, ds.oracleStore, builder, values...); err != nil {
 		// Oracle failed, transition cannot take place
 		ds.logger.Info("oracle failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(err))
 		return nil
 	}
-	return mutate(ctx, ds.testStore, ts, builder, values...)
+	return mutate(ctx, ds.testStore, builder, values...)
 }
 
-func mutate(ctx context.Context, s storeLoader, ts time.Time, builder qb.Builder, values ...interface{}) error {
-	if err := s.mutate(ctx, builder, ts, values...); err != nil {
+func mutate(ctx context.Context, s storeLoader, builder qb.Builder, values ...interface{}) error {
+	if err := s.mutate(ctx, builder, values...); err != nil {
 		return errors.Wrapf(err, "unable to apply mutations to the %s store", s.name())
 	}
 	return nil
