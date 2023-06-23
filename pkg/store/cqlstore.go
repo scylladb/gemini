@@ -45,10 +45,12 @@ func (cs *cqlStore) name() string {
 	return cs.system
 }
 
-func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, ts time.Time, values ...interface{}) (err error) {
+func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, values ...interface{}) (err error) {
 	var i int
 	for i = 0; i < cs.maxRetriesMutate; i++ {
-		err = cs.doMutate(ctx, builder, ts, values...)
+		// retry with new timestamp as list modification with the same ts
+		// will produce duplicated values, see https://github.com/scylladb/scylladb/issues/7937
+		err = cs.doMutate(ctx, builder, time.Now(), values...)
 		if err == nil {
 			cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
 			return nil
