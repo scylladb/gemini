@@ -1,0 +1,59 @@
+name: Upload Gemini version Docker release
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - master
+
+jobs:
+  build:
+    name: Lint Test and Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Pull tags and refs
+        run: git fetch --prune --unshallow
+      - name: Check if version is updated
+        run: |
+          export ExpectedVersion=$(git describe --tags --abbrev=0)
+          export DefinedVersion=$(cat cmd/gemini/Version)
+          if [ "$ExpectedVersion" != "$DefinedVersion" ]; then 
+            echo "Expect to have '$ExpectedVersion', but got '$DefinedVersion'"
+            exit 1
+          fi
+      - name: Setup Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.20.4
+
+      - name: Linting
+        run: |
+          make check
+
+      - name: Unit Tests
+        run: |
+          go test -v -race ./...
+
+      - name: Build
+        run: |
+          go build ./cmd/gemini/
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      - name: Build and push master
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          file: ./cmd/gemini/Dockerfile
+          push: true
+          tags: |
+            scylladb/gemini:latest
+#           TODO: add a new version tag as well.
