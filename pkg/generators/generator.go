@@ -15,17 +15,13 @@
 package generators
 
 import (
-	"context"
-
 	"github.com/pkg/errors"
-
-	"github.com/scylladb/gemini/pkg/inflight"
-	"github.com/scylladb/gemini/pkg/routingkey"
-	"github.com/scylladb/gemini/pkg/typedef"
-
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
-	"golang.org/x/sync/errgroup"
+
+	"github.com/scylladb/gemini/pkg/routingkey"
+	"github.com/scylladb/gemini/pkg/stop"
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 // TokenIndex represents the position of a token in the token ring.
@@ -49,7 +45,6 @@ type GeneratorInterface interface {
 }
 
 type Generator struct {
-	ctx               context.Context
 	logger            *zap.Logger
 	table             *typedef.Table
 	routingKeyCreator *routingkey.Creator
@@ -65,10 +60,16 @@ type Generator struct {
 	cntEmitted uint64
 }
 
-type Partitions []*Partition
-
 func (g *Generator) PartitionCount() uint64 {
 	return g.partitionCount
+}
+
+type Generators []*Generator
+
+func (g Generators) StartAll(stopFlag *stop.Flag) {
+	for _, gen := range g {
+		gen.Start(stopFlag)
+	}
 }
 
 type Config struct {
@@ -79,21 +80,10 @@ type Config struct {
 	PkUsedBufferSize           uint64
 }
 
-func NewGenerator(ctx context.Context, table *typedef.Table, config *Config, logger *zap.Logger) *Generator {
+func NewGenerator(table *typedef.Table, config *Config, logger *zap.Logger) *Generator {
 	wakeUpSignal := make(chan struct{})
-	partitions := make([]*Partition, config.PartitionsCount)
-	for i := 0; i < len(partitions); i++ {
-		partitions[i] = &Partition{
-			ctx:          ctx,
-			values:       make(chan *typedef.ValueWithToken, config.PkUsedBufferSize),
-			oldValues:    make(chan *typedef.ValueWithToken, config.PkUsedBufferSize),
-			inFlight:     inflight.New(),
-			wakeUpSignal: wakeUpSignal,
-		}
-	}
-	gs := &Generator{
-		ctx:              ctx,
-		partitions:       partitions,
+	return &Generator{
+		partitions:       NewPartitions(int(config.PartitionsCount), int(config.PkUsedBufferSize), wakeUpSignal),
 		partitionCount:   config.PartitionsCount,
 		table:            table,
 		partitionsConfig: config.PartitionsRangeConfig,
@@ -102,74 +92,46 @@ func NewGenerator(ctx context.Context, table *typedef.Table, config *Config, log
 		logger:           logger,
 		wakeUpSignal:     wakeUpSignal,
 	}
-	gs.start()
-	return gs
-}
-
-func (g *Generator) isContextCanceled() bool {
-	select {
-	case <-g.ctx.Done():
-		return true
-	default:
-		return false
-	}
 }
 
 func (g *Generator) Get() *typedef.ValueWithToken {
-	if g.isContextCanceled() {
-		return nil
-	}
-	partition := g.partitions[uint64(g.idxFunc())%g.partitionCount]
-	return partition.get()
+	return g.partitions.GetPartitionForToken(g.idxFunc()).get()
 }
 
 // GetOld returns a previously used value and token or a new if
 // the old queue is empty.
 func (g *Generator) GetOld() *typedef.ValueWithToken {
-	if g.isContextCanceled() {
-		return nil
-	}
-	return g.partitions[uint64(g.idxFunc())%g.partitionCount].getOld()
+	return g.partitions.GetPartitionForToken(g.idxFunc()).getOld()
 }
 
 // GiveOld returns the supplied value for later reuse unless
 func (g *Generator) GiveOld(v *typedef.ValueWithToken) {
-	if g.isContextCanceled() {
-		return
-	}
-	g.partitions[v.Token%g.partitionCount].giveOld(v)
+	g.partitions.GetPartitionForToken(TokenIndex(v.Token)).giveOld(v)
 }
 
 // ReleaseToken removes the corresponding token from the in-flight tracking.
 func (g *Generator) ReleaseToken(token uint64) {
-	if g.isContextCanceled() {
-		return
-	}
-	g.partitions[token%g.partitionCount].releaseToken(token)
+	g.partitions.GetPartitionForToken(TokenIndex(token)).releaseToken(token)
 }
 
-func (g *Generator) start() {
-	grp, gCtx := errgroup.WithContext(g.ctx)
-	g.ctx = gCtx
-	for _, partition := range g.partitions {
-		partition.ctx = gCtx
-	}
-	grp.Go(func() error {
+func (g *Generator) Start(stopFlag *stop.Flag) {
+	go func() {
 		g.logger.Info("starting partition key generation loop")
 		g.routingKeyCreator = &routingkey.Creator{}
 		g.r = rand.New(rand.NewSource(g.seed))
+		defer g.partitions.CloseAll()
 		for {
 			g.fillAllPartitions()
 			select {
-			case <-gCtx.Done():
+			case <-stopFlag.SignalChannel():
 				g.logger.Debug("stopping partition key generation loop",
 					zap.Uint64("keys_created", g.cntCreated),
 					zap.Uint64("keys_emitted", g.cntEmitted))
-				return gCtx.Err()
+				return
 			case <-g.wakeUpSignal:
 			}
 		}
-	})
+	}()
 }
 
 // fillAllPartitions guarantees that each partition was tested to be full

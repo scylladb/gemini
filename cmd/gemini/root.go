@@ -254,12 +254,12 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 
 	ctx, done := context.WithTimeout(context.Background(), duration+warmup+time.Second*2)
-	warmupStopFlag := stop.NewFlag()
-	workStopFlag := stop.NewFlag()
-	stop.StartOsSignalsTransmitter(logger, &warmupStopFlag, &workStopFlag)
+	stopFlag := stop.NewFlag("main")
+	stop.StartOsSignalsTransmitter(logger, stopFlag)
 	pump := jobs.NewPump(ctx, logger)
 
-	generators := createGenerators(ctx, schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
+	gens := createGenerators(schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
+	gens.StartAll(stopFlag)
 
 	if !nonInteractive {
 		sp := createSpinner(interactive())
@@ -268,7 +268,7 @@ func run(_ *cobra.Command, _ []string) error {
 			defer done()
 			for {
 				select {
-				case <-ctx.Done():
+				case <-stopFlag.SignalChannel():
 					return
 				case <-ticker.C:
 					sp.Set(" Running Gemini... %v", globalStatus)
@@ -277,24 +277,18 @@ func run(_ *cobra.Command, _ []string) error {
 		}()
 	}
 
-	if warmup > 0 && !warmupStopFlag.IsHardOrSoft() {
+	if warmup > 0 && !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, generators, globalStatus, logger, seed, &warmupStopFlag, failFast, verbose); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, seed, stopFlag.CreateChild("warmup"), failFast, verbose); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
 		}
 	}
 
-	select {
-	case <-ctx.Done():
-	default:
-		if workStopFlag.IsHardOrSoft() {
-			break
-		}
+	if !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(mode, duration, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, generators, globalStatus, logger, seed, &workStopFlag, failFast, verbose); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, seed, stopFlag.CreateChild("workload"), failFast, verbose); err != nil {
 			logger.Debug("error detected", zap.Error(err))
 		}
-
 	}
 	logger.Info("test finished")
 	globalStatus.PrintResult(outFile, schema, version)

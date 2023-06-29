@@ -116,12 +116,11 @@ func (l List) Run(
 	failFast, verbose bool,
 ) error {
 	logger = logger.Named(l.name)
-	jCtx, jobCancel := context.WithCancel(ctx)
-	g, gCtx := errgroup.WithContext(jCtx)
-	stopFlag.SetOnHardStopHandler(jobCancel)
+	ctx = stopFlag.CancelContextOnSignal(ctx, stop.SignalHardStop)
+	g, gCtx := errgroup.WithContext(ctx)
 	time.AfterFunc(l.duration, func() {
 		logger.Info("jobs time is up, begins jobs completion")
-		stopFlag.SetSoft()
+		stopFlag.SetSoft(true)
 	})
 
 	partitionRangeConfig := typedef.PartitionRangeConfig{
@@ -176,7 +175,7 @@ func mutationJob(
 			return nil
 		}
 		select {
-		case <-ctx.Done():
+		case <-stopFlag.SignalChannel():
 			logger.Debug("mutation job terminated")
 			return nil
 		case hb := <-pump:
@@ -189,7 +188,7 @@ func mutationJob(
 			_ = mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, true, logger)
 		}
 		if failFast && globalStatus.HasErrors() {
-			stopFlag.SetSoft()
+			stopFlag.SetSoft(true)
 			return nil
 		}
 	}
@@ -224,7 +223,7 @@ func validationJob(
 			return nil
 		}
 		select {
-		case <-ctx.Done():
+		case <-stopFlag.SignalChannel():
 			return nil
 		case hb := <-pump:
 			time.Sleep(hb)
@@ -251,7 +250,7 @@ func validationJob(
 		}
 
 		if failFast && globalStatus.HasErrors() {
-			stopFlag.SetSoft()
+			stopFlag.SetSoft(true)
 			return nil
 		}
 	}
@@ -282,18 +281,13 @@ func warmupJob(
 	}()
 	for {
 		if stopFlag.IsHardOrSoft() {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
 			logger.Debug("warmup job terminated")
 			return nil
-		default:
 		}
 		// Do we care about errors during warmup?
 		_ = mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
 		if failFast && globalStatus.HasErrors() {
-			stopFlag.SetSoft()
+			stopFlag.SetSoft(true)
 			return nil
 		}
 	}
