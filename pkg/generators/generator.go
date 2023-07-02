@@ -83,14 +83,16 @@ type Config struct {
 func NewGenerator(table *typedef.Table, config *Config, logger *zap.Logger) *Generator {
 	wakeUpSignal := make(chan struct{})
 	return &Generator{
-		partitions:       NewPartitions(int(config.PartitionsCount), int(config.PkUsedBufferSize), wakeUpSignal),
-		partitionCount:   config.PartitionsCount,
-		table:            table,
-		partitionsConfig: config.PartitionsRangeConfig,
-		seed:             config.Seed,
-		idxFunc:          config.PartitionsDistributionFunc,
-		logger:           logger,
-		wakeUpSignal:     wakeUpSignal,
+		partitions:        NewPartitions(int(config.PartitionsCount), int(config.PkUsedBufferSize), wakeUpSignal),
+		partitionCount:    config.PartitionsCount,
+		table:             table,
+		partitionsConfig:  config.PartitionsRangeConfig,
+		seed:              config.Seed,
+		idxFunc:           config.PartitionsDistributionFunc,
+		logger:            logger,
+		wakeUpSignal:      wakeUpSignal,
+		routingKeyCreator: &routingkey.Creator{},
+		r:                 rand.New(rand.NewSource(config.Seed)),
 	}
 }
 
@@ -117,8 +119,6 @@ func (g *Generator) ReleaseToken(token uint64) {
 func (g *Generator) Start(stopFlag *stop.Flag) {
 	go func() {
 		g.logger.Info("starting partition key generation loop")
-		g.routingKeyCreator = &routingkey.Creator{}
-		g.r = rand.New(rand.NewSource(g.seed))
 		defer g.partitions.CloseAll()
 		for {
 			g.fillAllPartitions()
@@ -148,7 +148,7 @@ func (g *Generator) fillAllPartitions() {
 		return true
 	}
 	for {
-		values := g.createPartitionKeyValues()
+		values := CreatePartitionKeyValues(g.table, g.r, &g.partitionsConfig)
 		token, err := g.routingKeyCreator.GetHash(g.table, values)
 		if err != nil {
 			g.logger.Panic(errors.Wrap(err, "failed to get primary key hash").Error())
@@ -168,23 +168,4 @@ func (g *Generator) fillAllPartitions() {
 			}
 		}
 	}
-}
-
-func (g *Generator) createPartitionKeyValues() []interface{} {
-	values := make([]interface{}, 0, g.table.PartitionKeysLenValues())
-	for _, pk := range g.table.PartitionKeys {
-		values = append(values, pk.Type.GenValue(g.r, &g.partitionsConfig)...)
-	}
-	return values
-}
-
-func CreatePkColumns(cnt int, prefix string) typedef.Columns {
-	var cols typedef.Columns
-	for i := 0; i < cnt; i++ {
-		cols = append(cols, &typedef.ColumnDef{
-			Name: GenColumnName(prefix, i),
-			Type: typedef.TYPE_INT,
-		})
-	}
-	return cols
 }
