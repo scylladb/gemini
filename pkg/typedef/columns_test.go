@@ -109,6 +109,8 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 }
 
 func TestMarshalUnmarshal(t *testing.T) {
+	t.Parallel()
+
 	s1 := getTestSchema()
 
 	opts := cmp.Options{
@@ -132,6 +134,8 @@ func TestMarshalUnmarshal(t *testing.T) {
 }
 
 func TestPrimitives(t *testing.T) {
+	t.Parallel()
+
 	sc := &typedef.SchemaConfig{
 		MaxPartitionKeys:  3,
 		MinPartitionKeys:  2,
@@ -201,6 +205,8 @@ func TestPrimitives(t *testing.T) {
 }
 
 func TestValidColumnsForDelete(t *testing.T) {
+	t.Parallel()
+
 	s1 := getTestSchema()
 	expected := typedef.Columns{
 		s1.Tables[0].Columns[2],

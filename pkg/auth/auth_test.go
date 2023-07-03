@@ -24,6 +24,7 @@ import (
 )
 
 func TestSetAuthenticator(t *testing.T) {
+	t.Parallel()
 	username := "username"
 	password := "password"
 	expectedAuthenticator := gocql.PasswordAuthenticator{
@@ -60,6 +61,7 @@ func TestSetAuthenticator(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			authenticator, err := auth.BuildAuthenticator(
 				test.input.username,
 				test.input.password,

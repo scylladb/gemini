@@ -21,6 +21,7 @@ import (
 )
 
 func TestToCQL(t *testing.T) {
+	t.Parallel()
 	tests := map[string]struct {
 		rs   *replication.Replication
 		want string
@@ -36,6 +37,7 @@ func TestToCQL(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			got := test.rs.ToCQL()
 			if got != test.want {
 				t.Fatalf("expected '%s', got '%s'", test.want, got)

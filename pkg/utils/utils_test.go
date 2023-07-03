@@ -38,6 +38,8 @@ func BenchmarkUtilsRandString1000(t *testing.B) {
 }
 
 func TestRandString(t *testing.T) {
+	t.Parallel()
+
 	for _, ln := range []int{1, 3, 5, 16, 45, 100, 1000} {
 		out := utils.RandString(rnd, ln)
 		if len(out) != ln {

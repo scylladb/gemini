@@ -29,6 +29,7 @@ import (
 )
 
 func TestHardStop(t *testing.T) {
+	t.Parallel()
 	testFlag, ctx, workersDone := initVars()
 	workers := 30
 
@@ -39,6 +40,7 @@ func TestHardStop(t *testing.T) {
 }
 
 func TestSoftStop(t *testing.T) {
+	t.Parallel()
 	testFlag, ctx, workersDone := initVars()
 	workers := 30
 
@@ -49,6 +51,7 @@ func TestSoftStop(t *testing.T) {
 }
 
 func TestSoftOrHardStop(t *testing.T) {
+	t.Parallel()
 	testFlag, ctx, workersDone := initVars()
 	workers := 30
 

@@ -21,6 +21,8 @@ import (
 )
 
 func TestValues(t *testing.T) {
+	t.Parallel()
+
 	tmp := make(Values, 0, 10)
 	expected := Values{1, 2, 3, 4, 5, 6, 7}
 	expected2 := Values{1, 2, 3, 4, 5, 6, 7, 8, 9}

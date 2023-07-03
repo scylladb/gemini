@@ -26,6 +26,7 @@ import (
 )
 
 func TestGenerator(t *testing.T) {
+	t.Parallel()
 	table := &typedef.Table{
 		Name:          "tbl",
 		PartitionKeys: generators.CreatePkColumns(1, "pk"),

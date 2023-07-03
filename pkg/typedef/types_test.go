@@ -214,6 +214,8 @@ var prettytests = []struct {
 }
 
 func TestCQLPretty(t *testing.T) {
+	t.Parallel()
+	
 	for _, p := range prettytests {
 		result, _ := p.typ.CQLPretty(p.query, p.values)
 		if result != p.expected {

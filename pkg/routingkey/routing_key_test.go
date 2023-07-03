@@ -27,6 +27,7 @@ import (
 )
 
 func TestRoutingKey(t *testing.T) {
+	t.Parallel()
 	type data struct {
 		values typedef.Values
 		want   []byte
@@ -462,8 +463,10 @@ func TestRoutingKey(t *testing.T) {
 		},
 	}
 
-	for name, test := range tests {
+	for name := range tests {
+		test := tests[name]
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			for _, d := range test.data {
 				result, err := rkc.CreateRoutingKey(test.table, d.values)
 				if err != nil {

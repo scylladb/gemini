@@ -30,6 +30,7 @@ func options(cql string) []string {
 }
 
 func TestGetCreateSchema(t *testing.T) {
+	t.Parallel()
 	ks := typedef.Keyspace{Name: "ks1"}
 	tests := map[string]struct {
 		table *typedef.Table
@@ -169,6 +170,7 @@ func TestGetCreateSchema(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			got := generators.GetCreateTable(test.table, ks)
 			if diff := cmp.Diff(got, test.want); diff != "" {
 				t.Fatalf(diff)

@@ -21,6 +21,8 @@ import (
 )
 
 func TestToCQL(t *testing.T) {
+	t.Parallel()
+
 	tests := map[string]struct {
 		rs   string
 		want string
@@ -60,6 +62,7 @@ func TestToCQL(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			if o, err := tableopts.FromCQL(test.rs); err != nil {
 				t.Error(err)
 			} else {
