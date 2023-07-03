@@ -14,7 +14,7 @@
     {
       "Token": "6292367497774912474",
       "TokenValues": "[1]",
-      "Query": "INSERT INTO ks1.pk1_ck0_col0_lwt (pk0) VALUES (?) IF NOT EXISTS",
+      "Query": "INSERT INTO ks1.pk1_ck0_col0_lwt (pk0) VALUES (?)",
       "Names": "[pk0]",
       "Values": "[1]",
       "Types": " bigint",
@@ -36,7 +36,7 @@
     {
       "Token": "6292367497774912474",
       "TokenValues": "[1]",
-      "Query": "INSERT INTO ks1.pk1_ck1_col1_lwt (pk0,ck0,col0) VALUES (?,?,?) IF NOT EXISTS",
+      "Query": "INSERT INTO ks1.pk1_ck1_col1_lwt (pk0,ck0,col0) VALUES (?,?,?)",
       "Names": "[pk0 ck0 col0]",
       "Values": "[1 1970-01-01 1970-01-01]",
       "Types": " bigint date date",
@@ -58,7 +58,7 @@
     {
       "Token": "6292367497774912474",
       "TokenValues": "[1]",
-      "Query": "INSERT INTO ks1.pk1_ck1_col1cr_lwt (pk0,ck0,col0) VALUES (?,?,?) IF NOT EXISTS",
+      "Query": "INSERT INTO ks1.pk1_ck1_col1cr_lwt (pk0,ck0,col0) VALUES (?,?,?)",
       "Names": "[pk0 ck0 col0]",
       "Values": "[1 1970-01-01 1]",
       "Types": " bigint date counter",
@@ -102,7 +102,7 @@
     {
       "Token": "10809021593573154036",
       "TokenValues": "[01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 0 00 1 00000001-0000-1000-8000-3132372e302e 0 00000001-0000-1000-8000-3132372e302e 00 1 1]",
-      "Query": "INSERT INTO ks1.pkAll_ckAll_colAll_lwt (pk0,pk1,pk2,pk3,pk4,pk5,pk6,pk7,pk8,pk9,pk10,pk11,pk12,pk13,pk14,pk15,pk16,pk17,pk18,ck0,ck1,ck2,ck3,ck4,ck5,ck6,ck7,ck8,ck9,ck10,ck11,ck12,ck13,ck14,ck15,ck16,ck17,ck18,col0,col1,col2,col3,col4,col5,col6,col7,col8,col9,col10,col11,col12,col13,col14,col15,col16,col17,col18,col19) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) IF NOT EXISTS",
+      "Query": "INSERT INTO ks1.pkAll_ckAll_colAll_lwt (pk0,pk1,pk2,pk3,pk4,pk5,pk6,pk7,pk8,pk9,pk10,pk11,pk12,pk13,pk14,pk15,pk16,pk17,pk18,ck0,ck1,ck2,ck3,ck4,ck5,ck6,ck7,ck8,ck9,ck10,ck11,ck12,ck13,ck14,ck15,ck16,ck17,ck18,col0,col1,col2,col3,col4,col5,col6,col7,col8,col9,col10,col11,col12,col13,col14,col15,col16,col17,col18,col19) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
       "Names": "[pk0 pk1 pk2 pk3 pk4 pk5 pk6 pk7 pk8 pk9 pk10 pk11 pk12 pk13 pk14 pk15 pk16 pk17 pk18 ck0 ck1 ck2 ck3 ck4 ck5 ck6 ck7 ck8 ck9 ck10 ck11 ck12 ck13 ck14 ck15 ck16 ck17 ck18 col0 col1 col2 col3 col4 col5 col6 col7 col8 col9 col10 col11 col12 col13 col14 col15 col16 col17 col18 col19]",
       "Values": "[01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 0 00 1 00000001-0000-1000-8000-3132372e302e 0 00000001-0000-1000-8000-3132372e302e 00 1 1 01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 0 00 1 00000001-0000-1000-8000-3132372e302e 0 00000001-0000-1000-8000-3132372e302e 00 1 1 1m0s 01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 0 00 1 00000001-0000-1000-8000-3132372e302e 0 00000001-0000-1000-8000-3132372e302e 00 1 1]",
       "Types": " ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time duration ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time",

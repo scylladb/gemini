@@ -85,3 +85,13 @@ func (sc *SchemaConfig) GetMaxColumns() int {
 func (sc *SchemaConfig) GetMinColumns() int {
 	return sc.MinColumns
 }
+
+func (sc *SchemaConfig) GetPartitionRangeConfig() PartitionRangeConfig {
+	return PartitionRangeConfig{
+		MaxBlobLength:   sc.MaxBlobLength,
+		MinBlobLength:   sc.MinBlobLength,
+		MaxStringLength: sc.MaxStringLength,
+		MinStringLength: sc.MinStringLength,
+		UseLWT:          sc.UseLWT,
+	}
+}

@@ -63,7 +63,7 @@ func TestGetReplicationStrategy(t *testing.T) {
 func TestReadSchema(t *testing.T) {
 	filePath := "schema.json"
 
-	testSchema, err := readSchema(filePath)
+	testSchema, err := readSchema(filePath, typedef.SchemaConfig{})
 	if err != nil {
 		t.Fatalf("failed to open schema example json file %s, error:%s", filePath, err)
 	}

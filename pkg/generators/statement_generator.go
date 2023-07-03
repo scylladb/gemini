@@ -25,6 +25,7 @@ import (
 
 func GenSchema(sc typedef.SchemaConfig) *typedef.Schema {
 	builder := builders.NewSchemaBuilder()
+	builder.Config(sc)
 	keyspace := typedef.Keyspace{
 		Name:              "ks1",
 		Replication:       sc.ReplicationStrategy,

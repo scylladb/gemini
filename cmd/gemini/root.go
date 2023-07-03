@@ -110,7 +110,7 @@ func interactive() bool {
 	return !nonInteractive
 }
 
-func readSchema(confFile string) (*typedef.Schema, error) {
+func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Schema, error) {
 	byteValue, err := os.ReadFile(confFile)
 	if err != nil {
 		return nil, err
@@ -124,7 +124,7 @@ func readSchema(confFile string) (*typedef.Schema, error) {
 	}
 
 	schemaBuilder := builders.NewSchemaBuilder()
-	schemaBuilder.Keyspace(shm.Keyspace)
+	schemaBuilder.Keyspace(shm.Keyspace).Config(schemaConfig)
 	for t, tbl := range shm.Tables {
 		shm.Tables[t].LinkIndexAndColumns()
 		schemaBuilder.Table(tbl)
@@ -193,7 +193,7 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 	var schema *typedef.Schema
 	if len(schemaFile) > 0 {
-		schema, err = readSchema(schemaFile)
+		schema, err = readSchema(schemaFile, schemaConfig)
 		if err != nil {
 			return errors.Wrap(err, "cannot create schema")
 		}

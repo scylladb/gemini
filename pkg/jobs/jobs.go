@@ -123,13 +123,7 @@ func (l List) Run(
 		stopFlag.SetSoft(true)
 	})
 
-	partitionRangeConfig := typedef.PartitionRangeConfig{
-		MaxBlobLength:   schemaConfig.MaxBlobLength,
-		MinBlobLength:   schemaConfig.MinBlobLength,
-		MaxStringLength: schemaConfig.MaxStringLength,
-		MinStringLength: schemaConfig.MinStringLength,
-		UseLWT:          schemaConfig.UseLWT,
-	}
+	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 	logger.Info("start jobs")
 	for j := range schema.Tables {
 		gen := generators[j]

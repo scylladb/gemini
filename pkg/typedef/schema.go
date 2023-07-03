@@ -23,8 +23,9 @@ type MaterializedView struct {
 }
 
 type Schema struct {
-	Keyspace Keyspace `json:"keyspace"`
-	Tables   []*Table `json:"tables"`
+	Keyspace Keyspace     `json:"keyspace"`
+	Tables   []*Table     `json:"tables"`
+	Config   SchemaConfig `json:"-"`
 }
 
 func (m *MaterializedView) HaveNonPrimaryKey() bool {

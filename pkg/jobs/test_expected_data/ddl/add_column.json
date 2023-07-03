@@ -1,207 +1,207 @@
 {
-  "pk1_ck1_col1_addSt_0": [
+  "pk1_ck1_col1.addSt0": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_0 ADD col2 ascii",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt0 ADD col2 ascii",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_1": [
+  "pk1_ck1_col1.addSt1": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_1 ADD col2 bigint",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt1 ADD col2 bigint",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_10": [
+  "pk1_ck1_col1.addSt10": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_10 ADD col2 text",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt10 ADD col2 text",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_11": [
+  "pk1_ck1_col1.addSt11": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_11 ADD col2 time",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt11 ADD col2 time",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_12": [
+  "pk1_ck1_col1.addSt12": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_12 ADD col2 timestamp",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt12 ADD col2 timestamp",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_13": [
+  "pk1_ck1_col1.addSt13": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_13 ADD col2 timeuuid",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt13 ADD col2 timeuuid",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_14": [
+  "pk1_ck1_col1.addSt14": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_14 ADD col2 tinyint",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt14 ADD col2 tinyint",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_15": [
+  "pk1_ck1_col1.addSt15": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_15 ADD col2 uuid",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt15 ADD col2 uuid",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_16": [
+  "pk1_ck1_col1.addSt16": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_16 ADD col2 varchar",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt16 ADD col2 varchar",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_17": [
+  "pk1_ck1_col1.addSt17": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_17 ADD col2 varint",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt17 ADD col2 varint",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_18": [
+  "pk1_ck1_col1.addSt18": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_18 ADD col2 boolean",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt18 ADD col2 boolean",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_2": [
+  "pk1_ck1_col1.addSt2": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_2 ADD col2 blob",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt2 ADD col2 blob",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_3": [
+  "pk1_ck1_col1.addSt3": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_3 ADD col2 date",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt3 ADD col2 date",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_4": [
+  "pk1_ck1_col1.addSt4": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_4 ADD col2 decimal",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt4 ADD col2 decimal",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_5": [
+  "pk1_ck1_col1.addSt5": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_5 ADD col2 double",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt5 ADD col2 double",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_6": [
+  "pk1_ck1_col1.addSt6": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_6 ADD col2 float",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt6 ADD col2 float",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_7": [
+  "pk1_ck1_col1.addSt7": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_7 ADD col2 inet",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt7 ADD col2 inet",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_8": [
+  "pk1_ck1_col1.addSt8": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_8 ADD col2 int",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt8 ADD col2 int",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
       "QueryType": "0"
     }
   ],
-  "pk1_ck1_col1_addSt_9": [
+  "pk1_ck1_col1.addSt9": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "ALTER TABLE ks1.pk1_ck1_col1_addSt_9 ADD col2 smallint",
+      "Query": "ALTER TABLE ks1.pk1_ck1_col1.addSt9 ADD col2 smallint",
       "Names": "[]",
       "Values": "[]",
       "Types": "",

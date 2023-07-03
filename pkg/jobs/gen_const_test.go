@@ -14,67 +14,6 @@
 
 package jobs
 
-import (
-	"flag"
-
-	. "github.com/scylladb/gemini/pkg/typedef"
-)
-
-var (
-	partitionKeysCases = map[string][]Type{
-		"pk1": {TYPE_BIGINT},
-		"pk3": {TYPE_BIGINT, TYPE_FLOAT, TYPE_INET},
-		"pkAll": {
-			TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_BOOLEAN, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT,
-			TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT, TYPE_TIMESTAMP, TYPE_TIMEUUID, TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT, TYPE_TIME,
-		},
-	}
-
-	clusteringKeysCases = map[string][]Type{
-		"ck0": {},
-		"ck1": {TYPE_DATE},
-		"ck3": {TYPE_ASCII, TYPE_DATE, TYPE_DECIMAL},
-		"ckAll": {
-			TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_BOOLEAN, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT,
-			TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT, TYPE_TIMESTAMP, TYPE_TIMEUUID, TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT, TYPE_TIME,
-		},
-	}
-
-	columnsCases = map[string][]Type{
-		"col0":   {},
-		"col1":   {TYPE_DATE},
-		"col5":   {TYPE_ASCII, TYPE_DATE, TYPE_BLOB, TYPE_BIGINT, TYPE_FLOAT},
-		"col5c":  {TYPE_ASCII, &mapType, TYPE_BLOB, &tupleType, TYPE_FLOAT},
-		"col1cr": {&counterType},
-		"col3cr": {&counterType, &counterType, &counterType},
-		"colAll": {
-			TYPE_DURATION, TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_BOOLEAN, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT,
-			TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT, TYPE_TIMESTAMP, TYPE_TIMEUUID, TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT, TYPE_TIME,
-		},
-	}
-
-	optionsCases = map[string]bool{
-		"mv":      true,
-		"mvNp":    true,
-		"cpk1":    true,
-		"cpkAll":  true,
-		"cck1":    true,
-		"cckAll":  true,
-		"lwt":     true,
-		"idx1":    true,
-		"idxAll":  true,
-		"delFist": true,
-		"delLast": true,
-		"addSt":   true,
-	}
-
-	counterType CounterType
-	tupleType   TupleType
-	mapType     MapType
-
-	updateExpected = flag.Bool("update-expected", false, "make test to update expected results")
-)
-
 var (
 	genInsertStmtCases = []string{
 		"pk1_ck0_col0",
@@ -130,102 +69,102 @@ var (
 		"pkAll_ckAll_colAll_mvNp",
 	}
 	genMultiplePartitionQueryCases = []string{
-		"pk1_ck0_col0_cpk1",
-		"pk1_ck1_col1_cpk1",
-		"pk3_ck3_col5_cpk1",
-		"pkAll_ckAll_colAll_cpk1",
-		"pk1_ck1_col1cr_cpkAll",
-		"pk3_ck3_col3cr_cpkAll",
-		"pk3_ck3_col5_cpkAll",
-		"pkAll_ckAll_colAll_cpkAll",
+		"pk1_ck0_col0.cpk1",
+		"pk1_ck1_col1.cpk1",
+		"pk3_ck3_col5.cpk1",
+		"pkAll_ckAll_colAll.cpk1",
+		"pk1_ck1_col1cr.cpkAll",
+		"pk3_ck3_col3cr.cpkAll",
+		"pk3_ck3_col5.cpkAll",
+		"pkAll_ckAll_colAll.cpkAll",
 	}
 	genMultiplePartitionQueryMvCases = []string{
-		"pk1_ck0_col0_cpk1.mv",
-		"pk1_ck1_col1_cpk1.mv",
-		"pk3_ck3_col5_cpk1.mv",
-		"pkAll_ckAll_colAll_cpk1.mv",
-		"pk1_ck1_col1cr_cpkAll.mv",
-		"pk3_ck3_col3cr_cpkAll.mv",
-		"pk3_ck3_col5_cpkAll.mv",
-		"pkAll_ckAll_colAll_cpkAll.mv",
+		"pk1_ck0_col0_mv.cpk1",
+		"pk1_ck1_col1_mv.cpk1",
+		"pk3_ck3_col5_mv.cpk1",
+		"pkAll_ckAll_colAll_mv.cpk1",
+		"pk1_ck1_col1cr_mv.cpkAll",
+		"pk3_ck3_col3cr_mv.cpkAll",
+		"pk3_ck3_col5_mv.cpkAll",
+		"pkAll_ckAll_colAll_mv.cpkAll",
 
-		"pk1_ck0_col1_cpk1.mvNp",
-		"pk1_ck1_col1_cpk1.mvNp",
-		"pk3_ck3_col5_cpk1.mvNp",
-		"pkAll_ckAll_colAll_cpk1.mvNp",
-		"pk3_ck3_col5_cpkAll.mvNp",
-		"pkAll_ckAll_colAll_cpkAll.mvNp",
+		"pk1_ck0_col1_mvNp.cpk1",
+		"pk1_ck1_col1_mvNp.cpk1",
+		"pk3_ck3_col5_mvNp.cpk1",
+		"pkAll_ckAll_colAll_mvNp.cpk1",
+		"pk3_ck3_col5_mvNp.cpkAll",
+		"pkAll_ckAll_colAll_mvNp.cpkAll",
 	}
 	genClusteringRangeQueryCases = []string{
-		"pk1_ck1_col1_cck1",
-		"pk3_ck3_col5_cck1",
-		"pkAll_ckAll_colAll_cck1",
-		"pk1_ck1_col1cr_cckAll",
-		"pk3_ck3_col3cr_cckAll",
-		"pk3_ck3_col5_cckAll",
-		"pkAll_ckAll_colAll_cckAll",
+		"pk1_ck1_col1.cck1",
+		"pk3_ck3_col5.cck1",
+		"pkAll_ckAll_colAll.cck1",
+		"pk1_ck1_col1cr.cckAll",
+		"pk3_ck3_col3cr.cckAll",
+		"pk3_ck3_col5.cckAll",
+		"pkAll_ckAll_colAll.cckAll",
 	}
 	genClusteringRangeQueryMvCases = []string{
-		"pk1_ck1_col1_cck1.mv",
-		"pk3_ck3_col5_cck1.mv",
-		"pkAll_ckAll_colAll_cck1.mv",
-		"pk1_ck1_col1cr_cckAll.mv",
-		"pk3_ck3_col3cr_cckAll.mv",
-		"pk3_ck3_col5_cckAll.mv",
-		"pkAll_ckAll_colAll_cckAll.mv",
+		"pk1_ck1_col1_mv.cck1",
+		"pk3_ck3_col5_mv.cck1",
+		"pkAll_ckAll_colAll_mv.cck1",
+		"pk1_ck1_col1cr_mv.cckAll",
+		"pk3_ck3_col3cr_mv.cckAll",
+		"pk3_ck3_col5_mv.cckAll",
+		"pkAll_ckAll_colAll_mv.cckAll",
 
-		"pk1_ck1_col1_cck1.mvNp",
-		"pk3_ck3_col5_cck1.mvNp",
-		"pkAll_ckAll_colAll_cck1.mvNp",
-		"pk3_ck3_col5_cckAll.mvNp",
-		"pkAll_ckAll_colAll_cckAll.mvNp",
+		"pk1_ck1_col1_mvNp.cck1",
+		"pk3_ck3_col5_mvNp.cck1",
+		"pkAll_ckAll_colAll_mvNp.cck1",
+		"pk3_ck3_col5_mvNp.cckAll",
+		"pkAll_ckAll_colAll_mvNp.cckAll",
 	}
 	genMultiplePartitionClusteringRangeQueryCases = []string{
-		"pk1_ck1_col1_cpk1.cck1",
-		"pk3_ck3_col5_cpk1.cck1",
-		"pkAll_ckAll_colAll_cpk1.cck1",
-		"pk1_ck1_col1cr_cpkAll.cck1",
-		"pk3_ck3_col3cr_cpkAll.cck1",
-		"pk3_ck3_col5_cpkAll.cck1",
-		"pkAll_ckAll_colAll_cpkAll.cck1",
+		"pk1_ck1_col1.cpk1.cck1",
+		"pk3_ck3_col5.cpk1.cck1",
+		"pkAll_ckAll_colAll.cpk1.cck1",
+		"pk1_ck1_col1cr.cpkAll.cck1",
+		"pk3_ck3_col3cr.cpkAll.cck1",
+		"pk3_ck3_col5.cpkAll.cck1",
+		"pkAll_ckAll_colAll.cpkAll.cck1",
 
-		"pk1_ck1_col1_cpk1.cckAll",
-		"pk3_ck3_col5_cpk1.cckAll",
-		"pkAll_ckAll_colAll_cpk1.cckAll",
-		"pk1_ck1_col1cr_cpkAll.cckAll",
-		"pk3_ck3_col3cr_cpkAll.cckAll",
-		"pk3_ck3_col5_cpkAll.cckAll",
-		"pkAll_ckAll_colAll_cpkAll.cckAll",
+		"pk1_ck1_col1.cpk1.cckAll",
+		"pk3_ck3_col5.cpk1.cckAll",
+		"pkAll_ckAll_colAll.cpk1.cckAll",
+		"pk1_ck1_col1cr.cpkAll.cckAll",
+		"pk3_ck3_col3cr.cpkAll.cckAll",
+		"pk3_ck3_col5.cpkAll.cckAll",
+		"pkAll_ckAll_colAll.cpkAll.cckAll",
 	}
 
 	genMultiplePartitionClusteringRangeQueryMvCases = []string{
-		"pk1_ck1_col1_cpk1.cck1.mv",
-		"pk3_ck3_col5_cpk1.cck1.mv",
-		"pkAll_ckAll_colAll_cpk1.cck1.mv",
-		"pk1_ck1_col1cr_cpkAll.cck1.mv",
-		"pk3_ck3_col3cr_cpkAll.cck1.mv",
-		"pk3_ck3_col5_cpkAll.cck1.mv",
-		"pkAll_ckAll_colAll_cpkAll.cck1.mv",
+		"pk1_ck1_col1_mv.cpk1.cck1",
+		"pk3_ck3_col5_mv.cpk1.cck1",
+		"pkAll_ckAll_colAll_mv.cpk1.cck1",
+		"pk1_ck1_col1cr_mv.cpkAll.cck1",
+		"pk3_ck3_col3cr_mv.cpkAll.cck1",
+		"pk3_ck3_col5_mv.cpkAll.cck1",
+		"pkAll_ckAll_colAll_mv.cpkAll.cck1",
 
-		"pk1_ck1_col1_cpk1.cckAll.mv",
-		"pk3_ck3_col5_cpk1.cckAll.mv",
-		"pkAll_ckAll_colAll_cpk1.cckAll.mv",
-		"pk1_ck1_col1cr_cpkAll.cckAll.mv",
-		"pk3_ck3_col3cr_cpkAll.cckAll.mv",
-		"pk3_ck3_col5_cpkAll.cckAll.mv",
-		"pkAll_ckAll_colAll_cpkAll.cckAll.mv",
+		"pk1_ck1_col1_mv.cpk1.cckAll",
+		"pk3_ck3_col5_mv.cpk1.cckAll",
+		"pkAll_ckAll_colAll_mv.cpk1.cckAll",
+		"pk1_ck1_col1cr_mv.cpkAll.cckAll",
+		"pk3_ck3_col3cr_mv.cpkAll.cckAll",
+		"pk3_ck3_col5_mv.cpkAll.cckAll",
+		"pkAll_ckAll_colAll_mv.cpkAll.cckAll",
 
-		"pk1_ck1_col1_cpk1.cck1.mvNp",
-		"pk3_ck3_col5_cpk1.cck1.mvNp",
-		"pkAll_ckAll_colAll_cpk1.cck1.mvNp",
-		"pk3_ck3_col5_cpkAll.cck1.mvNp",
-		"pkAll_ckAll_colAll_cpkAll.cck1.mvNp",
+		"pk1_ck1_col1_mvNp.cpk1.cck1",
+		"pk3_ck3_col5_mvNp.cpk1.cck1",
+		"pkAll_ckAll_colAll_mvNp.cpk1.cck1",
+		"pk3_ck3_col5_mvNp.cpkAll.cck1",
+		"pkAll_ckAll_colAll_mvNp.cpkAll.cck1",
 
-		"pk1_ck1_col1_cpk1.cckAll.mvNp",
-		"pk3_ck3_col5_cpk1.cckAll.mvNp",
-		"pkAll_ckAll_colAll_cpk1.cckAll.mvNp",
-		"pk3_ck3_col5_cpkAll.cckAll.mvNp",
-		"pkAll_ckAll_colAll_cpkAll.cckAll.mvNp",
+		"pk1_ck1_col1_mvNp.cpk1.cckAll",
+		"pk3_ck3_col5_mvNp.cpk1.cckAll",
+		"pkAll_ckAll_colAll_mvNp.cpk1.cckAll",
+		"pk3_ck3_col5_mvNp.cpkAll.cckAll",
+		"pkAll_ckAll_colAll_mvNp.cpkAll.cckAll",
 	}
 
 	genSingleIndexQueryCases = []string{
@@ -237,28 +176,28 @@ var (
 
 var (
 	genDropColumnStmtCases = []string{
-		"pk1_ck1_col1_delFist",
-		"pkAll_ckAll_colAll_delLast",
+		"pk1_ck1_col1.delFist",
+		"pkAll_ckAll_colAll.delLast",
 	}
 	genAddColumnStmtCases = []string{
-		"pk1_ck1_col1_addSt_0",
-		"pk1_ck1_col1_addSt_1",
-		"pk1_ck1_col1_addSt_2",
-		"pk1_ck1_col1_addSt_3",
-		"pk1_ck1_col1_addSt_4",
-		"pk1_ck1_col1_addSt_5",
-		"pk1_ck1_col1_addSt_6",
-		"pk1_ck1_col1_addSt_7",
-		"pk1_ck1_col1_addSt_8",
-		"pk1_ck1_col1_addSt_9",
-		"pk1_ck1_col1_addSt_10",
-		"pk1_ck1_col1_addSt_11",
-		"pk1_ck1_col1_addSt_12",
-		"pk1_ck1_col1_addSt_13",
-		"pk1_ck1_col1_addSt_14",
-		"pk1_ck1_col1_addSt_15",
-		"pk1_ck1_col1_addSt_16",
-		"pk1_ck1_col1_addSt_17",
-		"pk1_ck1_col1_addSt_18",
+		"pk1_ck1_col1.addSt0",
+		"pk1_ck1_col1.addSt1",
+		"pk1_ck1_col1.addSt2",
+		"pk1_ck1_col1.addSt3",
+		"pk1_ck1_col1.addSt4",
+		"pk1_ck1_col1.addSt5",
+		"pk1_ck1_col1.addSt6",
+		"pk1_ck1_col1.addSt7",
+		"pk1_ck1_col1.addSt8",
+		"pk1_ck1_col1.addSt9",
+		"pk1_ck1_col1.addSt10",
+		"pk1_ck1_col1.addSt11",
+		"pk1_ck1_col1.addSt12",
+		"pk1_ck1_col1.addSt13",
+		"pk1_ck1_col1.addSt14",
+		"pk1_ck1_col1.addSt15",
+		"pk1_ck1_col1.addSt16",
+		"pk1_ck1_col1.addSt17",
+		"pk1_ck1_col1.addSt18",
 	}
 )

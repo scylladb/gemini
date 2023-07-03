@@ -20,6 +20,7 @@ import (
 )
 
 type SchemaBuilder interface {
+	Config(config typedef.SchemaConfig) SchemaBuilder
 	Keyspace(typedef.Keyspace) SchemaBuilder
 	Table(*typedef.Table) SchemaBuilder
 	Build() *typedef.Schema
@@ -36,10 +37,16 @@ func (atb *AlterTableBuilder) ToCql() (string, []string) {
 type schemaBuilder struct {
 	keyspace typedef.Keyspace
 	tables   []*typedef.Table
+	config   typedef.SchemaConfig
 }
 
 func (s *schemaBuilder) Keyspace(keyspace typedef.Keyspace) SchemaBuilder {
 	s.keyspace = keyspace
+	return s
+}
+
+func (s *schemaBuilder) Config(config typedef.SchemaConfig) SchemaBuilder {
+	s.config = config
 	return s
 }
 
@@ -49,7 +56,7 @@ func (s *schemaBuilder) Table(table *typedef.Table) SchemaBuilder {
 }
 
 func (s *schemaBuilder) Build() *typedef.Schema {
-	out := &typedef.Schema{Keyspace: s.keyspace, Tables: s.tables}
+	out := &typedef.Schema{Keyspace: s.keyspace, Tables: s.tables, Config: s.config}
 	for id := range s.tables {
 		s.tables[id].Init(out, querycache.New(out))
 	}

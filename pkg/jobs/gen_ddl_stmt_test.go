@@ -16,11 +16,13 @@
 package jobs
 
 import (
+	"fmt"
 	"path"
 	"strconv"
-	"strings"
 	"testing"
 
+	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -28,20 +30,24 @@ import (
 var ddlDataPath = "./test_expected_data/ddl/"
 
 func TestGenDropColumnStmt(t *testing.T) {
-	RunStmtTest(t, path.Join(ddlDataPath, "drop_column.json"), genDropColumnStmtCases, func(subT *testing.T, caseName string, expected *expectedStore) {
-		schema, _, _, _, opts := getAllForTestStmt(subT, caseName)
-		stmt, err := genDropColumnStmt(schema.Tables[0], schema.Keyspace.Name, schema.Tables[0].Columns[opts.delNum])
+	RunStmtTest[results](t, path.Join(ddlDataPath, "drop_column.json"), genDropColumnStmtCases, func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+		schema, _, _ := testutils.GetAllForTestStmt(subT, caseName)
+		options := testutils.GetOptionsFromCaseName(caseName)
+		columnToDelete := getColumnToDeleteFromOptions(options, schema.Tables[0].Columns)
+		stmt, err := genDropColumnStmt(schema.Tables[0], schema.Keyspace.Name, columnToDelete)
 		validateStmt(subT, stmt, err)
-		expected.CompareOrStore(subT, caseName, stmt)
+		expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
 	})
 }
 
 func TestGenAddColumnStmt(t *testing.T) {
-	RunStmtTest(t, path.Join(ddlDataPath, "add_column.json"), genAddColumnStmtCases, func(subT *testing.T, caseName string, expected *expectedStore) {
-		schema, _, _, _, opts := getAllForTestStmt(subT, caseName)
-		stmt, err := genAddColumnStmt(schema.Tables[0], schema.Keyspace.Name, &opts.addType)
+	RunStmtTest[results](t, path.Join(ddlDataPath, "add_column.json"), genAddColumnStmtCases, func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+		schema, _, _ := testutils.GetAllForTestStmt(subT, caseName)
+		options := testutils.GetOptionsFromCaseName(caseName)
+		columnToAdd := getColumnToAddFromOptions(options, len(schema.Tables[0].Columns))
+		stmt, err := genAddColumnStmt(schema.Tables[0], schema.Keyspace.Name, columnToAdd)
 		validateStmt(subT, stmt, err)
-		expected.CompareOrStore(subT, caseName, stmt)
+		expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
 	})
 }
 
@@ -51,10 +57,12 @@ func BenchmarkGenDropColumnStmt(t *testing.B) {
 		caseName := genDropColumnStmtCases[idx]
 		t.Run(caseName,
 			func(subT *testing.B) {
-				schema, _, _, _, opts := getAllForTestStmt(subT, caseName)
+				schema, _, _ := testutils.GetAllForTestStmt(subT, caseName)
+				options := testutils.GetOptionsFromCaseName(caseName)
+				columnToDelete := getColumnToDeleteFromOptions(options, schema.Tables[0].Columns)
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_, _ = genDropColumnStmt(schema.Tables[0], schema.Keyspace.Name, schema.Tables[0].Columns[opts.delNum])
+					_, _ = genDropColumnStmt(schema.Tables[0], schema.Keyspace.Name, columnToDelete)
 				}
 			})
 	}
@@ -66,30 +74,40 @@ func BenchmarkGenAddColumnStmt(t *testing.B) {
 		caseName := genAddColumnStmtCases[idx]
 		t.Run(caseName,
 			func(subT *testing.B) {
-				schema, _, _, _, opts := getAllForTestStmt(subT, caseName)
+				schema, _, _ := testutils.GetAllForTestStmt(subT, caseName)
+				options := testutils.GetOptionsFromCaseName(caseName)
+				columnToAdd := getColumnToAddFromOptions(options, len(schema.Tables[0].Columns))
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_, _ = genAddColumnStmt(schema.Tables[0], schema.Keyspace.Name, &opts.addType)
+					_, _ = genAddColumnStmt(schema.Tables[0], schema.Keyspace.Name, columnToAdd)
 				}
 			})
 	}
 }
 
-//nolint:unused
-func checkOnAllTypesInAddColumnCases(t *testing.T, cases []string) {
-	founded := 0
-	for j := 0; j < len(typedef.AllTypes); j++ {
-		for i := range cases {
-			caseName := cases[i]
-			_, caseNum, _ := strings.Cut(caseName, ".")
-			caseN, _ := strconv.ParseInt(caseNum, 0, 8)
-			num := int(caseN)
-			if num == j {
-				founded++
-			}
-		}
+func getColumnToDeleteFromOptions(options testutils.TestCaseOptions, columns typedef.Columns) *typedef.ColumnDef {
+	optVal := options.GetString("del")
+	switch optVal {
+	case "delFist":
+		return columns[0]
+	case "delLast":
+		return columns[len(columns)-1]
+	default:
+		panic(fmt.Sprintf("unexpected value %s", optVal))
 	}
-	if founded != len(typedef.AllTypes) || founded != len(cases) {
-		t.Error("not all column types in genAddColumnStmtCases")
+}
+
+func getColumnToAddFromOptions(options testutils.TestCaseOptions, columnsLen int) *typedef.ColumnDef {
+	optVal := options.GetString("addSt")
+	if optVal == "" || len(optVal) <= 5 {
+		panic(fmt.Sprintf("wrong addSt parameter '%s'", optVal))
+	}
+	typeNum, err := strconv.Atoi(optVal[5:])
+	if err != nil {
+		panic(fmt.Sprintf("wrong addSt parameter '%s'", optVal))
+	}
+	return &typedef.ColumnDef{
+		Type: typedef.AllTypes[typeNum],
+		Name: generators.GenColumnName("col", columnsLen+1),
 	}
 }

@@ -1,75 +1,75 @@
 {
-  "pk1_ck1_col1_cck1": [
+  "pk1_ck1_col1.cck1": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "SELECT * FROM ks1.pk1_ck1_col1_cck1 WHERE pk0=? AND ck0\u003e? AND ck0\u003c?",
+      "Query": "SELECT * FROM ks1.pk1_ck1_col1.cck1 WHERE pk0=? AND ck0\u003e? AND ck0\u003c?",
       "Names": "[pk0 ck0 ck0]",
       "Values": "[1 1970-01-01 1970-01-01]",
       "Types": " bigint date date",
       "QueryType": "1"
     }
   ],
-  "pk1_ck1_col1cr_cckAll": [
+  "pk1_ck1_col1cr.cckAll": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "SELECT * FROM ks1.pk1_ck1_col1cr_cckAll WHERE pk0=? AND ck0\u003e? AND ck0\u003c?",
+      "Query": "SELECT * FROM ks1.pk1_ck1_col1cr.cckAll WHERE pk0=? AND ck0\u003e? AND ck0\u003c?",
       "Names": "[pk0 ck0 ck0]",
       "Values": "[1 1970-01-01 1970-01-01]",
       "Types": " bigint date date",
       "QueryType": "1"
     }
   ],
-  "pk3_ck3_col3cr_cckAll": [
+  "pk3_ck3_col3cr.cckAll": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "SELECT * FROM ks1.pk3_ck3_col3cr_cckAll WHERE pk0=? AND pk1=? AND pk2=? AND ck0=? AND ck1=? AND ck2\u003e? AND ck2\u003c?",
+      "Query": "SELECT * FROM ks1.pk3_ck3_col3cr.cckAll WHERE pk0=? AND pk1=? AND pk2=? AND ck0=? AND ck1=? AND ck2\u003e? AND ck2\u003c?",
       "Names": "[pk0 pk1 pk2 ck0 ck1 ck2 ck2]",
       "Values": "[1 1.110223e-16 1.1.1.1 01 1970-01-01 0.001 0.001]",
       "Types": " bigint float inet ascii date decimal decimal",
       "QueryType": "1"
     }
   ],
-  "pk3_ck3_col5_cck1": [
+  "pk3_ck3_col5.cck1": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "SELECT * FROM ks1.pk3_ck3_col5_cck1 WHERE pk0=? AND pk1=? AND pk2=? AND ck0\u003e? AND ck0\u003c?",
+      "Query": "SELECT * FROM ks1.pk3_ck3_col5.cck1 WHERE pk0=? AND pk1=? AND pk2=? AND ck0\u003e? AND ck0\u003c?",
       "Names": "[pk0 pk1 pk2 ck0 ck0]",
       "Values": "[1 1.110223e-16 1.1.1.1 01 00]",
       "Types": " bigint float inet ascii ascii",
       "QueryType": "1"
     }
   ],
-  "pk3_ck3_col5_cckAll": [
+  "pk3_ck3_col5.cckAll": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "SELECT * FROM ks1.pk3_ck3_col5_cckAll WHERE pk0=? AND pk1=? AND pk2=? AND ck0=? AND ck1=? AND ck2\u003e? AND ck2\u003c?",
+      "Query": "SELECT * FROM ks1.pk3_ck3_col5.cckAll WHERE pk0=? AND pk1=? AND pk2=? AND ck0=? AND ck1=? AND ck2\u003e? AND ck2\u003c?",
       "Names": "[pk0 pk1 pk2 ck0 ck1 ck2 ck2]",
       "Values": "[1 1.110223e-16 1.1.1.1 01 1970-01-01 0.001 0.001]",
       "Types": " bigint float inet ascii date decimal decimal",
       "QueryType": "1"
     }
   ],
-  "pkAll_ckAll_colAll_cck1": [
+  "pkAll_ckAll_colAll.cck1": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "SELECT * FROM ks1.pkAll_ckAll_colAll_cck1 WHERE pk0=? AND pk1=? AND pk2=? AND pk3=? AND pk4=? AND pk5=? AND pk6=? AND pk7=? AND pk8=? AND pk9=? AND pk10=? AND pk11=? AND pk12=? AND pk13=? AND pk14=? AND pk15=? AND pk16=? AND pk17=? AND pk18=? AND ck0\u003e? AND ck0\u003c?",
+      "Query": "SELECT * FROM ks1.pkAll_ckAll_colAll.cck1 WHERE pk0=? AND pk1=? AND pk2=? AND pk3=? AND pk4=? AND pk5=? AND pk6=? AND pk7=? AND pk8=? AND pk9=? AND pk10=? AND pk11=? AND pk12=? AND pk13=? AND pk14=? AND pk15=? AND pk16=? AND pk17=? AND pk18=? AND ck0\u003e? AND ck0\u003c?",
       "Names": "[pk0 pk1 pk2 pk3 pk4 pk5 pk6 pk7 pk8 pk9 pk10 pk11 pk12 pk13 pk14 pk15 pk16 pk17 pk18 ck0 ck0]",
       "Values": "[01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 0 00 1 00000001-0000-1000-8000-3132372e302e 0 00000001-0000-1000-8000-3132372e302e 00 1 1 01 00]",
       "Types": " ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time ascii ascii",
       "QueryType": "1"
     }
   ],
-  "pkAll_ckAll_colAll_cckAll": [
+  "pkAll_ckAll_colAll.cckAll": [
     {
       "Token": "",
       "TokenValues": "",
-      "Query": "SELECT * FROM ks1.pkAll_ckAll_colAll_cckAll WHERE pk0=? AND pk1=? AND pk2=? AND pk3=? AND pk4=? AND pk5=? AND pk6=? AND pk7=? AND pk8=? AND pk9=? AND pk10=? AND pk11=? AND pk12=? AND pk13=? AND pk14=? AND pk15=? AND pk16=? AND pk17=? AND pk18=? AND ck0=? AND ck1=? AND ck2=? AND ck3=? AND ck4=? AND ck5=? AND ck6=? AND ck7=? AND ck8=? AND ck9=? AND ck10=? AND ck11=? AND ck12=? AND ck13=? AND ck14=? AND ck15=? AND ck16=? AND ck17=? AND ck18\u003e? AND ck18\u003c?",
+      "Query": "SELECT * FROM ks1.pkAll_ckAll_colAll.cckAll WHERE pk0=? AND pk1=? AND pk2=? AND pk3=? AND pk4=? AND pk5=? AND pk6=? AND pk7=? AND pk8=? AND pk9=? AND pk10=? AND pk11=? AND pk12=? AND pk13=? AND pk14=? AND pk15=? AND pk16=? AND pk17=? AND pk18=? AND ck0=? AND ck1=? AND ck2=? AND ck3=? AND ck4=? AND ck5=? AND ck6=? AND ck7=? AND ck8=? AND ck9=? AND ck10=? AND ck11=? AND ck12=? AND ck13=? AND ck14=? AND ck15=? AND ck16=? AND ck17=? AND ck18\u003e? AND ck18\u003c?",
       "Names": "[pk0 pk1 pk2 pk3 pk4 pk5 pk6 pk7 pk8 pk9 pk10 pk11 pk12 pk13 pk14 pk15 pk16 pk17 pk18 ck0 ck1 ck2 ck3 ck4 ck5 ck6 ck7 ck8 ck9 ck10 ck11 ck12 ck13 ck14 ck15 ck16 ck17 ck18 ck18]",
       "Values": "[01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 0 00 1 00000001-0000-1000-8000-3132372e302e 0 00000001-0000-1000-8000-3132372e302e 00 1 1 01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 0 00 1 00000001-0000-1000-8000-3132372e302e 0 00000001-0000-1000-8000-3132372e302e 00 1 1 1]",
       "Types": " ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time time",

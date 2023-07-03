@@ -27,13 +27,7 @@ func createGenerators(
 	_, distributionSize uint64,
 	logger *zap.Logger,
 ) generators.Generators {
-	partitionRangeConfig := typedef.PartitionRangeConfig{
-		MaxBlobLength:   schemaConfig.MaxBlobLength,
-		MinBlobLength:   schemaConfig.MinBlobLength,
-		MaxStringLength: schemaConfig.MaxStringLength,
-		MinStringLength: schemaConfig.MinStringLength,
-		UseLWT:          schemaConfig.UseLWT,
-	}
+	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 
 	var gs []*generators.Generator
 	for _, table := range schema.Tables {

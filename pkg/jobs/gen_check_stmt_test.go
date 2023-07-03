@@ -19,92 +19,134 @@ import (
 	"path"
 	"testing"
 
+	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
 var checkDataPath = "./test_expected_data/check/"
 
 func TestGenSinglePartitionQuery(t *testing.T) {
-	RunStmtTest(t, path.Join(checkDataPath, "single_partition.json"), genSinglePartitionQueryCases, func(subT *testing.T, caseName string, expected *expectedStore) {
-		schema, _, gen, _, _ := getAllForTestStmt(subT, caseName)
-		stmt := genSinglePartitionQuery(schema, schema.Tables[0], gen)
-		validateStmt(subT, stmt, nil)
-		expected.CompareOrStore(subT, caseName, stmt)
-	})
+	RunStmtTest[results](t, path.Join(checkDataPath, "single_partition.json"), genSinglePartitionQueryCases,
+		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, gen, _ := testutils.GetAllForTestStmt(subT, caseName)
+			stmt := genSinglePartitionQuery(schema, schema.Tables[0], gen)
+			validateStmt(subT, stmt, nil)
+			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
+		})
 }
 
 func TestGenSinglePartitionQueryMv(t *testing.T) {
-	RunStmtTest(t, path.Join(checkDataPath, "single_partition_mv.json"), genSinglePartitionQueryMvCases, func(subT *testing.T, caseName string, expected *expectedStore) {
-		schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-		stmt := genSinglePartitionQueryMv(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum)
-		validateStmt(subT, stmt, nil)
-		expected.CompareOrStore(subT, caseName, stmt)
-	})
+	RunStmtTest[results](t, path.Join(checkDataPath, "single_partition_mv.json"), genSinglePartitionQueryMvCases,
+		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+			prc := schema.Config.GetPartitionRangeConfig()
+			stmt := genSinglePartitionQueryMv(schema, schema.Tables[0], gen, rnd, &prc, len(schema.Tables[0].MaterializedViews)-1)
+			validateStmt(subT, stmt, nil)
+			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
+		})
 }
 
 func TestGenMultiplePartitionQuery(t *testing.T) {
-	RunStmtTest(t, path.Join(checkDataPath, "multiple_partition.json"), genMultiplePartitionQueryCases, func(subT *testing.T, caseName string, expected *expectedStore) {
-		schema, _, gen, _, opts := getAllForTestStmt(subT, caseName)
-		stmt := genMultiplePartitionQuery(schema, schema.Tables[0], gen, opts.pkCount)
-		validateStmt(subT, stmt, nil)
-		expected.CompareOrStore(subT, caseName, stmt)
-	})
+	RunStmtTest[results](t, path.Join(checkDataPath, "multiple_partition.json"), genMultiplePartitionQueryCases,
+		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, gen, _ := testutils.GetAllForTestStmt(subT, caseName)
+			options := testutils.GetOptionsFromCaseName(caseName)
+			stmt := genMultiplePartitionQuery(schema, schema.Tables[0], gen, GetPkCountFromOptions(options, len(schema.Tables[0].PartitionKeys)))
+			validateStmt(subT, stmt, nil)
+			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
+		})
 }
 
 func TestGenMultiplePartitionQueryMv(t *testing.T) {
-	RunStmtTest(t, path.Join(checkDataPath, "multiple_partition_mv.json"), genMultiplePartitionQueryMvCases, func(subT *testing.T, caseName string, expected *expectedStore) {
-		schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-		stmt := genMultiplePartitionQueryMv(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.pkCount)
-		validateStmt(subT, stmt, nil)
-		expected.CompareOrStore(subT, caseName, stmt)
-	})
+	RunStmtTest[results](t, path.Join(checkDataPath, "multiple_partition_mv.json"), genMultiplePartitionQueryMvCases,
+		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			options := testutils.GetOptionsFromCaseName(caseName)
+			schema, gen, _ := testutils.GetAllForTestStmt(subT, caseName)
+			stmt := genMultiplePartitionQuery(schema, schema.Tables[0], gen, GetPkCountFromOptions(options, len(schema.Tables[0].PartitionKeys)))
+			validateStmt(subT, stmt, nil)
+			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
+		})
 }
 
 func TestGenClusteringRangeQuery(t *testing.T) {
-	RunStmtTest(t, path.Join(checkDataPath, "clustering_range.json"), genClusteringRangeQueryCases, func(subT *testing.T, caseName string, expected *expectedStore) {
-		schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-		stmt := genClusteringRangeQuery(schema, schema.Tables[0], gen, rnd, prc, opts.ckCount)
-		validateStmt(subT, stmt, nil)
-		expected.CompareOrStore(subT, caseName, stmt)
-	})
+	RunStmtTest[results](t, path.Join(checkDataPath, "clustering_range.json"), genClusteringRangeQueryCases,
+		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+			options := testutils.GetOptionsFromCaseName(caseName)
+			prc := schema.Config.GetPartitionRangeConfig()
+			stmt := genClusteringRangeQuery(schema, schema.Tables[0], gen, rnd, &prc, GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
+			validateStmt(subT, stmt, nil)
+			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
+		})
 }
 
 func TestGenClusteringRangeQueryMv(t *testing.T) {
-	RunStmtTest(t, path.Join(checkDataPath, "clustering_range_mv.json"), genClusteringRangeQueryMvCases, func(subT *testing.T, caseName string, expected *expectedStore) {
-		schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-		stmt := genClusteringRangeQueryMv(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.ckCount)
-		validateStmt(subT, stmt, nil)
-		expected.CompareOrStore(subT, caseName, stmt)
-	})
+	RunStmtTest[results](t, path.Join(checkDataPath, "clustering_range_mv.json"), genClusteringRangeQueryMvCases,
+		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+			options := testutils.GetOptionsFromCaseName(caseName)
+			prc := schema.Config.GetPartitionRangeConfig()
+			stmt := genClusteringRangeQueryMv(
+				schema,
+				schema.Tables[0],
+				gen,
+				rnd,
+				&prc,
+				len(schema.Tables[0].MaterializedViews)-1,
+				GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
+			validateStmt(subT, stmt, nil)
+			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
+		})
 }
 
 func TestGenMultiplePartitionClusteringRangeQuery(t *testing.T) {
-	RunStmtTest(t, path.Join(checkDataPath, "multiple_partition_clustering_range.json"), genMultiplePartitionClusteringRangeQueryCases,
-		func(subT *testing.T, caseName string, expected *expectedStore) {
-			schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-			stmt := genMultiplePartitionClusteringRangeQuery(schema, schema.Tables[0], gen, rnd, prc, opts.pkCount, opts.ckCount)
+	RunStmtTest[results](t, path.Join(checkDataPath, "multiple_partition_clustering_range.json"), genMultiplePartitionClusteringRangeQueryCases,
+		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+			options := testutils.GetOptionsFromCaseName(caseName)
+			prc := schema.Config.GetPartitionRangeConfig()
+			stmt := genMultiplePartitionClusteringRangeQuery(
+				schema,
+				schema.Tables[0],
+				gen,
+				rnd,
+				&prc,
+				GetPkCountFromOptions(options, len(schema.Tables[0].PartitionKeys)),
+				GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
 			validateStmt(subT, stmt, nil)
-			expected.CompareOrStore(subT, caseName, stmt)
+			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
 		})
 }
 
 func TestGenMultiplePartitionClusteringRangeQueryMv(t *testing.T) {
-	RunStmtTest(t, path.Join(checkDataPath, "multiple_partition_clustering_range_mv.json"), genMultiplePartitionClusteringRangeQueryMvCases,
-		func(subT *testing.T, caseName string, expected *expectedStore) {
-			schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-			stmt := genMultiplePartitionClusteringRangeQueryMv(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.pkCount, opts.ckCount)
+	RunStmtTest[results](t, path.Join(checkDataPath, "multiple_partition_clustering_range_mv.json"), genMultiplePartitionClusteringRangeQueryMvCases,
+		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			options := testutils.GetOptionsFromCaseName(caseName)
+			schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+			prc := schema.Config.GetPartitionRangeConfig()
+			stmt := genMultiplePartitionClusteringRangeQueryMv(
+				schema,
+				schema.Tables[0],
+				gen,
+				rnd,
+				&prc,
+				len(schema.Tables[0].MaterializedViews)-1,
+				GetPkCountFromOptions(options, len(schema.Tables[0].PartitionKeys)),
+				GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
 			validateStmt(subT, stmt, nil)
-			expected.CompareOrStore(subT, caseName, stmt)
+			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
 		})
 }
 
 func TestGenSingleIndexQuery(t *testing.T) {
-	RunStmtTest(t, path.Join(checkDataPath, "single_index.json"), genSingleIndexQueryCases, func(subT *testing.T, caseName string, expected *expectedStore) {
-		schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
-		stmt := genSingleIndexQuery(schema, schema.Tables[0], gen, rnd, prc, opts.idxCount)
-		validateStmt(subT, stmt, nil)
-		expected.CompareOrStore(subT, caseName, stmt)
-	})
+	RunStmtTest[results](t, path.Join(checkDataPath, "single_index.json"), genSingleIndexQueryCases,
+		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+			prc := schema.Config.GetPartitionRangeConfig()
+			stmt := genSingleIndexQuery(schema, schema.Tables[0], gen, rnd, &prc, len(schema.Tables[0].Indexes))
+			validateStmt(subT, stmt, nil)
+			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
+		})
 }
 
 func BenchmarkGenSinglePartitionQuery(t *testing.B) {
@@ -113,7 +155,7 @@ func BenchmarkGenSinglePartitionQuery(t *testing.B) {
 		caseName := genSinglePartitionQueryCases[idx]
 		t.Run(caseName,
 			func(subT *testing.B) {
-				schema, _, gen, _, _ := getAllForTestStmt(subT, caseName)
+				schema, gen, _ := testutils.GetAllForTestStmt(subT, caseName)
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
 					_ = genSinglePartitionQuery(schema, schema.Tables[0], gen)
@@ -128,10 +170,11 @@ func BenchmarkGenSinglePartitionQueryMv(t *testing.B) {
 		caseName := genSinglePartitionQueryMvCases[idx]
 		t.Run(caseName,
 			func(subT *testing.B) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+				schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+				prc := schema.Config.GetPartitionRangeConfig()
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_ = genSinglePartitionQueryMv(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum)
+					_ = genSinglePartitionQueryMv(schema, schema.Tables[0], gen, rnd, &prc, len(schema.Tables[0].MaterializedViews)-1)
 				}
 			})
 	}
@@ -143,10 +186,11 @@ func BenchmarkGenMultiplePartitionQuery(t *testing.B) {
 		caseName := genMultiplePartitionQueryCases[idx]
 		t.Run(caseName,
 			func(subT *testing.B) {
-				schema, _, gen, _, opts := getAllForTestStmt(subT, caseName)
+				options := testutils.GetOptionsFromCaseName(caseName)
+				schema, gen, _ := testutils.GetAllForTestStmt(subT, caseName)
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_ = genMultiplePartitionQuery(schema, schema.Tables[0], gen, opts.pkCount)
+					_ = genMultiplePartitionQuery(schema, schema.Tables[0], gen, GetPkCountFromOptions(options, len(schema.Tables[0].PartitionKeys)))
 				}
 			})
 	}
@@ -158,10 +202,19 @@ func BenchmarkGenMultiplePartitionQueryMv(t *testing.B) {
 		caseName := genMultiplePartitionQueryMvCases[idx]
 		t.Run(caseName,
 			func(subT *testing.B) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+				options := testutils.GetOptionsFromCaseName(caseName)
+				schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+				prc := schema.Config.GetPartitionRangeConfig()
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_ = genMultiplePartitionQueryMv(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.pkCount)
+					_ = genMultiplePartitionQueryMv(
+						schema,
+						schema.Tables[0],
+						gen,
+						rnd,
+						&prc,
+						len(schema.Tables[0].MaterializedViews)-1,
+						GetPkCountFromOptions(options, len(schema.Tables[0].PartitionKeys)))
 				}
 			})
 	}
@@ -173,10 +226,12 @@ func BenchmarkGenClusteringRangeQuery(t *testing.B) {
 		caseName := genClusteringRangeQueryCases[idx]
 		t.Run(caseName,
 			func(subT *testing.B) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+				options := testutils.GetOptionsFromCaseName(caseName)
+				schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+				prc := schema.Config.GetPartitionRangeConfig()
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_ = genClusteringRangeQuery(schema, schema.Tables[0], gen, rnd, prc, opts.ckCount)
+					_ = genClusteringRangeQuery(schema, schema.Tables[0], gen, rnd, &prc, GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
 				}
 			})
 	}
@@ -188,10 +243,19 @@ func BenchmarkGenClusteringRangeQueryMv(t *testing.B) {
 		caseName := genClusteringRangeQueryMvCases[idx]
 		t.Run(caseName,
 			func(subT *testing.B) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+				options := testutils.GetOptionsFromCaseName(caseName)
+				schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+				prc := schema.Config.GetPartitionRangeConfig()
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_ = genClusteringRangeQueryMv(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.ckCount)
+					_ = genClusteringRangeQueryMv(
+						schema,
+						schema.Tables[0],
+						gen,
+						rnd,
+						&prc,
+						len(schema.Tables[0].MaterializedViews)-1,
+						GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
 				}
 			})
 	}
@@ -203,10 +267,19 @@ func BenchmarkGenMultiplePartitionClusteringRangeQuery(t *testing.B) {
 		caseName := genMultiplePartitionClusteringRangeQueryCases[idx]
 		t.Run(caseName,
 			func(subT *testing.B) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+				options := testutils.GetOptionsFromCaseName(caseName)
+				schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+				prc := schema.Config.GetPartitionRangeConfig()
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_ = genMultiplePartitionClusteringRangeQuery(schema, schema.Tables[0], gen, rnd, prc, opts.pkCount, opts.ckCount)
+					_ = genMultiplePartitionClusteringRangeQuery(
+						schema,
+						schema.Tables[0],
+						gen,
+						rnd,
+						&prc,
+						GetPkCountFromOptions(options, len(schema.Tables[0].PartitionKeys)),
+						GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
 				}
 			})
 	}
@@ -218,10 +291,20 @@ func BenchmarkGenMultiplePartitionClusteringRangeQueryMv(t *testing.B) {
 		caseName := genMultiplePartitionClusteringRangeQueryMvCases[idx]
 		t.Run(caseName,
 			func(subT *testing.B) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+				options := testutils.GetOptionsFromCaseName(caseName)
+				schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+				prc := schema.Config.GetPartitionRangeConfig()
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_ = genMultiplePartitionClusteringRangeQueryMv(schema, schema.Tables[0], gen, rnd, prc, opts.mvNum, opts.pkCount, opts.ckCount)
+					_ = genMultiplePartitionClusteringRangeQueryMv(
+						schema,
+						schema.Tables[0],
+						gen,
+						rnd,
+						&prc,
+						len(schema.Tables[0].MaterializedViews)-1,
+						GetPkCountFromOptions(options, len(schema.Tables[0].PartitionKeys)),
+						GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
 				}
 			})
 	}
@@ -233,10 +316,17 @@ func BenchmarkGenSingleIndexQuery(t *testing.B) {
 		caseName := genSingleIndexQueryCases[idx]
 		t.Run(caseName,
 			func(subT *testing.B) {
-				schema, prc, gen, rnd, opts := getAllForTestStmt(subT, caseName)
+				schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
+				prc := schema.Config.GetPartitionRangeConfig()
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_ = genSingleIndexQuery(schema, schema.Tables[0], gen, rnd, prc, opts.idxCount)
+					_ = genSingleIndexQuery(
+						schema,
+						schema.Tables[0],
+						gen,
+						rnd,
+						&prc,
+						len(schema.Tables[0].Indexes))
 				}
 			})
 	}
