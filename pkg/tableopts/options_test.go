@@ -60,7 +60,8 @@ func TestToCQL(t *testing.T) {
 				"'enabled':true,'max_threshold':32,'min_threshold':4,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
 		},
 	}
-	for name, test := range tests {
+	for name := range tests {
+		test := tests[name]
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			if o, err := tableopts.FromCQL(test.rs); err != nil {

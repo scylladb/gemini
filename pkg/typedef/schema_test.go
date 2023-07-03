@@ -88,7 +88,8 @@ func TestSchemaConfigValidate(t *testing.T) {
 		},
 	}
 	cmp.AllowUnexported()
-	for name, test := range tests {
+	for name := range tests {
+		test := tests[name]
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			got := test.config.Valid()

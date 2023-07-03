@@ -37,7 +37,8 @@ func TestRotl(t *testing.T) {
 		{-6486402271863858009, 31, 405973038345868736},
 	}
 
-	for _, test := range tests {
+	for id := range tests {
+		test := tests[id]
 		t.Run(fmt.Sprintf("%d >> %d", test.in, test.rotate), func(t *testing.T) {
 			t.Parallel()
 			if v := rotl(test.in, uint8(test.rotate)); v != test.exp {
@@ -59,7 +60,8 @@ func TestFmix(t *testing.T) {
 		{-7566534940689533355, 4729783097411765989},
 	}
 
-	for _, test := range tests {
+	for id := range tests {
+		test := tests[id]
 		t.Run(strconv.Itoa(int(test.in)), func(t *testing.T) {
 			t.Parallel()
 			if v := fmix(test.in); v != test.exp {

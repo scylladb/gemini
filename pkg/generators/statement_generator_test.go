@@ -168,7 +168,8 @@ func TestGetCreateSchema(t *testing.T) {
 		},
 	}
 
-	for name, test := range tests {
+	for name := range tests {
+		test := tests[name]
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			got := generators.GetCreateTable(test.table, ks)
