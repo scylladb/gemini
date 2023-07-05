@@ -1,4 +1,10 @@
 # Changelog
+## [1.8.5] - 2023-07-05
+
+- Set oracle timeout properly ([3e8f096](https://github.com/scylladb/gemini/commit/3e8f096a9c7b9bf170761e417188c312e002b35b))
+- Update gocql to 1.8.0 ([6bbb4fb](https://github.com/scylladb/gemini/commit/6bbb4fbc6e68762271a233780592e8a26dc60c5b))
+- Gemini can get stuck at the end of test ([#372](https://github.com/scylladb/gemini/pull/372))
+
 ## [1.8.4] - 2023-06-20
 
 - Populate version info ([#361](https://github.com/scylladb/gemini/pull/361))
