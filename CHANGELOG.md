@@ -1,4 +1,8 @@
 # Changelog
+## [1.8.6] - 2023-07-06
+- Test stops after warmup ([9aa8f65](https://github.com/scylladb/gemini/commit/9aa8f65209d00b3a9cbb4ed40ca975dcf2236653))
+- Make goreleaser work after deprication of replacements ([99ddf27](https://github.com/scylladb/gemini/commit/99ddf274a81088a573bece7c11b358e405f588bb))
+
 ## [1.8.5] - 2023-07-05
 
 - Set oracle timeout properly ([3e8f096](https://github.com/scylladb/gemini/commit/3e8f096a9c7b9bf170761e417188c312e002b35b))
