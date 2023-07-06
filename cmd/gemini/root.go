@@ -281,8 +281,9 @@ func run(_ *cobra.Command, _ []string) error {
 
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, seed, stopFlag.CreateChild("warmup"), failFast, verbose); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, seed, stop.NewFlag("warmup"), failFast, verbose); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
+			stopFlag.SetHard(true)
 		}
 	}
 
