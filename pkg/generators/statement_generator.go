@@ -87,7 +87,7 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 	table.Indexes = indexes
 
 	var mvs []typedef.MaterializedView
-	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && len(clusteringKeys) > 0 {
+	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && len(clusteringKeys) > 0 && columns.ValidColumnsForPrimaryKey().Len() != 0 {
 		mvs = CreateMaterializedViews(columns, table.Name, partitionKeys, clusteringKeys, r)
 	}
 
