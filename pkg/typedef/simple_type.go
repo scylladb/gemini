@@ -44,8 +44,8 @@ func (l SimpleTypes) Contains(colType Type) bool {
 	return false
 }
 
-func (l SimpleTypes) Random() SimpleType {
-	return l[rand.Intn(len(l))]
+func (l SimpleTypes) Random(r *rand.Rand) SimpleType {
+	return l[r.Intn(len(l))]
 }
 
 type SimpleType string

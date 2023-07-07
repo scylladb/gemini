@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pkg/errors"
 	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/builders"
@@ -36,9 +35,12 @@ func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, _ *typedef.Pa
 	// case 0: // Alter column not supported in Cassandra from 3.0.11
 	//	return t.alterColumn(s.Keyspace.Name)
 	case 2:
-		return genDropColumnStmt(t, s.Keyspace.Name, validCols.Random())
+		return genDropColumnStmt(t, s.Keyspace.Name, validCols.Random(r))
 	default:
-		column := typedef.ColumnDef{Name: generators.GenColumnName("col", len(t.Columns)+1), Type: generators.GenColumnType(len(t.Columns)+1, sc)}
+		column := typedef.ColumnDef{
+			Name: generators.GenColumnName("col", len(t.Columns)+1),
+			Type: generators.GenColumnType(len(t.Columns)+1, sc, r),
+		}
 		return genAddColumnStmt(t, s.Keyspace.Name, &column)
 	}
 }
@@ -79,36 +81,6 @@ func genAddColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnD
 			t.Columns = append(t.Columns, column)
 			t.ResetQueryCache()
 		},
-	}, nil
-}
-
-//nolint:unused
-func alterColumn(t *typedef.Table, keyspace string) ([]*typedef.Stmt, func(), error) {
-	var stmts []*typedef.Stmt
-	idx := rand.Intn(len(t.Columns))
-	column := t.Columns[idx]
-	oldType, isSimpleType := column.Type.(typedef.SimpleType)
-	if !isSimpleType {
-		return nil, func() {}, errors.Errorf("complex type=%s cannot be altered", column.Name)
-	}
-	compatTypes := typedef.CompatibleColumnTypes[oldType]
-	if len(compatTypes) == 0 {
-		return nil, func() {}, errors.Errorf("simple type=%s has no compatible coltypes so it cannot be altered", column.Name)
-	}
-	newType := compatTypes.Random()
-	newColumn := typedef.ColumnDef{Name: column.Name, Type: newType}
-	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " ALTER " + column.Name + " TYPE " + column.Type.CQLDef()
-	stmts = append(stmts, &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
-			Query: &builders.AlterTableBuilder{
-				Stmt: stmt,
-			},
-			QueryType: typedef.AlterColumnStatementType,
-		},
-	})
-	return stmts, func() {
-		t.Columns[idx] = &newColumn
-		t.ResetQueryCache()
 	}, nil
 }
 

@@ -18,12 +18,15 @@ import (
 	"fmt"
 	"strings"
 
+	"golang.org/x/exp/rand"
+
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
-func GenSchema(sc typedef.SchemaConfig) *typedef.Schema {
+func GenSchema(sc typedef.SchemaConfig, seed uint64) *typedef.Schema {
+	r := rand.New(rand.NewSource(seed))
 	builder := builders.NewSchemaBuilder()
 	builder.Config(sc)
 	keyspace := typedef.Keyspace{
@@ -32,22 +35,22 @@ func GenSchema(sc typedef.SchemaConfig) *typedef.Schema {
 		OracleReplication: sc.OracleReplicationStrategy,
 	}
 	builder.Keyspace(keyspace)
-	numTables := utils.RandInt(1, sc.GetMaxTables())
+	numTables := utils.RandInt2(r, 1, sc.GetMaxTables())
 	for i := 0; i < numTables; i++ {
-		table := genTable(sc, fmt.Sprintf("table%d", i+1))
+		table := genTable(sc, fmt.Sprintf("table%d", i+1), r)
 		builder.Table(table)
 	}
 	return builder.Build()
 }
 
-func genTable(sc typedef.SchemaConfig, tableName string) *typedef.Table {
-	partitionKeys := make(typedef.Columns, utils.RandInt(sc.GetMinPartitionKeys(), sc.GetMaxPartitionKeys()))
+func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.Table {
+	partitionKeys := make(typedef.Columns, utils.RandInt2(r, sc.GetMinPartitionKeys(), sc.GetMaxPartitionKeys()))
 	for i := 0; i < len(partitionKeys); i++ {
-		partitionKeys[i] = &typedef.ColumnDef{Name: GenColumnName("pk", i), Type: GenPartitionKeyColumnType()}
+		partitionKeys[i] = &typedef.ColumnDef{Name: GenColumnName("pk", i), Type: GenPartitionKeyColumnType(r)}
 	}
-	clusteringKeys := make(typedef.Columns, utils.RandInt(sc.GetMinClusteringKeys(), sc.GetMaxClusteringKeys()))
+	clusteringKeys := make(typedef.Columns, utils.RandInt2(r, sc.GetMinClusteringKeys(), sc.GetMaxClusteringKeys()))
 	for i := 0; i < len(clusteringKeys); i++ {
-		clusteringKeys[i] = &typedef.ColumnDef{Name: GenColumnName("ck", i), Type: GenPrimaryKeyColumnType()}
+		clusteringKeys[i] = &typedef.ColumnDef{Name: GenColumnName("ck", i), Type: GenPrimaryKeyColumnType(r)}
 	}
 	table := typedef.Table{
 		Name:           tableName,
@@ -71,21 +74,21 @@ func genTable(sc typedef.SchemaConfig, tableName string) *typedef.Table {
 		}
 		return &table
 	}
-	columns := make(typedef.Columns, utils.RandInt(sc.GetMinColumns(), sc.GetMaxColumns()))
+	columns := make(typedef.Columns, utils.RandInt2(r, sc.GetMinColumns(), sc.GetMaxColumns()))
 	for i := 0; i < len(columns); i++ {
-		columns[i] = &typedef.ColumnDef{Name: GenColumnName("col", i), Type: GenColumnType(len(columns), &sc)}
+		columns[i] = &typedef.ColumnDef{Name: GenColumnName("col", i), Type: GenColumnType(len(columns), &sc, r)}
 	}
 	table.Columns = columns
 
 	var indexes []typedef.IndexDef
 	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && len(columns) > 0 {
-		indexes = CreateIndexesForColumn(&table, utils.RandInt(1, len(columns)))
+		indexes = CreateIndexesForColumn(&table, utils.RandInt2(r, 1, len(columns)))
 	}
 	table.Indexes = indexes
 
 	var mvs []typedef.MaterializedView
 	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && len(clusteringKeys) > 0 {
-		mvs = CreateMaterializedViews(columns, table.Name, partitionKeys, clusteringKeys)
+		mvs = CreateMaterializedViews(columns, table.Name, partitionKeys, clusteringKeys, r)
 	}
 
 	table.MaterializedViews = mvs
@@ -143,12 +146,12 @@ func GetDropSchema(s *typedef.Schema) []string {
 	}
 }
 
-func CreateMaterializedViews(c typedef.Columns, tableName string, partitionKeys, clusteringKeys typedef.Columns) []typedef.MaterializedView {
+func CreateMaterializedViews(c typedef.Columns, tableName string, partitionKeys, clusteringKeys typedef.Columns, r *rand.Rand) []typedef.MaterializedView {
 	validColumns := c.ValidColumnsForPrimaryKey()
 	var mvs []typedef.MaterializedView
 	numMvs := 1
 	for i := 0; i < numMvs; i++ {
-		col := validColumns.Random()
+		col := validColumns.Random(r)
 		if col == nil {
 			fmt.Printf("unable to generate valid columns for materialized view")
 			continue

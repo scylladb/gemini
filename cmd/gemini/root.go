@@ -197,7 +197,7 @@ func run(_ *cobra.Command, _ []string) error {
 			return errors.Wrap(err, "cannot create schema")
 		}
 	} else {
-		schema = generators.GenSchema(schemaConfig)
+		schema = generators.GenSchema(schemaConfig, seed)
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
