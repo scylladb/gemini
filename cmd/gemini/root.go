@@ -33,7 +33,6 @@ import (
 	"github.com/scylladb/gemini/pkg/jobs"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/store"
-	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 
@@ -390,19 +389,6 @@ func createClusters(
 	}
 	oracleCluster.Authenticator = oracleAuthenticator
 	return testCluster, oracleCluster
-}
-
-func createTableOptions(tableOptionStrings []string, logger *zap.Logger) []tableopts.Option {
-	var tableOptions []tableopts.Option
-	for _, optionString := range tableOptionStrings {
-		o, err := tableopts.FromCQL(optionString)
-		if err != nil {
-			logger.Warn("invalid table option", zap.String("option", optionString), zap.Error(err))
-			continue
-		}
-		tableOptions = append(tableOptions, o)
-	}
-	return tableOptions
 }
 
 func getReplicationStrategy(rs string, fallback *replication.Replication, logger *zap.Logger) *replication.Replication {
