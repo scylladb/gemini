@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/typedef"
 
 	"go.uber.org/zap"
@@ -67,7 +68,7 @@ func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 	return typedef.SchemaConfig{
 		ReplicationStrategy:              rs,
 		OracleReplicationStrategy:        ors,
-		TableOptions:                     createTableOptions(tableOptions, logger),
+		TableOptions:                     tableopts.CreateTableOptions(tableOptions, logger),
 		MaxTables:                        maxTables,
 		MaxPartitionKeys:                 maxPartitionKeys,
 		MinPartitionKeys:                 minPartitionKeys,

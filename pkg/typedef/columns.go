@@ -124,8 +124,8 @@ func (c Columns) ValidColumnsForPrimaryKey() Columns {
 	return validCols
 }
 
-func (c Columns) Random() *ColumnDef {
-	return c[rand.Intn(len(c))]
+func (c Columns) Random(r *rand.Rand) *ColumnDef {
+	return c[r.Intn(len(c))]
 }
 
 func (c Columns) LenValues() int {

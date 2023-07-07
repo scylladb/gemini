@@ -39,3 +39,20 @@ func NewNetworkTopologyStrategy() *Replication {
 		"datacenter1": 1,
 	}
 }
+
+func (r *Replication) UnmarshalJSON(data []byte) error {
+	dataMap := make(map[string]interface{})
+	if err := json.Unmarshal(data, &dataMap); err != nil {
+		return err
+	}
+	out := Replication{}
+	for idx := range dataMap {
+		val := dataMap[idx]
+		if fVal, ok := val.(float64); ok {
+			dataMap[idx] = int(fVal)
+		}
+		out[idx] = dataMap[idx]
+	}
+	*r = out
+	return nil
+}

@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -110,8 +111,9 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 
 func TestMarshalUnmarshal(t *testing.T) {
 	t.Parallel()
+	r := rand.New(rand.NewSource(rand.Uint64()))
 
-	s1 := getTestSchema()
+	s1 := getTestSchema(r)
 
 	opts := cmp.Options{
 		cmp.AllowUnexported(typedef.Table{}, typedef.MaterializedView{}),
@@ -134,6 +136,8 @@ func TestMarshalUnmarshal(t *testing.T) {
 }
 
 func TestPrimitives(t *testing.T) {
+	r := rand.New(rand.NewSource(rand.Uint64()))
+
 	t.Parallel()
 
 	sc := &typedef.SchemaConfig{
@@ -150,11 +154,11 @@ func TestPrimitives(t *testing.T) {
 	cols := typedef.Columns{
 		&typedef.ColumnDef{
 			Name: "pk_mv_0",
-			Type: generators.GenListType(sc),
+			Type: generators.GenListType(sc, r),
 		},
 		&typedef.ColumnDef{
 			Name: "pk_mv_1",
-			Type: generators.GenTupleType(sc),
+			Type: generators.GenTupleType(sc, r),
 		},
 		&typedef.ColumnDef{
 			Name: "ct_1",
@@ -207,7 +211,8 @@ func TestPrimitives(t *testing.T) {
 func TestValidColumnsForDelete(t *testing.T) {
 	t.Parallel()
 
-	s1 := getTestSchema()
+	r := rand.New(rand.NewSource(rand.Uint64()))
+	s1 := getTestSchema(r)
 	expected := typedef.Columns{
 		s1.Tables[0].Columns[2],
 		s1.Tables[0].Columns[3],
@@ -241,7 +246,7 @@ func TestValidColumnsForDelete(t *testing.T) {
 	}
 }
 
-func getTestSchema() *typedef.Schema {
+func getTestSchema(r *rand.Rand) *typedef.Schema {
 	sc := &typedef.SchemaConfig{
 		MaxPartitionKeys:  3,
 		MinPartitionKeys:  2,
@@ -255,23 +260,23 @@ func getTestSchema() *typedef.Schema {
 	columns := typedef.Columns{
 		&typedef.ColumnDef{
 			Name: generators.GenColumnName("col", 0),
-			Type: generators.GenMapType(sc),
+			Type: generators.GenMapType(sc, r),
 		},
 		&typedef.ColumnDef{
 			Name: generators.GenColumnName("col", 1),
-			Type: generators.GenSetType(sc),
+			Type: generators.GenSetType(sc, r),
 		},
 		&typedef.ColumnDef{
 			Name: generators.GenColumnName("col", 2),
-			Type: generators.GenListType(sc),
+			Type: generators.GenListType(sc, r),
 		},
 		&typedef.ColumnDef{
 			Name: generators.GenColumnName("col", 3),
-			Type: generators.GenTupleType(sc),
+			Type: generators.GenTupleType(sc, r),
 		},
 		&typedef.ColumnDef{
 			Name: generators.GenColumnName("col", 4),
-			Type: generators.GenUDTType(sc),
+			Type: generators.GenUDTType(sc, r),
 		},
 	}
 
@@ -282,13 +287,13 @@ func getTestSchema() *typedef.Schema {
 				PartitionKeys: typedef.Columns{
 					&typedef.ColumnDef{
 						Name: generators.GenColumnName("pk", 0),
-						Type: generators.GenSimpleType(sc),
+						Type: generators.GenSimpleType(sc, r),
 					},
 				},
 				ClusteringKeys: typedef.Columns{
 					&typedef.ColumnDef{
 						Name: generators.GenColumnName("ck", 0),
-						Type: generators.GenSimpleType(sc),
+						Type: generators.GenSimpleType(sc, r),
 					},
 				},
 				Columns: columns,

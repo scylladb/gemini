@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 type Option interface {
@@ -64,4 +65,17 @@ func FromCQL(cql string) (Option, error) {
 		key: keyPart,
 		val: valPart,
 	}, nil
+}
+
+func CreateTableOptions(tableOptionStrings []string, logger *zap.Logger) []Option {
+	var tableOptions []Option
+	for _, optionString := range tableOptionStrings {
+		o, err := FromCQL(optionString)
+		if err != nil {
+			logger.Warn("invalid table option", zap.String("option", optionString), zap.Error(err))
+			continue
+		}
+		tableOptions = append(tableOptions, o)
+	}
+	return tableOptions
 }

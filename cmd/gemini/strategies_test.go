@@ -60,7 +60,8 @@ func TestGetReplicationStrategy(t *testing.T) {
 	}
 }
 
-func TestReadSchema(t *testing.T) {
+// TestReadExampleSchema main task of this test to be sure that schema example (schema.json) is correct and have correct marshal, unmarshal
+func TestReadExampleSchema(t *testing.T) {
 	filePath := "schema.json"
 
 	testSchema, err := readSchema(filePath, typedef.SchemaConfig{})

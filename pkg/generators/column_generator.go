@@ -26,51 +26,51 @@ func GenColumnName(prefix string, idx int) string {
 	return fmt.Sprintf("%s%d", prefix, idx)
 }
 
-func GenColumnType(numColumns int, sc *typedef.SchemaConfig) typedef.Type {
-	n := rand.Intn(numColumns + 5)
+func GenColumnType(numColumns int, sc *typedef.SchemaConfig, r *rand.Rand) typedef.Type {
+	n := r.Intn(numColumns + 5)
 	switch n {
 	case numColumns:
-		return GenTupleType(sc)
+		return GenTupleType(sc, r)
 	case numColumns + 1:
-		return GenUDTType(sc)
+		return GenUDTType(sc, r)
 	case numColumns + 2:
-		return GenSetType(sc)
+		return GenSetType(sc, r)
 	case numColumns + 3:
-		return GenListType(sc)
+		return GenListType(sc, r)
 	case numColumns + 4:
-		return GenMapType(sc)
+		return GenMapType(sc, r)
 	default:
-		return GenSimpleType(sc)
+		return GenSimpleType(sc, r)
 	}
 }
 
-func GenSimpleType(_ *typedef.SchemaConfig) typedef.SimpleType {
-	return typedef.AllTypes[rand.Intn(len(typedef.AllTypes))]
+func GenSimpleType(_ *typedef.SchemaConfig, r *rand.Rand) typedef.SimpleType {
+	return typedef.AllTypes[r.Intn(len(typedef.AllTypes))]
 }
 
-func GenTupleType(sc *typedef.SchemaConfig) typedef.Type {
-	n := rand.Intn(sc.MaxTupleParts)
+func GenTupleType(sc *typedef.SchemaConfig, r *rand.Rand) typedef.Type {
+	n := r.Intn(sc.MaxTupleParts)
 	if n < 2 {
 		n = 2
 	}
 	typeList := make([]typedef.SimpleType, n)
 	for i := 0; i < n; i++ {
-		typeList[i] = GenSimpleType(sc)
+		typeList[i] = GenSimpleType(sc, r)
 	}
 	return &typedef.TupleType{
 		ComplexType: typedef.TYPE_TUPLE,
 		ValueTypes:  typeList,
-		Frozen:      rand.Uint32()%2 == 0,
+		Frozen:      r.Uint32()%2 == 0,
 	}
 }
 
-func GenUDTType(sc *typedef.SchemaConfig) *typedef.UDTType {
-	udtNum := rand.Uint32()
+func GenUDTType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.UDTType {
+	udtNum := r.Uint32()
 	typeName := fmt.Sprintf("udt_%d", udtNum)
 	ts := make(map[string]typedef.SimpleType)
 
-	for i := 0; i < rand.Intn(sc.MaxUDTParts)+1; i++ {
-		ts[typeName+fmt.Sprintf("_%d", i)] = GenSimpleType(sc)
+	for i := 0; i < r.Intn(sc.MaxUDTParts)+1; i++ {
+		ts[typeName+fmt.Sprintf("_%d", i)] = GenSimpleType(sc, r)
 	}
 
 	return &typedef.UDTType{
@@ -81,18 +81,18 @@ func GenUDTType(sc *typedef.SchemaConfig) *typedef.UDTType {
 	}
 }
 
-func GenSetType(sc *typedef.SchemaConfig) *typedef.BagType {
-	return genBagType(typedef.TYPE_SET, sc)
+func GenSetType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.BagType {
+	return genBagType(typedef.TYPE_SET, sc, r)
 }
 
-func GenListType(sc *typedef.SchemaConfig) *typedef.BagType {
-	return genBagType(typedef.TYPE_LIST, sc)
+func GenListType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.BagType {
+	return genBagType(typedef.TYPE_LIST, sc, r)
 }
 
-func genBagType(kind string, sc *typedef.SchemaConfig) *typedef.BagType {
+func genBagType(kind string, sc *typedef.SchemaConfig, r *rand.Rand) *typedef.BagType {
 	var t typedef.SimpleType
 	for {
-		t = GenSimpleType(sc)
+		t = GenSimpleType(sc, r)
 		if t != typedef.TYPE_DURATION {
 			break
 		}
@@ -100,32 +100,32 @@ func genBagType(kind string, sc *typedef.SchemaConfig) *typedef.BagType {
 	return &typedef.BagType{
 		ComplexType: kind,
 		ValueType:   t,
-		Frozen:      rand.Uint32()%2 == 0,
+		Frozen:      r.Uint32()%2 == 0,
 	}
 }
 
-func GenMapType(sc *typedef.SchemaConfig) *typedef.MapType {
-	t := GenSimpleType(sc)
+func GenMapType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.MapType {
+	t := GenSimpleType(sc, r)
 	for {
 		if _, ok := typedef.TypesMapKeyBlacklist[t]; !ok {
 			break
 		}
-		t = GenSimpleType(sc)
+		t = GenSimpleType(sc, r)
 	}
 	return &typedef.MapType{
 		ComplexType: typedef.TYPE_MAP,
 		KeyType:     t,
-		ValueType:   GenSimpleType(sc),
-		Frozen:      rand.Uint32()%2 == 0,
+		ValueType:   GenSimpleType(sc, r),
+		Frozen:      r.Uint32()%2 == 0,
 	}
 }
 
-func GenPartitionKeyColumnType() typedef.Type {
-	return typedef.PartitionKeyTypes[rand.Intn(len(typedef.PartitionKeyTypes))]
+func GenPartitionKeyColumnType(r *rand.Rand) typedef.Type {
+	return typedef.PartitionKeyTypes[r.Intn(len(typedef.PartitionKeyTypes))]
 }
 
-func GenPrimaryKeyColumnType() typedef.Type {
-	return typedef.PkTypes[rand.Intn(len(typedef.PkTypes))]
+func GenPrimaryKeyColumnType(r *rand.Rand) typedef.Type {
+	return typedef.PkTypes[r.Intn(len(typedef.PkTypes))]
 }
 
 func GenIndexName(prefix string, idx int) string {
