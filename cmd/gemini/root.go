@@ -62,6 +62,7 @@ var (
 	outFileArg                       string
 	concurrency                      uint64
 	seed                             uint64
+	schemaSeed                       uint64
 	dropSchema                       bool
 	verbose                          bool
 	mode                             string
@@ -144,6 +145,8 @@ func run(_ *cobra.Command, _ []string) error {
 	globalStatus := status.NewGlobalStatus(1000)
 	defer utils.IgnoreError(logger.Sync)
 
+	rand.Seed(seed)
+
 	cons, err := gocql.ParseConsistencyWrapper(consistency)
 	if err != nil {
 		logger.Error("Unable parse consistency, error=%s. Falling back on Quorum", zap.Error(err))
@@ -197,7 +200,7 @@ func run(_ *cobra.Command, _ []string) error {
 			return errors.Wrap(err, "cannot create schema")
 		}
 	} else {
-		schema = generators.GenSchema(schemaConfig, seed)
+		schema = generators.GenSchema(schemaConfig, schemaSeed)
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
@@ -278,9 +281,8 @@ func run(_ *cobra.Command, _ []string) error {
 
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, seed, stop.NewFlag("warmup"), failFast, verbose); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, seed, stopFlag.CreateChild("warmup"), failFast, verbose); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
-			stopFlag.SetHard(true)
 		}
 	}
 
@@ -379,8 +381,8 @@ func createClusters(
 		return testCluster, nil
 	}
 	oracleCluster := gocql.NewCluster(oracleClusterHost...)
-	oracleCluster.Timeout = requestTimeout
-	oracleCluster.ConnectTimeout = connectTimeout
+	testCluster.Timeout = requestTimeout
+	testCluster.ConnectTimeout = connectTimeout
 	oracleCluster.RetryPolicy = retryPolicy
 	oracleCluster.Consistency = consistency
 	oracleCluster.PoolConfig.HostSelectionPolicy = oracleHostSelectionPolicy
@@ -453,7 +455,8 @@ func init() {
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", jobs.MixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	rootCmd.Flags().Uint64VarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
-	rootCmd.Flags().Uint64VarP(&seed, "seed", "s", 1, "PRNG seed value")
+	rootCmd.Flags().Uint64VarP(&seed, "seed", "s", 1, "Statement seed value")
+	rootCmd.Flags().Uint64VarP(&schemaSeed, "schema-seed", "", 1, "Schema seed value")
 	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
 	rootCmd.Flags().BoolVarP(&failFast, "fail-fast", "f", false, "Stop on the first failure")
@@ -520,8 +523,8 @@ func init() {
 func printSetup() error {
 	tw := new(tabwriter.Writer)
 	tw.Init(os.Stdout, 0, 8, 2, '\t', tabwriter.AlignRight)
-	rand.Seed(seed)
 	fmt.Fprintf(tw, "Seed:\t%d\n", seed)
+	fmt.Fprintf(tw, "Schema seed:\t%d\n", schemaSeed)
 	fmt.Fprintf(tw, "Maximum duration:\t%s\n", duration)
 	fmt.Fprintf(tw, "Warmup duration:\t%s\n", warmup)
 	fmt.Fprintf(tw, "Concurrency:\t%d\n", concurrency)
