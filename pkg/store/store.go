@@ -20,6 +20,7 @@ import (
 	"math/big"
 	"os"
 	"sort"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -177,13 +178,21 @@ func mutate(ctx context.Context, s storeLoader, builder qb.Builder, values ...in
 }
 
 func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, builder qb.Builder, values ...interface{}) error {
-	testRows, err := ds.testStore.load(ctx, builder, values)
-	if err != nil {
-		return errors.Wrapf(err, "unable to load check data from the test store")
+	var testRows, oracleRows []map[string]interface{}
+	var testErr, oracleErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		testRows, testErr = ds.testStore.load(ctx, builder, values)
+		wg.Done()
+	}()
+	oracleRows, oracleErr = ds.oracleStore.load(ctx, builder, values)
+	if oracleErr != nil {
+		return errors.Wrapf(oracleErr, "unable to load check data from the oracle store")
 	}
-	oracleRows, err := ds.oracleStore.load(ctx, builder, values)
-	if err != nil {
-		return errors.Wrapf(err, "unable to load check data from the oracle store")
+	wg.Wait()
+	if testErr != nil {
+		return errors.Wrapf(testErr, "unable to load check data from the test store")
 	}
 	if !ds.validations {
 		return nil
