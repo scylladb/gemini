@@ -21,13 +21,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/scylladb/gemini/pkg/count"
 	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/store"
-	"github.com/scylladb/gemini/pkg/typedef"
-
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
+	"github.com/scylladb/gemini/pkg/store"
+	"github.com/scylladb/gemini/pkg/typedef"
 
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
@@ -52,6 +52,13 @@ var (
 	validate = job{name: validateName, function: validationJob}
 	mutate   = job{name: mutateName, function: mutationJob}
 )
+
+var stmtsCounter = count.StmtsCounters.AddTotalCounter(count.Info{
+	Name:                  "total statement`s count",
+	Unit:                  "pc.",
+	Description:           "count of all generated statement`s by its type",
+	PrometheusIntegration: false,
+}, "", []string{"Select", "SelectRange", "SelectByIndex", "SelectFromMaterializedView", "Delete", "Insert", "InsertJSON", "Update", "AlterColumn", "DropColumn", "AddColumn"})
 
 type List struct {
 	name     string
@@ -325,6 +332,7 @@ func ddl(
 		if w := logger.Check(zap.DebugLevel, "ddl statement"); w != nil {
 			w.Write(zap.String("pretty_cql", ddlStmt.PrettyCQL()))
 		}
+		stmtsCounter.Inc(int(ddlStmt.QueryType))
 		if err = s.Mutate(ctx, ddlStmt.Query); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
@@ -374,6 +382,7 @@ func mutation(
 	}
 	mutateQuery := mutateStmt.Query
 	mutateValues := mutateStmt.Values
+	stmtsCounter.Inc(int(mutateStmt.QueryType))
 	if mutateStmt.ValuesWithToken != nil {
 		defer func() {
 			g.GiveOld(mutateStmt.ValuesWithToken)
@@ -426,7 +435,7 @@ func validation(
 		}
 		delay = sc.AsyncObjectStabilizationDelay
 	}
-
+	stmtsCounter.Inc(int(stmt.QueryType))
 	var lastErr, err error
 	attempt := 1
 	for {

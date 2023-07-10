@@ -22,6 +22,7 @@ import (
 
 	"github.com/pkg/errors"
 
+	"github.com/scylladb/gemini/pkg/count"
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -96,6 +97,7 @@ func (gs *GlobalStatus) PrintResult(w io.Writer, schema *typedef.Schema, version
 		jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
 		fmt.Printf("Schema: %v\n", string(jsonSchema))
 	}
+	count.PrintAllGroups()
 }
 
 func NewGlobalStatus(limit int32) *GlobalStatus {

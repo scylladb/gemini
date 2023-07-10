@@ -35,8 +35,16 @@ import (
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
 
+	"github.com/scylladb/gemini/pkg/count"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
+
+var nilRowsValidate = count.StmtsCounters.AddSimpleCounter(count.Info{
+	Name:                  "nil rows validate responses",
+	Unit:                  "pc.",
+	Description:           "count validate responses with nil rows",
+	PrometheusIntegration: false,
+})
 
 type loader interface {
 	load(context.Context, qb.Builder, []interface{}) ([]map[string]interface{}, error)
@@ -189,6 +197,7 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, build
 		return nil
 	}
 	if len(testRows) == 0 && len(oracleRows) == 0 {
+		nilRowsValidate.Inc()
 		return nil
 	}
 	if len(testRows) != len(oracleRows) {
