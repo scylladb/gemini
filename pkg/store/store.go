@@ -162,12 +162,25 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder
 }
 
 func (ds delegatingStore) Mutate(ctx context.Context, builder qb.Builder, values ...interface{}) error {
-	if err := mutate(ctx, ds.oracleStore, builder, values...); err != nil {
+	var testErr error
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		testErr = mutate(ctx, ds.testStore, builder, values...)
+		wg.Done()
+	}()
+	if oracleErr := mutate(ctx, ds.oracleStore, builder, values...); oracleErr != nil {
 		// Oracle failed, transition cannot take place
-		ds.logger.Info("oracle failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(err))
-		return nil
+		ds.logger.Info("oracle store failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(oracleErr))
+		return oracleErr
 	}
-	return mutate(ctx, ds.testStore, builder, values...)
+	wg.Wait()
+	if testErr != nil {
+		// Test store failed, transition cannot take place
+		ds.logger.Info("test store failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(testErr))
+		return testErr
+	}
+	return nil
 }
 
 func mutate(ctx context.Context, s storeLoader, builder qb.Builder, values ...interface{}) error {
