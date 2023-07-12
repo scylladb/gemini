@@ -42,11 +42,12 @@ func RandDate(rnd *rand.Rand) time.Time {
 	return time.Unix(rnd.Int63n(1<<63-2), rnd.Int63n(999999999)).UTC()
 }
 
-// RandTime generates time in string representation
-// it is done in such way because we wanted to make JSON statement to work
-// but scylla supports only string representation of time in JSON format
+// According to the CQL binary protocol, time is an int64 in range [0;86399999999999]
+// https://github.com/apache/cassandra/blob/f5df4b219e063cb24b9cc0c22b6e614506b8d903/doc/native_protocol_v4.spec#L941
+// An 8 byte two's complement long representing nanoseconds since midnight.
+// Valid values are in the range 0 to 86399999999999
 func RandTime(rnd *rand.Rand) int64 {
-	return rnd.Int63()
+	return rnd.Int63n(86400000000000)
 }
 
 func RandIPV4Address(rnd *rand.Rand, v, pos int) string {
