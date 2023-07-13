@@ -146,20 +146,20 @@ func (mt *MapType) CQLPretty(query string, value []interface{}) (string, int) {
 
 func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
 	count := r.Intn(9) + 1
-	vals := make(map[interface{}]interface{})
+	vals := reflect.MakeMap(reflect.MapOf(reflect.TypeOf(mt.KeyType.GenJSONValue(r, p)), reflect.TypeOf(mt.ValueType.GenJSONValue(r, p))))
 	for i := 0; i < count; i++ {
-		vals[mt.KeyType.GenJSONValue(r, p)] = mt.ValueType.GenJSONValue(r, p)
+		vals.SetMapIndex(reflect.ValueOf(mt.KeyType.GenJSONValue(r, p)), reflect.ValueOf(mt.ValueType.GenJSONValue(r, p)))
 	}
-	return vals
+	return vals.Interface()
 }
 
 func (mt *MapType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	count := r.Intn(9) + 1
-	vals := make(map[interface{}]interface{})
+	vals := reflect.MakeMap(reflect.MapOf(reflect.TypeOf(mt.KeyType.GenJSONValue(r, p)), reflect.TypeOf(mt.ValueType.GenJSONValue(r, p))))
 	for i := 0; i < count; i++ {
-		vals[mt.KeyType.GenValue(r, p)[0]] = mt.ValueType.GenValue(r, p)[0]
+		vals.SetMapIndex(reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]), reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]))
 	}
-	return []interface{}{vals}
+	return []interface{}{vals.Interface()}
 }
 
 func (mt *MapType) LenValue() int {
