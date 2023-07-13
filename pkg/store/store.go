@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -220,6 +221,9 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, build
 		missingInOracle := strset.Difference(testSet, oracleSet).List()
 		return fmt.Errorf("row count differ (test has %d rows, oracle has %d rows, test is missing rows: %s, oracle is missing rows: %s)",
 			len(testRows), len(oracleRows), missingInTest, missingInOracle)
+	}
+	if reflect.DeepEqual(testRows, oracleRows) {
+		return nil
 	}
 	sort.SliceStable(testRows, func(i, j int) bool {
 		return lt(testRows[i], testRows[j])
