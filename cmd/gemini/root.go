@@ -15,6 +15,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -38,6 +39,8 @@ import (
 
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
+
+	crand "crypto/rand"
 
 	"github.com/gocql/gocql"
 	"github.com/hailocab/go-hostpool"
@@ -178,10 +181,6 @@ func run(_ *cobra.Command, _ []string) error {
 	if err = printSetup(); err != nil {
 		return errors.Wrapf(err, "unable to print setup")
 	}
-	distFunc, err := createDistributionFunc(partitionKeyDistribution, math.MaxUint64, seed, stdDistMean, oneStdDev)
-	if err != nil {
-		return err
-	}
 
 	outFile, err := createFile(outFileArg, os.Stdout)
 	if err != nil {
@@ -259,9 +258,12 @@ func run(_ *cobra.Command, _ []string) error {
 	stopFlag := stop.NewFlag("main")
 	warmupStopFlag := stop.NewFlag("warmup")
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
-	pump := jobs.NewPump(ctx, logger)
+	pump := jobs.NewPump(stopFlag, logger)
 
-	gens := createGenerators(schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
+	gens, err := createGenerators(schema, schemaConfig, concurrency, partitionCount, logger)
+	if err != nil {
+		return err
+	}
 	gens.StartAll(stopFlag)
 
 	if !nonInteractive {
@@ -457,8 +459,8 @@ func init() {
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", jobs.MixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	rootCmd.Flags().Uint64VarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
-	rootCmd.Flags().Uint64VarP(&seed, "seed", "s", 1, "Statement seed value")
-	rootCmd.Flags().Uint64VarP(&schemaSeed, "schema-seed", "", 1, "Schema seed value")
+	rootCmd.Flags().Uint64VarP(&seed, "seed", "s", RealRandom(), "Statement seed value")
+	rootCmd.Flags().Uint64VarP(&schemaSeed, "schema-seed", "", RealRandom(), "Schema seed value")
 	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
 	rootCmd.Flags().BoolVarP(&failFast, "fail-fast", "f", false, "Stop on the first failure")
@@ -539,4 +541,13 @@ func printSetup() error {
 	}
 	tw.Flush()
 	return nil
+}
+
+func RealRandom() uint64 {
+	var b [8]byte
+	_, err := crand.Read(b[:])
+	if err != nil {
+		return uint64(time.Now().Nanosecond() * time.Now().Second())
+	}
+	return binary.LittleEndian.Uint64(b[:])
 }

@@ -60,6 +60,7 @@ func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, v
 	result := map[string]interface{}{
 		"result":         gs,
 		"gemini_version": version,
+		"schemaHash":     schema.GetHash(),
 		"schema":         schema,
 	}
 	encoder := json.NewEncoder(w)

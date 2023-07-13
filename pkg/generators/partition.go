@@ -35,7 +35,7 @@ type Partition struct {
 func (s *Partition) get() *typedef.ValueWithToken {
 	for {
 		v := s.pick()
-		if s.inFlight.AddIfNotPresent(v.Token) {
+		if v == nil || s.inFlight.AddIfNotPresent(v.Token) {
 			return v
 		}
 	}

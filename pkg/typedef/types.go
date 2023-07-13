@@ -65,8 +65,13 @@ var (
 		TYPE_DURATION: {},
 	}
 	TypesForIndex     = SimpleTypes{TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT, TYPE_VARINT}
-	PartitionKeyTypes = SimpleTypes{TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT, TYPE_VARINT}
-	PkTypes           = SimpleTypes{
+	PartitionKeyTypes = SimpleTypes{
+		TYPE_ASCII, TYPE_BIGINT, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE,
+		TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT, TYPE_TIME, TYPE_TIMESTAMP, TYPE_TIMEUUID,
+		TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT, TYPE_BOOLEAN,
+	}
+
+	PkTypes = SimpleTypes{
 		TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE,
 		TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT, TYPE_TIME, TYPE_TIMESTAMP, TYPE_TIMEUUID,
 		TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT,
@@ -155,7 +160,7 @@ func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface
 
 func (mt *MapType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
 	count := r.Intn(9) + 1
-	vals := reflect.MakeMap(reflect.MapOf(reflect.TypeOf(mt.KeyType.GenJSONValue(r, p)), reflect.TypeOf(mt.ValueType.GenJSONValue(r, p))))
+	vals := reflect.MakeMap(reflect.MapOf(reflect.TypeOf(mt.KeyType.GenValue(r, p)[0]), reflect.TypeOf(mt.ValueType.GenValue(r, p)[0])))
 	for i := 0; i < count; i++ {
 		vals.SetMapIndex(reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]), reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]))
 	}

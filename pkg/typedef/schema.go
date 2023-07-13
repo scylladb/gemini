@@ -14,6 +14,13 @@
 
 package typedef
 
+import (
+	"encoding/json"
+	"strconv"
+
+	"github.com/scylladb/gemini/pkg/murmur"
+)
+
 type MaterializedView struct {
 	NonPrimaryKey          *ColumnDef
 	Name                   string  `json:"name"`
@@ -26,6 +33,14 @@ type Schema struct {
 	Keyspace Keyspace     `json:"keyspace"`
 	Tables   []*Table     `json:"tables"`
 	Config   SchemaConfig `json:"-"`
+}
+
+func (s *Schema) GetHash() string {
+	out, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return strconv.FormatUint(uint64(murmur.Murmur3H1(out)), 16)
 }
 
 func (m *MaterializedView) HaveNonPrimaryKey() bool {
