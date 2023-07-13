@@ -202,11 +202,11 @@ func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) interface{}
 	case TYPE_INT:
 		return r.Int31()
 	case TYPE_SMALLINT:
-		return int16(r.Int31())
+		return int16(r.Uint64n(65535))
 	case TYPE_TIMEUUID, TYPE_UUID:
 		return utils.UUIDFromTime(r)
 	case TYPE_TINYINT:
-		return int8(r.Int31())
+		return int8(r.Uint64n(255))
 	case TYPE_VARINT:
 		return big.NewInt(r.Int63())
 	default:

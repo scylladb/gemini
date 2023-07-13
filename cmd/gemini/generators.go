@@ -23,23 +23,29 @@ import (
 func createGenerators(
 	schema *typedef.Schema,
 	schemaConfig typedef.SchemaConfig,
-	distributionFunc generators.DistributionFunc,
 	_, distributionSize uint64,
 	logger *zap.Logger,
-) generators.Generators {
+) (generators.Generators, error) {
 	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 
 	var gs []*generators.Generator
-	for _, table := range schema.Tables {
+	for id := range schema.Tables {
+		table := schema.Tables[id]
+
+		distFunc, err := createDistributionFunc(partitionKeyDistribution, partitionCount, seed, stdDistMean, oneStdDev)
+		if err != nil {
+			return nil, err
+		}
+
 		gCfg := &generators.Config{
 			PartitionsRangeConfig:      partitionRangeConfig,
 			PartitionsCount:            distributionSize,
-			PartitionsDistributionFunc: distributionFunc,
+			PartitionsDistributionFunc: distFunc,
 			Seed:                       seed,
 			PkUsedBufferSize:           pkBufferReuseSize,
 		}
 		g := generators.NewGenerator(table, gCfg, logger.Named("generators"))
 		gs = append(gs, g)
 	}
-	return gs
+	return gs, nil
 }

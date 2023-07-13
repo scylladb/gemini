@@ -54,7 +54,6 @@ type Generator struct {
 	partitions        Partitions
 	partitionsConfig  typedef.PartitionRangeConfig
 	partitionCount    uint64
-	seed              uint64
 
 	cntCreated uint64
 	cntEmitted uint64
@@ -87,7 +86,6 @@ func NewGenerator(table *typedef.Table, config *Config, logger *zap.Logger) *Gen
 		partitionCount:    config.PartitionsCount,
 		table:             table,
 		partitionsConfig:  config.PartitionsRangeConfig,
-		seed:              config.Seed,
 		idxFunc:           config.PartitionsDistributionFunc,
 		logger:            logger,
 		wakeUpSignal:      wakeUpSignal,
@@ -121,7 +119,7 @@ func (g *Generator) Start(stopFlag *stop.Flag) {
 		g.logger.Info("starting partition key generation loop")
 		defer g.partitions.CloseAll()
 		for {
-			g.fillAllPartitions()
+			g.fillAllPartitions(stopFlag)
 			select {
 			case <-stopFlag.SignalChannel():
 				g.logger.Debug("stopping partition key generation loop",
@@ -137,7 +135,7 @@ func (g *Generator) Start(stopFlag *stop.Flag) {
 // fillAllPartitions guarantees that each partition was tested to be full
 // at least once since the function started and before it ended.
 // In other words no partition will be starved.
-func (g *Generator) fillAllPartitions() {
+func (g *Generator) fillAllPartitions(stopFlag *stop.Flag) {
 	pFilled := make([]bool, len(g.partitions))
 	allFilled := func() bool {
 		for _, filled := range pFilled {
@@ -160,6 +158,9 @@ func (g *Generator) fillAllPartitions() {
 		case partition.values <- &typedef.ValueWithToken{Token: token, Value: values}:
 			g.cntEmitted++
 		default:
+			if stopFlag.IsHardOrSoft() {
+				return
+			}
 			if !pFilled[idx] {
 				pFilled[idx] = true
 				if allFilled() {
