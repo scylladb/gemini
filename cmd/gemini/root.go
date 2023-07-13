@@ -257,7 +257,8 @@ func run(_ *cobra.Command, _ []string) error {
 
 	ctx, done := context.WithTimeout(context.Background(), duration+warmup+time.Second*2)
 	stopFlag := stop.NewFlag("main")
-	stop.StartOsSignalsTransmitter(logger, stopFlag)
+	warmupStopFlag := stop.NewFlag("warmup")
+	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
 	pump := jobs.NewPump(ctx, logger)
 
 	gens := createGenerators(schema, schemaConfig, distFunc, concurrency, partitionCount, logger)
@@ -281,7 +282,7 @@ func run(_ *cobra.Command, _ []string) error {
 
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, seed, stop.NewFlag("warmup"), failFast, verbose); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, seed, warmupStopFlag, failFast, verbose); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
 			stopFlag.SetHard(true)
 		}
