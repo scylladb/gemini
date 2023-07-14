@@ -188,21 +188,23 @@ func genMultiplePartitionQuery(
 ) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
-	var (
-		values []interface{}
-		typs   []typedef.Type
-	)
+	typs := make([]typedef.Type, numQueryPKs*t.PartitionKeys.Len())
+	values := make([]interface{}, numQueryPKs*t.PartitionKeys.Len())
+
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
-	for i, pk := range t.PartitionKeys {
-		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
-		for j := 0; j < numQueryPKs; j++ {
-			vs := g.GetOld()
-			if vs == nil {
-				return nil
-			}
-			values = append(values, vs.Value[i])
-			typs = append(typs, pk.Type)
+
+	for j := 0; j < numQueryPKs; j++ {
+		vs := g.GetOld()
+		if vs == nil {
+			return nil
 		}
+		for i := range vs.Value {
+			values[j+i*numQueryPKs] = vs.Value[i]
+			typs[j+i*numQueryPKs] = t.PartitionKeys[i].Type
+		}
+	}
+	for _, pk := range t.PartitionKeys {
+		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
 	}
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
@@ -225,41 +227,31 @@ func genMultiplePartitionQueryMv(
 	t.RLock()
 	defer t.RUnlock()
 
-	var values []interface{}
-	var typs []typedef.Type
-
 	mv := t.MaterializedViews[mvNum]
-	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
-	switch mv.HaveNonPrimaryKey() {
-	case true:
-		for i, pk := range mv.PartitionKeys {
-			builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
-			for j := 0; j < numQueryPKs; j++ {
-				vs := g.GetOld()
-				if vs == nil {
-					return nil
-				}
-				if i == 0 {
-					values = appendValue(pk.Type, r, p, values)
-					typs = append(typs, pk.Type)
-				} else {
-					values = append(values, vs.Value[i-1])
-					typs = append(typs, pk.Type)
-				}
-			}
+	typs := make([]typedef.Type, numQueryPKs*mv.PartitionKeys.Len())
+	values := make([]interface{}, numQueryPKs*mv.PartitionKeys.Len())
+
+	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
+
+	for j := 0; j < numQueryPKs; j++ {
+		vs := g.GetOld()
+		if vs == nil {
+			return nil
 		}
-	case false:
-		for i, pk := range mv.PartitionKeys {
-			builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
-			for j := 0; j < numQueryPKs; j++ {
-				vs := g.GetOld()
-				if vs == nil {
-					return nil
-				}
-				values = append(values, vs.Value[i])
-				typs = append(typs, pk.Type)
-			}
+		vals := make([]interface{}, mv.PartitionKeys.Len())
+		if mv.HaveNonPrimaryKey() {
+			vals[0] = mv.NonPrimaryKey.Type.GenValue(r, p)
+			copy(vals[1:], vs.Value.Copy())
+		} else {
+			vals = vs.Value.Copy()
 		}
+		for i := range vals {
+			values[j+i*numQueryPKs] = vals[i]
+			typs[j+i*numQueryPKs] = mv.PartitionKeys[i].Type
+		}
+	}
+	for _, pk := range t.PartitionKeys {
+		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
 	}
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
