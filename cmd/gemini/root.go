@@ -64,8 +64,8 @@ var (
 	schemaFile                       string
 	outFileArg                       string
 	concurrency                      uint64
-	seed                             uint64
-	schemaSeed                       uint64
+	seed                             string
+	schemaSeed                       string
 	dropSchema                       bool
 	verbose                          bool
 	mode                             string
@@ -148,7 +148,17 @@ func run(_ *cobra.Command, _ []string) error {
 	globalStatus := status.NewGlobalStatus(1000)
 	defer utils.IgnoreError(logger.Sync)
 
-	rand.Seed(seed)
+	if err := validateSeed(seed); err != nil {
+		return errors.Wrapf(err, "failed to parse --seed argument")
+	}
+	if err := validateSeed(schemaSeed); err != nil {
+		return errors.Wrapf(err, "failed to parse --schema-seed argument")
+	}
+
+	intSeed := seedFromString(seed)
+	intSchemaSeed := seedFromString(schemaSeed)
+
+	rand.Seed(intSeed)
 
 	cons, err := gocql.ParseConsistencyWrapper(consistency)
 	if err != nil {
@@ -178,7 +188,7 @@ func run(_ *cobra.Command, _ []string) error {
 		}()
 	}
 
-	if err = printSetup(); err != nil {
+	if err = printSetup(intSeed, intSchemaSeed); err != nil {
 		return errors.Wrapf(err, "unable to print setup")
 	}
 
@@ -199,7 +209,7 @@ func run(_ *cobra.Command, _ []string) error {
 			return errors.Wrap(err, "cannot create schema")
 		}
 	} else {
-		schema = generators.GenSchema(schemaConfig, schemaSeed)
+		schema = generators.GenSchema(schemaConfig, intSchemaSeed)
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
@@ -260,7 +270,7 @@ func run(_ *cobra.Command, _ []string) error {
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
 	pump := jobs.NewPump(stopFlag, logger)
 
-	gens, err := createGenerators(schema, schemaConfig, concurrency, partitionCount, logger)
+	gens, err := createGenerators(schema, schemaConfig, intSeed, partitionCount, logger)
 	if err != nil {
 		return err
 	}
@@ -284,7 +294,7 @@ func run(_ *cobra.Command, _ []string) error {
 
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, seed, warmupStopFlag, failFast, verbose); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, warmupStopFlag, failFast, verbose); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
 			stopFlag.SetHard(true)
 		}
@@ -292,7 +302,7 @@ func run(_ *cobra.Command, _ []string) error {
 
 	if !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(mode, duration, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, seed, stopFlag.CreateChild("workload"), failFast, verbose); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, stopFlag.CreateChild("workload"), failFast, verbose); err != nil {
 			logger.Debug("error detected", zap.Error(err))
 		}
 	}
@@ -459,8 +469,8 @@ func init() {
 	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", jobs.MixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	rootCmd.Flags().Uint64VarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
-	rootCmd.Flags().Uint64VarP(&seed, "seed", "s", RealRandom(), "Statement seed value")
-	rootCmd.Flags().Uint64VarP(&schemaSeed, "schema-seed", "", RealRandom(), "Schema seed value")
+	rootCmd.Flags().StringVarP(&seed, "seed", "s", "random", "Statement seed value")
+	rootCmd.Flags().StringVarP(&schemaSeed, "schema-seed", "", "random", "Schema seed value")
 	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
 	rootCmd.Flags().BoolVarP(&failFast, "fail-fast", "f", false, "Stop on the first failure")
@@ -524,7 +534,7 @@ func init() {
 	rootCmd.Flags().IntVarP(&maxErrorsToStore, "max-errors-to-store", "", 1000, "Maximum number of errors to store and output at the end")
 }
 
-func printSetup() error {
+func printSetup(seed, schemaSeed uint64) error {
 	tw := new(tabwriter.Writer)
 	tw.Init(os.Stdout, 0, 8, 2, '\t', tabwriter.AlignRight)
 	fmt.Fprintf(tw, "Seed:\t%d\n", seed)
@@ -550,4 +560,20 @@ func RealRandom() uint64 {
 		return uint64(time.Now().Nanosecond() * time.Now().Second())
 	}
 	return binary.LittleEndian.Uint64(b[:])
+}
+
+func validateSeed(seed string) error {
+	if seed == "random" {
+		return nil
+	}
+	_, err := strconv.ParseUint(seed, 10, 64)
+	return err
+}
+
+func seedFromString(seed string) uint64 {
+	if seed == "random" {
+		return RealRandom()
+	}
+	val, _ := strconv.ParseUint(seed, 10, 64)
+	return val
 }

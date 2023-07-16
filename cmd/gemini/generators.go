@@ -23,7 +23,7 @@ import (
 func createGenerators(
 	schema *typedef.Schema,
 	schemaConfig typedef.SchemaConfig,
-	_, distributionSize uint64,
+	seed, distributionSize uint64,
 	logger *zap.Logger,
 ) (generators.Generators, error) {
 	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
