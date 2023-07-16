@@ -57,8 +57,9 @@ func (g *MockGenerator) GetOld() *typedef.ValueWithToken {
 	return &typedef.ValueWithToken{Token: token, Value: values}
 }
 
-func (g *MockGenerator) GiveOld(_ *typedef.ValueWithToken) {
-}
+func (g *MockGenerator) GiveOld(_ *typedef.ValueWithToken) {}
+
+func (g *MockGenerator) GiveOlds(_ []*typedef.ValueWithToken) {}
 
 func (g *MockGenerator) ReleaseToken(_ uint64) {
 }

@@ -24,14 +24,64 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
-type result struct {
+type resultToken struct {
 	Token       string
 	TokenValues string
+}
+
+func (r resultToken) Equal(received resultToken) bool {
+	return r.Token == received.Token && r.TokenValues == received.TokenValues
+}
+
+type resultTokens []resultToken
+
+func (r resultTokens) Equal(received resultTokens) bool {
+	if len(r) != len(received) {
+		return false
+	}
+	for id, expectedToken := range r {
+		if !expectedToken.Equal(received[id]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (r resultTokens) Diff(received resultTokens) string {
+	var out []string
+	maxIdx := len(r)
+	if maxIdx < len(received) {
+		maxIdx = len(received)
+	}
+	var expected, found *resultToken
+	for idx := 0; idx < maxIdx; idx++ {
+		if idx < len(r) {
+			expected = &r[idx]
+		} else {
+			expected = &resultToken{}
+		}
+
+		if idx < len(received) {
+			found = &received[idx]
+		} else {
+			found = &resultToken{}
+		}
+
+		out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
+			expected.TokenValues, found.TokenValues, " error: value stmt.ValuesWithToken.Token expected and received are different:"))
+		out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
+			expected.TokenValues, found.TokenValues, " error: value stmt.ValuesWithToken.Value expected and received are different:"))
+	}
+	return strings.Join(out, "\n")
+}
+
+type result struct {
 	Query       string
 	Names       string
 	Values      string
 	Types       string
 	QueryType   string
+	TokenValues resultTokens
 }
 
 func (r *result) Equal(t *result) bool {
@@ -44,15 +94,17 @@ func (r *result) Equal(t *result) bool {
 	if t != nil {
 		provided = *t
 	}
-	return expected == provided
+	return expected.Query == provided.Query &&
+		expected.Names == provided.Names &&
+		expected.Values == provided.Values &&
+		expected.Types == provided.Types &&
+		expected.QueryType == provided.QueryType &&
+		expected.TokenValues.Equal(provided.TokenValues)
 }
 
 func (r *result) Diff(received *result) string {
 	var out []string
-	out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
-		r.Token, received.Token, " error: value stmt.ValuesWithToken.Token expected and received are different:"))
-	out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
-		r.TokenValues, received.TokenValues, " error: value stmt.ValuesWithToken.Value expected and received are different:"))
+	out = testutils.AppendIfNotEmpty(out, r.TokenValues.Diff(received.TokenValues))
 	out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
 		r.Query, received.Query, " error: value stmt.Query.ToCql().stmt expected and received are different:"))
 	out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
@@ -118,15 +170,16 @@ func convertStmtToResults(stmt *typedef.Stmt) *result {
 		types = fmt.Sprintf("%s %s", types, stmt.Types[idx].Name())
 	}
 	query, names := stmt.Query.ToCql()
-	token := ""
-	tokenValues := ""
-	if stmt.ValuesWithToken != nil {
-		token = fmt.Sprintf("%v", stmt.ValuesWithToken.Token)
-		tokenValues = strings.TrimSpace(fmt.Sprintf("%v", stmt.ValuesWithToken.Value))
+	var tokens []resultToken
+	for _, valueToken := range stmt.ValuesWithToken {
+		tokens = append(tokens, resultToken{
+			Token:       fmt.Sprintf("%v", valueToken.Token),
+			TokenValues: strings.TrimSpace(fmt.Sprintf("%v", valueToken.Value)),
+		})
 	}
+
 	return &result{
-		Token:       token,
-		TokenValues: tokenValues,
+		TokenValues: tokens,
 		Query:       strings.TrimSpace(query),
 		Names:       strings.TrimSpace(fmt.Sprintf("%s", names)),
 		Values:      strings.TrimSpace(fmt.Sprintf("%v", stmt.Values)),

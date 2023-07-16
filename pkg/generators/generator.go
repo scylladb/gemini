@@ -41,6 +41,7 @@ type GeneratorInterface interface {
 	Get() *typedef.ValueWithToken
 	GetOld() *typedef.ValueWithToken
 	GiveOld(_ *typedef.ValueWithToken)
+	GiveOlds(_ []*typedef.ValueWithToken)
 	ReleaseToken(_ uint64)
 }
 
@@ -107,6 +108,13 @@ func (g *Generator) GetOld() *typedef.ValueWithToken {
 // GiveOld returns the supplied value for later reuse unless
 func (g *Generator) GiveOld(v *typedef.ValueWithToken) {
 	g.partitions.GetPartitionForToken(TokenIndex(v.Token)).giveOld(v)
+}
+
+// GiveOlds returns the supplied value for later reuse unless
+func (g *Generator) GiveOlds(v []*typedef.ValueWithToken) {
+	for _, token := range v {
+		g.partitions.GetPartitionForToken(TokenIndex(token.Token)).giveOld(token)
+	}
 }
 
 // ReleaseToken removes the corresponding token from the in-flight tracking.

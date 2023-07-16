@@ -227,8 +227,12 @@ func validationJob(
 			logger.Info("Validation. No statement generated from GenCheckStmt.")
 			continue
 		}
-
-		err := validation(ctx, schemaConfig, table, s, stmt, g, globalStatus, logger)
+		err := validation(ctx, schemaConfig, table, s, stmt, logger)
+		if stmt.ValuesWithToken != nil {
+			for _, token := range stmt.ValuesWithToken {
+				g.ReleaseToken(token.Token)
+			}
+		}
 		switch {
 		case err == nil:
 			globalStatus.ReadOps.Add(1)
@@ -374,11 +378,7 @@ func mutation(
 	}
 	mutateQuery := mutateStmt.Query
 	mutateValues := mutateStmt.Values
-	if mutateStmt.ValuesWithToken != nil {
-		defer func() {
-			g.GiveOld(mutateStmt.ValuesWithToken)
-		}()
-	}
+
 	if w := logger.Check(zap.DebugLevel, "mutation statement"); w != nil {
 		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
 	}
@@ -394,6 +394,7 @@ func mutation(
 		})
 	} else {
 		globalStatus.WriteOps.Add(1)
+		g.GiveOlds(mutateStmt.ValuesWithToken)
 	}
 	return nil
 }
@@ -404,15 +405,8 @@ func validation(
 	table *typedef.Table,
 	s store.Store,
 	stmt *typedef.Stmt,
-	g *generators.Generator,
-	_ *status.GlobalStatus,
 	logger *zap.Logger,
 ) error {
-	if stmt.ValuesWithToken != nil {
-		defer func() {
-			g.ReleaseToken(stmt.ValuesWithToken.Token)
-		}()
-	}
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
 		w.Write(zap.String("pretty_cql", stmt.PrettyCQL()))
 	}

@@ -65,7 +65,7 @@ type StmtCache struct {
 
 type Stmt struct {
 	*StmtCache
-	ValuesWithToken *ValueWithToken
+	ValuesWithToken []*ValueWithToken
 	Values          Values
 }
 
