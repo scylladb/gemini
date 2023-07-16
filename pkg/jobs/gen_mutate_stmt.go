@@ -85,7 +85,7 @@ func genUpdateStmt(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef
 	}
 	return &typedef.Stmt{
 		StmtCache:       stmtCache,
-		ValuesWithToken: valuesWithToken,
+		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
 		Values:          values,
 	}, nil
 }
@@ -113,7 +113,7 @@ func genInsertStmt(
 	stmtCache := t.GetQueryCache(cacheType)
 	return &typedef.Stmt{
 		StmtCache:       stmtCache,
-		ValuesWithToken: valuesWithToken,
+		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
 		Values:          values,
 	}, nil
 }
@@ -160,7 +160,7 @@ func genInsertJSONStmt(
 			Types:     []typedef.Type{typedef.TYPE_TEXT},
 			QueryType: typedef.InsertJSONStatementType,
 		},
-		ValuesWithToken: valuesWithToken,
+		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
 		Values:          []interface{}{string(jsonString)},
 	}, nil
 }
@@ -175,7 +175,7 @@ func genDeleteRows(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef
 	}
 	return &typedef.Stmt{
 		StmtCache:       stmtCache,
-		ValuesWithToken: valuesWithToken,
+		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
 		Values:          values,
 	}, nil
 }

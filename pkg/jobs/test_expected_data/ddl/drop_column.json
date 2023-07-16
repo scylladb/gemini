@@ -1,24 +1,22 @@
 {
   "pk1_ck1_col1.delFist": [
     {
-      "Token": "",
-      "TokenValues": "",
       "Query": "ALTER TABLE ks1.pk1_ck1_col1.delFist DROP col0",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "9"
+      "QueryType": "9",
+      "TokenValues": null
     }
   ],
   "pkAll_ckAll_colAll.delLast": [
     {
-      "Token": "",
-      "TokenValues": "",
       "Query": "ALTER TABLE ks1.pkAll_ckAll_colAll.delLast DROP col19",
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "9"
+      "QueryType": "9",
+      "TokenValues": null
     }
   ]
 }
