@@ -27,6 +27,8 @@ type Type interface {
 	GenValue(*rand.Rand, *PartitionRangeConfig) []interface{}
 	GenJSONValue(*rand.Rand, *PartitionRangeConfig) interface{}
 	LenValue() int
+	// ValueVariationsNumber returns number of bytes generated value holds
+	ValueVariationsNumber(*PartitionRangeConfig) float64
 	Indexable() bool
 	CQLType() gocql.TypeInfo
 }
@@ -37,6 +39,14 @@ func (l Types) LenValue() int {
 	out := 0
 	for _, t := range l {
 		out += t.LenValue()
+	}
+	return out
+}
+
+func (l Types) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
+	var out float64
+	for _, t := range l {
+		out *= t.ValueVariationsNumber(p)
 	}
 	return out
 }

@@ -17,6 +17,7 @@ package typedef
 import (
 	"encoding/hex"
 	"fmt"
+	"math"
 	"math/big"
 	"net"
 	"strings"
@@ -202,13 +203,55 @@ func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) interface{}
 	case TYPE_INT:
 		return r.Int31()
 	case TYPE_SMALLINT:
-		return int16(r.Uint64n(65535))
+		return int16(r.Uint64n(65536))
 	case TYPE_TIMEUUID, TYPE_UUID:
 		return utils.UUIDFromTime(r)
 	case TYPE_TINYINT:
-		return int8(r.Uint64n(255))
+		return int8(r.Uint64n(256))
 	case TYPE_VARINT:
 		return big.NewInt(r.Int63())
+	default:
+		panic(fmt.Sprintf("generate value: not supported type %s", st))
+	}
+}
+
+// ValueVariationsNumber returns number of bytes generated value holds
+func (st SimpleType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
+	switch st {
+	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
+		return math.Pow(2, float64(p.MaxStringLength))
+	case TYPE_BLOB:
+		return math.Pow(2, float64(p.MaxBlobLength))
+	case TYPE_BIGINT:
+		return 2 ^ 64
+	case TYPE_BOOLEAN:
+		return 2
+	case TYPE_DATE:
+		return 10000*365 + 2000*4
+	case TYPE_TIME:
+		return 86400000000000
+	case TYPE_TIMESTAMP:
+		return 2 ^ 64
+	case TYPE_DECIMAL:
+		return 2 ^ 64
+	case TYPE_DOUBLE:
+		return 2 ^ 64
+	case TYPE_DURATION:
+		return 2 ^ 64
+	case TYPE_FLOAT:
+		return 2 ^ 64
+	case TYPE_INET:
+		return 2 ^ 32
+	case TYPE_INT:
+		return 2 ^ 32
+	case TYPE_SMALLINT:
+		return 2 ^ 16
+	case TYPE_TIMEUUID, TYPE_UUID:
+		return 2 ^ 64
+	case TYPE_TINYINT:
+		return 2 ^ 8
+	case TYPE_VARINT:
+		return 2 ^ 64
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", st))
 	}

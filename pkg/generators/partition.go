@@ -28,6 +28,16 @@ type Partition struct {
 	wakeUpSignal chan<- struct{} // wakes up generator
 	closed       bool
 	lock         sync.RWMutex
+	isStale      bool
+}
+
+func (s *Partition) MarkStale() {
+	s.isStale = true
+	s.Close()
+}
+
+func (s *Partition) Stale() bool {
+	return s.isStale
 }
 
 // get returns a new value and ensures that it's corresponding token
@@ -103,16 +113,21 @@ func (s *Partition) safelyGetOldValuesChannel() chan *typedef.ValueWithToken {
 	return s.oldValues
 }
 
-func (s *Partition) safelyCloseOldValuesChannel() {
+func (s *Partition) Close() {
+	s.lock.RLock()
+	if s.closed {
+		s.lock.RUnlock()
+		return
+	}
+	s.lock.RUnlock()
 	s.lock.Lock()
+	if s.closed {
+		return
+	}
 	s.closed = true
+	close(s.values)
 	close(s.oldValues)
 	s.lock.Unlock()
-}
-
-func (s *Partition) Close() {
-	close(s.values)
-	s.safelyCloseOldValuesChannel()
 }
 
 type Partitions []*Partition
@@ -121,10 +136,6 @@ func (p Partitions) CloseAll() {
 	for _, part := range p {
 		part.Close()
 	}
-}
-
-func (p Partitions) GetPartitionForToken(token TokenIndex) *Partition {
-	return p[uint64(token)%uint64(len(p))]
 }
 
 func NewPartitions(count, pkBufferSize int, wakeUpSignal chan struct{}) Partitions {

@@ -96,30 +96,43 @@ func NewGenerator(table *typedef.Table, config *Config, logger *zap.Logger) *Gen
 }
 
 func (g *Generator) Get() *typedef.ValueWithToken {
-	return g.partitions.GetPartitionForToken(g.idxFunc()).get()
+	targetPart := g.GetPartitionForToken(g.idxFunc())
+	for targetPart.Stale() {
+		targetPart = g.GetPartitionForToken(g.idxFunc())
+	}
+	out := targetPart.get()
+	return out
+}
+
+func (g *Generator) GetPartitionForToken(token TokenIndex) *Partition {
+	return g.partitions[g.shardOf(uint64(token))]
 }
 
 // GetOld returns a previously used value and token or a new if
 // the old queue is empty.
 func (g *Generator) GetOld() *typedef.ValueWithToken {
-	return g.partitions.GetPartitionForToken(g.idxFunc()).getOld()
+	targetPart := g.GetPartitionForToken(g.idxFunc())
+	for targetPart.Stale() {
+		targetPart = g.GetPartitionForToken(g.idxFunc())
+	}
+	return targetPart.getOld()
 }
 
 // GiveOld returns the supplied value for later reuse unless
 func (g *Generator) GiveOld(v *typedef.ValueWithToken) {
-	g.partitions.GetPartitionForToken(TokenIndex(v.Token)).giveOld(v)
+	g.GetPartitionForToken(TokenIndex(v.Token)).giveOld(v)
 }
 
-// GiveOlds returns the supplied value for later reuse unless
-func (g *Generator) GiveOlds(v []*typedef.ValueWithToken) {
-	for _, token := range v {
-		g.partitions.GetPartitionForToken(TokenIndex(token.Token)).giveOld(token)
+// GiveOlds returns the supplied values for later reuse unless
+func (g *Generator) GiveOlds(tokens []*typedef.ValueWithToken) {
+	for _, token := range tokens {
+		g.GiveOld(token)
 	}
 }
 
 // ReleaseToken removes the corresponding token from the in-flight tracking.
 func (g *Generator) ReleaseToken(token uint64) {
-	g.partitions.GetPartitionForToken(TokenIndex(token)).releaseToken(token)
+	g.GetPartitionForToken(TokenIndex(token)).releaseToken(token)
 }
 
 func (g *Generator) Start(stopFlag *stop.Flag) {
@@ -140,14 +153,36 @@ func (g *Generator) Start(stopFlag *stop.Flag) {
 	}()
 }
 
+func (g *Generator) FindAndMarkStalePartitions() {
+	r := rand.New(rand.NewSource(10))
+	nonStale := make([]bool, g.partitionCount)
+	for n := uint64(0); n < g.partitionCount*100; n++ {
+		values := CreatePartitionKeyValues(g.table, r, &g.partitionsConfig)
+		token, err := g.routingKeyCreator.GetHash(g.table, values)
+		if err != nil {
+			g.logger.Panic(errors.Wrap(err, "failed to get primary key hash").Error())
+		}
+		nonStale[g.shardOf(token)] = true
+	}
+
+	for idx, val := range nonStale {
+		if !val {
+			g.partitions[idx].MarkStale()
+		}
+	}
+}
+
 // fillAllPartitions guarantees that each partition was tested to be full
 // at least once since the function started and before it ended.
 // In other words no partition will be starved.
 func (g *Generator) fillAllPartitions(stopFlag *stop.Flag) {
 	pFilled := make([]bool, len(g.partitions))
 	allFilled := func() bool {
-		for _, filled := range pFilled {
+		for idx, filled := range pFilled {
 			if !filled {
+				if g.partitions[idx].Stale() {
+					continue
+				}
 				return false
 			}
 		}
@@ -162,7 +197,7 @@ func (g *Generator) fillAllPartitions(stopFlag *stop.Flag) {
 		g.cntCreated++
 		idx := token % g.partitionCount
 		partition := g.partitions[idx]
-		if partition.inFlight.Has(token) {
+		if partition.Stale() || partition.inFlight.Has(token) {
 			continue
 		}
 		select {
@@ -177,4 +212,8 @@ func (g *Generator) fillAllPartitions(stopFlag *stop.Flag) {
 			}
 		}
 	}
+}
+
+func (g *Generator) shardOf(token uint64) int {
+	return int(token % g.partitionCount)
 }

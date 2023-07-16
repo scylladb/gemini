@@ -16,11 +16,14 @@ package typedef
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type BagType struct {
@@ -79,7 +82,7 @@ func (ct *BagType) CQLPretty(query string, value []interface{}) (string, int) {
 }
 
 func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
-	count := r.Intn(9) + 1
+	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]interface{}, count)
 	for i := 0; i < count; i++ {
 		out[i] = ct.ValueType.GenValue(r, p)[0]
@@ -88,7 +91,7 @@ func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{}
 }
 
 func (ct *BagType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
-	count := r.Intn(9) + 1
+	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]interface{}, count)
 	for i := 0; i < count; i++ {
 		out[i] = ct.ValueType.GenJSONValue(r, p)
@@ -102,4 +105,9 @@ func (ct *BagType) LenValue() int {
 
 func (ct *BagType) Indexable() bool {
 	return false
+}
+
+// ValueVariationsNumber returns number of bytes generated value holds
+func (ct *BagType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
+	return math.Pow(ct.ValueType.ValueVariationsNumber(p), maxBagSize)
 }

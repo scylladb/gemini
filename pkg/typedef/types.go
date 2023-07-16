@@ -16,6 +16,7 @@ package typedef
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -57,6 +58,11 @@ const (
 	TYPE_UUID      = SimpleType("uuid")
 	TYPE_VARCHAR   = SimpleType("varchar")
 	TYPE_VARINT    = SimpleType("varint")
+)
+
+const (
+	maxMapSize = 10
+	maxBagSize = 10
 )
 
 var (
@@ -159,7 +165,7 @@ func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface
 }
 
 func (mt *MapType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
-	count := r.Intn(9) + 1
+	count := utils.RandInt2(r, 1, maxMapSize+1)
 	vals := reflect.MakeMap(reflect.MapOf(reflect.TypeOf(mt.KeyType.GenValue(r, p)[0]), reflect.TypeOf(mt.ValueType.GenValue(r, p)[0])))
 	for i := 0; i < count; i++ {
 		vals.SetMapIndex(reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]), reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]))
@@ -180,6 +186,11 @@ func (mt *MapType) CQLDef() string {
 
 func (mt *MapType) Indexable() bool {
 	return false
+}
+
+// ValueVariationsNumber returns number of bytes generated value holds
+func (mt *MapType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
+	return math.Pow(mt.KeyType.ValueVariationsNumber(p)*mt.ValueType.ValueVariationsNumber(p), maxMapSize)
 }
 
 type CounterType struct {
@@ -226,4 +237,10 @@ func (ct *CounterType) CQLDef() string {
 
 func (ct *CounterType) Indexable() bool {
 	return false
+}
+
+// ValueVariationsNumber returns number of bytes generated value holds
+func (ct *CounterType) ValueVariationsNumber(_ *PartitionRangeConfig) float64 {
+	// As a type, counters are a 64-bit signed integer
+	return 2 ^ 64
 }
