@@ -153,7 +153,7 @@ func (g *Generator) fillAllPartitions(stopFlag *stop.Flag) {
 		}
 		return true
 	}
-	for {
+	for !stopFlag.IsHardOrSoft() {
 		values := CreatePartitionKeyValues(g.table, g.r, &g.partitionsConfig)
 		token, err := g.routingKeyCreator.GetHash(g.table, values)
 		if err != nil {
@@ -162,13 +162,13 @@ func (g *Generator) fillAllPartitions(stopFlag *stop.Flag) {
 		g.cntCreated++
 		idx := token % g.partitionCount
 		partition := g.partitions[idx]
+		if partition.inFlight.Has(token) {
+			continue
+		}
 		select {
 		case partition.values <- &typedef.ValueWithToken{Token: token, Value: values}:
 			g.cntEmitted++
 		default:
-			if stopFlag.IsHardOrSoft() {
-				return
-			}
 			if !pFilled[idx] {
 				pFilled[idx] = true
 				if allFilled() {

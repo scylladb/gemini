@@ -26,6 +26,7 @@ const shrinkInflightsLimit = 1000
 type InFlight interface {
 	AddIfNotPresent(uint64) bool
 	Delete(uint64)
+	Has(uint64) bool
 }
 
 // New creates a instance of a simple InFlight set.
@@ -74,6 +75,11 @@ func (s *shardedSyncU64set) AddIfNotPresent(v uint64) bool {
 	return ss.AddIfNotPresent(v)
 }
 
+func (s *shardedSyncU64set) Has(v uint64) bool {
+	ss := s.shards[v%256]
+	return ss.Has(v)
+}
+
 type syncU64set struct {
 	values  map[uint64]struct{}
 	deleted uint64
@@ -90,31 +96,33 @@ func (s *syncU64set) AddIfNotPresent(u uint64) bool {
 	}
 	s.lock.RUnlock()
 	s.lock.Lock()
-	defer s.lock.Unlock()
 	_, ok = s.values[u]
 	if ok {
+		s.lock.Unlock()
 		return false
 	}
 	s.values[u] = struct{}{}
+	s.lock.Unlock()
 	return true
 }
 
 func (s *syncU64set) Has(u uint64) bool {
 	s.lock.RLock()
-	defer s.lock.RUnlock()
 	_, ok := s.values[u]
+	s.lock.RUnlock()
 	return ok
 }
 
 func (s *syncU64set) Delete(u uint64) {
 	s.lock.Lock()
-	defer s.lock.Unlock()
 	_, ok := s.values[u]
 	if !ok {
+		s.lock.Unlock()
 		return
 	}
 	delete(s.values, u)
 	s.addDeleted(1)
+	s.lock.Unlock()
 }
 
 func (s *syncU64set) addDeleted(n uint64) {
@@ -126,7 +134,6 @@ func (s *syncU64set) addDeleted(n uint64) {
 
 func (s *syncU64set) shrink() {
 	s.lock.Lock()
-	defer s.lock.Unlock()
 	mapLen := uint64(0)
 	if uint64(len(s.values)) >= s.deleted {
 		mapLen = uint64(len(s.values)) - s.deleted
@@ -138,4 +145,5 @@ func (s *syncU64set) shrink() {
 	}
 	s.values = newValues
 	s.deleted = 0
+	s.lock.Unlock()
 }
