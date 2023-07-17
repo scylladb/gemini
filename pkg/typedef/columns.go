@@ -146,6 +146,15 @@ func (c Columns) NonCounters() Columns {
 	return out
 }
 
+// ValueVariationsNumber returns number of bytes generated value holds
+func (c Columns) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
+	var out float64
+	for _, col := range c {
+		out *= col.Type.ValueVariationsNumber(p)
+	}
+	return out
+}
+
 func GetMapTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	st := struct {
 		Type map[string]interface{}

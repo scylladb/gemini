@@ -15,7 +15,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -32,6 +31,7 @@ import (
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/jobs"
+	"github.com/scylladb/gemini/pkg/realrandom"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -39,8 +39,6 @@ import (
 
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
-
-	crand "crypto/rand"
 
 	"github.com/gocql/gocql"
 	"github.com/hailocab/go-hostpool"
@@ -188,10 +186,6 @@ func run(_ *cobra.Command, _ []string) error {
 		}()
 	}
 
-	if err = printSetup(intSeed, intSchemaSeed); err != nil {
-		return errors.Wrapf(err, "unable to print setup")
-	}
-
 	outFile, err := createFile(outFileArg, os.Stdout)
 	if err != nil {
 		return err
@@ -209,10 +203,15 @@ func run(_ *cobra.Command, _ []string) error {
 			return errors.Wrap(err, "cannot create schema")
 		}
 	} else {
-		schema = generators.GenSchema(schemaConfig, intSchemaSeed)
+		schema, intSchemaSeed, err = generateSchema(logger, schemaConfig, schemaSeed)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create schema for seed %s", schemaSeed)
+		}
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
+
+	printSetup(intSeed, intSchemaSeed)
 	fmt.Printf("Schema: %v\n", string(jsonSchema))
 
 	testCluster, oracleCluster := createClusters(cons, testHostSelectionPolicy, oracleHostSelectionPolicy, logger)
@@ -534,7 +533,7 @@ func init() {
 	rootCmd.Flags().IntVarP(&maxErrorsToStore, "max-errors-to-store", "", 1000, "Maximum number of errors to store and output at the end")
 }
 
-func printSetup(seed, schemaSeed uint64) error {
+func printSetup(seed, schemaSeed uint64) {
 	tw := new(tabwriter.Writer)
 	tw.Init(os.Stdout, 0, 8, 2, '\t', tabwriter.AlignRight)
 	fmt.Fprintf(tw, "Seed:\t%d\n", seed)
@@ -550,16 +549,10 @@ func printSetup(seed, schemaSeed uint64) error {
 		fmt.Fprintf(tw, "Output file:\t%s\n", outFileArg)
 	}
 	tw.Flush()
-	return nil
 }
 
 func RealRandom() uint64 {
-	var b [8]byte
-	_, err := crand.Read(b[:])
-	if err != nil {
-		return uint64(time.Now().Nanosecond() * time.Now().Second())
-	}
-	return binary.LittleEndian.Uint64(b[:])
+	return rand.New(realrandom.Source).Uint64()
 }
 
 func validateSeed(seed string) error {
@@ -576,4 +569,27 @@ func seedFromString(seed string) uint64 {
 	}
 	val, _ := strconv.ParseUint(seed, 10, 64)
 	return val
+}
+
+// generateSchema generates schema, if schema seed is random and schema did not pass validation it regenerates it
+func generateSchema(logger *zap.Logger, sc typedef.SchemaConfig, schemaSeed string) (schema *typedef.Schema, intSchemaSeed uint64, err error) {
+	intSchemaSeed = seedFromString(schemaSeed)
+	schema = generators.GenSchema(sc, intSchemaSeed)
+	err = schema.Validate(partitionCount)
+	if err == nil {
+		return schema, intSchemaSeed, nil
+	}
+	if schemaSeed != "random" {
+		// If user provided schema, allow to run it, but log warning
+		logger.Warn(errors.Wrap(err, "validation failed, running this test could end up in error or stale gemini").Error())
+		return schema, intSchemaSeed, nil
+	}
+
+	for err != nil {
+		intSchemaSeed = seedFromString(schemaSeed)
+		schema = generators.GenSchema(sc, intSchemaSeed)
+		err = schema.Validate(partitionCount)
+	}
+
+	return schema, intSchemaSeed, nil
 }

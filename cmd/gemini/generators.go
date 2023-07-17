@@ -31,20 +31,26 @@ func createGenerators(
 	var gs []*generators.Generator
 	for id := range schema.Tables {
 		table := schema.Tables[id]
+		pkVariations := table.PartitionKeys.ValueVariationsNumber(&partitionRangeConfig)
 
-		distFunc, err := createDistributionFunc(partitionKeyDistribution, partitionCount, seed, stdDistMean, oneStdDev)
+		distFunc, err := createDistributionFunc(partitionKeyDistribution, distributionSize, seed, stdDistMean, oneStdDev)
 		if err != nil {
 			return nil, err
 		}
 
-		gCfg := &generators.Config{
+		tablePartConfig := &generators.Config{
 			PartitionsRangeConfig:      partitionRangeConfig,
 			PartitionsCount:            distributionSize,
 			PartitionsDistributionFunc: distFunc,
 			Seed:                       seed,
 			PkUsedBufferSize:           pkBufferReuseSize,
 		}
-		g := generators.NewGenerator(table, gCfg, logger.Named("generators"))
+		g := generators.NewGenerator(table, tablePartConfig, logger.Named("generators"))
+		if pkVariations < 2^32 {
+			// Low partition key variation can lead to having staled partitions
+			// Let's detect and mark them before running test
+			g.FindAndMarkStalePartitions()
+		}
 		gs = append(gs, g)
 	}
 	return gs, nil

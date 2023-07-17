@@ -93,3 +93,12 @@ func (t *UDTType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} 
 func (t *UDTType) LenValue() int {
 	return 1
 }
+
+// ValueVariationsNumber returns number of bytes generated value holds
+func (t *UDTType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
+	var out float64
+	for _, tp := range t.ValueTypes {
+		out *= tp.ValueVariationsNumber(p)
+	}
+	return out
+}
