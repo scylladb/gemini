@@ -1,4 +1,14 @@
 # Changelog
+## [1.8.7] - 2023-07-20
+- Introduce `--schema-seed` ([#376](https://github.com/scylladb/gemini/pull/376))
+- Make `--seed` and `--schema-seed` random by default ([#394](https://github.com/scylladb/gemini/pull/394))
+- Expand types allowed in partition key by schema generator ([#394](https://github.com/scylladb/gemini/pull/394))
+- Queries to test and oracle are running in parallel ([#375](https://github.com/scylladb/gemini/pull/375)) 
+- Fix time generator to match general gocql limitations ([#389](https://github.com/scylladb/gemini/pull/389))
+- Make maps to work again ([#392](https://github.com/scylladb/gemini/pull/392))
+- Fix values circulation - ([#390](https://github.com/scylladb/gemini/pull/390)) and ([#397](https://github.com/scylladb/gemini/pull/397))
+- Check on inflights conflict early - ([#399](https://github.com/scylladb/gemini/pull/399))
+
 ## [1.8.6] - 2023-07-06
 - Test stops after warmup ([9aa8f65](https://github.com/scylladb/gemini/commit/9aa8f65209d00b3a9cbb4ed40ca975dcf2236653))
 - Make goreleaser work after deprication of replacements ([99ddf27](https://github.com/scylladb/gemini/commit/99ddf274a81088a573bece7c11b358e405f588bb))
