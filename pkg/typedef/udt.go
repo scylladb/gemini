@@ -96,7 +96,7 @@ func (t *UDTType) LenValue() int {
 
 // ValueVariationsNumber returns number of bytes generated value holds
 func (t *UDTType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
-	var out float64
+	out := float64(1)
 	for _, tp := range t.ValueTypes {
 		out *= tp.ValueVariationsNumber(p)
 	}
