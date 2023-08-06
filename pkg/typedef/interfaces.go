@@ -44,7 +44,7 @@ func (l Types) LenValue() int {
 }
 
 func (l Types) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
-	var out float64
+	out := float64(1)
 	for _, t := range l {
 		out *= t.ValueVariationsNumber(p)
 	}

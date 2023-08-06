@@ -148,7 +148,7 @@ func (c Columns) NonCounters() Columns {
 
 // ValueVariationsNumber returns number of bytes generated value holds
 func (c Columns) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
-	var out float64
+	out := float64(1)
 	for _, col := range c {
 		out *= col.Type.ValueVariationsNumber(p)
 	}

@@ -101,7 +101,7 @@ func (t *TupleType) LenValue() int {
 
 // ValueVariationsNumber returns number of bytes generated value holds
 func (t *TupleType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
-	var out float64
+	out := float64(1)
 	for _, tp := range t.ValueTypes {
 		out *= out * tp.ValueVariationsNumber(p)
 	}
