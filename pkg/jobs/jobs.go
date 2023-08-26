@@ -425,7 +425,7 @@ func validation(
 	attempt := 1
 	for {
 		lastErr = err
-		err = s.Check(ctx, table, stmt.Query, stmt.Values...)
+		err = s.Check(ctx, table, stmt.Query, attempt == maxAttempts, stmt.Values...)
 
 		if err == nil {
 			if attempt > 1 {

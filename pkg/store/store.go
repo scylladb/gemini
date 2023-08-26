@@ -58,7 +58,7 @@ type storeLoader interface {
 type Store interface {
 	Create(context.Context, qb.Builder, qb.Builder) error
 	Mutate(context.Context, qb.Builder, ...interface{}) error
-	Check(context.Context, *typedef.Table, qb.Builder, ...interface{}) error
+	Check(context.Context, *typedef.Table, qb.Builder, bool, ...interface{}) error
 	Close() error
 }
 
@@ -191,7 +191,7 @@ func mutate(ctx context.Context, s storeLoader, builder qb.Builder, values ...in
 	return nil
 }
 
-func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, builder qb.Builder, values ...interface{}) error {
+func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, builder qb.Builder, detailedDiff bool, values ...interface{}) error {
 	var testRows, oracleRows []map[string]interface{}
 	var testErr, oracleErr error
 	var wg sync.WaitGroup
@@ -215,6 +215,9 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, build
 		return nil
 	}
 	if len(testRows) != len(oracleRows) {
+		if !detailedDiff {
+			return fmt.Errorf("rows count differ (test store rows %d, oracle store rows %d, detailed information will be at last attempt)", len(testRows), len(oracleRows))
+		}
 		testSet := strset.New(pks(table, testRows)...)
 		oracleSet := strset.New(pks(table, oracleRows)...)
 		missingInTest := strset.Difference(oracleSet, testSet).List()
@@ -224,6 +227,9 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, build
 	}
 	if reflect.DeepEqual(testRows, oracleRows) {
 		return nil
+	}
+	if !detailedDiff {
+		return fmt.Errorf("test and oracle store have difference, detailed information will be at last attempt")
 	}
 	sort.SliceStable(testRows, func(i, j int) bool {
 		return lt(testRows[i], testRows[j])
