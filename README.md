@@ -21,7 +21,7 @@ Enjoy!
 ### Further CLI arguments
 
 Execute `./gemini --help` to see the entire list of arguments available.
-Their explanation in some detail is available the [CLI arguments](cli-arguments.md).
+Their explanation in some detail is available the [CLI arguments](docs/cli-arguments.md).
 
 ## Features
 
