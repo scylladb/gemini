@@ -118,6 +118,10 @@ var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
 	gocql.TypeCounter: gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeCounter, ""),
 }
 
+func GetGoCQLTypeMap() map[gocql.Type]gocql.TypeInfo {
+	return goCQLTypeMap
+}
+
 type MapType struct {
 	ComplexType string     `json:"complex_type"`
 	KeyType     SimpleType `json:"key_type"`

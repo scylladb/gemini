@@ -27,6 +27,8 @@ import (
 	"github.com/scylladb/gocqlx/v2/qb"
 	"go.uber.org/zap"
 
+	mv "github.com/scylladb/gemini/pkg/store/mv"
+	sv "github.com/scylladb/gemini/pkg/store/sv"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -92,12 +94,28 @@ func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Ti
 	return nil
 }
 
-func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (result []map[string]interface{}, err error) {
+func (cs *cqlStore) loadSV(ctx context.Context, stmt *typedef.Stmt) (sv.Result, error) {
 	query, _ := stmt.Query.ToCql()
 	cs.stmtLogger.LogStmt(stmt)
 	iter := cs.session.Query(query, stmt.Values...).WithContext(ctx).Iter()
 	cs.ops.WithLabelValues(cs.system, opType(stmt)).Inc()
-	return loadSet(iter), iter.Close()
+	return sv.GetResult(iter), iter.Close()
+}
+
+func (cs *cqlStore) loadMV(ctx context.Context, stmt *typedef.Stmt) (mv.Result, error) {
+	query, _ := stmt.Query.ToCql()
+	cs.stmtLogger.LogStmt(stmt)
+	iter := cs.session.Query(query, stmt.Values...).WithContext(ctx).Iter()
+	cs.ops.WithLabelValues(cs.system, opType(stmt)).Inc()
+	return mv.GetResult(iter), iter.Close()
+}
+
+func (cs *cqlStore) loadVerCheck(ctx context.Context, stmt *typedef.Stmt) (mv.Result, error) {
+	query, _ := stmt.Query.ToCql()
+	cs.stmtLogger.LogStmt(stmt)
+	iter := cs.session.Query(query, stmt.Values...).WithContext(ctx).Iter()
+	cs.ops.WithLabelValues(cs.system, opType(stmt)).Inc()
+	return mv.GetResultWithVerCheck(iter), iter.Close()
 }
 
 func (cs cqlStore) close() error {

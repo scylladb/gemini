@@ -107,3 +107,19 @@ func UUIDFromTime(rnd *rand.Rand) string {
 	}
 	return gocql.UUIDFromTime(RandDate(rnd)).String()
 }
+
+func RandBytes(rnd *rand.Rand, lenBytes int) []byte {
+	out := make([]byte, lenBytes)
+	for idx := range out {
+		out[idx] = byte(rnd.Intn(256))
+	}
+	return out
+}
+
+func RandSliceBytes(rnd *rand.Rand, count, lenBytes int) [][]byte {
+	out := make([][]byte, count)
+	for idx := range out {
+		out[idx] = RandBytes(rnd, lenBytes)
+	}
+	return out
+}

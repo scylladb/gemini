@@ -16,33 +16,31 @@ package store
 
 import (
 	"context"
-	"fmt"
-	"math/big"
 	"os"
-	"reflect"
-	"sort"
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/gocql/gocql"
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/multierr"
-	"gopkg.in/inf.v0"
-
-	"github.com/scylladb/go-set/strset"
+	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/stmtlogger"
+	"github.com/scylladb/gemini/pkg/store/comp"
+	mv "github.com/scylladb/gemini/pkg/store/mv"
+	sv "github.com/scylladb/gemini/pkg/store/sv"
+	"github.com/scylladb/gemini/pkg/store/ver"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
+var errorResponseDiffer = errors.New("response from test and oracle store have difference")
+
 type loader interface {
-	load(context.Context, *typedef.Stmt) ([]map[string]interface{}, error)
+	loadSV(context.Context, *typedef.Stmt) (sv.Result, error)
+	loadMV(context.Context, *typedef.Stmt) (mv.Result, error)
+	loadVerCheck(context.Context, *typedef.Stmt) (mv.Result, error)
 }
 
 type storer interface {
@@ -113,8 +111,16 @@ func (n *noOpStore) mutate(context.Context, *typedef.Stmt) error {
 	return nil
 }
 
-func (n *noOpStore) load(context.Context, *typedef.Stmt) ([]map[string]interface{}, error) {
-	return nil, nil
+func (n *noOpStore) loadSV(context.Context, *typedef.Stmt) (sv.Result, error) {
+	return sv.Result{}, nil
+}
+
+func (n *noOpStore) loadMV(context.Context, *typedef.Stmt) (mv.Result, error) {
+	return mv.Result{}, nil
+}
+
+func (n *noOpStore) loadVerCheck(context.Context, *typedef.Stmt) (mv.Result, error) {
+	return mv.Result{}, nil
 }
 
 func (n *noOpStore) Close() error {
@@ -183,17 +189,37 @@ func mutate(ctx context.Context, s storeLoader, stmt *typedef.Stmt) error {
 	return nil
 }
 
-func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, detailedDiff bool) error {
-	var testRows, oracleRows []map[string]interface{}
+func (ds delegatingStore) Check(ctx context.Context, _ *typedef.Table, stmt *typedef.Stmt, detailedDiff bool) error {
 	var testErr, oracleErr error
 	var wg sync.WaitGroup
 	wg.Add(1)
-
-	go func() {
-		testRows, testErr = ds.testStore.load(ctx, stmt)
-		wg.Done()
-	}()
-	oracleRows, oracleErr = ds.oracleStore.load(ctx, stmt)
+	var results comp.Results
+	switch {
+	case ver.Check.ModeSV():
+		resultsSV := sv.Results{}
+		go func() {
+			resultsSV.Test, testErr = ds.testStore.loadSV(ctx, stmt)
+			wg.Done()
+		}()
+		resultsSV.Oracle, oracleErr = ds.oracleStore.loadSV(ctx, stmt)
+		results = &resultsSV
+	case ver.Check.Done():
+		resultsMV := mv.Results{}
+		go func() {
+			resultsMV.Test, testErr = ds.testStore.loadMV(ctx, stmt)
+			wg.Done()
+		}()
+		resultsMV.Oracle, oracleErr = ds.oracleStore.loadMV(ctx, stmt)
+		results = &resultsMV
+	default:
+		resultsMV := mv.Results{}
+		go func() {
+			resultsMV.Test, testErr = ds.testStore.loadVerCheck(ctx, stmt)
+			wg.Done()
+		}()
+		resultsMV.Oracle, oracleErr = ds.oracleStore.loadVerCheck(ctx, stmt)
+		results = &resultsMV
+	}
 	if oracleErr != nil {
 		return errors.Wrapf(oracleErr, "unable to load check data from the oracle store")
 	}
@@ -201,50 +227,17 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt 
 	if testErr != nil {
 		return errors.Wrapf(testErr, "unable to load check data from the test store")
 	}
-	if !ds.validations {
+	if !ds.validations || !results.HaveRows() {
 		return nil
 	}
-	if len(testRows) == 0 && len(oracleRows) == 0 {
-		return nil
+	var diff comp.Info
+	if detailedDiff {
+		diff = comp.GetCompareInfoDetailed(results)
+	} else {
+		diff = comp.GetCompareInfoSimple(results)
 	}
-	if len(testRows) != len(oracleRows) {
-		if !detailedDiff {
-			return fmt.Errorf("rows count differ (test store rows %d, oracle store rows %d, detailed information will be at last attempt)", len(testRows), len(oracleRows))
-		}
-		testSet := strset.New(pks(table, testRows)...)
-		oracleSet := strset.New(pks(table, oracleRows)...)
-		missingInTest := strset.Difference(oracleSet, testSet).List()
-		missingInOracle := strset.Difference(testSet, oracleSet).List()
-		return fmt.Errorf("row count differ (test has %d rows, oracle has %d rows, test is missing rows: %s, oracle is missing rows: %s)",
-			len(testRows), len(oracleRows), missingInTest, missingInOracle)
-	}
-	if reflect.DeepEqual(testRows, oracleRows) {
-		return nil
-	}
-	if !detailedDiff {
-		return fmt.Errorf("test and oracle store have difference, detailed information will be at last attempt")
-	}
-	sort.SliceStable(testRows, func(i, j int) bool {
-		return lt(testRows[i], testRows[j])
-	})
-	sort.SliceStable(oracleRows, func(i, j int) bool {
-		return lt(oracleRows[i], oracleRows[j])
-	})
-	for i, oracleRow := range oracleRows {
-		testRow := testRows[i]
-		cmp.AllowUnexported()
-		diff := cmp.Diff(oracleRow, testRow,
-			cmpopts.SortMaps(func(x, y *inf.Dec) bool {
-				return x.Cmp(y) < 0
-			}),
-			cmp.Comparer(func(x, y *inf.Dec) bool {
-				return x.Cmp(y) == 0
-			}), cmp.Comparer(func(x, y *big.Int) bool {
-				return x.Cmp(y) == 0
-			}))
-		if diff != "" {
-			return fmt.Errorf("rows differ (-%v +%v): %v", oracleRow, testRow, diff)
-		}
+	if diff.Len() > 0 {
+		return errors.Wrap(errorResponseDiffer, diff.String())
 	}
 	return nil
 }
