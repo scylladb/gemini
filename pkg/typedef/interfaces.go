@@ -33,6 +33,11 @@ type Type interface {
 	CQLType() gocql.TypeInfo
 }
 
+type Statement interface {
+	ToCql() (stmt string, names []string)
+	PrettyCQL() string
+}
+
 type Types []Type
 
 func (l Types) LenValue() int {

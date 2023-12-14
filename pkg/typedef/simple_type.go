@@ -96,9 +96,9 @@ func (st SimpleType) CQLPretty(value interface{}) string {
 		panic(fmt.Sprintf("unexpected time value [%T]%+v", value, value))
 	case TYPE_TIMESTAMP:
 		if v, ok := value.(int64); ok {
-			// CQL supports only 3 digits microseconds:
+			// CQL supports only 3 digits milliseconds:
 			// '1976-03-25T10:10:55.83275+0000': marshaling error: Milliseconds length exceeds expected (5)"
-			return time.UnixMicro(v).UTC().Format("'2006-01-02T15:04:05.999-0700'")
+			return time.UnixMilli(v).UTC().Format("'2006-01-02T15:04:05.999-0700'")
 		}
 		panic(fmt.Sprintf("unexpected timestamp value [%T]%+v", value, value))
 	case TYPE_DURATION, TYPE_TIMEUUID, TYPE_UUID:

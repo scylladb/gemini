@@ -105,6 +105,8 @@ var (
 	requestTimeout                   time.Duration
 	connectTimeout                   time.Duration
 	profilingPort                    int
+	testStatementLogFile             string
+	oracleStatementLogFile           string
 )
 
 func interactive() bool {
@@ -131,14 +133,6 @@ func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Sc
 		schemaBuilder.Table(tbl)
 	}
 	return schemaBuilder.Build(), nil
-}
-
-type createBuilder struct {
-	stmt string
-}
-
-func (cb createBuilder) ToCql() (stmt string, names []string) {
-	return cb.stmt, nil
 }
 
 func run(_ *cobra.Command, _ []string) error {
@@ -219,6 +213,8 @@ func run(_ *cobra.Command, _ []string) error {
 		MaxRetriesMutate:        maxRetriesMutate,
 		MaxRetriesMutateSleep:   maxRetriesMutateSleep,
 		UseServerSideTimestamps: useServerSideTimestamps,
+		TestLogStatementsFile:   testStatementLogFile,
+		OracleLogStatementsFile: oracleStatementLogFile,
 	}
 	var tracingFile *os.File
 	if tracingOutFile != "" {
@@ -243,22 +239,25 @@ func run(_ *cobra.Command, _ []string) error {
 	defer utils.IgnoreError(st.Close)
 
 	if dropSchema && mode != jobs.ReadMode {
-		for _, stmt := range generators.GetDropSchema(schema) {
+		for _, stmt := range generators.GetDropKeyspace(schema) {
 			logger.Debug(stmt)
-			if err = st.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
+			if err = st.Mutate(context.Background(), typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
 				return errors.Wrap(err, "unable to drop schema")
 			}
 		}
 	}
 
 	testKeyspace, oracleKeyspace := generators.GetCreateKeyspaces(schema)
-	if err = st.Create(context.Background(), createBuilder{stmt: testKeyspace}, createBuilder{stmt: oracleKeyspace}); err != nil {
+	if err = st.Create(
+		context.Background(),
+		typedef.SimpleStmt(testKeyspace, typedef.CreateKeyspaceStatementType),
+		typedef.SimpleStmt(oracleKeyspace, typedef.CreateKeyspaceStatementType)); err != nil {
 		return errors.Wrap(err, "unable to create keyspace")
 	}
 
 	for _, stmt := range generators.GetCreateSchema(schema) {
 		logger.Debug(stmt)
-		if err = st.Mutate(context.Background(), createBuilder{stmt: stmt}); err != nil {
+		if err = st.Mutate(context.Background(), typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
 			return errors.Wrap(err, "unable to create schema")
 		}
 	}
@@ -531,6 +530,8 @@ func init() {
 	rootCmd.Flags().DurationVarP(&connectTimeout, "connect-timeout", "", 30*time.Second, "Duration of waiting connection established")
 	rootCmd.Flags().IntVarP(&profilingPort, "profiling-port", "", 0, "If non-zero starts pprof profiler on given port at 'http://0.0.0.0:<port>/profile'")
 	rootCmd.Flags().IntVarP(&maxErrorsToStore, "max-errors-to-store", "", 1000, "Maximum number of errors to store and output at the end")
+	rootCmd.Flags().StringVarP(&testStatementLogFile, "test-statement-log-file", "", "", "File to write statements flow to")
+	rootCmd.Flags().StringVarP(&oracleStatementLogFile, "oracle-statement-log-file", "", "", "File to write statements flow to")
 }
 
 func printSetup(seed, schemaSeed uint64) {

@@ -24,6 +24,9 @@ import (
 )
 
 type (
+	CQLFeature int
+	OpType     uint8
+
 	ValueWithToken struct {
 		Value Values
 		Token uint64
@@ -48,26 +51,41 @@ type (
 		UseLWT          bool
 	}
 
-	CQLFeature int
+	Stmts struct {
+		PostStmtHook func()
+		List         []*Stmt
+		QueryType    StatementType
+	}
+
+	StmtCache struct {
+		Query     qb.Builder
+		Types     Types
+		QueryType StatementType
+		LenValue  int
+	}
 )
 
-type Stmts struct {
-	PostStmtHook func()
-	List         []*Stmt
-	QueryType    StatementType
+type SimpleQuery struct {
+	query string
 }
 
-type StmtCache struct {
-	Query     qb.Builder
-	Types     Types
-	QueryType StatementType
-	LenValue  int
+func (q SimpleQuery) ToCql() (stmt string, names []string) {
+	return q.query, nil
 }
 
 type Stmt struct {
 	*StmtCache
 	ValuesWithToken []*ValueWithToken
 	Values          Values
+}
+
+func SimpleStmt(query string, queryType StatementType) *Stmt {
+	return &Stmt{
+		StmtCache: &StmtCache{
+			Query:     SimpleQuery{query},
+			QueryType: queryType,
+		},
+	}
 }
 
 func (s *Stmt) PrettyCQL() string {
@@ -105,6 +123,27 @@ func (st StatementType) ToString() string {
 		return "DropColumnStatement"
 	case AddColumnStatementType:
 		return "AddColumnStatement"
+	default:
+		panic(fmt.Sprintf("unknown statement type %d", st))
+	}
+}
+
+func (st StatementType) OpType() OpType {
+	switch st {
+	case SelectStatementType, SelectRangeStatementType, SelectByIndexStatementType, SelectFromMaterializedViewStatementType:
+		return OpSelect
+	case InsertStatementType, InsertJSONStatementType:
+		return OpInsert
+	case UpdateStatementType:
+		return OpUpdate
+	case DeleteStatementType:
+		return OpDelete
+	case AlterColumnStatementType, DropColumnStatementType, AddColumnStatementType:
+		return OpSchemaAlter
+	case DropKeyspaceStatementType:
+		return OpSchemaDrop
+	case CreateKeyspaceStatementType, CreateSchemaStatementType:
+		return OpSchemaCreate
 	default:
 		panic(fmt.Sprintf("unknown statement type %d", st))
 	}

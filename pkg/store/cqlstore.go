@@ -30,7 +30,7 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-type cqlStore struct {
+type cqlStore struct { //nolint:govet
 	session                 *gocql.Session
 	schema                  *typedef.Schema
 	ops                     *prometheus.CounterVec
@@ -39,20 +39,21 @@ type cqlStore struct {
 	maxRetriesMutate        int
 	maxRetriesMutateSleep   time.Duration
 	useServerSideTimestamps bool
+	stmtLogger              stmtLogger
 }
 
 func (cs *cqlStore) name() string {
 	return cs.system
 }
 
-func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, values ...interface{}) (err error) {
+func (cs *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) (err error) {
 	var i int
 	for i = 0; i < cs.maxRetriesMutate; i++ {
 		// retry with new timestamp as list modification with the same ts
 		// will produce duplicated values, see https://github.com/scylladb/scylladb/issues/7937
-		err = cs.doMutate(ctx, builder, time.Now(), values...)
+		err = cs.doMutate(ctx, stmt, time.Now())
 		if err == nil {
-			cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
+			cs.ops.WithLabelValues(cs.system, opType(stmt)).Inc()
 			return nil
 		}
 		select {
@@ -67,14 +68,15 @@ func (cs *cqlStore) mutate(ctx context.Context, builder qb.Builder, values ...in
 	return err
 }
 
-func (cs *cqlStore) doMutate(ctx context.Context, builder qb.Builder, ts time.Time, values ...interface{}) error {
-	queryBody, _ := builder.ToCql()
-
-	query := cs.session.Query(queryBody, values...).WithContext(ctx)
+func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Time) error {
+	queryBody, _ := stmt.Query.ToCql()
+	query := cs.session.Query(queryBody, stmt.Values...).WithContext(ctx)
 	if cs.useServerSideTimestamps {
 		query = query.DefaultTimestamp(false)
+		cs.stmtLogger.LogStmt(stmt)
 	} else {
 		query = query.WithTimestamp(ts.UnixNano() / 1000)
+		cs.stmtLogger.LogStmtWithTimeStamp(stmt, ts)
 	}
 
 	if err := query.Exec(); err != nil {
@@ -90,10 +92,11 @@ func (cs *cqlStore) doMutate(ctx context.Context, builder qb.Builder, ts time.Ti
 	return nil
 }
 
-func (cs *cqlStore) load(ctx context.Context, builder qb.Builder, values []interface{}) (result []map[string]interface{}, err error) {
-	query, _ := builder.ToCql()
-	iter := cs.session.Query(query, values...).WithContext(ctx).Iter()
-	cs.ops.WithLabelValues(cs.system, opType(builder)).Inc()
+func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (result []map[string]interface{}, err error) {
+	query, _ := stmt.Query.ToCql()
+	cs.stmtLogger.LogStmt(stmt)
+	iter := cs.session.Query(query, stmt.Values...).WithContext(ctx).Iter()
+	cs.ops.WithLabelValues(cs.system, opType(stmt)).Inc()
 	return loadSet(iter), iter.Close()
 }
 
@@ -126,8 +129,8 @@ func ignore(err error) bool {
 	}
 }
 
-func opType(builder qb.Builder) string {
-	switch builder.(type) {
+func opType(stmt *typedef.Stmt) string {
+	switch stmt.Query.(type) {
 	case *qb.InsertBuilder:
 		return "insert"
 	case *qb.DeleteBuilder:

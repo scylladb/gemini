@@ -140,7 +140,7 @@ func GetCreateSchema(s *typedef.Schema) []string {
 	return stmts
 }
 
-func GetDropSchema(s *typedef.Schema) []string {
+func GetDropKeyspace(s *typedef.Schema) []string {
 	return []string{
 		fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", s.Keyspace.Name),
 	}
