@@ -32,20 +32,21 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/scylladb/go-set/strset"
-	"github.com/scylladb/gocqlx/v2/qb"
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
 
+	"github.com/scylladb/go-set/strset"
+
+	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 type loader interface {
-	load(context.Context, qb.Builder, []interface{}) ([]map[string]interface{}, error)
+	load(context.Context, *typedef.Stmt) ([]map[string]interface{}, error)
 }
 
 type storer interface {
-	mutate(context.Context, qb.Builder, ...interface{}) error
+	mutate(context.Context, *typedef.Stmt) error
 }
 
 type storeLoader interface {
@@ -55,14 +56,22 @@ type storeLoader interface {
 	name() string
 }
 
+type stmtLogger interface {
+	LogStmt(*typedef.Stmt)
+	LogStmtWithTimeStamp(stmt *typedef.Stmt, ts time.Time)
+	Close() error
+}
+
 type Store interface {
-	Create(context.Context, qb.Builder, qb.Builder) error
-	Mutate(context.Context, qb.Builder, ...interface{}) error
-	Check(context.Context, *typedef.Table, qb.Builder, bool, ...interface{}) error
+	Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
+	Mutate(context.Context, *typedef.Stmt) error
+	Check(context.Context, *typedef.Table, *typedef.Stmt, bool) error
 	Close() error
 }
 
 type Config struct {
+	TestLogStatementsFile   string
+	OracleLogStatementsFile string
 	MaxRetriesMutate        int
 	MaxRetriesMutateSleep   time.Duration
 	UseServerSideTimestamps bool
@@ -75,48 +84,23 @@ func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig
 	}, []string{"system", "method"},
 	)
 
-	var oracleStore storeLoader
-	var validations bool
-	if oracleCluster != nil {
-		oracleSession, err := newSession(oracleCluster, traceOut)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to connect to oracle cluster")
-		}
-		oracleStore = &cqlStore{
-			session:                 oracleSession,
-			schema:                  schema,
-			system:                  "oracle",
-			ops:                     ops,
-			maxRetriesMutate:        cfg.MaxRetriesMutate + 10,
-			maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
-			useServerSideTimestamps: cfg.UseServerSideTimestamps,
-			logger:                  logger,
-		}
-		validations = true
-	} else {
-		oracleStore = &noOpStore{
-			system: "oracle",
-		}
+	oracleStore, err := getStore("oracle", schema, oracleCluster, cfg, cfg.OracleLogStatementsFile, traceOut, logger, ops)
+	if err != nil {
+		return nil, err
 	}
 
-	testSession, err := newSession(testCluster, traceOut)
+	if testCluster == nil {
+		return nil, errors.New("test cluster is empty")
+	}
+	testStore, err := getStore("test", schema, testCluster, cfg, cfg.TestLogStatementsFile, traceOut, logger, ops)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to connect to oracle cluster")
+		return nil, err
 	}
 
 	return &delegatingStore{
-		testStore: &cqlStore{
-			session:                 testSession,
-			schema:                  schema,
-			system:                  "test",
-			ops:                     ops,
-			maxRetriesMutate:        cfg.MaxRetriesMutate,
-			maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
-			useServerSideTimestamps: cfg.UseServerSideTimestamps,
-			logger:                  logger,
-		},
+		testStore:   testStore,
 		oracleStore: oracleStore,
-		validations: validations,
+		validations: oracleStore != nil,
 		logger:      logger.Named("delegating_store"),
 	}, nil
 }
@@ -125,11 +109,11 @@ type noOpStore struct {
 	system string
 }
 
-func (n *noOpStore) mutate(context.Context, qb.Builder, ...interface{}) error {
+func (n *noOpStore) mutate(context.Context, *typedef.Stmt) error {
 	return nil
 }
 
-func (n *noOpStore) load(context.Context, qb.Builder, []interface{}) ([]map[string]interface{}, error) {
+func (n *noOpStore) load(context.Context, *typedef.Stmt) ([]map[string]interface{}, error) {
 	return nil, nil
 }
 
@@ -146,31 +130,39 @@ func (n *noOpStore) close() error {
 }
 
 type delegatingStore struct {
-	oracleStore storeLoader
-	testStore   storeLoader
-	logger      *zap.Logger
-	validations bool
+	oracleStore     storeLoader
+	testStore       storeLoader
+	statementLogger stmtLogger
+	logger          *zap.Logger
+	validations     bool
 }
 
-func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder qb.Builder) error {
-	if err := mutate(ctx, ds.oracleStore, oracleBuilder, []interface{}{}); err != nil {
+func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error {
+	if ds.statementLogger != nil {
+		ds.statementLogger.LogStmt(testBuilder)
+	}
+	if err := mutate(ctx, ds.oracleStore, oracleBuilder); err != nil {
 		return errors.Wrap(err, "oracle failed store creation")
 	}
-	if err := mutate(ctx, ds.testStore, testBuilder, []interface{}{}); err != nil {
+	if err := mutate(ctx, ds.testStore, testBuilder); err != nil {
 		return errors.Wrap(err, "test failed store creation")
 	}
 	return nil
 }
 
-func (ds delegatingStore) Mutate(ctx context.Context, builder qb.Builder, values ...interface{}) error {
+func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error {
 	var testErr error
 	var wg sync.WaitGroup
 	wg.Add(1)
+
 	go func() {
-		testErr = mutate(ctx, ds.testStore, builder, values...)
-		wg.Done()
+		defer wg.Done()
+		testErr = errors.Wrapf(
+			ds.testStore.mutate(ctx, stmt),
+			"unable to apply mutations to the %s store", ds.testStore.name())
 	}()
-	if oracleErr := mutate(ctx, ds.oracleStore, builder, values...); oracleErr != nil {
+
+	if oracleErr := ds.oracleStore.mutate(ctx, stmt); oracleErr != nil {
 		// Oracle failed, transition cannot take place
 		ds.logger.Info("oracle store failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(oracleErr))
 		return oracleErr
@@ -184,23 +176,24 @@ func (ds delegatingStore) Mutate(ctx context.Context, builder qb.Builder, values
 	return nil
 }
 
-func mutate(ctx context.Context, s storeLoader, builder qb.Builder, values ...interface{}) error {
-	if err := s.mutate(ctx, builder, values...); err != nil {
+func mutate(ctx context.Context, s storeLoader, stmt *typedef.Stmt) error {
+	if err := s.mutate(ctx, stmt); err != nil {
 		return errors.Wrapf(err, "unable to apply mutations to the %s store", s.name())
 	}
 	return nil
 }
 
-func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, builder qb.Builder, detailedDiff bool, values ...interface{}) error {
+func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, detailedDiff bool) error {
 	var testRows, oracleRows []map[string]interface{}
 	var testErr, oracleErr error
 	var wg sync.WaitGroup
 	wg.Add(1)
+
 	go func() {
-		testRows, testErr = ds.testStore.load(ctx, builder, values)
+		testRows, testErr = ds.testStore.load(ctx, stmt)
 		wg.Done()
 	}()
-	oracleRows, oracleErr = ds.oracleStore.load(ctx, builder, values)
+	oracleRows, oracleErr = ds.oracleStore.load(ctx, stmt)
 	if oracleErr != nil {
 		return errors.Wrapf(oracleErr, "unable to load check data from the oracle store")
 	}
@@ -257,7 +250,47 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, build
 }
 
 func (ds delegatingStore) Close() (err error) {
+	if ds.statementLogger != nil {
+		err = multierr.Append(err, ds.statementLogger.Close())
+	}
 	err = multierr.Append(err, ds.testStore.close())
 	err = multierr.Append(err, ds.oracleStore.close())
 	return
+}
+
+func getStore(
+	name string,
+	schema *typedef.Schema,
+	clusterConfig *gocql.ClusterConfig,
+	cfg Config,
+	stmtLogFile string,
+	traceOut *os.File,
+	logger *zap.Logger,
+	ops *prometheus.CounterVec,
+) (out storeLoader, err error) {
+	if clusterConfig == nil {
+		return &noOpStore{
+			system: name,
+		}, nil
+	}
+	oracleSession, err := newSession(clusterConfig, traceOut)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to connect to %s cluster", name)
+	}
+	oracleFileLogger, err := stmtlogger.NewFileLogger(stmtLogFile)
+	if err != nil {
+		return nil, err
+	}
+
+	return &cqlStore{
+		session:                 oracleSession,
+		schema:                  schema,
+		system:                  name,
+		ops:                     ops,
+		maxRetriesMutate:        cfg.MaxRetriesMutate + 10,
+		maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
+		useServerSideTimestamps: cfg.UseServerSideTimestamps,
+		logger:                  logger.Named(name),
+		stmtLogger:              oracleFileLogger,
+	}, nil
 }

@@ -36,6 +36,19 @@ const (
 	AlterColumnStatementType
 	DropColumnStatementType
 	AddColumnStatementType
+	DropKeyspaceStatementType
+	CreateKeyspaceStatementType
+	CreateSchemaStatementType
+)
+
+const (
+	OpSelect OpType = iota
+	OpInsert
+	OpUpdate
+	OpDelete
+	OpSchemaAlter
+	OpSchemaDrop
+	OpSchemaCreate
 )
 
 //nolint:revive

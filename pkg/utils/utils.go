@@ -25,7 +25,7 @@ import (
 	"golang.org/x/exp/rand"
 )
 
-var maxDateMs = time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC).UTC().UnixMilli()
+var maxDateMs = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC).UTC().UnixMilli()
 
 // RandDateStr generates time in string representation
 // it is done in such way because we wanted to make JSON statement to work
@@ -34,8 +34,12 @@ func RandDateStr(rnd *rand.Rand) string {
 	return time.UnixMilli(rnd.Int63n(maxDateMs)).UTC().Format("2006-01-02")
 }
 
+// RandTimestamp generates timestamp in nanoseconds
+// Date limit needed to make sure that textual representation of the date is parsable by cql and drivers
+// Currently CQL fails: unable to parse date '95260-10-10T19:09:07.148+0000': marshaling error: Unable to parse timestamp from '95260-10-10t19:09:07.148+0000'"
+// if year is bigger than 9999, same as golang time.Parse
 func RandTimestamp(rnd *rand.Rand) int64 {
-	return rnd.Int63()
+	return rnd.Int63n(maxDateMs)
 }
 
 func RandDate(rnd *rand.Rand) time.Time {

@@ -329,7 +329,7 @@ func ddl(
 		if w := logger.Check(zap.DebugLevel, "ddl statement"); w != nil {
 			w.Write(zap.String("pretty_cql", ddlStmt.PrettyCQL()))
 		}
-		if err = s.Mutate(ctx, ddlStmt.Query); err != nil {
+		if err = s.Mutate(ctx, ddlStmt); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
@@ -376,13 +376,11 @@ func mutation(
 		}
 		return err
 	}
-	mutateQuery := mutateStmt.Query
-	mutateValues := mutateStmt.Values
 
 	if w := logger.Check(zap.DebugLevel, "mutation statement"); w != nil {
 		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
 	}
-	if err = s.Mutate(ctx, mutateQuery, mutateValues...); err != nil {
+	if err = s.Mutate(ctx, mutateStmt); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}
@@ -425,7 +423,7 @@ func validation(
 	attempt := 1
 	for {
 		lastErr = err
-		err = s.Check(ctx, table, stmt.Query, attempt == maxAttempts, stmt.Values...)
+		err = s.Check(ctx, table, stmt, attempt == maxAttempts)
 
 		if err == nil {
 			if attempt > 1 {

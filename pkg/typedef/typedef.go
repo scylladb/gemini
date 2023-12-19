@@ -16,6 +16,7 @@ package typedef
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/scylladb/gocqlx/v2/qb"
 
@@ -23,6 +24,9 @@ import (
 )
 
 type (
+	CQLFeature int
+	OpType     uint8
+
 	ValueWithToken struct {
 		Value Values
 		Token uint64
@@ -47,20 +51,26 @@ type (
 		UseLWT          bool
 	}
 
-	CQLFeature int
+	Stmts struct {
+		PostStmtHook func()
+		List         []*Stmt
+		QueryType    StatementType
+	}
+
+	StmtCache struct {
+		Query     qb.Builder
+		Types     Types
+		QueryType StatementType
+		LenValue  int
+	}
 )
 
-type Stmts struct {
-	PostStmtHook func()
-	List         []*Stmt
-	QueryType    StatementType
+type SimpleQuery struct {
+	query string
 }
 
-type StmtCache struct {
-	Query     qb.Builder
-	Types     Types
-	QueryType StatementType
-	LenValue  int
+func (q SimpleQuery) ToCql() (stmt string, names []string) {
+	return q.query, nil
 }
 
 type Stmt struct {
@@ -69,22 +79,22 @@ type Stmt struct {
 	Values          Values
 }
 
+func SimpleStmt(query string, queryType StatementType) *Stmt {
+	return &Stmt{
+		StmtCache: &StmtCache{
+			Query:     SimpleQuery{query},
+			QueryType: queryType,
+		},
+	}
+}
+
 func (s *Stmt) PrettyCQL() string {
-	var replaced int
 	query, _ := s.Query.ToCql()
 	values := s.Values.Copy()
 	if len(values) == 0 {
 		return query
 	}
-	for _, typ := range s.Types {
-		query, replaced = typ.CQLPretty(query, values)
-		if len(values) >= replaced {
-			values = values[replaced:]
-		} else {
-			break
-		}
-	}
-	return query
+	return prettyCQL(query, values, s.Types)
 }
 
 type StatementType uint8
@@ -113,6 +123,27 @@ func (st StatementType) ToString() string {
 		return "DropColumnStatement"
 	case AddColumnStatementType:
 		return "AddColumnStatement"
+	default:
+		panic(fmt.Sprintf("unknown statement type %d", st))
+	}
+}
+
+func (st StatementType) OpType() OpType {
+	switch st {
+	case SelectStatementType, SelectRangeStatementType, SelectByIndexStatementType, SelectFromMaterializedViewStatementType:
+		return OpSelect
+	case InsertStatementType, InsertJSONStatementType:
+		return OpInsert
+	case UpdateStatementType:
+		return OpUpdate
+	case DeleteStatementType:
+		return OpDelete
+	case AlterColumnStatementType, DropColumnStatementType, AddColumnStatementType:
+		return OpSchemaAlter
+	case DropKeyspaceStatementType:
+		return OpSchemaDrop
+	case CreateKeyspaceStatementType, CreateSchemaStatementType:
+		return OpSchemaCreate
 	default:
 		panic(fmt.Sprintf("unknown statement type %d", st))
 	}
@@ -165,3 +196,33 @@ const (
 	CacheDelete
 	CacheArrayLen
 )
+
+func prettyCQL(query string, values Values, types Types) string {
+	if len(values) == 0 {
+		return query
+	}
+
+	k := 0
+	out := make([]string, 0, len(values)*2)
+	queryChunks := strings.Split(query, "?")
+	out = append(out, queryChunks[0])
+	qID := 1
+	for _, typ := range types {
+		tupleType, ok := typ.(*TupleType)
+		if !ok {
+			out = append(out, typ.CQLPretty(values[k]))
+			out = append(out, queryChunks[qID])
+			qID++
+			k++
+			continue
+		}
+		for _, t := range tupleType.ValueTypes {
+			out = append(out, t.CQLPretty(values[k]))
+			out = append(out, queryChunks[qID])
+			qID++
+			k++
+		}
+	}
+	out = append(out, queryChunks[qID:]...)
+	return strings.Join(out, "")
+}
