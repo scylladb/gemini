@@ -217,7 +217,7 @@ func TestCQLPretty(t *testing.T) {
 	t.Parallel()
 
 	for _, p := range prettytests {
-		result, _ := p.typ.CQLPretty(p.query, p.values)
+		result := p.typ.CQLPretty(p.values)
 		if result != p.expected {
 			t.Fatalf("expected '%s', got '%s' for values %v and type '%v'", p.expected, result, p.values, p.typ)
 		}

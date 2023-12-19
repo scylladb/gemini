@@ -16,6 +16,7 @@ package typedef
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/scylladb/gocqlx/v2/qb"
 
@@ -70,21 +71,12 @@ type Stmt struct {
 }
 
 func (s *Stmt) PrettyCQL() string {
-	var replaced int
 	query, _ := s.Query.ToCql()
 	values := s.Values.Copy()
 	if len(values) == 0 {
 		return query
 	}
-	for _, typ := range s.Types {
-		query, replaced = typ.CQLPretty(query, values)
-		if len(values) >= replaced {
-			values = values[replaced:]
-		} else {
-			break
-		}
-	}
-	return query
+	return prettyCQL(query, values, s.Types)
 }
 
 type StatementType uint8
@@ -165,3 +157,33 @@ const (
 	CacheDelete
 	CacheArrayLen
 )
+
+func prettyCQL(query string, values Values, types Types) string {
+	if len(values) == 0 {
+		return query
+	}
+
+	k := 0
+	out := make([]string, 0, len(values)*2)
+	queryChunks := strings.Split(query, "?")
+	out = append(out, queryChunks[0])
+	qID := 1
+	for _, typ := range types {
+		tupleType, ok := typ.(*TupleType)
+		if !ok {
+			out = append(out, typ.CQLPretty(values[k]))
+			out = append(out, queryChunks[qID])
+			qID++
+			k++
+			continue
+		}
+		for _, t := range tupleType.ValueTypes {
+			out = append(out, t.CQLPretty(values[k]))
+			out = append(out, queryChunks[qID])
+			qID++
+			k++
+		}
+	}
+	out = append(out, queryChunks[qID:]...)
+	return strings.Join(out, "")
+}

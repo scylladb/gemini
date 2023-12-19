@@ -20,7 +20,6 @@ import (
 	"math"
 	"math/big"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -67,43 +66,51 @@ func (st SimpleType) LenValue() int {
 	return 1
 }
 
-func (st SimpleType) CQLPretty(query string, value []interface{}) (string, int) {
-	if len(value) == 0 {
-		return query, 0
-	}
-	var replacement string
+func (st SimpleType) CQLPretty(value interface{}) string {
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR, TYPE_INET, TYPE_DATE:
-		replacement = fmt.Sprintf("'%s'", value[0])
+		return fmt.Sprintf("'%s'", value)
 	case TYPE_BLOB:
-		if v, ok := value[0].(string); ok {
+		if v, ok := value.(string); ok {
 			if len(v) > 100 {
 				v = v[:100]
 			}
-			replacement = "textasblob('" + v + "')"
+			return "textasblob('" + v + "')"
 		}
+		panic(fmt.Sprintf("unexpected blob value [%T]%+v", value, value))
 	case TYPE_BIGINT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT:
-		replacement = fmt.Sprintf("%d", value[0])
+		return fmt.Sprintf("%d", value)
 	case TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT:
-		replacement = fmt.Sprintf("%.2f", value[0])
+		return fmt.Sprintf("%.2f", value)
 	case TYPE_BOOLEAN:
-		if v, ok := value[0].(bool); ok {
-			replacement = fmt.Sprintf("%t", v)
+		if v, ok := value.(bool); ok {
+			return fmt.Sprintf("%t", v)
 		}
-	case TYPE_TIME, TYPE_TIMESTAMP:
-		if v, ok := value[0].(time.Time); ok {
-			replacement = "'" + v.Format(time.RFC3339) + "'"
+		panic(fmt.Sprintf("unexpected boolean value [%T]%+v", value, value))
+	case TYPE_TIME:
+		if v, ok := value.(int64); ok {
+			// CQL supports only 3 digits microseconds:
+			// '10:10:55.83275+0000': marshaling error: Milliseconds length exceeds expected (5)"
+			return fmt.Sprintf("'%s'", time.Time{}.Add(time.Duration(v)).Format("15:04:05.999"))
 		}
+		panic(fmt.Sprintf("unexpected time value [%T]%+v", value, value))
+	case TYPE_TIMESTAMP:
+		if v, ok := value.(int64); ok {
+			// CQL supports only 3 digits microseconds:
+			// '1976-03-25T10:10:55.83275+0000': marshaling error: Milliseconds length exceeds expected (5)"
+			return time.UnixMicro(v).UTC().Format("'2006-01-02T15:04:05.999-0700'")
+		}
+		panic(fmt.Sprintf("unexpected timestamp value [%T]%+v", value, value))
 	case TYPE_DURATION, TYPE_TIMEUUID, TYPE_UUID:
-		replacement = fmt.Sprintf("%s", value[0])
+		return fmt.Sprintf("%s", value)
 	case TYPE_VARINT:
-		if s, ok := value[0].(*big.Int); ok {
-			replacement = fmt.Sprintf("%d", s.Int64())
+		if s, ok := value.(*big.Int); ok {
+			return fmt.Sprintf("%d", s.Int64())
 		}
+		panic(fmt.Sprintf("unexpected varint value [%T]%+v", value, value))
 	default:
 		panic(fmt.Sprintf("cql pretty: not supported type %s", st))
 	}
-	return strings.Replace(query, "?", replacement, 1), 1
 }
 
 func (st SimpleType) CQLType() gocql.TypeInfo {

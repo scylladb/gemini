@@ -15,6 +15,7 @@
 package typedef
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/gocql/gocql"
@@ -54,16 +55,16 @@ func (t *TupleType) CQLHolder() string {
 	return "(" + strings.TrimRight(strings.Repeat("?,", len(t.ValueTypes)), ",") + ")"
 }
 
-func (t *TupleType) CQLPretty(query string, value []interface{}) (string, int) {
-	if len(value) == 0 {
-		return query, 0
+func (t *TupleType) CQLPretty(value interface{}) string {
+	values, ok := value.([]interface{})
+	if !ok {
+		return "()"
 	}
-	var cnt, tmp int
+	out := make([]string, len(values))
 	for i, tp := range t.ValueTypes {
-		query, tmp = tp.CQLPretty(query, value[i:])
-		cnt += tmp
+		out[i] = tp.CQLPretty(values[i])
 	}
-	return query, cnt
+	return fmt.Sprintf("(%s)", strings.Join(out, ","))
 }
 
 func (t *TupleType) Indexable() bool {

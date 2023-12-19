@@ -140,19 +140,19 @@ func (mt *MapType) CQLHolder() string {
 	return "?"
 }
 
-func (mt *MapType) CQLPretty(query string, value []interface{}) (string, int) {
-	if reflect.TypeOf(value[0]).Kind() != reflect.Map {
+func (mt *MapType) CQLPretty(value interface{}) string {
+	if reflect.TypeOf(value).Kind() != reflect.Map {
 		panic(fmt.Sprintf("map cql pretty, unknown type %v", mt))
 	}
-	s := reflect.ValueOf(value[0]).MapRange()
-	vv := "{"
+	vof := reflect.ValueOf(value)
+	s := vof.MapRange()
+	out := make([]string, len(vof.MapKeys()))
+	id := 0
 	for s.Next() {
-		vv += fmt.Sprintf("%v:?,", s.Key().Interface())
-		vv, _ = mt.ValueType.CQLPretty(vv, []interface{}{s.Value().Interface()})
+		out[id] = fmt.Sprintf("%s:%s", mt.KeyType.CQLPretty(s.Key().Interface()), mt.ValueType.CQLPretty(s.Value().Interface()))
+		id++
 	}
-	vv = strings.TrimSuffix(vv, ",")
-	vv += "}"
-	return strings.Replace(query, "?", vv, 1), 1
+	return fmt.Sprintf("{%s}", strings.Join(out, ","))
 }
 
 func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
@@ -209,8 +209,8 @@ func (ct *CounterType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *CounterType) CQLPretty(query string, value []interface{}) (string, int) {
-	return strings.Replace(query, "?", fmt.Sprintf("%d", value[0]), 1), 1
+func (ct *CounterType) CQLPretty(value interface{}) string {
+	return fmt.Sprintf("%d", value)
 }
 
 func (ct *CounterType) GenJSONValue(r *rand.Rand, _ *PartitionRangeConfig) interface{} {

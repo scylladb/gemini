@@ -48,21 +48,21 @@ func (t *UDTType) CQLHolder() string {
 	return "?"
 }
 
-func (t *UDTType) CQLPretty(query string, value []interface{}) (string, int) {
-	if len(value) == 0 {
-		return query, 0
+func (t *UDTType) CQLPretty(value interface{}) string {
+	s, ok := value.(map[string]interface{})
+	if !ok {
+		panic(fmt.Sprintf("udt pretty, unknown type %v", t))
 	}
-	if s, ok := value[0].(map[string]interface{}); ok {
-		vv := "{"
-		for k, v := range t.ValueTypes {
-			vv += fmt.Sprintf("%s:?,", k)
-			vv, _ = v.CQLPretty(vv, []interface{}{s[k]})
+
+	out := make([]string, 0, len(t.ValueTypes))
+	for k, v := range t.ValueTypes {
+		keyVal, kexExists := s[k]
+		if !kexExists {
+			continue
 		}
-		vv = strings.TrimSuffix(vv, ",")
-		vv += "}"
-		return strings.Replace(query, "?", vv, 1), 1
+		out = append(out, fmt.Sprintf("%s:%s", k, v.CQLPretty(keyVal)))
 	}
-	panic(fmt.Sprintf("udt pretty, unknown type %v", t))
+	return fmt.Sprintf("{%s}", strings.Join(out, ","))
 }
 
 func (t *UDTType) Indexable() bool {

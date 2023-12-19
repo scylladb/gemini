@@ -23,7 +23,7 @@ type Type interface {
 	Name() string
 	CQLDef() string
 	CQLHolder() string
-	CQLPretty(string, []interface{}) (string, int)
+	CQLPretty(interface{}) string
 	GenValue(*rand.Rand, *PartitionRangeConfig) []interface{}
 	GenJSONValue(*rand.Rand, *PartitionRangeConfig) interface{}
 	LenValue() int
