@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,8 @@ func TestTuple_UnmarshalCQL(t *testing.T) {
 		// Tuple initialization.
 		testColumn := make(Tuple, elems)
 		for idx := range testColumn {
-			testColumn[idx] = &ColumnRaw{}
+			tmp := ColumnRaw("")
+			testColumn[idx] = &tmp
 		}
 		// Unmarshall.
 		err := testColumn.UnmarshalCQL(gocql.TupleTypeInfo{Elems: make([]gocql.TypeInfo, elems)}, data)
@@ -71,8 +72,9 @@ func TestTuple_Equal(t *testing.T) {
 		if !testColumn1.EqualElem(&testColumn2) {
 			t.Fatal("Tuple.EqualElem should return true")
 		}
+		tmp := ColumnRaw("123")
 		testColumn2 = []Elem{
-			&ColumnRaw{1, 2, 3},
+			&tmp,
 		}
 		// EqualColumn test on unequal
 		if testColumn1.EqualColumn(testColumn2) {

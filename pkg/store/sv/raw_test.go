@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,18 +25,18 @@ import (
 
 func TestColumnRaw_UnmarshalCQL(t *testing.T) {
 	errorMsg := "wrong ColumnRaw.UnmarshalCQL work:"
-	testColumn := make(ColumnRaw, 0)
+	var testColumn ColumnRaw
 
 	testsCount := 1000
 	for i := 0; i < testsCount; i++ {
 		expected := utils.RandBytes(rnd, rnd.Intn(1000))
 		if i == 0 {
-			expected = ColumnRaw{}
+			expected = make([]byte, 0)
 		}
 		_ = testColumn.UnmarshalCQL(nil, expected)
 		if !reflect.DeepEqual(expected, ([]byte)(testColumn)) {
 			t.Fatalf("%s\nreceived:%+v \nexpected:%+v", errorMsg, testColumn, expected)
 		}
-		testColumn = make(ColumnRaw, 0)
+		testColumn = ""
 	}
 }

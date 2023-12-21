@@ -94,7 +94,7 @@ func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Ti
 	return nil
 }
 
-func (cs *cqlStore) loadSV(ctx context.Context, stmt *typedef.Stmt) (sv.Result, error) {
+func (cs *cqlStore) loadSingleVersion(ctx context.Context, stmt *typedef.Stmt) (sv.Result, error) {
 	query, _ := stmt.Query.ToCql()
 	cs.stmtLogger.LogStmt(stmt)
 	iter := cs.session.Query(query, stmt.Values...).WithContext(ctx).Iter()
@@ -102,7 +102,7 @@ func (cs *cqlStore) loadSV(ctx context.Context, stmt *typedef.Stmt) (sv.Result, 
 	return sv.GetResult(iter), iter.Close()
 }
 
-func (cs *cqlStore) loadMV(ctx context.Context, stmt *typedef.Stmt) (mv.Result, error) {
+func (cs *cqlStore) loadMultiVersion(ctx context.Context, stmt *typedef.Stmt) (mv.Result, error) {
 	query, _ := stmt.Query.ToCql()
 	cs.stmtLogger.LogStmt(stmt)
 	iter := cs.session.Query(query, stmt.Values...).WithContext(ctx).Iter()
@@ -110,7 +110,7 @@ func (cs *cqlStore) loadMV(ctx context.Context, stmt *typedef.Stmt) (mv.Result, 
 	return mv.GetResult(iter), iter.Close()
 }
 
-func (cs *cqlStore) loadVerCheck(ctx context.Context, stmt *typedef.Stmt) (mv.Result, error) {
+func (cs *cqlStore) loadCheckVersion(ctx context.Context, stmt *typedef.Stmt) (mv.Result, error) {
 	query, _ := stmt.Query.ToCql()
 	cs.stmtLogger.LogStmt(stmt)
 	iter := cs.session.Query(query, stmt.Values...).WithContext(ctx).Iter()

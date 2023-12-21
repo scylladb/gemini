@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,28 +25,28 @@ import (
 
 func TestColumnRaw_UnmarshalCQL(t *testing.T) {
 	errorMsg := "wrong ColumnRaw.UnmarshalCQL work:"
-	testColumn := make(ColumnRaw, 0)
+	testColumn := ColumnRaw("")
 
 	testsCount := 1000
 	for i := 0; i < testsCount; i++ {
 		expected := utils.RandBytes(rnd, rnd.Intn(1000))
 		if i == 0 {
-			expected = ColumnRaw{}
+			expected = make([]byte, 0)
 		}
 		_ = testColumn.UnmarshalCQL(nil, expected)
 		if !reflect.DeepEqual(expected, ([]byte)(testColumn)) {
 			t.Fatalf("%s\nreceived:%+v \nexpected:%+v", errorMsg, testColumn, expected)
 		}
-		testColumn = make(ColumnRaw, 0)
+		testColumn = ColumnRaw("")
 	}
 }
 
 func TestColumnRaw_Equal(t *testing.T) {
-	testColumn1 := make(ColumnRaw, 0)
-	testColumn2 := make(ColumnRaw, 0)
+	testColumn1 := ColumnRaw("")
+	testColumn2 := ColumnRaw("")
 	tests := []ColumnRaw{
-		utils.RandBytes(rnd, rnd.Intn(1000)),
-		[]byte{},
+		ColumnRaw(utils.RandBytes(rnd, rnd.Intn(1000))),
+		ColumnRaw(""),
 	}
 	for i := range tests {
 		testColumn1 = tests[i]
@@ -59,7 +59,7 @@ func TestColumnRaw_Equal(t *testing.T) {
 		if !testColumn1.EqualElem(&testColumn2) {
 			t.Fatal("ColumnRaw.EqualElem should return true")
 		}
-		testColumn2 = utils.RandBytes(rnd, rnd.Intn(30))
+		testColumn2 = ColumnRaw(utils.RandBytes(rnd, rnd.Intn(30)))
 		// EqualColumn test on unequal
 		if testColumn1.EqualColumn(testColumn2) {
 			t.Fatal("ColumnRaw.EqualColumn should return false")

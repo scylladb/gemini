@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,8 +35,7 @@ func (m Map) ToString(colInfo gocql.TypeInfo) string {
 	for idx := range m.Keys {
 		out += fmt.Sprintf("%s:%s;", m.Keys[idx].ToString(mapInfo.Key), m.Values[idx].ToString(mapInfo.Elem))
 	}
-	out = out[:len(out)-1]
-	return out + ")"
+	return out[:len(out)-1] + ">"
 }
 
 func (m Map) ToStringRaw() string {
@@ -47,8 +46,7 @@ func (m Map) ToStringRaw() string {
 	for idx := range m.Keys {
 		out += fmt.Sprintf("key%d%s:value%s;", idx, m.Keys[idx].ToStringRaw(), m.Values[idx].ToStringRaw())
 	}
-	out = out[:len(out)-1]
-	return out + ")"
+	return out[:len(out)-1] + ">"
 }
 
 func (m Map) EqualColumn(colT interface{}) bool {

@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,19 +16,20 @@ package mv
 
 import (
 	"fmt"
+	"unsafe"
 
 	"github.com/gocql/gocql"
 )
 
 // ColumnRaw for most cases.
-type ColumnRaw []byte
+type ColumnRaw string
 
 func (col ColumnRaw) ToString(colInfo gocql.TypeInfo) string {
 	if len(col) == 0 {
 		return ""
 	}
 	tmpVal := colInfo.New()
-	if err := gocql.Unmarshal(colInfo, col, tmpVal); err != nil {
+	if err := gocql.Unmarshal(colInfo, unsafe.Slice(unsafe.StringData((string)(col)), len(col)), tmpVal); err != nil {
 		panic(err)
 	}
 	out := fmt.Sprintf("%v", dereference(tmpVal))
@@ -49,49 +50,28 @@ func (col ColumnRaw) ToString(colInfo gocql.TypeInfo) string {
 }
 
 func (col ColumnRaw) ToStringRaw() string {
-	return fmt.Sprint(col)
+	return fmt.Sprint(unsafe.Slice(unsafe.StringData((string)(col)), len(col)))
 }
 
 func (col ColumnRaw) EqualColumn(colT interface{}) bool {
 	col2, ok := colT.(ColumnRaw)
-	if len(col) != len(col2) || !ok {
-		// Columns len are different - means columns are unequal
+	if !ok {
 		return false
 	}
-	if len(col) < 1 {
-		// Columns len==0 and same - means columns are equal
-		// Conditions "<" or ">" works faster that "=="
-		return true
-	}
-	for idx := range col {
-		if col[idx] != col2[idx] {
-			return false
-		}
-	}
-	return true
+	return col == col2
 }
 
 func (col ColumnRaw) EqualElem(colT interface{}) bool {
 	col2, ok := colT.(*ColumnRaw)
-	if len(col) != len(*col2) || !ok {
+	if !ok {
 		// Columns len are different - means columns are unequal
 		return false
 	}
-	if len(col) < 1 {
-		// Columns len==0 and same - means columns are equal
-		// Conditions "<" or ">" works faster that "=="
-		return true
-	}
-	for idx := range col {
-		if col[idx] != (*col2)[idx] {
-			return false
-		}
-	}
-	return true
+	return col == *col2
 }
 
 func (col ColumnRaw) NewSameColumn() Column {
-	return ColumnRaw{}
+	return ColumnRaw("")
 }
 
 func (col ColumnRaw) ToUnmarshal() interface{} {
@@ -99,13 +79,14 @@ func (col ColumnRaw) ToUnmarshal() interface{} {
 }
 
 func (col ColumnRaw) NewSameElem() Elem {
-	return &ColumnRaw{}
+	tmp := ColumnRaw("")
+	return &tmp
 }
 
 func (col *ColumnRaw) UnmarshalCQL(_ gocql.TypeInfo, data []byte) error {
 	if len(data) > 0 {
 		// Puts data without copying
-		*col = data
+		*col = (ColumnRaw)(unsafe.String(&data[0], len(data)))
 	}
 	return nil
 }

@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,8 +32,7 @@ func (t Tuple) ToString(colInfo gocql.TypeInfo) string {
 	for i, elem := range tuple.Elems {
 		out += fmt.Sprintf("%d:%s;", i, t[i].ToString(elem))
 	}
-	out = out[:len(out)-1]
-	return out + ">"
+	return out[:len(out)-1] + ">"
 }
 
 func (t Tuple) ToStringRaw() string {
@@ -44,8 +43,7 @@ func (t Tuple) ToStringRaw() string {
 	for i := range t {
 		out += fmt.Sprintf("%d:%s;", i, t[i].ToStringRaw())
 	}
-	out = out[:len(out)-1]
-	return out + ">"
+	return out[:len(out)-1] + ">"
 }
 
 func (t Tuple) EqualColumn(colT interface{}) bool {

@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -214,16 +214,14 @@ func rndSameRowSV(columns, columnLen int) (sv.RowSV, sv.RowSV) {
 }
 
 func rndSameRawSV(columnLen int) (sv.ColumnRaw, sv.ColumnRaw) {
-	out1 := []byte(utils.RandString(rnd, columnLen))
-	out2 := make(sv.ColumnRaw, columnLen)
-	copy(out2, out1)
+	out1 := sv.ColumnRaw(utils.RandString(rnd, columnLen))
+	out2 := out1
 	return out1, out2
 }
 
 func rndSameRaw(columnLen int) (mv.ColumnRaw, mv.ColumnRaw) {
-	out1 := []byte(utils.RandString(rnd, columnLen))
-	out2 := make(mv.ColumnRaw, columnLen)
-	copy(out2, out1)
+	out1 := mv.ColumnRaw(utils.RandString(rnd, columnLen))
+	out2 := out1
 	return out1, out2
 }
 

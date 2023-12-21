@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import "github.com/gocql/gocql"
 // So initColumn checks all these cases and returns right Column implementation.
 func initColumn(colType gocql.TypeInfo) Column {
 	if !haveCollection(colType) {
-		return ColumnRaw{}
+		return ColumnRaw("")
 	}
 
 	switch colType.Type() {
@@ -57,7 +57,7 @@ func initColumn(colType gocql.TypeInfo) Column {
 		}
 		return udt
 	default:
-		return ColumnRaw{}
+		return ColumnRaw("")
 	}
 }
 
@@ -87,7 +87,8 @@ func haveCollection(typeInfo gocql.TypeInfo) bool {
 // initElem returns Elem implementation for the specified type.
 func initElem(elemType gocql.TypeInfo) Elem {
 	if !haveCollection(elemType) {
-		return &ColumnRaw{}
+		tmp := ColumnRaw("")
+		return &tmp
 	}
 
 	switch elemType.Type() {
@@ -121,6 +122,7 @@ func initElem(elemType gocql.TypeInfo) Elem {
 		}
 		return &udt
 	default:
-		return &ColumnRaw{}
+		tmp := ColumnRaw("")
+		return &tmp
 	}
 }

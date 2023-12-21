@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -88,8 +88,10 @@ func rndDataElemsMap(elems, elemLenMax int, old bool) ([]Elem, []Elem, []byte) {
 	}
 	if elems < 1 {
 		// With correction needed, because List and Map initialization required fist elem.
-		outKeys = append(outKeys, &ColumnRaw{})
-		outValues = append(outValues, &ColumnRaw{})
+		tmpKey := ColumnRaw("")
+		tmpValue := ColumnRaw("")
+		outKeys = append(outKeys, &tmpKey)
+		outValues = append(outValues, &tmpValue)
 	}
 	return outKeys, outValues, outData
 }
@@ -97,8 +99,7 @@ func rndDataElemsMap(elems, elemLenMax int, old bool) ([]Elem, []Elem, []byte) {
 func rndRow(columns, columnLen int) RowMV {
 	out := make(RowMV, columns)
 	for idx := range out {
-		col := utils.RandBytes(rnd, columnLen)
-		out[idx] = *(*ColumnRaw)(&col)
+		out[idx] = ColumnRaw(utils.RandBytes(rnd, columnLen))
 	}
 	return out
 }
@@ -133,12 +134,8 @@ func rndSameRow(columns, columnLen int) (RowMV, RowMV) {
 }
 
 func rndSameRaw(columnLen int) (ColumnRaw, ColumnRaw) {
-	out1 := make(ColumnRaw, columnLen)
-	for idx := range out1 {
-		out1[idx] = byte(rnd.Intn(256))
-	}
-	out2 := make(ColumnRaw, columnLen)
-	copy(out2, out1)
+	out1 := ColumnRaw(utils.RandBytes(rnd, columnLen))
+	out2 := out1
 	return out1, out2
 }
 

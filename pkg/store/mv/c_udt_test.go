@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,7 +39,8 @@ func TestUDT_UnmarshalCQL(t *testing.T) {
 		testColumn.Names = make([]string, elems)
 		testColumn.Values = make([]Elem, elems)
 		for idx := range testColumn.Values {
-			testColumn.Values[idx] = &ColumnRaw{}
+			tmp := ColumnRaw("")
+			testColumn.Values[idx] = &tmp
 		}
 		// Unmarshall.
 		err := testColumn.UnmarshalCQL(gocql.UDTTypeInfo{Elements: make([]gocql.UDTField, elems)}, data)
@@ -74,8 +75,9 @@ func TestUDT_Equal(t *testing.T) {
 			t.Fatal("UDT.EqualElem should return true")
 		}
 		// Corrupt values
+		tmp := ColumnRaw("123")
 		testColumn2.Values = []Elem{
-			&ColumnRaw{1, 2, 3},
+			&tmp,
 		}
 		// EqualColumn test on unequal
 		if testColumn1.EqualColumn(testColumn2) {

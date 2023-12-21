@@ -38,9 +38,9 @@ import (
 var errorResponseDiffer = errors.New("response from test and oracle store have difference")
 
 type loader interface {
-	loadSV(context.Context, *typedef.Stmt) (sv.Result, error)
-	loadMV(context.Context, *typedef.Stmt) (mv.Result, error)
-	loadVerCheck(context.Context, *typedef.Stmt) (mv.Result, error)
+	loadSingleVersion(context.Context, *typedef.Stmt) (sv.Result, error)
+	loadMultiVersion(context.Context, *typedef.Stmt) (mv.Result, error)
+	loadCheckVersion(context.Context, *typedef.Stmt) (mv.Result, error)
 }
 
 type storer interface {
@@ -111,15 +111,15 @@ func (n *noOpStore) mutate(context.Context, *typedef.Stmt) error {
 	return nil
 }
 
-func (n *noOpStore) loadSV(context.Context, *typedef.Stmt) (sv.Result, error) {
+func (n *noOpStore) loadSingleVersion(context.Context, *typedef.Stmt) (sv.Result, error) {
 	return sv.Result{}, nil
 }
 
-func (n *noOpStore) loadMV(context.Context, *typedef.Stmt) (mv.Result, error) {
+func (n *noOpStore) loadMultiVersion(context.Context, *typedef.Stmt) (mv.Result, error) {
 	return mv.Result{}, nil
 }
 
-func (n *noOpStore) loadVerCheck(context.Context, *typedef.Stmt) (mv.Result, error) {
+func (n *noOpStore) loadCheckVersion(context.Context, *typedef.Stmt) (mv.Result, error) {
 	return mv.Result{}, nil
 }
 
@@ -198,26 +198,26 @@ func (ds delegatingStore) Check(ctx context.Context, _ *typedef.Table, stmt *typ
 	case ver.Check.ModeSV():
 		resultsSV := sv.Results{}
 		go func() {
-			resultsSV.Test, testErr = ds.testStore.loadSV(ctx, stmt)
+			resultsSV.Test, testErr = ds.testStore.loadSingleVersion(ctx, stmt)
 			wg.Done()
 		}()
-		resultsSV.Oracle, oracleErr = ds.oracleStore.loadSV(ctx, stmt)
+		resultsSV.Oracle, oracleErr = ds.oracleStore.loadSingleVersion(ctx, stmt)
 		results = &resultsSV
 	case ver.Check.Done():
 		resultsMV := mv.Results{}
 		go func() {
-			resultsMV.Test, testErr = ds.testStore.loadMV(ctx, stmt)
+			resultsMV.Test, testErr = ds.testStore.loadMultiVersion(ctx, stmt)
 			wg.Done()
 		}()
-		resultsMV.Oracle, oracleErr = ds.oracleStore.loadMV(ctx, stmt)
+		resultsMV.Oracle, oracleErr = ds.oracleStore.loadMultiVersion(ctx, stmt)
 		results = &resultsMV
 	default:
 		resultsMV := mv.Results{}
 		go func() {
-			resultsMV.Test, testErr = ds.testStore.loadVerCheck(ctx, stmt)
+			resultsMV.Test, testErr = ds.testStore.loadCheckVersion(ctx, stmt)
 			wg.Done()
 		}()
-		resultsMV.Oracle, oracleErr = ds.oracleStore.loadVerCheck(ctx, stmt)
+		resultsMV.Oracle, oracleErr = ds.oracleStore.loadCheckVersion(ctx, stmt)
 		results = &resultsMV
 	}
 	if oracleErr != nil {

@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,16 +50,8 @@ func (row RowSV) Equal(row2 RowSV) bool {
 		return true
 	}
 	for idx := range row {
-		if len(row[idx]) != len(row2[idx]) {
+		if row[idx] != row2[idx] {
 			return false
-		}
-		if len(row[idx]) < 1 {
-			continue
-		}
-		for id := range row[idx] {
-			if row[idx][id] != row2[idx][id] {
-				return false
-			}
 		}
 	}
 	return true

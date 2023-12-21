@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,7 +43,8 @@ func TestList_UnmarshalCQL(t *testing.T) {
 		expected, data := rndDataElems(elems, maxElemLen, old, true)
 		// List initialization.
 		testColumn := make(List, 1)
-		testColumn[0] = &ColumnRaw{}
+		tmp := ColumnRaw("")
+		testColumn[0] = &tmp
 		// Unmarshall.
 		if old {
 			err = testColumn.unmarshalOld(gocql.CollectionType{}, data)
@@ -56,7 +57,7 @@ func TestList_UnmarshalCQL(t *testing.T) {
 			t.Fatalf("%s error:%s", errorMsg, err)
 		}
 		// With correction needed, because List and Map initialization required fist elem
-		if len(expected) == 0 && len(testColumn) == 1 && testColumn[0].EqualColumn(ColumnRaw{}) {
+		if len(expected) == 0 && len(testColumn) == 1 && testColumn[0].EqualColumn(ColumnRaw("")) {
 			continue
 		}
 		if len(testColumn) != len(expected) {
@@ -83,8 +84,9 @@ func TestList_Equal(t *testing.T) {
 		if !testColumn1.EqualElem(&testColumn2) {
 			t.Fatal("List.EqualElem should return true")
 		}
+		tmp := ColumnRaw("123")
 		testColumn2 = []Elem{
-			&ColumnRaw{1, 2, 3},
+			&tmp,
 		}
 		// EqualColumn test on unequal
 		if testColumn1.EqualColumn(testColumn2) {

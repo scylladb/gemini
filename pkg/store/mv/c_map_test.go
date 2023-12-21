@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,8 +45,10 @@ func TestMap_UnmarshalCQL(t *testing.T) {
 		// Map initialization.
 		testColumn.Keys = make([]Elem, 1)
 		testColumn.Values = make([]Elem, 1)
-		testColumn.Keys[0] = &ColumnRaw{}
-		testColumn.Values[0] = &ColumnRaw{}
+		tmpKey := ColumnRaw("")
+		tmpValue := ColumnRaw("")
+		testColumn.Keys[0] = &tmpKey
+		testColumn.Values[0] = &tmpValue
 		// Unmarshall.
 		if old {
 			err = testColumn.oldUnmarshalCQL(gocql.CollectionType{}, data)
@@ -95,8 +97,9 @@ func TestMap_Equal(t *testing.T) {
 		}
 
 		// Corrupt values
+		tmp := ColumnRaw("123")
 		testColumn2.Values = []Elem{
-			&ColumnRaw{1, 2, 3},
+			&tmp,
 		}
 		// EqualColumn test on unequal
 		if testColumn1.EqualColumn(testColumn2) {
@@ -110,7 +113,7 @@ func TestMap_Equal(t *testing.T) {
 		// Corrupt keys
 		testColumn1.Values, testColumn2.Values = rndSameElems(testCeases[i].elems, testCeases[i].elemLen)
 		testColumn2.Keys = []Elem{
-			&ColumnRaw{1, 2, 3},
+			&tmp,
 		}
 		// EqualColumn test on unequal
 		if testColumn1.EqualColumn(testColumn2) {

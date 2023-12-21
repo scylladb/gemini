@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,8 +36,7 @@ func (u UDT) ToString(colInfo gocql.TypeInfo) string {
 	for idx := range u.Values {
 		out += u.pairToString(idx, udt.Elements[idx].Type)
 	}
-	out = out[:len(out)-1]
-	return out + ">"
+	return out[:len(out)-1] + ">"
 }
 
 func (u UDT) pairToString(idx int, colType gocql.TypeInfo) string {
@@ -52,8 +51,7 @@ func (u UDT) ToStringRaw() string {
 	for idx := range u.Values {
 		out += u.pairToStringRaw(idx)
 	}
-	out = out[:len(out)-1]
-	return out + ">"
+	return out[:len(out)-1] + ">"
 }
 
 func (u UDT) pairToStringRaw(idx int) string {

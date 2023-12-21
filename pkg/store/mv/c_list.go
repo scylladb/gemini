@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,8 +35,7 @@ func (l List) ToString(colInfo gocql.TypeInfo) string {
 	for idx := range l {
 		out += fmt.Sprintf("%d:%s;", idx, l[idx].ToString(listInfo.Elem))
 	}
-	out = out[:len(out)-1]
-	return out + ">"
+	return out[:len(out)-1] + ">"
 }
 
 func (l List) ToStringRaw() string {
@@ -47,8 +46,7 @@ func (l List) ToStringRaw() string {
 	for idx := range l {
 		out += fmt.Sprintf("%d:%s;", idx, l[idx].ToStringRaw())
 	}
-	out = out[:len(out)-1]
-	return out + ">"
+	return out[:len(out)-1] + ">"
 }
 
 func (l List) EqualColumn(colT interface{}) bool {

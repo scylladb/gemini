@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,19 +17,20 @@ package sv
 import (
 	"fmt"
 	"reflect"
+	"unsafe"
 
 	"github.com/gocql/gocql"
 )
 
 // ColumnRaw for most cases.
-type ColumnRaw []byte
+type ColumnRaw string
 
 func (col ColumnRaw) ToString(colInfo gocql.TypeInfo) string {
 	if len(col) == 0 {
 		return ""
 	}
 	tmpVal := colInfo.New()
-	if err := gocql.Unmarshal(colInfo, col, tmpVal); err != nil {
+	if err := gocql.Unmarshal(colInfo, unsafe.Slice(unsafe.StringData((string)(col)), len(col)), tmpVal); err != nil {
 		panic(err)
 	}
 	out := fmt.Sprintf("%v", reflect.Indirect(reflect.ValueOf(tmpVal)).Interface())
@@ -50,7 +51,7 @@ func (col ColumnRaw) ToString(colInfo gocql.TypeInfo) string {
 }
 
 func (col ColumnRaw) ToStringRaw() string {
-	return fmt.Sprint(col)
+	return fmt.Sprint(unsafe.Slice(unsafe.StringData((string)(col)), len(col)))
 }
 
 func (col ColumnRaw) ToInterface() interface{} {
@@ -60,7 +61,7 @@ func (col ColumnRaw) ToInterface() interface{} {
 func (col *ColumnRaw) UnmarshalCQL(_ gocql.TypeInfo, data []byte) error {
 	if len(data) > 0 {
 		// Puts data without copying
-		*col = data
+		*col = (ColumnRaw)(unsafe.String(&data[0], len(data)))
 	}
 	return nil
 }

@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2023 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -132,8 +132,7 @@ func getRandomRawRows(rowsCount, columns, columnLen int) RowsSV {
 func rndRow(columns, columnLen int) RowSV {
 	out := make(RowSV, columns)
 	for idx := range out {
-		col := utils.RandBytes(rnd, columnLen)
-		out[idx] = *(*ColumnRaw)(&col)
+		out[idx] = ColumnRaw(utils.RandBytes(rnd, columnLen))
 	}
 	return out
 }
