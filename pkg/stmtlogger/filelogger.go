@@ -31,7 +31,13 @@ const (
 	errorsOnFileLimit = 5
 )
 
-type FileLogger struct {
+type StmtToFile interface {
+	LogStmt(*typedef.Stmt)
+	LogStmtWithTimeStamp(stmt *typedef.Stmt, ts time.Time)
+	Close() error
+}
+
+type fileLogger struct {
 	fd                   *os.File
 	activeChannel        atomic.Pointer[loggerChan]
 	channel              loggerChan
@@ -46,7 +52,7 @@ type logRec struct {
 	ts   time.Time
 }
 
-func (fl *FileLogger) LogStmt(stmt *typedef.Stmt) {
+func (fl *fileLogger) LogStmt(stmt *typedef.Stmt) {
 	ch := fl.activeChannel.Load()
 	if ch != nil {
 		*ch <- logRec{
@@ -55,7 +61,7 @@ func (fl *FileLogger) LogStmt(stmt *typedef.Stmt) {
 	}
 }
 
-func (fl *FileLogger) LogStmtWithTimeStamp(stmt *typedef.Stmt, ts time.Time) {
+func (fl *fileLogger) LogStmtWithTimeStamp(stmt *typedef.Stmt, ts time.Time) {
 	ch := fl.activeChannel.Load()
 	if ch != nil {
 		*ch <- logRec{
@@ -65,11 +71,11 @@ func (fl *FileLogger) LogStmtWithTimeStamp(stmt *typedef.Stmt, ts time.Time) {
 	}
 }
 
-func (fl *FileLogger) Close() error {
+func (fl *fileLogger) Close() error {
 	return fl.fd.Close()
 }
 
-func (fl *FileLogger) committer() {
+func (fl *fileLogger) committer() {
 	var err2 error
 
 	defer func() {
@@ -114,16 +120,16 @@ func (fl *FileLogger) committer() {
 	}
 }
 
-func NewFileLogger(filename string) (*FileLogger, error) {
+func NewFileLogger(filename string) (StmtToFile, error) {
 	if filename == "" {
-		return nil, nil
+		return &nopFileLogger{}, nil
 	}
 	fd, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		return nil, err
 	}
 
-	out := &FileLogger{
+	out := &fileLogger{
 		filename: filename,
 		fd:       fd,
 		channel:  make(loggerChan, defaultChanSize),
@@ -133,3 +139,11 @@ func NewFileLogger(filename string) (*FileLogger, error) {
 	go out.committer()
 	return out, nil
 }
+
+type nopFileLogger struct{}
+
+func (n *nopFileLogger) LogStmtWithTimeStamp(_ *typedef.Stmt, _ time.Time) {}
+
+func (n *nopFileLogger) Close() error { return nil }
+
+func (n *nopFileLogger) LogStmt(_ *typedef.Stmt) {}

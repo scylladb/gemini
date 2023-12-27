@@ -27,6 +27,7 @@ import (
 	"github.com/scylladb/gocqlx/v2/qb"
 	"go.uber.org/zap"
 
+	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -39,7 +40,7 @@ type cqlStore struct { //nolint:govet
 	maxRetriesMutate        int
 	maxRetriesMutateSleep   time.Duration
 	useServerSideTimestamps bool
-	stmtLogger              stmtLogger
+	stmtLogger              stmtlogger.StmtToFile
 }
 
 func (cs *cqlStore) name() string {
