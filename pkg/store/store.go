@@ -56,12 +56,6 @@ type storeLoader interface {
 	name() string
 }
 
-type stmtLogger interface {
-	LogStmt(*typedef.Stmt)
-	LogStmtWithTimeStamp(stmt *typedef.Stmt, ts time.Time)
-	Close() error
-}
-
 type Store interface {
 	Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
 	Mutate(context.Context, *typedef.Stmt) error
@@ -132,7 +126,7 @@ func (n *noOpStore) close() error {
 type delegatingStore struct {
 	oracleStore     storeLoader
 	testStore       storeLoader
-	statementLogger stmtLogger
+	statementLogger stmtlogger.StmtToFile
 	logger          *zap.Logger
 	validations     bool
 }
