@@ -2,7 +2,7 @@ package unmarshal
 
 import (
 	"github.com/gocql/gocql"
-	"github.com/pmezard/go-difflib/difflib"
+	"github.com/google/go-cmp/cmp"
 	"github.com/scylladb/gemini/pkg/murmur"
 	"golang.org/x/exp/slices"
 	"sort"
@@ -70,11 +70,9 @@ func (r Rows) Equal(o Rows) bool {
 	return true
 }
 
-func (r Rows) Diff(o Rows, limit diffLimit) {
-	tmp := map[]struct{}{}{}
-	expected := r.ToData()
-	actual := o.ToData()
-	difflib.UnifiedDiff{}
+func (r Rows) Diff(o Rows, limit diffLimit) string {
+	r[0].Columns.ToData()
+	return cmp.Diff(r, o)
 }
 
 type Row struct {
