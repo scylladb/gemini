@@ -118,7 +118,8 @@ func TestMurmur3H1(t *testing.T) {
 	sample := ""
 	for i, expected := range seriesExpected {
 		assertMurmur3H1(t, []byte(sample), expected)
-
+		assertMurmur3H1Hash(t, []byte(sample), expected)
+		assertMurmur3H1HashByByte(t, []byte(sample), expected)
 		sample += strconv.Itoa(i % 10)
 	}
 
@@ -127,6 +128,45 @@ func TestMurmur3H1(t *testing.T) {
 	assertMurmur3H1(t, []byte("hello, world"), 0x342fac623a5ebc8e)
 	assertMurmur3H1(t, []byte("19 Jan 2038 at 3:14:07 AM"), 0xb89e5988b737affc)
 	assertMurmur3H1(t, []byte("The quick brown fox jumps over the lazy dog."), 0xcd99481f9ee902c9)
+
+	assertMurmur3H1Hash(t, []byte("hello"), 0xcbd8a7b341bd9b02)
+	assertMurmur3H1Hash(t, []byte("hello, world"), 0x342fac623a5ebc8e)
+	assertMurmur3H1Hash(t, []byte("19 Jan 2038 at 3:14:07 AM"), 0xb89e5988b737affc)
+	assertMurmur3H1Hash(t, []byte("The quick brown fox jumps over the lazy dog."), 0xcd99481f9ee902c9)
+
+	assertMurmur3H1HashByByte(t, []byte("hello"), 0xcbd8a7b341bd9b02)
+	assertMurmur3H1HashByByte(t, []byte("hello, world"), 0x342fac623a5ebc8e)
+	assertMurmur3H1HashByByte(t, []byte("19 Jan 2038 at 3:14:07 AM"), 0xb89e5988b737affc)
+	assertMurmur3H1HashByByte(t, []byte("The quick brown fox jumps over the lazy dog."), 0xcd99481f9ee902c9)
+}
+
+// helper function for testing the murmur3 implementation
+func assertMurmur3H1Hash(t *testing.T, data []byte, expected uint64) {
+	t.Helper()
+
+	hash := Hash{}
+	_, _ = hash.Write(data)
+
+	actual2 := hash.Sum64()
+	if actual2 != expected {
+		t.Errorf("Expected h1 = %x for data = %x, but was %x", int64(expected), data, actual2)
+	}
+}
+
+// helper function for testing the murmur3 implementation
+func assertMurmur3H1HashByByte(t *testing.T, data []byte, expected uint64) {
+	t.Helper()
+
+	hash := Hash{}
+
+	for _, val := range data {
+		_, _ = hash.Write([]byte{val})
+	}
+
+	actual2 := hash.Sum64()
+	if actual2 != expected {
+		t.Errorf("Expected h1 = %x for data = %x, but was %x", int64(expected), data, actual2)
+	}
 }
 
 // helper function for testing the murmur3 implementation

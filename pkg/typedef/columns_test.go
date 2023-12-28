@@ -221,7 +221,7 @@ func TestValidColumnsForDelete(t *testing.T) {
 
 	validColsToDelete := s1.Tables[0].ValidColumnsForDelete()
 	if fmt.Sprintf("%v", expected) != fmt.Sprintf("%v", validColsToDelete) {
-		t.Errorf("wrong valid columns for delete. Expected:%v .Received:%v", expected, validColsToDelete)
+		t.Errorf("wrong valid columns for delete. Expected:%v .ReceivedValue:%v", expected, validColsToDelete)
 	}
 
 	s1.Tables[0].MaterializedViews[0].NonPrimaryKey = s1.Tables[0].Columns[4]
@@ -231,7 +231,7 @@ func TestValidColumnsForDelete(t *testing.T) {
 	}
 	validColsToDelete = s1.Tables[0].ValidColumnsForDelete()
 	if fmt.Sprintf("%v", expected) != fmt.Sprintf("%v", validColsToDelete) {
-		t.Errorf("wrong valid columns for delete. Expected:%v .Received:%v", expected, validColsToDelete)
+		t.Errorf("wrong valid columns for delete. Expected:%v .ReceivedValue:%v", expected, validColsToDelete)
 	}
 
 	s1.Tables[0].MaterializedViews = append(s1.Tables[0].MaterializedViews, s1.Tables[0].MaterializedViews[0])
@@ -242,7 +242,7 @@ func TestValidColumnsForDelete(t *testing.T) {
 	expected = typedef.Columns{}
 	validColsToDelete = s1.Tables[0].ValidColumnsForDelete()
 	if fmt.Sprintf("%v", expected) != fmt.Sprintf("%v", validColsToDelete) {
-		t.Errorf("wrong valid columns for delete. Expected:%v .Received:%v", expected, validColsToDelete)
+		t.Errorf("wrong valid columns for delete. Expected:%v .ReceivedValue:%v", expected, validColsToDelete)
 	}
 }
 

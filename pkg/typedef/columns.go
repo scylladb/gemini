@@ -16,7 +16,6 @@ package typedef
 
 import (
 	"encoding/json"
-
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	"golang.org/x/exp/rand"

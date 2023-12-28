@@ -17,10 +17,9 @@ package store
 import (
 	"context"
 	"fmt"
+	"github.com/scylladb/gemini/pkg/unmarshal"
 	"math/big"
 	"os"
-	"reflect"
-	"sort"
 	"sync"
 	"time"
 
@@ -35,14 +34,12 @@ import (
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
 
-	"github.com/scylladb/go-set/strset"
-
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 type loader interface {
-	load(context.Context, *typedef.Stmt) ([]map[string]interface{}, error)
+	load(context.Context, *typedef.Stmt) (unmarshal.Rows, error)
 }
 
 type storer interface {
@@ -107,7 +104,7 @@ func (n *noOpStore) mutate(context.Context, *typedef.Stmt) error {
 	return nil
 }
 
-func (n *noOpStore) load(context.Context, *typedef.Stmt) ([]map[string]interface{}, error) {
+func (n *noOpStore) load(context.Context, *typedef.Stmt) (unmarshal.Rows, error) {
 	return nil, nil
 }
 
@@ -178,9 +175,10 @@ func mutate(ctx context.Context, s storeLoader, stmt *typedef.Stmt) error {
 }
 
 func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, detailedDiff bool) error {
-	var testRows, oracleRows []map[string]interface{}
+	var testRows, oracleRows unmarshal.Rows
 	var testErr, oracleErr error
 	var wg sync.WaitGroup
+	var pkNames, ckNames = table.PartitionKeys.Names(), table.ClusteringKeys.Names()
 	wg.Add(1)
 
 	go func() {
@@ -201,29 +199,24 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt 
 	if len(testRows) == 0 && len(oracleRows) == 0 {
 		return nil
 	}
-	if len(testRows) != len(oracleRows) {
-		if !detailedDiff {
-			return fmt.Errorf("rows count differ (test store rows %d, oracle store rows %d, detailed information will be at last attempt)", len(testRows), len(oracleRows))
-		}
-		testSet := strset.New(pks(table, testRows)...)
-		oracleSet := strset.New(pks(table, oracleRows)...)
-		missingInTest := strset.Difference(oracleSet, testSet).List()
-		missingInOracle := strset.Difference(testSet, oracleSet).List()
-		return fmt.Errorf("row count differ (test has %d rows, oracle has %d rows, test is missing rows: %s, oracle is missing rows: %s)",
-			len(testRows), len(oracleRows), missingInTest, missingInOracle)
+	err := testRows.CalculateHashes(pkNames, ckNames)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get hashes for test rows")
 	}
-	if reflect.DeepEqual(testRows, oracleRows) {
+	err = oracleRows.CalculateHashes(pkNames, ckNames)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get hashes for oracle rows")
+	}
+	testRows.Sort()
+	oracleRows.Sort()
+
+	if testRows.Equal(oracleRows) {
 		return nil
 	}
 	if !detailedDiff {
 		return fmt.Errorf("test and oracle store have difference, detailed information will be at last attempt")
 	}
-	sort.SliceStable(testRows, func(i, j int) bool {
-		return lt(testRows[i], testRows[j])
-	})
-	sort.SliceStable(oracleRows, func(i, j int) bool {
-		return lt(oracleRows[i], oracleRows[j])
-	})
+
 	for i, oracleRow := range oracleRows {
 		testRow := testRows[i]
 		cmp.AllowUnexported()

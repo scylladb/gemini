@@ -45,14 +45,14 @@ func GetErrorMsgIfDifferent(expected, received, errMsg string) string {
 			errMsg,
 			fmt.Sprintf("Expected   %s", expected),
 			diffHighlightString([]rune(expected), []rune(received)),
-			fmt.Sprintf("Received   %s", received),
+			fmt.Sprintf("ReceivedValue   %s", received),
 			"-------------------------------------------",
 		}
 	case false:
 		errMsgList = []string{
 			errMsg,
 			fmt.Sprintf("Expected   %s", expected),
-			fmt.Sprintf("Received   %s", received),
+			fmt.Sprintf("ReceivedValue   %s", received),
 			"-------------------------------------------",
 		}
 	}

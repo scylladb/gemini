@@ -56,11 +56,13 @@ func (gs *GlobalStatus) AddReadError(err *joberror.JobError) {
 	gs.ReadErrors.Add(1)
 }
 
-func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, version string) error {
+func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, version string, seed, schemaSeed uint64) error {
 	result := map[string]interface{}{
+		"schema_seed":    schemaSeed,
+		"seed":           seed,
+		"schemaHash":     schema.GetHash(),
 		"result":         gs,
 		"gemini_version": version,
-		"schemaHash":     schema.GetHash(),
 		"schema":         schema,
 	}
 	encoder := json.NewEncoder(w)
@@ -81,8 +83,8 @@ func (gs *GlobalStatus) HasErrors() bool {
 	return gs.WriteErrors.Load() > 0 || gs.ReadErrors.Load() > 0
 }
 
-func (gs *GlobalStatus) PrintResult(w io.Writer, schema *typedef.Schema, version string) {
-	if err := gs.PrintResultAsJSON(w, schema, version); err != nil {
+func (gs *GlobalStatus) PrintResult(w io.Writer, schema *typedef.Schema, version string, seed, schemaSeed uint64) {
+	if err := gs.PrintResultAsJSON(w, schema, version, seed, schemaSeed); err != nil {
 		// In case there has been it has been a long run we want to display it anyway...
 		fmt.Printf("Unable to print result as json, using plain text to stdout, error=%s\n", err)
 		fmt.Printf("Gemini version: %s\n", version)
