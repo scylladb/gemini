@@ -145,7 +145,7 @@ func assertMurmur3H1Hash(t *testing.T, data []byte, expected uint64) {
 	t.Helper()
 
 	hash := Hash{}
-	_, _ = hash.Write(data)
+	hash.Write2(data...)
 
 	actual2 := hash.Sum64()
 	if actual2 != expected {
@@ -160,7 +160,7 @@ func assertMurmur3H1HashByByte(t *testing.T, data []byte, expected uint64) {
 	hash := Hash{}
 
 	for _, val := range data {
-		_, _ = hash.Write([]byte{val})
+		hash.Write2(val)
 	}
 
 	actual2 := hash.Sum64()

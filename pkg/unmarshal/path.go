@@ -7,10 +7,14 @@ import (
 
 type Path []interface{}
 
-func (p Path) Add(item interface{}) Path {
-	val := make(Path, len(p), len(p)+1)
-	copy(val, p)
-	return append(val, item)
+func (p *Path) Add(item interface{}) Path {
+	*p = append(*p, item)
+	return *p
+}
+
+func (p *Path) Remove() Path {
+	*p = (*p)[:len(*p)-1]
+	return *p
 }
 
 func (p Path) String() string {

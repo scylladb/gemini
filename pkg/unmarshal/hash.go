@@ -4,41 +4,71 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/scylladb/gemini/pkg/murmur"
-	"hash"
 	"sort"
 )
 
-func writeCollectionLength(protoVersion byte, h hash.Hash64, data []byte) error {
-	if protoVersion > protoVersion2 {
-		_, err := h.Write(data[:4])
-		if err != nil {
-			return err
-		}
+// writeToHash get hash for protocol V2 and older
+func writeToHash(proto byte, pathname Path, info gocql.TypeInfo, h *murmur.Hash, data []byte) error {
+	switch info.Type() {
+	case gocql.TypeList, gocql.TypeSet:
+		return writeListToHash(proto, pathname, info, h, data)
+	case gocql.TypeMap:
+		return writeMapToHash(proto, pathname, info, h, data)
+	case gocql.TypeTuple:
+		return writeTupleToHash(proto, pathname, info, h, data)
+	case gocql.TypeUDT:
+		return writeUDTToHash(proto, pathname, info, h, data)
+	default:
+		h.Write2(data...)
 		return nil
 	}
-	var buff [4]byte
-	copy(buff[2:], data[:2])
-	_, err := h.Write(buff[:])
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
-func getHashList(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byte) error {
+// GetColumnHash get hash for protocol V2 and older
+func GetColumnHash(info gocql.TypeInfo, data []byte) (uint64, error) {
+	hash := murmur.Hash{}
+	proto := info.Version()
+	err := writeToHash(proto, nil, info, &hash, data)
+	if err != nil {
+		return 0, err
+	}
+	return hash.Sum64(), nil
+}
+
+func writeCollectionLength(protoVersion byte, h *murmur.Hash, data []byte) {
+	if protoVersion > protoVersion2 {
+		h.Write2(data[:4]...)
+	}
+	h.Write2(0, 0, data[1], data[0])
+}
+
+func readListElement(protoVersion byte, data []byte) (out []byte, size int, err error) {
+	var p int
+	size, p, err = readCollectionSize(protoVersion, data)
+	if err != nil {
+		return nil, 0, errors.Wrap(err, "unmarshal: failed to read collection element length")
+	}
+	data = data[p:]
+	if len(data) < size {
+		return nil, 0, unmarshalErrorf("unmarshal list: unexpected eof")
+	}
+	return data, size, nil
+}
+
+func uint64ToBytes(val uint64) []byte {
+	return []byte{byte(val >> 56), byte(val >> 48), byte(val >> 40), byte(val >> 32), byte(val >> 24), byte(val >> 16), byte(val >> 8), byte(val)}
+}
+
+func writeListToHash(proto byte, pathname Path, info gocql.TypeInfo, h *murmur.Hash, data []byte) error {
 	listInfo, ok := info.(gocql.CollectionType)
 	if !ok {
 		return errors.Errorf("%s can't unmarshal none collection type into list", pathname.String())
 	}
-	pversion := listInfo.NativeType.Version()
-	n, p, err := readCollectionSize(pversion, data)
+	n, p, err := readCollectionSize(proto, data)
 	if err != nil {
 		return errors.Wrapf(err, "%s failed to read list lenght", pathname.String())
 	}
-	err = writeCollectionLength(pversion, h, data)
-	if err != nil {
-		return errors.Wrapf(err, "%s failed to write to hash", pathname.String())
-	}
+	writeCollectionLength(proto, h, data)
 
 	data = data[p:]
 	var m int
@@ -47,11 +77,11 @@ func getHashList(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byte)
 			break
 		}
 		elemPath := pathname.Add(i)
-		data, m, err = readListElement(pversion, data)
+		data, m, err = readListElement(proto, data)
 		if err != nil {
 			return errors.Wrapf(err, "%s failed to read oracle data", pathname.String())
 		}
-		err = getHash(elemPath, listInfo.Elem, h, data[:m])
+		err = writeToHash(proto, elemPath, listInfo.Elem, h, data[:m])
 		if err != nil {
 			return err
 		}
@@ -60,7 +90,7 @@ func getHashList(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byte)
 	return nil
 }
 
-func getHashMap(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byte) error {
+func writeMapToHash(proto byte, pathname Path, info gocql.TypeInfo, h *murmur.Hash, data []byte) error {
 	type mapRecord struct {
 		keyHash    uint64
 		keyLenData []byte
@@ -74,25 +104,21 @@ func getHashMap(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byte) 
 	if !ok {
 		return errors.Errorf("%s can't unmarshal none collection type into map", pathname.String())
 	}
-	pversion := mapInfo.NativeType.Version()
 
 	if len(data) == 0 {
 		return nil
 	}
-	n, p, err := readCollectionSize(pversion, data)
+	n, p, err := readCollectionSize(proto, data)
 	if err != nil {
 		return err
 	}
-	err = writeCollectionLength(pversion, h, data)
-	if err != nil {
-		return errors.Wrapf(err, "%s failed to write to hash", pathname.String())
-	}
+	writeCollectionLength(proto, h, data)
 	data = data[p:]
 
 	records := make([]*mapRecord, n)
 	for i := 0; i < n; i++ {
 		records[i] = &mapRecord{}
-		m, p, err := readCollectionSize(pversion, data)
+		m, p, err := readCollectionSize(proto, data)
 		if err != nil {
 			return err
 		}
@@ -108,13 +134,16 @@ func getHashMap(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byte) 
 		}
 
 		localHash := murmur.Hash{}
-		getHash(pathname.Add(i), mapInfo.Key, &localHash, data[:m])
+		err = writeToHash(proto, pathname.Add(i), mapInfo.Key, &localHash, data[:m])
+		if err != nil {
+			return err
+		}
 
 		records[i].keyHash = localHash.Sum64()
 		records[i].keyData = data[:m]
 		data = data[m:]
 
-		m, p, err = readCollectionSize(pversion, data)
+		m, p, err = readCollectionSize(proto, data)
 		if err != nil {
 			return err
 		}
@@ -126,7 +155,10 @@ func getHashMap(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byte) 
 		data = data[m:]
 
 		localHash.Reset()
-		getHash(pathname.Add(i), mapInfo.Key, &localHash, data[:m])
+		err = writeToHash(proto, pathname.Add(i), mapInfo.Key, &localHash, data[:m])
+		if err != nil {
+			return err
+		}
 		records[i].valHash = localHash.Sum64()
 		data = data[m:]
 	}
@@ -136,11 +168,11 @@ func getHashMap(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byte) 
 	})
 
 	for i := 0; i < n; i++ {
-		err = getHash(pathname.Add(i), mapInfo.Key, h, records[i].keyData)
+		err = writeToHash(proto, pathname.Add(i), mapInfo.Key, h, records[i].keyData)
 		if err != nil {
 			return err
 		}
-		err = getHash(pathname.Add(i), mapInfo.Elem, h, records[i].valData)
+		err = writeToHash(proto, pathname.Add(i), mapInfo.Elem, h, records[i].valData)
 		if err != nil {
 			return err
 		}
@@ -149,7 +181,7 @@ func getHashMap(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byte) 
 	return nil
 }
 
-func getHashOldTuple(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byte) error {
+func writeTupleToHash(proto byte, pathname Path, info gocql.TypeInfo, h *murmur.Hash, data []byte) error {
 	tupleInfo, ok := info.(gocql.TupleTypeInfo)
 	if !ok {
 		return errors.Errorf("%s can't unmarshal none tuple type into tuple", pathname.String())
@@ -161,7 +193,7 @@ func getHashOldTuple(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []b
 		if len(data) >= 4 {
 			p, data = readBytes(data)
 		}
-		err := getHash(pathname.Add(i), elem, h, p)
+		err := writeToHash(proto, pathname.Add(i), elem, h, p)
 		if err != nil {
 			return err
 		}
@@ -169,7 +201,7 @@ func getHashOldTuple(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []b
 	return nil
 }
 
-func getHashOldUDT(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byte) error {
+func writeUDTToHash(proto byte, pathname Path, info gocql.TypeInfo, h *murmur.Hash, data []byte) error {
 	udtInfo, ok := info.(gocql.UDTTypeInfo)
 	if !ok {
 		return errors.Errorf("%s can't unmarshal none tuple type into tuple", pathname.String())
@@ -193,7 +225,7 @@ func getHashOldUDT(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byt
 			valData: p,
 		}
 
-		err := getHash(pathname.Add(i), elem.Type, &localHash, p)
+		err := writeToHash(proto, pathname.Add(i), elem.Type, &localHash, p)
 		if err != nil {
 			return err
 		}
@@ -206,7 +238,7 @@ func getHashOldUDT(pathname Path, info gocql.TypeInfo, h hash.Hash64, data []byt
 	})
 
 	for i, elem := range udtInfo.Elements {
-		err := getHash(pathname.Add(i), elem.Type, h, records[i].valData)
+		err := writeToHash(proto, pathname.Add(i), elem.Type, h, records[i].valData)
 		if err != nil {
 			return err
 		}

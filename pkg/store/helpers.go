@@ -23,7 +23,7 @@ func loadSet(iter *gocql.Iter) unmarshal.Rows {
 	var rows unmarshal.Rows
 	for {
 		row := unmarshal.NewRow(iter.Columns())
-		if !iter.Scan(row.ToInterfaces()...) {
+		if !iter.Scan(row.Columns.ToInterfaces()...) {
 			break
 		}
 		rows = append(rows, row)

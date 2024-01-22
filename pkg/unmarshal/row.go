@@ -1,12 +1,19 @@
 package unmarshal
 
 import (
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
+	"github.com/pkg/errors"
 	"github.com/scylladb/gemini/pkg/murmur"
 	"golang.org/x/exp/slices"
-	"sort"
 )
+
+var ErrRowsDifferent = errors.New("rows are different")
 
 type diffLimit struct {
 	pct     float32
@@ -26,7 +33,60 @@ func (l *diffLimit) Evaluate(val, total int) bool {
 
 type Rows []*Row
 
-func (r Rows) CalculateHashes(pks []string, cks []string) error {
+func (r Rows) Compare(pkNames, ckNames []string, o Rows) error {
+	if len(r) != len(o) {
+		return ErrRowsDifferent
+	}
+
+	// TODO: for short rows, compare raw data
+
+	err := r.calculateHashes(pkNames, ckNames)
+	if err != nil {
+		return errors.Wrap(err, "failed to calculate hashes")
+	}
+
+	err = o.calculateHashes(pkNames, ckNames)
+	if err != nil {
+		return errors.Wrap(err, "failed to calculate hashes")
+	}
+
+	r.sort()
+	o.sort()
+
+	if !r.equal(o) {
+		return ErrRowsDifferent
+	}
+	return nil
+}
+
+func (r Rows) Diff(o Rows) (string, error) {
+	var total []string
+	for i, otherRow := range o {
+		row := r[i]
+		rowJSON, err := row.Columns.ToJSON()
+		if err != nil {
+			return "", err
+		}
+		otherJSON, err := otherRow.Columns.ToData()
+		if err != nil {
+			return "", err
+		}
+		if diff := cmp.Diff(rowJSON, otherJSON); diff != "" {
+			total = append(total, fmt.Sprintf(
+				`================== ROW %.2d ==================
+================== EXPECTED ================
+%s
+================== ACTUAL ==================
+%s
+================== DIFF ====================
+%s
+`, i, rowJSON, otherJSON, diff))
+		}
+	}
+	return strings.Join(total, "\n"), nil
+}
+
+func (r Rows) calculateHashes(pks []string, cks []string) error {
 	for _, rec := range r {
 		err := rec.CalculateHashes(pks, cks)
 		if err != nil {
@@ -36,17 +96,7 @@ func (r Rows) CalculateHashes(pks []string, cks []string) error {
 	return nil
 }
 
-func (r Rows) ToData() error {
-	for _, rec := range r {
-		_, err := rec.Columns.ToData()
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r Rows) Sort() {
+func (r Rows) sort() {
 	sort.Slice(r, func(i, j int) bool {
 		if r[i].pkHash < r[j].pkHash {
 			return true
@@ -58,21 +108,13 @@ func (r Rows) Sort() {
 	})
 }
 
-func (r Rows) Equal(o Rows) bool {
-	if len(r) != len(o) {
-		return false
-	}
+func (r Rows) equal(o Rows) bool {
 	for i, rec := range r {
-		if rec.hash != o[i].hash {
+		if rec.CompareHashes(o[i]) {
 			return false
 		}
 	}
 	return true
-}
-
-func (r Rows) Diff(o Rows, limit diffLimit) string {
-	r[0].Columns.ToData()
-	return cmp.Diff(r, o)
 }
 
 type Row struct {
@@ -82,30 +124,13 @@ type Row struct {
 	ckHash  uint64
 }
 
-func (r *Row) ToInterfaces() []interface{} {
-	out := make([]interface{}, len(r.Columns))
-	for i := range r.Columns {
-		out[i] = &r.Columns[i]
-	}
-	return out
+func (r *Row) CalculateHashes(pks []string, cks []string) (err error) {
+	r.pkHash, r.ckHash, r.hash, err = r.Columns.HashInfo(pks, cks)
+	return err
 }
 
-func (r *Row) CalculateHashes(pks []string, cks []string) error {
-	err := r.Columns.CalculateHashes()
-	if err != nil {
-		return err
-	}
-
-	r.pkHash, err = r.Columns.HashOnly(pks)
-	if err != nil {
-		return err
-	}
-
-	r.ckHash, err = r.Columns.HashOnly(cks)
-	if err != nil {
-		return err
-	}
-	return nil
+func (r *Row) CompareHashes(o *Row) bool {
+	return r.hash == o.hash && r.pkHash == o.pkHash && r.ckHash == o.ckHash
 }
 
 func NewRow(columns []gocql.ColumnInfo) *Row {
@@ -134,47 +159,46 @@ func (c Columns) ToData() (map[string]interface{}, error) {
 	return out, nil
 }
 
-func (c Columns) CalculateHashes() error {
-	for _, col := range c {
-		_, err := col.Hash()
-		if err != nil {
-			return err
-		}
+func (c Columns) ToJSON() (string, error) {
+	rowData, err := c.ToData()
+	if err != nil {
+		return "", err
 	}
-	return nil
+	data, err := json.Marshal(rowData)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to marshal row data")
+	}
+	return string(data), nil
 }
 
-func (c Columns) Hash() (uint64, error) {
-	hash := murmur.Hash{}
+func (c Columns) HashInfo(pk []string, ck []string) (pkHash, ckHash, dataHash uint64, err error) {
+	pkh := &murmur.Hash{}
+	ckh := &murmur.Hash{}
+	datah := &murmur.Hash{}
 	for _, col := range c {
 		colHash, err := col.Hash()
 		if err != nil {
-			return 0, err
+			return 0, 0, 0, errors.Wrapf(err, "failed to get column %q hash", col.info.Name)
 		}
-		_, err = hash.Write(uint64ToBytes(colHash))
-		if err != nil {
-			return 0, err
-		}
-	}
-	return hash.Sum64(), nil
-}
-
-func (c Columns) HashOnly(names []string) (uint64, error) {
-	hash := murmur.Hash{}
-	for _, col := range c {
-		if !slices.Contains(names, col.info.Name) {
+		if slices.Contains(pk, col.info.Name) {
+			pkh.Write2(uint64ToBytes(colHash)...)
 			continue
 		}
-		colHash, err := col.Hash()
-		if err != nil {
-			return 0, err
+		if slices.Contains(ck, col.info.Name) {
+			ckh.Write2(uint64ToBytes(colHash)...)
+			continue
 		}
-		_, err = hash.Write(uint64ToBytes(colHash))
-		if err != nil {
-			return 0, err
-		}
+		_, _ = datah.Write(uint64ToBytes(colHash))
 	}
-	return hash.Sum64(), nil
+	return pkh.Sum64(), ckh.Sum64(), datah.Sum64(), nil
+}
+
+func (c Columns) ToInterfaces() []interface{} {
+	out := make([]interface{}, len(c))
+	for i := range c {
+		out[i] = &c[i]
+	}
+	return out
 }
 
 type Column struct {

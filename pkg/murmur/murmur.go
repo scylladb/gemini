@@ -263,16 +263,21 @@ func (h *Hash) Sum64() uint64 {
 var _ hash.Hash64 = (*Hash)(nil)
 
 func (h *Hash) Write(data []byte) (n int, err error) {
+	h.Write2(data...)
+	return len(data), nil
+}
+
+func (h *Hash) Write2(data ...byte) {
 	originalLen := len(data)
 	h.totalLen += originalLen
 
 	h1, h2, k1, k2 := h.h1, h.h2, h.k1, h.k2
 
 	if h.tailLen > 0 {
-		n = copy(h.tail[h.tailLen:], data)
+		n := copy(h.tail[h.tailLen:], data)
 		h.tailLen += n
 		if h.tailLen < 16 {
-			return n, nil
+			return
 		}
 		k1, k2 = getBlock(h.tail[:], 0)
 		k1 *= c1
@@ -328,5 +333,5 @@ func (h *Hash) Write(data []byte) (n int, err error) {
 	if tail > 0 {
 		h.tailLen = copy(h.tail[:], data[nBlocks*16:])
 	}
-	return originalLen, nil
+	return
 }

@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/scylladb/gemini/pkg/unmarshal"
-	"math/big"
 	"os"
 	"sync"
 	"time"
@@ -26,16 +25,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/gocql/gocql"
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"go.uber.org/multierr"
-	"gopkg.in/inf.v0"
-
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"go.uber.org/multierr"
 )
 
 type loader interface {
@@ -196,44 +191,23 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt 
 	if !ds.validations {
 		return nil
 	}
-	if len(testRows) == 0 && len(oracleRows) == 0 {
+	err := oracleRows.Compare(pkNames, ckNames, testRows)
+	if err == nil {
 		return nil
 	}
-	err := testRows.CalculateHashes(pkNames, ckNames)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get hashes for test rows")
+	if !errors.Is(err, unmarshal.ErrRowsDifferent) {
+		return errors.Wrapf(err, "failed to compare rows")
 	}
-	err = oracleRows.CalculateHashes(pkNames, ckNames)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get hashes for oracle rows")
-	}
-	testRows.Sort()
-	oracleRows.Sort()
 
-	if testRows.Equal(oracleRows) {
-		return nil
-	}
 	if !detailedDiff {
 		return fmt.Errorf("test and oracle store have difference, detailed information will be at last attempt")
 	}
 
-	for i, oracleRow := range oracleRows {
-		testRow := testRows[i]
-		cmp.AllowUnexported()
-		diff := cmp.Diff(oracleRow, testRow,
-			cmpopts.SortMaps(func(x, y *inf.Dec) bool {
-				return x.Cmp(y) < 0
-			}),
-			cmp.Comparer(func(x, y *inf.Dec) bool {
-				return x.Cmp(y) == 0
-			}), cmp.Comparer(func(x, y *big.Int) bool {
-				return x.Cmp(y) == 0
-			}))
-		if diff != "" {
-			return fmt.Errorf("rows differ (-%v +%v): %v", oracleRow, testRow, diff)
-		}
+	diff, err := oracleRows.Diff(testRows)
+	if err != nil {
+		return errors.Wrapf(err, "failed to diff rows")
 	}
-	return nil
+	return errors.New(diff)
 }
 
 func (ds delegatingStore) Close() (err error) {

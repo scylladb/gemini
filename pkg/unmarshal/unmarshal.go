@@ -724,15 +724,9 @@ func decIntZigZag(n uint64) int64 {
 
 func readCollectionSize(protoVersion byte, data []byte) (size, read int, err error) {
 	if protoVersion > protoVersion2 {
-		if len(data) < 4 {
-			return 0, 0, unmarshalErrorf("unmarshal list: unexpected eof")
-		}
 		size = int(data[0])<<24 | int(data[1])<<16 | int(data[2])<<8 | int(data[3])
 		read = 4
 	} else {
-		if len(data) < 2 {
-			return 0, 0, unmarshalErrorf("unmarshal list: unexpected eof")
-		}
 		size = int(data[0])<<8 | int(data[1])
 		read = 2
 	}

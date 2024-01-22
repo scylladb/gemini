@@ -145,7 +145,6 @@ func (m *MapKeyDataType) UnmarshalCQL(info gocql.TypeInfo, data []byte) error {
 	if err := gocql.Unmarshal(origType, data, val); err != nil {
 		return err
 	}
-	gocql.NativeType{}
 
 	switch refT.Kind() {
 	case reflect.Map:
@@ -153,7 +152,7 @@ func (m *MapKeyDataType) UnmarshalCQL(info gocql.TypeInfo, data []byte) error {
 	case reflect.Struct:
 		switch val.(type) {
 		case big.Int:
-			(&val.(big.Int)).String()
+			//(&val.(big.Int)).String()
 		case inf.Dec:
 		}
 	case reflect.Ptr:
@@ -162,20 +161,20 @@ func (m *MapKeyDataType) UnmarshalCQL(info gocql.TypeInfo, data []byte) error {
 
 }
 
-func convert(val interface{}) (string, error) {
-	origType := wrt.originalType
-	val := origType.New()
-	refT := reflect.TypeOf(val)
-
-	if err := gocql.Unmarshal(origType, data, val); err != nil {
-		return err
-	}
-
-	switch refT.Kind() {
-	case reflect.Map:
-	case reflect.Slice:
-	case reflect.Struct:
-	case reflect.Ptr:
-
-	}
-}
+//func convert(val interface{}) (string, error) {
+//	origType := wrt.originalType
+//	val := origType.New()
+//	refT := reflect.TypeOf(val)
+//
+//	if err := gocql.Unmarshal(origType, data, val); err != nil {
+//		return err
+//	}
+//
+//	switch refT.Kind() {
+//	case reflect.Map:
+//	case reflect.Slice:
+//	case reflect.Struct:
+//	case reflect.Ptr:
+//
+//	}
+//}
