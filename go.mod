@@ -2,8 +2,6 @@ module github.com/scylladb/gemini
 
 go 1.21
 
-toolchain go1.22.3
-
 require (
 	github.com/briandowns/spinner v1.23.0
 	github.com/gocql/gocql v1.8.0
