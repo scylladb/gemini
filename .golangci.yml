@@ -1,20 +1,43 @@
+run:
+  concurrency: 8
+  timeout: 10m
+  issues-exit-code: 1
+  tests: true
+  modules-download-mode: mod
+  allow-parallel-runners: true
+  go: '1.23'
+
+output:
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
+
 issues:
+  max-same-issues: 1
+  max-issues-per-linter: 10
+  new: true
   exclude:
     - Error return value of `.*.Unlock` is not checked
     - Error return value of `.*.Completed` is not checked
 linters:
   disable-all: true
   enable:
+    - asasalint
+    - bidichk
     - errcheck
     - govet
+    - bodyclose
     - ineffassign
     - unused
+    - durationcheck
     - goheader
     - goimports
     - misspell
     - gofumpt
     - gosimple
     - staticcheck
+    - decorder
     - lll
     - errorlint
     - gocritic
@@ -25,16 +48,22 @@ linters:
     - tparallel
     - typecheck
     - unused
-run:
-  deadline: 10m
-  modules-download-mode: readonly
+    - gomodguard
+    - gocyclo
+    - nilerr
+    - makezero
+    - wastedassign
+    - prealloc
+
+
 linters-settings:
   govet:
-    check-shadowing: true
     settings:
       shadow:
         strict: true
     enable-all: true
+  gocyclo:
+    min-complexity: 50
   lll:
     line-length: 180
   goheader:
@@ -64,8 +93,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 
 limitations under the License.'
+
   gofumpt:
-    lang-version: "1.12"
     extra-rules: true
   goimports:
     local-prefixes: github.com/scylladb/gemini

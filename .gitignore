@@ -3,3 +3,4 @@ cmd/gemini/dist/
 .idea
 .vscode
 bin/
+coverage.txt
