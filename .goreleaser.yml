@@ -1,3 +1,5 @@
+version: 2
+
 env:
   - GO111MODULE=on
 before:
@@ -16,14 +18,16 @@ archives:
 
 checksum:
   name_template: 'checksums.txt'
+
 snapshot:
   name_template: "{{ .Tag }}-next"
+
 blobs:
-  -
-    provider: s3
+  - provider: s3
     bucket: downloads.scylladb.com
     region: us-east-1
     folder: "gemini/{{.Version}}"
+
 changelog:
   sort: asc
   filters:
@@ -33,5 +37,5 @@ changelog:
 
 dockers:
   - image_templates:
-      - scylladb/hydra-loaders:gemini-{{ .Tag }}
-      - scylladb/hydra-loaders:gemini-latest
+      - scylladb/gemini:{{ .Tag }}
+      - scylladb/gemini:latest
