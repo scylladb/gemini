@@ -47,6 +47,7 @@ func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 			UseLWT:                           defaultConfig.UseLWT,
 			CQLFeature:                       defaultConfig.CQLFeature,
 			AsyncObjectStabilizationAttempts: defaultConfig.AsyncObjectStabilizationAttempts,
+			UseMaterializedViews:             defaultConfig.UseMaterializedViews,
 			AsyncObjectStabilizationDelay:    defaultConfig.AsyncObjectStabilizationDelay,
 		}
 	default:
@@ -85,6 +86,7 @@ func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 		UseCounters:                      useCounters,
 		UseLWT:                           useLWT,
 		CQLFeature:                       getCQLFeature(cqlFeatures),
+		UseMaterializedViews:             useMaterializedViews,
 		AsyncObjectStabilizationAttempts: asyncObjectStabilizationAttempts,
 		AsyncObjectStabilizationDelay:    asyncObjectStabilizationDelay,
 	}
