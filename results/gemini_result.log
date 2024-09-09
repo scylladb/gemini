@@ -1,0 +1,226 @@
+{
+     "gemini_version": "v1.8.7",
+     "result": {
+         "errors": [],
+         "write_ops": 8261,
+         "write_errors": 0,
+         "read_ops": 0,
+         "read_errors": 0
+     },
+     "schema": {
+         "keyspace": {
+             "replication": {
+                 "class": "NetworkTopologyStrategy",
+                 "replication_factor": "1"
+             },
+             "oracle_replication": {
+                 "class": "NetworkTopologyStrategy",
+                 "replication_factor": "1"
+             },
+             "name": "ks1"
+         },
+         "tables": [
+             {
+                 "name": "table1",
+                 "partition_keys": [
+                     {
+                         "type": "bigint",
+                         "name": "pk0"
+                     },
+                     {
+                         "type": "smallint",
+                         "name": "pk1"
+                     },
+                     {
+                         "type": "double",
+                         "name": "pk2"
+                     },
+                     {
+                         "type": "varchar",
+                         "name": "pk3"
+                     },
+                     {
+                         "type": "varchar",
+                         "name": "pk4"
+                     }
+                 ],
+                 "clustering_keys": [
+                     {
+                         "type": "smallint",
+                         "name": "ck0"
+                     },
+                     {
+                         "type": "double",
+                         "name": "ck1"
+                     },
+                     {
+                         "type": "varchar",
+                         "name": "ck2"
+                     }
+                 ],
+                 "columns": [
+                     {
+                         "type": "double",
+                         "name": "col0"
+                     },
+                     {
+                         "type": "date",
+                         "name": "col1"
+                     },
+                     {
+                         "type": {
+                             "complex_type": "udt",
+                             "value_types": {
+                                 "udt_3288840351_0": "smallint",
+                                 "udt_3288840351_1": "decimal"
+                             },
+                             "type_name": "udt_3288840351",
+                             "frozen": true
+                         },
+                         "name": "col2"
+                     },
+                     {
+                         "type": "duration",
+                         "name": "col3"
+                     },
+                     {
+                         "type": "float",
+                         "name": "col4"
+                     },
+                     {
+                         "type": {
+                             "complex_type": "set",
+                             "value_type": "timeuuid",
+                             "frozen": false
+                         },
+                         "name": "col5"
+                     },
+                     {
+                         "type": "double",
+                         "name": "col6"
+                     },
+                     {
+                         "type": "int",
+                         "name": "col7"
+                     },
+                     {
+                         "type": "int",
+                         "name": "col8"
+                     },
+                     {
+                         "type": {
+                             "complex_type": "map",
+                             "key_type": "int",
+                             "value_type": "tinyint",
+                             "frozen": true
+                         },
+                         "name": "col9"
+                     },
+                     {
+                         "type": {
+                             "complex_type": "set",
+                             "value_type": "time",
+                             "frozen": true
+                         },
+                         "name": "col10"
+                     }
+                 ],
+                 "indexes": [
+                     {
+                         "Column": {
+                             "type": "double",
+                             "name": "col0"
+                         },
+                         "index_name": "table1_col0_idx",
+                         "column_name": "col0"
+                     },
+                     {
+                         "Column": {
+                             "type": "float",
+                             "name": "col4"
+                         },
+                         "index_name": "table1_col4_idx",
+                         "column_name": "col4"
+                     },
+                     {
+                         "Column": {
+                             "type": "double",
+                             "name": "col6"
+                         },
+                         "index_name": "table1_col6_idx",
+                         "column_name": "col6"
+                     },
+                     {
+                         "Column": {
+                             "type": "int",
+                             "name": "col7"
+                         },
+                         "index_name": "table1_col7_idx",
+                         "column_name": "col7"
+                     },
+                     {
+                         "Column": {
+                             "type": "int",
+                             "name": "col8"
+                         },
+                         "index_name": "table1_col8_idx",
+                         "column_name": "col8"
+                     }
+                 ],
+                 "materialized_views": [
+                     {
+                         "NonPrimaryKey": {
+                             "type": "int",
+                             "name": "col8"
+                         },
+                         "name": "table1_mv_0",
+                         "partition_keys": [
+                             {
+                                 "type": "int",
+                                 "name": "col8"
+                             },
+                             {
+                                 "type": "bigint",
+                                 "name": "pk0"
+                             },
+                             {
+                                 "type": "smallint",
+                                 "name": "pk1"
+                             },
+                             {
+                                 "type": "double",
+                                 "name": "pk2"
+                             },
+                             {
+                                 "type": "varchar",
+                                 "name": "pk3"
+                             },
+                             {
+                                 "type": "varchar",
+                                 "name": "pk4"
+                             }
+                         ],
+                         "clustering_keys": [
+                             {
+                                 "type": "smallint",
+                                 "name": "ck0"
+                             },
+                             {
+                                 "type": "double",
+                                 "name": "ck1"
+                             },
+                             {
+                                 "type": "varchar",
+                                 "name": "ck2"
+                             }
+                         ]
+                     }
+                 ],
+                 "known_issues": {
+                     "https://github.com/scylladb/scylla/issues/3708": true
+                 }
+             }
+         ]
+     },
+     "schemaHash": "785a75a33a8e5bb"
+ }
