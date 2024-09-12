@@ -40,6 +40,7 @@ type SchemaConfig struct {
 	MinStringLength                  int
 	UseCounters                      bool
 	UseLWT                           bool
+	UseMaterializedViews             bool
 	CQLFeature                       CQLFeature
 	AsyncObjectStabilizationAttempts int
 	AsyncObjectStabilizationDelay    time.Duration
