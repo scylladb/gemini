@@ -1,0 +1,66 @@
+name: Gemini Integrations Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name:
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Build
+        run: make build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin
+          path: "./bin/gemini"
+          if-no-files-found: error
+          retention-days: 1
+  test:
+    needs: [build]
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      matrix:
+        gemini-features: ["basic", "normal", "all"]
+        gemini-concurrency: [16]
+        oracle-scylla-version: ["6.1.1"]
+        test-scylla-version: ["6.1.1"]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+      - name: Start ScyllaDB
+        id: scylla
+        run: |
+          chmod +x ./bin/gemini
+          make scylla-setup \
+            SCYLLA_TEST_VERSION=${{ matrix.test-scylla-version }} \
+            SCYLLA_ORACLE_VERSION=${{ matrix.oracle-scylla-version }}
+      - name: Test
+        shell: bash
+        run: |
+          make integration-test \
+            CONCURRENCY=${{ matrix.gemini-concurrency }} \
+            CQL_FEATURES=${{ matrix.gemini-features }} \
+            DURATION=5m
+      - name: Shutdown ScyllaDB
+        run: |
+          make scylla-shutdown \
+            SCYLLA_TEST_VERSION=${{ matrix.test-scylla-version }} \
+            SCYLLA_ORACLE_VERSION=${{ matrix.oracle-scylla-version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}
+          path: ./results
+          if-no-files-found: error
+          retention-days: 30

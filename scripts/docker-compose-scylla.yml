@@ -1,5 +1,3 @@
-version: '3.5'
-
 networks:
   gemini:
     name: gemini
@@ -11,15 +9,15 @@ networks:
 
 services:
   gemini-oracle:
-    image: scylladb/scylla:5.2.2
+    image: scylladb/scylla:${SCYLLA_ORACLE_VERSION:-6.1.1}
     container_name: gemini-oracle
-    command: --smp 2 --memory 512M --api-address 0.0.0.0
+    command: --smp 1 --memory 512M --api-address 0.0.0.0
     networks:
       gemini:
 
   gemini-test:
-    image: scylladb/scylla:5.2.2
+    image: scylladb/scylla:${SCYLLA_TEST_VERSION:-6.1.1}
     container_name: gemini-test
-    command: --smp 2 --memory 512M --api-address 0.0.0.0
+    command: --smp 1 --memory 512M --api-address 0.0.0.0
     networks:
       gemini:
