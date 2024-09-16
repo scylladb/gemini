@@ -22,12 +22,6 @@ checksum:
 snapshot:
   name_template: "{{ .Tag }}-next"
 
-blobs:
-  - provider: s3
-    bucket: downloads.scylladb.com
-    region: us-east-1
-    folder: "gemini/{{.Version}}"
-
 changelog:
   sort: asc
   filters:
