@@ -1,19 +1,8 @@
-FROM golang:1.23 AS builder
-
-ENV GO111MODULE=on
+FROM busybox
 
 WORKDIR /gemini
 
-COPY . .
-
-RUN apt-get update && apt-get install -y libc-dev build-essential \
-    && make build
-
-FROM busybox AS production
-
-WORKDIR /gemini
-
-COPY --from=builder /gemini/bin/gemini .
+COPY gemini .
 
 ENV PATH="/gemini:${PATH}"
 

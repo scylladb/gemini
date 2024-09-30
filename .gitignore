@@ -4,3 +4,4 @@ cmd/gemini/dist/
 .vscode
 bin/
 coverage.txt
+dist/
