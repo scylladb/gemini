@@ -1,11 +1,108 @@
 {
-     "gemini_version": "v1.8.7",
+     "gemini_version": "v1.8.8",
      "result": {
-         "errors": [],
-         "write_ops": 8261,
+         "errors": [
+             {
+                 "timestamp": "2024-10-01T16:22:06.547500931+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (1854565899760301.719) AND pk2 IN (-119) AND pk3 IN ('ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104cab6fce96b2228b9e07bbe38ec931104ca') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:06.556763689+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (8958086393744832.173) AND pk2 IN (-69) AND pk3 IN ('fd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30baaafd1cb8f87a2da894ed842cb2bd30ba') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:06.573357825+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (7360477426753361.127) AND pk2 IN (88) AND pk3 IN ('8396bfe6e142aa3709df3b5065ec43bb8396bfe6e142aa3709df3b5065ec43bb8396bfe6e142aa3709df3b5065ec43bb8396bfe6e142aa3709df3b5065ec43bb8396bfe6e142aa3709df3b5065ec43bb8396bfe6e142aa3709df3b5065ec43bb8396bfe6e142aa3709df3b5065ec43bb8396bfe6e142aa3709df3b5065ec43bb8396bfe6e142aa3709df3b5065ec43bb8396bfe6e142aa3709df3b5065ec43bb') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:06.600650996+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (5778813519030883.267) AND pk2 IN (118) AND pk3 IN ('9d5935dcc3044539f8d2a640702b4ff89d5935dcc3044539f8d2a640702b4ff89d5935dcc3044539f8d2a640702b4ff89d5935dcc3044539f8d2a640702b4ff89d5935dcc3044539f8d2a640702b4ff89d') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:06.643075582+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (1027369262190864.426) AND pk2 IN (-115) AND pk3 IN ('33edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e318100041016a98f415833edae4de88e31810') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:06.713527801+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (3991802584538357.563) AND pk2 IN (78) AND pk3 IN ('fbfb3afd8ac2c53348d2da395171c43bfbfb3afd8ac2c53348d2da395171c43bfbfb3afd8ac2c53348d2da395171c43') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:06.741019663+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (7690678519746762.777) AND pk2 IN (-10) AND pk3 IN ('7f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91dbcc67f5592ba7f09269f1c73338ee91') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:06.75443824+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (5102716488615528.557) AND pk2 IN (74) AND pk3 IN ('0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de0569db1cad9aaa04b3e1aee13e9876de') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:06.761698069+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (6165487190679752.622) AND pk2 IN (-15) AND pk3 IN ('b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4960c6b2b1d3728188b469ebefca629a4') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:06.862996097+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (9029086532767754.736) AND pk2 IN (38) AND pk3 IN ('e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c045e0e28f8ca0598616f06cce4b3c10c0') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:06.896214985+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (168654854674180.227) AND pk2 IN (-96) AND pk3 IN ('e0da17c56b866caf6a466cf57f2e4a23e0da17c56b866caf6a466cf57f2e4a23e0d') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:06.919741168+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (1413364064774825.349) AND pk2 IN (47) AND pk3 IN ('f44bb778684cd66b4a2d33e721baed74f4') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:07.006569217+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (2963443645880873.364) AND pk2 IN (102) AND pk3 IN ('18330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57cafbb6b748e2e65b26feabd918330d57ca') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:07.088756445+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (7950155270236772.913) AND pk2 IN (76) AND pk3 IN ('24a8ab0de2b9a3e71c63fc843852ccc024a8ab0de2b9a3e71c63fc843852ccc024a8ab0de2b9a3e71c63fc843852ccc024a8ab0de2b9a3e71c63fc843852ccc024a8ab0de2b9a3e71c63fc843852ccc024a8ab0de2b9a3e71c63fc843852ccc024a8ab0de2b9a3e71c63fc843852ccc024a8ab0de2b9a3e71c63fc843852ccc024a8ab0de') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:07.10998925+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (700471893039039.692) AND pk2 IN (-74) AND pk3 IN ('e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96dac54d987e5a54e9520cb01da7dc8e96d') ",
+                 "stmt-type": "SelectStatement"
+             },
+             {
+                 "timestamp": "2024-10-01T16:22:07.420952929+02:00",
+                 "message": "Validation failed: unable to load check data from the oracle store: gocql: expected 4 values send got 5",
+                 "query": "SELECT * FROM ks1.table1 WHERE pk0 IN ([-24201]) AND pk1 IN (3491282899392328.390) AND pk2 IN (45) AND pk3 IN ('ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97eb6c75e04449d6b3ba2f5cd49767ee97') ",
+                 "stmt-type": "SelectStatement"
+             }
+         ],
+         "write_ops": 245474,
          "write_errors": 0,
-         "read_ops": 0,
-         "read_errors": 0
+         "read_ops": 144,
+         "read_errors": 16
      },
      "schema": {
          "keyspace": {
@@ -24,24 +121,20 @@
                  "name": "table1",
                  "partition_keys": [
                      {
-                         "type": "bigint",
+                         "type": "decimal",
                          "name": "pk0"
                      },
                      {
-                         "type": "smallint",
+                         "type": "tinyint",
                          "name": "pk1"
                      },
                      {
-                         "type": "double",
+                         "type": "varchar",
                          "name": "pk2"
                      },
                      {
-                         "type": "varchar",
+                         "type": "ascii",
                          "name": "pk3"
-                     },
-                     {
-                         "type": "varchar",
-                         "name": "pk4"
                      }
                  ],
                  "clustering_keys": [
@@ -50,101 +143,88 @@
                          "name": "ck0"
                      },
                      {
-                         "type": "double",
+                         "type": "float",
                          "name": "ck1"
-                     },
-                     {
-                         "type": "varchar",
-                         "name": "ck2"
                      }
                  ],
                  "columns": [
                      {
-                         "type": "double",
+                         "type": "uuid",
                          "name": "col0"
                      },
                      {
-                         "type": "date",
+                         "type": "timestamp",
                          "name": "col1"
+                     },
+                     {
+                         "type": "inet",
+                         "name": "col2"
+                     },
+                     {
+                         "type": "text",
+                         "name": "col3"
+                     },
+                     {
+                         "type": "varchar",
+                         "name": "col4"
+                     },
+                     {
+                         "type": "ascii",
+                         "name": "col5"
+                     },
+                     {
+                         "type": "smallint",
+                         "name": "col6"
+                     },
+                     {
+                         "type": "uuid",
+                         "name": "col7"
                      },
                      {
                          "type": {
                              "complex_type": "udt",
                              "value_types": {
-                                 "udt_3288840351_0": "smallint",
-                                 "udt_3288840351_1": "decimal"
+                                 "udt_742658279_0": "decimal",
+                                 "udt_742658279_1": "inet"
                              },
-                             "type_name": "udt_3288840351",
+                             "type_name": "udt_742658279",
                              "frozen": true
                          },
-                         "name": "col2"
-                     },
-                     {
-                         "type": "duration",
-                         "name": "col3"
-                     },
-                     {
-                         "type": "float",
-                         "name": "col4"
-                     },
-                     {
-                         "type": {
-                             "complex_type": "set",
-                             "value_type": "timeuuid",
-                             "frozen": false
-                         },
-                         "name": "col5"
-                     },
-                     {
-                         "type": "double",
-                         "name": "col6"
-                     },
-                     {
-                         "type": "int",
-                         "name": "col7"
-                     },
-                     {
-                         "type": "int",
                          "name": "col8"
                      },
                      {
-                         "type": {
-                             "complex_type": "map",
-                             "key_type": "int",
-                             "value_type": "tinyint",
-                             "frozen": true
-                         },
+                         "type": "double",
                          "name": "col9"
                      },
                      {
+                         "type": "tinyint",
+                         "name": "col10"
+                     },
+                     {
+                         "type": "uuid",
+                         "name": "col11"
+                     },
+                     {
+                         "type": "varint",
+                         "name": "col12"
+                     },
+                     {
                          "type": {
-                             "complex_type": "set",
-                             "value_type": "time",
+                             "complex_type": "list",
+                             "value_type": "timestamp",
                              "frozen": true
                          },
-                         "name": "col10"
+                         "name": "col13"
+                     },
+                     {
+                         "type": "timestamp",
+                         "name": "col14"
                      }
                  ],
                  "indexes": [
                      {
                          "Column": {
-                             "type": "double",
-                             "name": "col0"
-                         },
-                         "index_name": "table1_col0_idx",
-                         "column_name": "col0"
-                     },
-                     {
-                         "Column": {
-                             "type": "float",
-                             "name": "col4"
-                         },
-                         "index_name": "table1_col4_idx",
-                         "column_name": "col4"
-                     },
-                     {
-                         "Column": {
-                             "type": "double",
+                             "type": "smallint",
                              "name": "col6"
                          },
                          "index_name": "table1_col6_idx",
@@ -152,52 +232,56 @@
                      },
                      {
                          "Column": {
-                             "type": "int",
-                             "name": "col7"
+                             "type": "double",
+                             "name": "col9"
                          },
-                         "index_name": "table1_col7_idx",
-                         "column_name": "col7"
+                         "index_name": "table1_col9_idx",
+                         "column_name": "col9"
                      },
                      {
                          "Column": {
-                             "type": "int",
-                             "name": "col8"
+                             "type": "tinyint",
+                             "name": "col10"
                          },
-                         "index_name": "table1_col8_idx",
-                         "column_name": "col8"
+                         "index_name": "table1_col10_idx",
+                         "column_name": "col10"
+                     },
+                     {
+                         "Column": {
+                             "type": "varint",
+                             "name": "col12"
+                         },
+                         "index_name": "table1_col12_idx",
+                         "column_name": "col12"
                      }
                  ],
                  "materialized_views": [
                      {
                          "NonPrimaryKey": {
-                             "type": "int",
-                             "name": "col8"
+                             "type": "smallint",
+                             "name": "col6"
                          },
                          "name": "table1_mv_0",
                          "partition_keys": [
                              {
-                                 "type": "int",
-                                 "name": "col8"
+                                 "type": "smallint",
+                                 "name": "col6"
                              },
                              {
-                                 "type": "bigint",
+                                 "type": "decimal",
                                  "name": "pk0"
                              },
                              {
-                                 "type": "smallint",
+                                 "type": "tinyint",
                                  "name": "pk1"
                              },
                              {
-                                 "type": "double",
+                                 "type": "varchar",
                                  "name": "pk2"
                              },
                              {
-                                 "type": "varchar",
+                                 "type": "ascii",
                                  "name": "pk3"
-                             },
-                             {
-                                 "type": "varchar",
-                                 "name": "pk4"
                              }
                          ],
                          "clustering_keys": [
@@ -206,12 +290,8 @@
                                  "name": "ck0"
                              },
                              {
-                                 "type": "double",
+                                 "type": "float",
                                  "name": "ck1"
-                             },
-                             {
-                                 "type": "varchar",
-                                 "name": "ck2"
                              }
                          ]
                      }
@@ -222,5 +302,5 @@
              }
          ]
      },
-     "schemaHash": "785a75a33a8e5bb"
+     "schemaHash": "fcb43beca0cdf704"
  }

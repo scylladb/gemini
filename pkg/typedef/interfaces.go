@@ -23,9 +23,9 @@ type Type interface {
 	Name() string
 	CQLDef() string
 	CQLHolder() string
-	CQLPretty(interface{}) string
-	GenValue(*rand.Rand, *PartitionRangeConfig) []interface{}
-	GenJSONValue(*rand.Rand, *PartitionRangeConfig) interface{}
+	CQLPretty(any) string
+	GenValue(*rand.Rand, *PartitionRangeConfig) []any
+	GenJSONValue(*rand.Rand, *PartitionRangeConfig) any
 	LenValue() int
 	// ValueVariationsNumber returns number of bytes generated value holds
 	ValueVariationsNumber(*PartitionRangeConfig) float64

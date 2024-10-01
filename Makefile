@@ -35,7 +35,7 @@ fix: $(GOBIN)/golangci-lint
 
 .PHONY: build
 build:
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/gemini ./cmd/gemini
+	CGO_ENABLED=0 go build -ldflags="-asan" -gcflags "all=-N -l" -o bin/gemini ./cmd/gemini
 
 debug-build:
 	CGO_ENABLED=0 go build -gcflags "all=-N -l" -o bin/gemini ./cmd/gemini
@@ -46,32 +46,41 @@ build-docker:
 
 .PHONY: scylla-setup
 scylla-setup:
-	@docker compose -f scripts/docker-compose-$(DOCKER_COMPOSE_TESTING).yml up -d
+	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml up -d
 
 	until docker logs gemini-oracle 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
 	until docker logs gemini-test 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
 
 .PHONY: scylla-shutdown
 scylla-shutdown:
-	docker compose -f scripts/docker-compose-$(DOCKER_COMPOSE_TESTING).yml down --volumes
+	docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml down --volumes
 
 .PHONY: test
 test:
 	go test -covermode=atomic -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | gotestfmt -showteststatus
 
 CQL_FEATURES := normal
-CONCURRENCY := 1
+CONCURRENCY := 16
 DURATION := 10m
 WARMUP := 1m
+SEED := $(shell date +%s | tee ./results/gemini_seed)
 
 .PHONY: integration-test
-integration-test:
+integration-test: build
 	mkdir -p ./results
 	touch ./results/gemini_seed
 	./bin/gemini \
+		--drop-schema true \
 		--fail-fast \
-		--dataset-size=small \
-		--seed=$(shell date +%s | tee ./results/gemini_seed) \
+		--non-interactive \
+		--materialized-views false \
+		--dataset-size=large \
+		--outfile ./results/gemini.log \
+		--test-statement-log-file ./results/gemini_test_statements.log \
+		--oracle-statement-log-file ./results/gemini_oracle_statements.log \
+		--test-host-selection-policy token-aware \
+		--oracle-host-selection-policy token-aware \
+		--seed=$(SEED) \
 		--test-cluster=$(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-test) \
 		--oracle-cluster=$(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-oracle) \
 		--outfile ./results/gemini_result.log \
@@ -82,10 +91,12 @@ integration-test:
 		--cql-features $(CQL_FEATURES) \
 		--request-timeout 180s \
 		--connect-timeout 120s \
-		--async-objects-stabilization-attempts 5 \
-		--async-objects-stabilization-backoff 500ms \
+		--consistency LOCAL_QUORUM \
+		--use-server-timestamps true \
+		--async-objects-stabilization-attempts 10 \
+		--async-objects-stabilization-backoff 100ms \
 		--replication-strategy "{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 		--oracle-replication-strategy "{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
-		--max-mutation-retries 10 \
+		--max-mutation-retries 1 \
 		--max-mutation-retries-backoff 500ms \
 		-c $(CONCURRENCY)
