@@ -199,7 +199,7 @@ const (
 	CacheArrayLen
 )
 
-func splitString(str string, delimiter string) func(func(int, string) bool) {
+func splitString(str, delimiter string) func(func(int, string) bool) {
 	lastPos := 0
 	delLen := len(delimiter)
 	return func(yield func(int, string) bool) {

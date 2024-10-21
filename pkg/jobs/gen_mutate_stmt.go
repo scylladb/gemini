@@ -129,13 +129,13 @@ func genInsertJSONStmt(
 		return nil, nil
 	}
 	vs := valuesWithToken.Value.Copy()
-	values := make(map[string]interface{})
+	values := make(map[string]any)
 	for i, pk := range table.PartitionKeys {
 		switch t := pk.Type.(type) {
 		case typedef.SimpleType:
 			values[pk.Name] = convertForJSON(t, vs[i])
 		case *typedef.TupleType:
-			tupVals := make([]interface{}, len(t.ValueTypes))
+			tupVals := make([]any, len(t.ValueTypes))
 			for j := 0; j < len(t.ValueTypes); j++ {
 				tupVals[i] = convertForJSON(t, vs[i])
 				i++
@@ -161,7 +161,7 @@ func genInsertJSONStmt(
 			QueryType: typedef.InsertJSONStatementType,
 		},
 		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
-		Values:          []interface{}{string(jsonString)},
+		Values:          []any{string(jsonString)},
 	}, nil
 }
 
@@ -180,7 +180,7 @@ func genDeleteRows(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef
 	}, nil
 }
 
-func convertForJSON(vType typedef.Type, value interface{}) interface{} {
+func convertForJSON(vType typedef.Type, value any) any {
 	switch vType {
 	case typedef.TYPE_BLOB:
 		val, _ := value.(string)

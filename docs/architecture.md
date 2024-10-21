@@ -9,7 +9,7 @@ database clusters.
 ## The different Jobs
 
 1. ___MutationJob___: This job applies mutations to the clusters. The mutations can be of several types.
-   The basic _INSERT_ and _DELETE_ with various conditions or ___DDL___ type statements such as _ALTER_ the 
+   The basic _INSERT_ and _DELETE_ with various conditions or ___DDL___ type statements such as _ALTER_ the
    structure of the table. These type of mutations happen with different frequency with normal _INSERT_
    being the most common and _ALTER_ the most infrequent.
 
@@ -39,7 +39,7 @@ The application allows the user to decide the level of concurrency that Gemini o
 The toggle `--concurrency` currently means that the application will create that number of
 ___READ___ and ___WRITE___ jobs when running _mixed_ mode. If running in ___WRITE___ or ___READ___
 mode it will correspond to the exact number of job executing goroutines. Each goroutine is only
-working on a subset of the data (from now known as bucket) when mutating and validating to avoid 
+working on a subset of the data (from now known as bucket) when mutating and validating to avoid
 concurrent modification races when validating the system under test.
 This can still happen when executing read queries that performs an index scan.
 
@@ -56,7 +56,7 @@ in use but the idea is to introduce some jitter into the execution flow.
 The application generates partition ids through a `Generator` that creates a steady flow of partition
 key components for the desired [concurrency](architecture.md#Concurrency).
 Each goroutine is connected to a `partition` that the generator controls. This partition continuously emits
-new partition ids in the form of a `[]interface{}`. These keys are created in the same way as the the
+new partition ids in the form of a `[]any`. These keys are created in the same way as the the
 driver does to ensure that each goroutine only processes partition keys from it's designated bucket.
 These partition keys These values are copied into another list that keeps the old partition ids for
 later reuse. The idea of reusing the partition keys is that probability of hitting the same partition
@@ -72,14 +72,14 @@ ___NB___:There are probably issues with this approach and we may want to refine 
 There are a number of core data structures that has a more central place in Gemini's design.
 
 * Schema
-  
+
   Gemini has a top level data structure named `Schema`. This structure a loose wrapper around a keyspace
 and a list of tables. It furthermore contains exported methods for generating a schema and it's
 corresponding CQL DDL statements allowing for creating the tables in the database. It also holds the
 methods for creating queries of all kinds which are used in the main Gemini program.
 
 * Table
-  
+
   Tables are conceptually very similar to regular CQL tables. Their base elements are partition keys,
   clustering keys and columns. They also may contain materialized views and indexes depending on user
   preferences.

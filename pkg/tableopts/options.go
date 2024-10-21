@@ -35,7 +35,7 @@ func (o *SimpleOption) ToCQL() string {
 }
 
 type MapOption struct {
-	val map[string]interface{}
+	val map[string]any
 	key string
 }
 

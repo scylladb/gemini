@@ -48,8 +48,8 @@ func (t *UDTType) CQLHolder() string {
 	return "?"
 }
 
-func (t *UDTType) CQLPretty(value interface{}) string {
-	s, ok := value.(map[string]interface{})
+func (t *UDTType) CQLPretty(value any) string {
+	s, ok := value.(map[string]any)
 	if !ok {
 		panic(fmt.Sprintf("udt pretty, unknown type %v", t))
 	}
@@ -74,20 +74,20 @@ func (t *UDTType) Indexable() bool {
 	return true
 }
 
-func (t *UDTType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
-	vals := make(map[string]interface{})
+func (t *UDTType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
+	vals := make(map[string]any)
 	for name, typ := range t.ValueTypes {
 		vals[name] = typ.GenJSONValue(r, p)
 	}
 	return vals
 }
 
-func (t *UDTType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
-	vals := make(map[string]interface{})
+func (t *UDTType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
+	vals := make(map[string]any)
 	for name, typ := range t.ValueTypes {
 		vals[name] = typ.GenValue(r, p)[0]
 	}
-	return []interface{}{vals}
+	return []any{vals}
 }
 
 func (t *UDTType) LenValue() int {

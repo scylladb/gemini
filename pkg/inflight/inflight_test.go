@@ -69,10 +69,10 @@ func TestDeleteSharded(t *testing.T) {
 func TestInflight(t *testing.T) {
 	t.Parallel()
 	flight := newSyncU64set(shrinkInflightsLimit)
-	f := func(v uint64) interface{} {
+	f := func(v uint64) any {
 		return flight.AddIfNotPresent(v)
 	}
-	g := func(v uint64) interface{} {
+	g := func(v uint64) any {
 		flight.Delete(v)
 		return !flight.Has(v)
 	}
@@ -105,10 +105,10 @@ func TestAutoShrink(t *testing.T) {
 func TestInflightSharded(t *testing.T) {
 	t.Parallel()
 	flight := newShardedSyncU64set()
-	f := func(v uint64) interface{} {
+	f := func(v uint64) any {
 		return flight.AddIfNotPresent(v)
 	}
-	g := func(v uint64) interface{} {
+	g := func(v uint64) any {
 		flight.Delete(v)
 		return !flight.shards[v%256].Has(v)
 	}

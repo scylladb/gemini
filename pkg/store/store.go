@@ -42,7 +42,7 @@ import (
 )
 
 type loader interface {
-	load(context.Context, *typedef.Stmt) ([]map[string]interface{}, error)
+	load(context.Context, *typedef.Stmt) ([]map[string]any, error)
 }
 
 type storer interface {
@@ -107,7 +107,7 @@ func (n *noOpStore) mutate(context.Context, *typedef.Stmt) error {
 	return nil
 }
 
-func (n *noOpStore) load(context.Context, *typedef.Stmt) ([]map[string]interface{}, error) {
+func (n *noOpStore) load(context.Context, *typedef.Stmt) ([]map[string]any, error) {
 	return nil, nil
 }
 
@@ -178,7 +178,7 @@ func mutate(ctx context.Context, s storeLoader, stmt *typedef.Stmt) error {
 }
 
 func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, detailedDiff bool) error {
-	var testRows, oracleRows []map[string]interface{}
+	var testRows, oracleRows []map[string]any
 	var testErr, oracleErr error
 	var wg sync.WaitGroup
 	wg.Add(1)

@@ -59,7 +59,7 @@ func (ct *BagType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *BagType) CQLPretty(value interface{}) string {
+func (ct *BagType) CQLPretty(value any) string {
 	if reflect.TypeOf(value).Kind() != reflect.Slice {
 		panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
 	}
@@ -75,18 +75,18 @@ func (ct *BagType) CQLPretty(value interface{}) string {
 	return fmt.Sprintf(format, strings.Join(out, ","))
 }
 
-func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
+func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
-	out := make([]interface{}, count)
+	out := make([]any, count)
 	for i := 0; i < count; i++ {
 		out[i] = ct.ValueType.GenValue(r, p)[0]
 	}
-	return []interface{}{out}
+	return []any{out}
 }
 
-func (ct *BagType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
+func (ct *BagType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
-	out := make([]interface{}, count)
+	out := make([]any, count)
 	for i := 0; i < count; i++ {
 		out[i] = ct.ValueType.GenJSONValue(r, p)
 	}

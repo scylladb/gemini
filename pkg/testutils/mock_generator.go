@@ -64,8 +64,8 @@ func (g *MockGenerator) GiveOlds(_ []*typedef.ValueWithToken) {}
 func (g *MockGenerator) ReleaseToken(_ uint64) {
 }
 
-func (g *MockGenerator) createPartitionKeyValues(r *rand.Rand) []interface{} {
-	var values []interface{}
+func (g *MockGenerator) createPartitionKeyValues(r *rand.Rand) []any {
+	var values []any
 	for _, pk := range g.table.PartitionKeys {
 		values = append(values, pk.Type.GenValue(r, g.partitionsConfig)...)
 	}

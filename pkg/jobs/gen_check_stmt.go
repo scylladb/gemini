@@ -165,7 +165,7 @@ func genSinglePartitionQueryMv(
 
 	values := valuesWithToken.Value.Copy()
 	if mv.HaveNonPrimaryKey() {
-		var mvValues []interface{}
+		var mvValues []any
 		mvValues = append(mvValues, mv.NonPrimaryKey.Type.GenValue(r, p)...)
 		values = append(mvValues, values...)
 	}
@@ -189,7 +189,7 @@ func genMultiplePartitionQuery(
 	t.RLock()
 	defer t.RUnlock()
 	typs := make([]typedef.Type, numQueryPKs*t.PartitionKeys.Len())
-	values := make([]interface{}, numQueryPKs*t.PartitionKeys.Len())
+	values := make([]any, numQueryPKs*t.PartitionKeys.Len())
 
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 	tokens := make([]*typedef.ValueWithToken, 0, numQueryPKs)
@@ -233,7 +233,7 @@ func genMultiplePartitionQueryMv(
 
 	mv := t.MaterializedViews[mvNum]
 	typs := make([]typedef.Type, numQueryPKs*mv.PartitionKeys.Len())
-	values := make([]interface{}, numQueryPKs*mv.PartitionKeys.Len())
+	values := make([]any, numQueryPKs*mv.PartitionKeys.Len())
 
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 	tokens := make([]*typedef.ValueWithToken, 0, numQueryPKs)
@@ -245,7 +245,7 @@ func genMultiplePartitionQueryMv(
 			return nil
 		}
 		tokens = append(tokens, vs)
-		vals := make([]interface{}, mv.PartitionKeys.Len())
+		vals := make([]any, mv.PartitionKeys.Len())
 		if mv.HaveNonPrimaryKey() {
 			vals[0] = mv.NonPrimaryKey.Type.GenValue(r, p)
 			copy(vals[1:], vs.Value.Copy())
@@ -335,7 +335,7 @@ func genClusteringRangeQueryMv(
 	values := vs.Value.Copy()
 	mv := t.MaterializedViews[mvNum]
 	if mv.HaveNonPrimaryKey() {
-		mvValues := append([]interface{}{}, mv.NonPrimaryKey.Type.GenValue(r, p)...)
+		mvValues := append([]any{}, mv.NonPrimaryKey.Type.GenValue(r, p)...)
 		values = append(mvValues, values...)
 	}
 	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
@@ -525,7 +525,7 @@ func genSingleIndexQuery(
 	defer t.RUnlock()
 
 	var (
-		values []interface{}
+		values []any
 		typs   []typedef.Type
 	)
 

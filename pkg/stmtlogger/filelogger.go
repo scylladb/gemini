@@ -124,7 +124,7 @@ func NewFileLogger(filename string) (StmtToFile, error) {
 	if filename == "" {
 		return &nopFileLogger{}, nil
 	}
-	fd, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	fd, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
 	}
