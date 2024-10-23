@@ -28,18 +28,21 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     strategy:
-      max-parallel: 1
+      max-parallel: 4
       matrix:
         gemini-features: ["basic", "normal", "all"]
         gemini-concurrency: [16]
-        oracle-scylla-version: ["6.1.1"]
-        test-scylla-version: ["6.1.1"]
+        duration: ["5m"]
+        dataset-size: [large, small]
+        oracle-scylla-version: ["6.1"]
+        test-scylla-version: ["6.1"]
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
       - name: Start ScyllaDB
         id: scylla
+        shell: bash
         run: |
           chmod +x ./bin/gemini
           make scylla-setup \
@@ -51,16 +54,19 @@ jobs:
           make integration-test \
             CONCURRENCY=${{ matrix.gemini-concurrency }} \
             CQL_FEATURES=${{ matrix.gemini-features }} \
-            DURATION=5m
+            DURATION=${{ matrix.duration }} \
+            DATASET_SIZE=${{ matrix.dataset-size }} \
       - name: Shutdown ScyllaDB
+        shell: bash
         run: |
           make scylla-shutdown \
             SCYLLA_TEST_VERSION=${{ matrix.test-scylla-version }} \
             SCYLLA_ORACLE_VERSION=${{ matrix.oracle-scylla-version }}
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: results-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}
+          name: results-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}-${{ matrix.duration }}-${{ matrix.dataset-size }}-${{ matrix.test-scylla-version }}-${{ matrix.oracle-scylla-version }}-${{ github.run_number }}
           path: ./results
           if-no-files-found: error
           retention-days: 30
