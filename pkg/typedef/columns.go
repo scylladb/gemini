@@ -39,7 +39,7 @@ func (cd *ColumnDef) IsValidForPrimaryKey() bool {
 }
 
 func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
-	dataMap := make(map[string]interface{})
+	dataMap := make(map[string]any)
 	if err := json.Unmarshal(data, &dataMap); err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
 		if !typeOk {
 			return errors.Wrapf(ErrSchemaValidation, "missing definition of column 'type': [%T]%+[1]v", dataMap)
 		}
-		complexTypeMap, typeMapOk := typeMap.(map[string]interface{})
+		complexTypeMap, typeMapOk := typeMap.(map[string]any)
 		if !typeMapOk {
 			return errors.Wrapf(ErrSchemaValidation, "unknown definition column 'type': [%T]%+[1]v", typeMap)
 		}
@@ -107,7 +107,7 @@ func (c Columns) Remove(column *ColumnDef) Columns {
 	return out
 }
 
-func (c Columns) ToJSONMap(values map[string]interface{}, r *rand.Rand, p *PartitionRangeConfig) map[string]interface{} {
+func (c Columns) ToJSONMap(values map[string]any, r *rand.Rand, p *PartitionRangeConfig) map[string]any {
 	for _, k := range c {
 		values[k.Name] = k.Type.GenJSONValue(r, p)
 	}
@@ -155,9 +155,9 @@ func (c Columns) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
 	return out
 }
 
-func GetMapTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
+func GetMapTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	st := struct {
-		Type map[string]interface{}
+		Type map[string]any
 		Name string
 	}{}
 
@@ -200,9 +200,9 @@ func GetMapTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	}, err
 }
 
-func GetBagTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
+func GetBagTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	st := struct {
-		Type map[string]interface{}
+		Type map[string]any
 		Name string
 	}{}
 
@@ -231,9 +231,9 @@ func GetBagTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	}, err
 }
 
-func GetTupleTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
+func GetTupleTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	st := struct {
-		Type map[string]interface{}
+		Type map[string]any
 		Name string
 	}{}
 
@@ -263,9 +263,9 @@ func GetTupleTypeColumn(data map[string]interface{}) (out *ColumnDef, err error)
 	}, nil
 }
 
-func GetUDTTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
+func GetUDTTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	st := struct {
-		Type map[string]interface{}
+		Type map[string]any
 		Name string
 	}{}
 
@@ -303,7 +303,7 @@ func GetUDTTypeColumn(data map[string]interface{}) (out *ColumnDef, err error) {
 	}, nil
 }
 
-func GetSimpleTypeColumn(data map[string]interface{}) (*ColumnDef, error) {
+func GetSimpleTypeColumn(data map[string]any) (*ColumnDef, error) {
 	st := struct {
 		Name string
 		Type SimpleType

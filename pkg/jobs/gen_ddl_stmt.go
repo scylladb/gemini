@@ -45,7 +45,7 @@ func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, _ *typedef.Pa
 	}
 }
 
-func appendValue(columnType typedef.Type, r *rand.Rand, p *typedef.PartitionRangeConfig, values []interface{}) []interface{} {
+func appendValue(columnType typedef.Type, r *rand.Rand, p *typedef.PartitionRangeConfig, values []any) []any {
 	return append(values, columnType.GenValue(r, p)...)
 }
 

@@ -34,7 +34,7 @@ func TestSerialization(t *testing.T) {
 	st.WriteOps.Store(10)
 	st.ReadOps.Store(5)
 
-	baseDate := time.Date(2020, 02, 01, 0, 0, 0, 0, time.UTC)
+	baseDate := time.Date(2020, 0o2, 0o1, 0, 0, 0, 0, time.UTC)
 	for y := 0; y < 5; y++ {
 		st.AddReadError(&joberror.JobError{
 			Timestamp: baseDate.AddDate(0, 0, y),
@@ -44,7 +44,7 @@ func TestSerialization(t *testing.T) {
 		})
 	}
 
-	baseDate = time.Date(2020, 03, 01, 0, 0, 0, 0, time.UTC)
+	baseDate = time.Date(2020, 0o3, 0o1, 0, 0, 0, 0, time.UTC)
 	for y := 0; y < 5; y++ {
 		st.AddWriteError(&joberror.JobError{
 			Timestamp: baseDate.AddDate(0, 0, y),

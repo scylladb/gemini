@@ -25,6 +25,10 @@ $(GOBIN)/golangci-lint: GOLANGCI_VERSION = 1.60.3
 $(GOBIN)/golangci-lint: Makefile
 	$(call dl_tgz,golangci-lint,https://github.com/golangci/golangci-lint/releases/download/v$(GOLANGCI_VERSION)/golangci-lint-$(GOLANGCI_VERSION)-$(GOOS)-amd64.tar.gz)
 
+.PHONY: fmt
+fmt:
+	gofumpt -w -extra .
+
 .PHONY: check
 check: $(GOBIN)/golangci-lint
 	$(GOBIN)/golangci-lint run

@@ -158,7 +158,7 @@ func (st StatementType) PossibleAsyncOperation() bool {
 	}
 }
 
-type Values []interface{}
+type Values []any
 
 func (v Values) Copy() Values {
 	values := make(Values, len(v))

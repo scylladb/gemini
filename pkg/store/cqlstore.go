@@ -93,7 +93,7 @@ func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Ti
 	return nil
 }
 
-func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (result []map[string]interface{}, err error) {
+func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (result []map[string]any, err error) {
 	query, _ := stmt.Query.ToCql()
 	cs.stmtLogger.LogStmt(stmt)
 	iter := cs.session.Query(query, stmt.Values...).WithContext(ctx).Iter()

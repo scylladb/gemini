@@ -140,7 +140,7 @@ func (mt *MapType) CQLHolder() string {
 	return "?"
 }
 
-func (mt *MapType) CQLPretty(value interface{}) string {
+func (mt *MapType) CQLPretty(value any) string {
 	if reflect.TypeOf(value).Kind() != reflect.Map {
 		panic(fmt.Sprintf("map cql pretty, unknown type %v", mt))
 	}
@@ -155,7 +155,7 @@ func (mt *MapType) CQLPretty(value interface{}) string {
 	return fmt.Sprintf("{%s}", strings.Join(out, ","))
 }
 
-func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
+func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	count := r.Intn(9) + 1
 	vals := reflect.MakeMap(reflect.MapOf(reflect.TypeOf(mt.KeyType.GenJSONValue(r, p)), reflect.TypeOf(mt.ValueType.GenJSONValue(r, p))))
 	for i := 0; i < count; i++ {
@@ -164,13 +164,13 @@ func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface
 	return vals.Interface()
 }
 
-func (mt *MapType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
+func (mt *MapType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxMapSize+1)
 	vals := reflect.MakeMap(reflect.MapOf(reflect.TypeOf(mt.KeyType.GenValue(r, p)[0]), reflect.TypeOf(mt.ValueType.GenValue(r, p)[0])))
 	for i := 0; i < count; i++ {
 		vals.SetMapIndex(reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]), reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]))
 	}
-	return []interface{}{vals.Interface()}
+	return []any{vals.Interface()}
 }
 
 func (mt *MapType) LenValue() int {
@@ -209,22 +209,22 @@ func (ct *CounterType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *CounterType) CQLPretty(value interface{}) string {
+func (ct *CounterType) CQLPretty(value any) string {
 	return fmt.Sprintf("%d", value)
 }
 
-func (ct *CounterType) GenJSONValue(r *rand.Rand, _ *PartitionRangeConfig) interface{} {
+func (ct *CounterType) GenJSONValue(r *rand.Rand, _ *PartitionRangeConfig) any {
 	if utils.UnderTest {
 		return r.Int63()
 	}
 	return atomic.AddInt64(&ct.Value, 1)
 }
 
-func (ct *CounterType) GenValue(r *rand.Rand, _ *PartitionRangeConfig) []interface{} {
+func (ct *CounterType) GenValue(r *rand.Rand, _ *PartitionRangeConfig) []any {
 	if utils.UnderTest {
-		return []interface{}{r.Int63()}
+		return []any{r.Int63()}
 	}
-	return []interface{}{atomic.AddInt64(&ct.Value, 1)}
+	return []any{atomic.AddInt64(&ct.Value, 1)}
 }
 
 func (ct *CounterType) LenValue() int {

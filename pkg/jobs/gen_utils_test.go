@@ -151,7 +151,7 @@ func (r results) Diff(t results) string {
 	return strings.Join(out, "\n")
 }
 
-func convertStmtsToResults(stmt interface{}) results {
+func convertStmtsToResults(stmt any) results {
 	var out results
 	switch stmts := stmt.(type) {
 	case *typedef.Stmts:
@@ -239,7 +239,7 @@ func GetCkCountFromOptions(options testutils.TestCaseOptions, allValue int) int 
 	return ckCount
 }
 
-func validateStmt(t *testing.T, stmt interface{}, err error) {
+func validateStmt(t *testing.T, stmt any, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatalf("error: get an error on create test inputs:%v", err)

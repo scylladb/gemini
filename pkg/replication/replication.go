@@ -19,7 +19,7 @@ import (
 	"strings"
 )
 
-type Replication map[string]interface{}
+type Replication map[string]any
 
 func (r *Replication) ToCQL() string {
 	b, _ := json.Marshal(r)
@@ -41,7 +41,7 @@ func NewNetworkTopologyStrategy() *Replication {
 }
 
 func (r *Replication) UnmarshalJSON(data []byte) error {
-	dataMap := make(map[string]interface{})
+	dataMap := make(map[string]any)
 	if err := json.Unmarshal(data, &dataMap); err != nil {
 		return err
 	}
