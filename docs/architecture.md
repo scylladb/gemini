@@ -56,7 +56,7 @@ in use but the idea is to introduce some jitter into the execution flow.
 The application generates partition ids through a `Generator` that creates a steady flow of partition
 key components for the desired [concurrency](architecture.md#Concurrency).
 Each goroutine is connected to a `partition` that the generator controls. This partition continuously emits
-new partition ids in the form of a `[]interface{}`. These keys are created in the same way as the the
+new partition ids in the form of a `[]any`. These keys are created in the same way as the the
 driver does to ensure that each goroutine only processes partition keys from it's designated bucket.
 These partition keys These values are copied into another list that keeps the old partition ids for
 later reuse. The idea of reusing the partition keys is that probability of hitting the same partition

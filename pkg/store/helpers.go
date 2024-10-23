@@ -25,7 +25,7 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func pks(t *typedef.Table, rows []map[string]interface{}) []string {
+func pks(t *typedef.Table, rows []map[string]any) []string {
 	var keySet []string
 	for _, row := range rows {
 		keys := make([]string, 0, len(t.PartitionKeys)+len(t.ClusteringKeys))
@@ -36,14 +36,14 @@ func pks(t *typedef.Table, rows []map[string]interface{}) []string {
 	return keySet
 }
 
-func extractRowValues(values []string, columns typedef.Columns, row map[string]interface{}) []string {
+func extractRowValues(values []string, columns typedef.Columns, row map[string]any) []string {
 	for _, pk := range columns {
 		values = append(values, fmt.Sprintf(pk.Name+"=%v", row[pk.Name]))
 	}
 	return values
 }
 
-func lt(mi, mj map[string]interface{}) bool {
+func lt(mi, mj map[string]any) bool {
 	switch mis := mi["pk0"].(type) {
 	case []byte:
 		mjs, _ := mj["pk0"].([]byte)
@@ -84,10 +84,10 @@ func lt(mi, mj map[string]interface{}) bool {
 	}
 }
 
-func loadSet(iter *gocql.Iter) []map[string]interface{} {
-	var rows []map[string]interface{}
+func loadSet(iter *gocql.Iter) []map[string]any {
+	var rows []map[string]any
 	for {
-		row := make(map[string]interface{})
+		row := make(map[string]any)
 		if !iter.MapScan(row) {
 			break
 		}

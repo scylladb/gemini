@@ -25,7 +25,7 @@ type spinningFeedback struct {
 	s *spinner.Spinner
 }
 
-func (sf *spinningFeedback) Set(format string, args ...interface{}) {
+func (sf *spinningFeedback) Set(format string, args ...any) {
 	if sf.s != nil {
 		sf.s.Suffix = fmt.Sprintf(format, args...)
 	}

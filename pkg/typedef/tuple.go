@@ -55,8 +55,8 @@ func (t *TupleType) CQLHolder() string {
 	return "(" + strings.TrimRight(strings.Repeat("?,", len(t.ValueTypes)), ",") + ")"
 }
 
-func (t *TupleType) CQLPretty(value interface{}) string {
-	values, ok := value.([]interface{})
+func (t *TupleType) CQLPretty(value any) string {
+	values, ok := value.([]any)
 	if !ok {
 		return "()"
 	}
@@ -76,16 +76,16 @@ func (t *TupleType) Indexable() bool {
 	return true
 }
 
-func (t *TupleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
-	out := make([]interface{}, 0, len(t.ValueTypes))
+func (t *TupleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
+	out := make([]any, 0, len(t.ValueTypes))
 	for _, tp := range t.ValueTypes {
 		out = append(out, tp.GenJSONValue(r, p))
 	}
 	return out
 }
 
-func (t *TupleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
-	out := make([]interface{}, 0, len(t.ValueTypes))
+func (t *TupleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
+	out := make([]any, 0, len(t.ValueTypes))
 	for _, tp := range t.ValueTypes {
 		out = append(out, tp.GenValue(r, p)...)
 	}

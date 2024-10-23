@@ -93,7 +93,7 @@ func (f *ExpectedStore[T]) UpdateExpected(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Marshal funcStmtTests error:%v", err)
 		}
-		err = os.WriteFile(f.filePath, data, 0644)
+		err = os.WriteFile(f.filePath, data, 0o644)
 		if err != nil {
 			t.Fatalf("write to file %s error:%v", f.filePath, err)
 		}

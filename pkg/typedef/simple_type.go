@@ -66,7 +66,7 @@ func (st SimpleType) LenValue() int {
 	return 1
 }
 
-func (st SimpleType) CQLPretty(value interface{}) string {
+func (st SimpleType) CQLPretty(value any) string {
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR, TYPE_INET, TYPE_DATE:
 		return fmt.Sprintf("'%s'", value)
@@ -164,7 +164,7 @@ func (st SimpleType) Indexable() bool {
 	return st != TYPE_DURATION
 }
 
-func (st SimpleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
+func (st SimpleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	switch st {
 	case TYPE_BLOB:
 		ln := r.Intn(p.MaxBlobLength) + p.MinBlobLength
@@ -175,11 +175,11 @@ func (st SimpleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) interfa
 	return st.genValue(r, p)
 }
 
-func (st SimpleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []interface{} {
-	return []interface{}{st.genValue(r, p)}
+func (st SimpleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
+	return []any{st.genValue(r, p)}
 }
 
-func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) interface{} {
+func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
 		ln := r.Intn(p.MaxStringLength) + p.MinStringLength

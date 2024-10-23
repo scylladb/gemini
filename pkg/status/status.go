@@ -57,7 +57,7 @@ func (gs *GlobalStatus) AddReadError(err *joberror.JobError) {
 }
 
 func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, version string) error {
-	result := map[string]interface{}{
+	result := map[string]any{
 		"result":         gs,
 		"gemini_version": version,
 		"schemaHash":     schema.GetHash(),

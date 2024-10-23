@@ -28,7 +28,7 @@ type Creator struct {
 	routingKeyBuffer []byte
 }
 
-func (rc *Creator) CreateRoutingKey(table *typedef.Table, values []interface{}) ([]byte, error) {
+func (rc *Creator) CreateRoutingKey(table *typedef.Table, values []any) ([]byte, error) {
 	partitionKeys := table.PartitionKeys
 	if len(partitionKeys) == 1 {
 		// single column routing key

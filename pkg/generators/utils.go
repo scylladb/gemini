@@ -20,8 +20,8 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func CreatePartitionKeyValues(table *typedef.Table, r *rand.Rand, g *typedef.PartitionRangeConfig) []interface{} {
-	values := make([]interface{}, 0, table.PartitionKeysLenValues())
+func CreatePartitionKeyValues(table *typedef.Table, r *rand.Rand, g *typedef.PartitionRangeConfig) []any {
+	values := make([]any, 0, table.PartitionKeysLenValues())
 	for _, pk := range table.PartitionKeys {
 		values = append(values, pk.Type.GenValue(r, g)...)
 	}
