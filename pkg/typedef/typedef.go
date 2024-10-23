@@ -16,7 +16,9 @@ package typedef
 
 import (
 	"fmt"
+	"iter"
 	"strings"
+	"sync"
 
 	"github.com/scylladb/gocqlx/v2/qb"
 
@@ -197,32 +199,78 @@ const (
 	CacheArrayLen
 )
 
+func splitString(str, delimiter string) func(func(int, string) bool) {
+	lastPos := 0
+	delLen := len(delimiter)
+	return func(yield func(int, string) bool) {
+		for i := 0; ; i++ {
+			pos := strings.Index(str[lastPos:], delimiter)
+
+			if pos == -1 || str[lastPos:] == "" {
+				yield(-1, str[lastPos:])
+
+				break
+			}
+
+			if str[lastPos:lastPos+pos] == "" || !yield(i, str[lastPos:lastPos+pos]) {
+				break
+			}
+
+			lastPos += pos + delLen
+		}
+	}
+}
+
+var builderPool = &sync.Pool{
+	New: func() any {
+		builder := &strings.Builder{}
+
+		builder.Grow(1024)
+
+		return builder
+	},
+}
+
 func prettyCQL(query string, values Values, types Types) string {
 	if len(values) == 0 {
 		return query
 	}
 
-	k := 0
-	out := make([]string, 0, len(values)*2)
-	queryChunks := strings.Split(query, "?")
-	out = append(out, queryChunks[0])
-	qID := 1
-	for _, typ := range types {
-		tupleType, ok := typ.(*TupleType)
-		if !ok {
-			out = append(out, typ.CQLPretty(values[k]))
-			out = append(out, queryChunks[qID])
-			qID++
-			k++
-			continue
+	out := builderPool.Get().(*strings.Builder)
+	defer func() {
+		out.Reset()
+		builderPool.Put(out)
+	}()
+
+	next, stop := iter.Pull2(splitString(query, "?"))
+
+	for {
+		i, str, more := next()
+
+		_, _ = out.WriteString(str)
+
+		if !more || i == -1 {
+			stop()
+			break
 		}
-		for _, t := range tupleType.ValueTypes {
-			out = append(out, t.CQLPretty(values[k]))
-			out = append(out, queryChunks[qID])
-			qID++
-			k++
+
+		switch ty := types[i].(type) {
+		case *TupleType:
+			for count, t := range ty.ValueTypes {
+				_, _ = out.WriteString(t.CQLPretty(values[count]))
+
+				_, str, more = next()
+				if !more {
+					stop()
+					break
+				}
+
+				_, _ = out.WriteString(str)
+			}
+		default:
+			_, _ = out.WriteString(ty.CQLPretty(values[i]))
 		}
 	}
-	out = append(out, queryChunks[qID:]...)
-	return strings.Join(out, "")
+
+	return out.String()
 }
