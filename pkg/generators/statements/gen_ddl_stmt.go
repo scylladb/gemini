@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package jobs
+package statements
 
 import (
 	"fmt"
@@ -25,14 +25,14 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, _ *typedef.PartitionRangeConfig, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
+func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
 	maxVariant := 1
 	validCols := t.ValidColumnsForDelete()
 	if validCols.Len() > 0 {
 		maxVariant = 2
 	}
 	switch n := r.Intn(maxVariant + 2); n {
-	// case 0: // Alter column not supported in Cassandra from 3.0.11
+	//case 0: // Alter column not supported in Cassandra from 3.0.11
 	//	return t.alterColumn(s.Keyspace.Name)
 	case 2:
 		return genDropColumnStmt(t, s.Keyspace.Name, validCols.Random(r))

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package jobs
+package statements
 
 import (
 	"math"
@@ -28,94 +28,105 @@ import (
 func GenCheckStmt(
 	s *typedef.Schema,
 	table *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
+	rnd *rand.Rand,
+	p *typedef.PartitionRangeConfig,
+) (*typedef.Stmt, func()) {
+	var stmt *typedef.Stmt
+
+	if shouldGenerateCheckStatementForMV(table, rnd) {
+		stmt = genCheckStmtMV(s, table, g, rnd, p)
+	} else {
+		stmt = genCheckTableStmt(s, table, g, rnd, p)
+	}
+
+	return stmt, func() {
+		if stmt.ValuesWithToken != nil {
+			for _, v := range stmt.ValuesWithToken {
+				g.ReleaseToken(v.Token)
+			}
+		}
+	}
+}
+
+// shouldGenerateCheckStatementForMV should be true if we have materialized views
+// and the random number is even. So this means that we have a 50% chance of
+// checking materialized views.
+func shouldGenerateCheckStatementForMV(table *typedef.Table, rnd *rand.Rand) bool {
+	return len(table.MaterializedViews) > 0 && rnd.Int()%2 == 0
+}
+
+func genCheckStmtMV(s *typedef.Schema, table *typedef.Table, g generators.Interface, rnd *rand.Rand, p *typedef.PartitionRangeConfig) *typedef.Stmt {
+	mvNum := utils.RandInt2(rnd, 0, len(table.MaterializedViews))
+	lenClusteringKeys := table.MaterializedViews[mvNum].ClusteringKeys.Len()
+	lenPartitionKeys := table.MaterializedViews[mvNum].PartitionKeys.Len()
+
+	maxClusteringRels := utils.RandInt2(rnd, 0, lenClusteringKeys)
+	numQueryPKs := utils.RandInt2(rnd, 1, lenPartitionKeys)
+	if int(math.Pow(float64(numQueryPKs), float64(lenPartitionKeys))) > 100 {
+		numQueryPKs = 1
+	}
+
+	switch rnd.Intn(4) {
+	case 0:
+		return genSinglePartitionQueryMv(s, table, g, rnd, p, mvNum)
+	case 1:
+		return genMultiplePartitionQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs)
+	case 2:
+		return genClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, maxClusteringRels)
+	case 3:
+		return genMultiplePartitionClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs, maxClusteringRels)
+	default:
+		panic("random number generator does not work correctly, unreachable statement")
+	}
+}
+
+func genCheckTableStmt(
+	s *typedef.Schema,
+	table *typedef.Table,
+	g generators.Interface,
 	rnd *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 ) *typedef.Stmt {
-	n := 0
-	mvNum := -1
-	maxClusteringRels := 0
-	numQueryPKs := 0
-	if len(table.MaterializedViews) > 0 && rnd.Int()%2 == 0 {
-		mvNum = utils.RandInt2(rnd, 0, len(table.MaterializedViews))
-	}
+	var n int
 
-	switch mvNum {
-	case -1:
-		if len(table.Indexes) > 0 {
-			n = rnd.Intn(5)
-		} else {
-			n = rnd.Intn(4)
-		}
-		switch n {
-		case 0:
-			return genSinglePartitionQuery(s, table, g)
-		case 1:
-			numQueryPKs = utils.RandInt2(rnd, 1, table.PartitionKeys.Len())
-			multiplier := int(math.Pow(float64(numQueryPKs), float64(table.PartitionKeys.Len())))
-			if multiplier > 100 {
-				numQueryPKs = 1
-			}
-			return genMultiplePartitionQuery(s, table, g, numQueryPKs)
-		case 2:
-			maxClusteringRels = utils.RandInt2(rnd, 0, table.ClusteringKeys.Len())
-			return genClusteringRangeQuery(s, table, g, rnd, p, maxClusteringRels)
-		case 3:
-			numQueryPKs = utils.RandInt2(rnd, 1, table.PartitionKeys.Len())
-			multiplier := int(math.Pow(float64(numQueryPKs), float64(table.PartitionKeys.Len())))
-			if multiplier > 100 {
-				numQueryPKs = 1
-			}
-			maxClusteringRels = utils.RandInt2(rnd, 0, table.ClusteringKeys.Len())
-			return genMultiplePartitionClusteringRangeQuery(s, table, g, rnd, p, numQueryPKs, maxClusteringRels)
-		case 4:
-			// Reducing the probability to hit these since they often take a long time to run
-			switch rnd.Intn(5) {
-			case 0:
-				idxCount := utils.RandInt2(rnd, 1, len(table.Indexes))
-				return genSingleIndexQuery(s, table, g, rnd, p, idxCount)
-			default:
-				return genSinglePartitionQuery(s, table, g)
-			}
-		}
-	default:
+	if len(table.Indexes) > 0 {
+		n = rnd.Intn(5)
+	} else {
 		n = rnd.Intn(4)
-		switch n {
-		case 0:
-			return genSinglePartitionQueryMv(s, table, g, rnd, p, mvNum)
-		case 1:
-			lenPartitionKeys := table.MaterializedViews[mvNum].PartitionKeys.Len()
-			numQueryPKs = utils.RandInt2(rnd, 1, lenPartitionKeys)
-			multiplier := int(math.Pow(float64(numQueryPKs), float64(lenPartitionKeys)))
-			if multiplier > 100 {
-				numQueryPKs = 1
-			}
-			return genMultiplePartitionQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs)
-		case 2:
-			lenClusteringKeys := table.MaterializedViews[mvNum].ClusteringKeys.Len()
-			maxClusteringRels = utils.RandInt2(rnd, 0, lenClusteringKeys)
-			return genClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, maxClusteringRels)
-		case 3:
-			lenPartitionKeys := table.MaterializedViews[mvNum].PartitionKeys.Len()
-			numQueryPKs = utils.RandInt2(rnd, 1, lenPartitionKeys)
-			multiplier := int(math.Pow(float64(numQueryPKs), float64(lenPartitionKeys)))
-			if multiplier > 100 {
-				numQueryPKs = 1
-			}
-			lenClusteringKeys := table.MaterializedViews[mvNum].ClusteringKeys.Len()
-			maxClusteringRels = utils.RandInt2(rnd, 0, lenClusteringKeys)
-			return genMultiplePartitionClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs, maxClusteringRels)
-		}
 	}
 
-	return nil
+	maxClusteringRels := utils.RandInt2(rnd, 0, table.ClusteringKeys.Len())
+	numQueryPKs := utils.RandInt2(rnd, 1, table.PartitionKeys.Len())
+	multiplier := int(math.Pow(float64(numQueryPKs), float64(table.PartitionKeys.Len())))
+	if multiplier > 100 {
+		numQueryPKs = 1
+	}
+
+	switch n {
+	case 0:
+		return genSinglePartitionQuery(s, table, g)
+	case 1:
+		return genMultiplePartitionQuery(s, table, g, numQueryPKs)
+	case 2:
+		return genClusteringRangeQuery(s, table, g, rnd, p, maxClusteringRels)
+	case 3:
+		return genMultiplePartitionClusteringRangeQuery(s, table, g, rnd, p, numQueryPKs, maxClusteringRels)
+	case 4:
+		// Reducing the probability to hit these since they often take a long time to run
+		// One in five chance to hit this
+		if rnd.Intn(5) == 0 {
+			idxCount := utils.RandInt2(rnd, 1, len(table.Indexes))
+			return genSingleIndexQuery(s, table, g, rnd, p, idxCount)
+		}
+
+		return genSinglePartitionQuery(s, table, g)
+	default:
+		panic("random number generator does not work correctly, unreachable statement")
+	}
 }
 
-func genSinglePartitionQuery(
-	s *typedef.Schema,
-	t *typedef.Table,
-	g generators.GeneratorInterface,
-) *typedef.Stmt {
+func genSinglePartitionQuery(s *typedef.Schema, t *typedef.Table, g generators.Interface) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
 	valuesWithToken := g.GetOld()
@@ -124,7 +135,8 @@ func genSinglePartitionQuery(
 	}
 	values := valuesWithToken.Value.Copy()
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
-	typs := make([]typedef.Type, 0, 10)
+	typs := make([]typedef.Type, 0, len(t.PartitionKeys))
+
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
 		typs = append(typs, pk.Type)
@@ -144,7 +156,7 @@ func genSinglePartitionQuery(
 func genSinglePartitionQueryMv(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	mvNum int,
@@ -183,7 +195,7 @@ func genSinglePartitionQueryMv(
 func genMultiplePartitionQuery(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	numQueryPKs int,
 ) *typedef.Stmt {
 	t.RLock()
@@ -197,7 +209,7 @@ func genMultiplePartitionQuery(
 	for j := 0; j < numQueryPKs; j++ {
 		vs := g.GetOld()
 		if vs == nil {
-			g.GiveOlds(tokens)
+			g.GiveOld(tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
@@ -223,7 +235,7 @@ func genMultiplePartitionQuery(
 func genMultiplePartitionQueryMv(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	mvNum, numQueryPKs int,
@@ -241,7 +253,7 @@ func genMultiplePartitionQueryMv(
 	for j := 0; j < numQueryPKs; j++ {
 		vs := g.GetOld()
 		if vs == nil {
-			g.GiveOlds(tokens)
+			g.GiveOld(tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
@@ -274,7 +286,7 @@ func genMultiplePartitionQueryMv(
 func genClusteringRangeQuery(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	maxClusteringRels int,
@@ -321,7 +333,7 @@ func genClusteringRangeQuery(
 func genClusteringRangeQueryMv(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	mvNum, maxClusteringRels int,
@@ -374,7 +386,7 @@ func genClusteringRangeQueryMv(
 func genMultiplePartitionClusteringRangeQuery(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	numQueryPKs, maxClusteringRels int,
@@ -397,7 +409,7 @@ func genMultiplePartitionClusteringRangeQuery(
 	for j := 0; j < numQueryPKs; j++ {
 		vs := g.GetOld()
 		if vs == nil {
-			g.GiveOlds(tokens)
+			g.GiveOld(tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
@@ -435,7 +447,7 @@ func genMultiplePartitionClusteringRangeQuery(
 func genMultiplePartitionClusteringRangeQueryMv(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	mvNum, numQueryPKs, maxClusteringRels int,
@@ -478,7 +490,7 @@ func genMultiplePartitionClusteringRangeQueryMv(
 	for j := 0; j < numQueryPKs; j++ {
 		vs := g.GetOld()
 		if vs == nil {
-			g.GiveOlds(tokens)
+			g.GiveOld(tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
@@ -516,7 +528,7 @@ func genMultiplePartitionClusteringRangeQueryMv(
 func genSingleIndexQuery(
 	s *typedef.Schema,
 	t *typedef.Table,
-	_ generators.GeneratorInterface,
+	_ generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	idxCount int,

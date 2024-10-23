@@ -15,18 +15,22 @@
 package generators_test
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 func TestGenerator(t *testing.T) {
 	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
 	table := &typedef.Table{
 		Name:          "tbl",
 		PartitionKeys: generators.CreatePkColumns(1, "pk"),
@@ -47,7 +51,7 @@ func TestGenerator(t *testing.T) {
 	}
 	logger, _ := zap.NewDevelopment()
 	generator := generators.NewGenerator(table, cfg, logger)
-	generator.Start(stop.NewFlag("main_test"))
+	generator.Start(ctx)
 	for i := uint64(0); i < cfg.PartitionsCount; i++ {
 		atomic.StoreUint64(&current, i)
 		v := generator.Get()

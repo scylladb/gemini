@@ -19,9 +19,12 @@ import (
 
 	"golang.org/x/exp/rand"
 
+	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
+
+var _ generators.Interface = &MockGenerator{}
 
 type MockGenerator struct {
 	table             *typedef.Table
@@ -57,9 +60,7 @@ func (g *MockGenerator) GetOld() *typedef.ValueWithToken {
 	return &typedef.ValueWithToken{Token: token, Value: values}
 }
 
-func (g *MockGenerator) GiveOld(_ *typedef.ValueWithToken) {}
-
-func (g *MockGenerator) GiveOlds(_ []*typedef.ValueWithToken) {}
+func (g *MockGenerator) GiveOld(_ ...*typedef.ValueWithToken) {}
 
 func (g *MockGenerator) ReleaseToken(_ uint64) {
 }

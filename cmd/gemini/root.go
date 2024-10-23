@@ -22,8 +22,10 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -38,7 +40,6 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 
 	"github.com/scylladb/gemini/pkg/status"
-	"github.com/scylladb/gemini/pkg/stop"
 
 	"github.com/gocql/gocql"
 	"github.com/hailocab/go-hostpool"
@@ -168,6 +169,9 @@ func run(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGABRT, syscall.SIGTERM)
+	defer cancel()
+
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
 		_ = http.ListenAndServe(bind, nil)
@@ -258,31 +262,29 @@ func run(_ *cobra.Command, _ []string) error {
 
 	for _, stmt := range generators.GetCreateSchema(schema) {
 		logger.Debug(stmt)
-		if err = st.Mutate(context.Background(), typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
+		if err = st.Mutate(ctx, typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
 			return errors.Wrap(err, "unable to create schema")
 		}
 	}
 
-	ctx, done := context.WithTimeout(context.Background(), duration+warmup+time.Second*2)
-	stopFlag := stop.NewFlag("main")
-	warmupStopFlag := stop.NewFlag("warmup")
-	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
-	pump := jobs.NewPump(stopFlag, logger)
+	ctx, done := context.WithTimeout(ctx, duration+warmup+10*time.Second)
 
 	gens, err := createGenerators(schema, schemaConfig, intSeed, partitionCount, logger)
 	if err != nil {
 		return err
 	}
-	gens.StartAll(stopFlag)
+	gens.StartAll(ctx)
 
 	if !nonInteractive {
 		sp := createSpinner(interactive())
 		ticker := time.NewTicker(time.Second)
+
 		go func() {
 			defer done()
+			defer ticker.Stop()
 			for {
 				select {
-				case <-stopFlag.SignalChannel():
+				case <-ctx.Done():
 					return
 				case <-ticker.C:
 					sp.Set(" Running Gemini... %v", globalStatus)
@@ -291,36 +293,31 @@ func run(_ *cobra.Command, _ []string) error {
 		}()
 	}
 
-	if warmup > 0 && !stopFlag.IsHardOrSoft() {
-		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, warmupStopFlag, failFast, verbose); err != nil {
-			logger.Error("warmup encountered an error", zap.Error(err))
-			stopFlag.SetHard(true)
-		}
+	jobsList := jobs.New(mode, duration, concurrency, logger, schema, st, globalStatus, intSeed, gens, failFast, warmup)
+	if err = jobsList.Run(ctx); err != nil {
+		logger.Debug("error detected", zap.Error(err))
 	}
 
-	if !stopFlag.IsHardOrSoft() {
-		jobsList := jobs.ListFromMode(mode, duration, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, stopFlag.CreateChild("workload"), failFast, verbose); err != nil {
-			logger.Debug("error detected", zap.Error(err))
-		}
-	}
 	logger.Info("test finished")
 	globalStatus.PrintResult(outFile, schema, version)
+
 	if globalStatus.HasErrors() {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")
 	}
+
 	return nil
 }
 
-func createFile(fname string, def *os.File) (*os.File, error) {
-	if fname != "" {
-		f, err := os.Create(fname)
+func createFile(name string, def *os.File) (*os.File, error) {
+	if name != "" {
+		f, err := os.Create(name)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Unable to open output file %s", fname)
+			return nil, errors.Wrapf(err, "Unable to open output file %s", name)
 		}
+
 		return f, nil
 	}
+
 	return def, nil
 }
 

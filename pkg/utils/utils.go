@@ -17,6 +17,7 @@ package utils
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/pkg/errors"
 	"strconv"
 	"strings"
 	"time"
@@ -106,4 +107,13 @@ func UUIDFromTime(rnd *rand.Rand) string {
 		return gocql.TimeUUIDWith(rnd.Int63(), 0, []byte("127.0.0.1")).String()
 	}
 	return gocql.UUIDFromTime(RandDate(rnd)).String()
+}
+
+func UnwrapErr(err error) error {
+	nextErr := err
+	for nextErr != nil {
+		err = nextErr
+		nextErr = errors.Unwrap(err)
+	}
+	return err
 }

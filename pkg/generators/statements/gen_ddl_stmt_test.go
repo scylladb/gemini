@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //nolint:thelper
-package jobs
+package statements
 
 import (
 	"fmt"

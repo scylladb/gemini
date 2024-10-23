@@ -105,14 +105,13 @@ func (t *Table) ValidColumnsForDelete() Columns {
 			}
 		}
 	}
-	if len(t.MaterializedViews) != 0 {
-		for _, mv := range t.MaterializedViews {
-			if mv.HaveNonPrimaryKey() {
-				for j := range validCols {
-					if validCols[j].Name == mv.NonPrimaryKey.Name {
-						validCols = append(validCols[:j], validCols[j+1:]...)
-						break
-					}
+
+	for _, mv := range t.MaterializedViews {
+		if mv.HaveNonPrimaryKey() {
+			for j := range validCols {
+				if validCols[j].Name == mv.NonPrimaryKey.Name {
+					validCols = append(validCols[:j], validCols[j+1:]...)
+					break
 				}
 			}
 		}
