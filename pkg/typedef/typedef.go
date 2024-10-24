@@ -236,7 +236,7 @@ func prettyCQL(query string, values Values, types Types) string {
 		return query
 	}
 
-	out := builderPool.Get().(*strings.Builder)
+	builder := builderPool.Get().(*strings.Builder)
 	defer func() {
 		out.Reset()
 		builderPool.Put(out)
