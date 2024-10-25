@@ -25,7 +25,7 @@ func (m *mutation) DDL(ctx context.Context, table *typedef.Table) error {
 
 	table.Lock()
 	defer table.Unlock()
-	ddlStmts, err := statements.GenDDLStmt(m.schema, table, m.random, m.partitionRangeConfig, m.schemaCfg)
+	ddlStmts, err := statements.GenDDLStmt(m.schema, table, m.random, &m.schema.Config)
 	if err != nil {
 		m.logger.Error("Failed! DDL Mutation statement generation failed", zap.Error(err))
 		m.globalStatus.WriteErrors.Add(1)

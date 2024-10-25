@@ -13,7 +13,6 @@ import (
 	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/status"
-	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -22,20 +21,18 @@ type (
 	Mutation struct {
 		logger   *zap.Logger
 		mutation mutation
-		stopFlag *stop.Flag
 		pump     <-chan time.Duration
 		failFast bool
 	}
 
 	mutation struct {
-		logger               *zap.Logger
-		schema               *typedef.Schema
-		store                store.Store
-		partitionRangeConfig *typedef.PartitionRangeConfig
-		schemaCfg            *typedef.SchemaConfig
-		globalStatus         *status.GlobalStatus
-		random               *rand.Rand
-		deletes              bool
+		logger       *zap.Logger
+		schema       *typedef.Schema
+		store        store.Store
+		globalStatus *status.GlobalStatus
+		random       *rand.Rand
+		deletes      bool
+		ddl          bool
 	}
 )
 
@@ -43,27 +40,24 @@ func NewMutation(
 	logger *zap.Logger,
 	schema *typedef.Schema,
 	store store.Store,
-	partitionRangeConfig *typedef.PartitionRangeConfig,
 	globalStatus *status.GlobalStatus,
-	stopFlag *stop.Flag,
 	rnd *rand.Rand,
-	schemaCfg *typedef.SchemaConfig,
 	pump <-chan time.Duration,
 	failFast bool,
+	deletes bool,
+	ddl bool,
 ) *Mutation {
 	return &Mutation{
 		logger: logger,
 		mutation: mutation{
-			logger:               logger.Named("mutation-with-deletes"),
-			schema:               schema,
-			store:                store,
-			partitionRangeConfig: partitionRangeConfig,
-			globalStatus:         globalStatus,
-			deletes:              true,
-			schemaCfg:            schemaCfg,
-			random:               rnd,
+			logger:       logger.Named("mutation-with-deletes"),
+			schema:       schema,
+			store:        store,
+			globalStatus: globalStatus,
+			deletes:      deletes,
+			random:       rnd,
+			ddl:          ddl,
 		},
-		stopFlag: stopFlag,
 		pump:     pump,
 		failFast: failFast,
 	}
@@ -78,12 +72,8 @@ func (m *Mutation) Do(ctx context.Context, generator generators.Interface, table
 	defer m.logger.Info("ending mutation loop")
 
 	for {
-		if m.stopFlag.IsHardOrSoft() {
-			return nil
-		}
-
 		select {
-		case <-m.stopFlag.SignalChannel():
+		case <-ctx.Done():
 			m.logger.Debug("mutation job terminated")
 			return nil
 		case hb := <-m.pump:
@@ -103,24 +93,17 @@ func (m *Mutation) Do(ctx context.Context, generator generators.Interface, table
 		}
 
 		if m.failFast && m.mutation.HasErrors() {
-			m.stopFlag.SetSoft(true)
 			return nil
 		}
 	}
 }
 
 func (m *mutation) Statement(ctx context.Context, generator generators.Interface, table *typedef.Table) error {
-	mutateStmt, err := statements.GenMutateStmt(m.schema, table, generator, m.random, m.partitionRangeConfig, m.deletes)
+	partitionRangeConfig := m.schema.Config.GetPartitionRangeConfig()
+	mutateStmt, err := statements.GenMutateStmt(m.schema, table, generator, m.random, &partitionRangeConfig, m.deletes)
 	if err != nil {
 		m.logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		m.globalStatus.WriteErrors.Add(1)
-		return err
-	}
-
-	if mutateStmt == nil {
-		if w := m.logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
-			w.Write(zap.String("job", "mutation"))
-		}
 		return err
 	}
 
@@ -136,6 +119,7 @@ func (m *mutation) Statement(ctx context.Context, generator generators.Interface
 
 		w.Write(zap.String("pretty_cql", prettyCQL))
 	}
+
 	if err = m.store.Mutate(ctx, mutateStmt); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return nil
@@ -171,11 +155,11 @@ func (m *mutation) HasErrors() bool {
 }
 
 func (m *mutation) ShouldDoDDL() bool {
-	if m.schemaCfg.CQLFeature != typedef.CQL_FEATURE_ALL {
-		return false
+	if m.ddl && m.schema.Config.CQLFeature == typedef.CQL_FEATURE_ALL {
+		// 2% Change of DDL Happening
+		ind := m.random.Intn(100)
+		return ind < 2
 	}
 
-	// 2% Change of DDL Happening
-	ind := m.random.Intn(100)
-	return ind < 2
+	return false
 }

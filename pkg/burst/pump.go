@@ -12,40 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package jobs
+package burst
 
 import (
+	"context"
+	"math/rand/v2"
 	"time"
-
-	"github.com/scylladb/gemini/pkg/stop"
-
-	"go.uber.org/zap"
-	"golang.org/x/exp/rand"
 )
 
-func NewPump(stopFlag *stop.Flag, logger *zap.Logger) chan time.Duration {
-	pump := make(chan time.Duration, 10000)
-	logger = logger.Named("Pump")
-	go func() {
-		logger.Debug("pump channel opened")
-		defer func() {
-			close(pump)
-			logger.Debug("pump channel closed")
-		}()
-		for !stopFlag.IsHardOrSoft() {
-			pump <- newHeartBeat()
-		}
-	}()
+const ChannelSize = 10000
 
-	return pump
+func work(ctx context.Context, pump chan<- time.Duration, chance int, sleepDuration time.Duration) {
+	defer close(pump)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			sleep := time.Duration(0)
+
+			if rand.Int()%chance == 0 {
+				sleep = sleepDuration
+			}
+
+			pump <- sleep
+		}
+	}
 }
 
-func newHeartBeat() time.Duration {
-	r := rand.Intn(10)
-	switch r {
-	case 0:
-		return 10 * time.Millisecond
-	default:
-		return 0
-	}
+func New(ctx context.Context, chance int, sleepDuration time.Duration) chan time.Duration {
+	pump := make(chan time.Duration, ChannelSize)
+	go work(ctx, pump, chance, sleepDuration)
+	return pump
 }

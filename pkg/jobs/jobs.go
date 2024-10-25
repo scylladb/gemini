@@ -22,33 +22,32 @@ import (
 	"golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/scylladb/gemini/pkg/burst"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-type Runner struct {
-	duration     time.Duration
-	logger       *zap.Logger
-	random       *rand.Rand
-	stopFlag     *stop.Flag
-	workers      uint64
-	generators   []*generators.Generator
-	schema       *typedef.Schema
-	failFast     bool
-	schemaCfg    *typedef.SchemaConfig
-	warmup       time.Duration
-	globalStatus *status.GlobalStatus
-	pump         <-chan time.Duration
-	store        store.Store
-	mode         Mode
-}
-
-type Job interface {
-	Name() string
-	Do(context.Context, generators.Interface, *typedef.Table) error
-}
+type (
+	Runner struct {
+		duration     time.Duration
+		logger       *zap.Logger
+		random       *rand.Rand
+		workers      uint64
+		generators   []*generators.Generator
+		schema       *typedef.Schema
+		failFast     bool
+		warmup       time.Duration
+		globalStatus *status.GlobalStatus
+		store        store.Store
+		mode         Mode
+	}
+	Job interface {
+		Name() string
+		Do(context.Context, generators.Interface, *typedef.Table) error
+	}
+)
 
 func New(
 	mode string,
@@ -58,7 +57,6 @@ func New(
 	schema *typedef.Schema,
 	store store.Store,
 	globalStatus *status.GlobalStatus,
-	schemaCfg *typedef.SchemaConfig,
 	seed uint64,
 	gens []*generators.Generator,
 	failFast bool,
@@ -67,14 +65,11 @@ func New(
 	return &Runner{
 		warmup:       warmup,
 		globalStatus: globalStatus,
-		pump:         NewPump(stopFlag, logger.Named("Pump")),
 		store:        store,
 		mode:         ModeFromString(mode),
 		logger:       logger,
-		schemaCfg:    schemaCfg,
 		duration:     duration,
 		workers:      workers,
-		stopFlag:     stopFlag,
 		failFast:     failFast,
 		random:       rand.New(rand.NewSource(seed)),
 		generators:   gens,
@@ -82,14 +77,7 @@ func New(
 	}
 }
 
-func (l *Runner) Name() string {
-	return "Runner"
-}
-
 func (l *Runner) Run(ctx context.Context) error {
-	ctx = l.stopFlag.CancelContextOnSignal(ctx, stop.SignalHardStop)
-	partitionRangeConfig := l.schemaCfg.GetPartitionRangeConfig()
-
 	l.logger.Info("start jobs")
 
 	if l.warmup > 0 {
@@ -97,79 +85,86 @@ func (l *Runner) Run(ctx context.Context) error {
 			zap.Int("duration", int(l.warmup.Seconds())),
 			zap.Int("workers", int(l.workers)),
 		)
-		time.AfterFunc(l.warmup, func() {
-			l.logger.Info("jobs time is up, begins jobs completion")
-			l.stopFlag.SetSoft(true)
-		})
 
-		warmup := func(_ <-chan time.Duration, rnd *rand.Rand) Job {
-			return NewWarmup(l.logger, l.schema, l.store, &partitionRangeConfig, l.globalStatus, l.schemaCfg, l.stopFlag, rnd, l.failFast)
-		}
-
-		if err := l.start(ctx, warmup); err != nil {
-			return err
-		}
+		warmupCtx, cancel := context.WithTimeout(ctx, l.warmup)
+		defer cancel()
+		l.startMutation(warmupCtx, cancel, l.random, "Warmup", false, false)
 	}
 
-	time.AfterFunc(l.duration, func() {
-		l.logger.Info("jobs time is up, begins jobs completion")
-		l.stopFlag.SetSoft(true)
-	})
+	ctx, cancel := context.WithTimeout(ctx, l.duration+1*time.Second)
+	defer cancel()
+
+	src := rand.NewSource(l.random.Uint64())
+
+	if l.mode.IsRead() {
+		go l.startValidation(ctx, cancel, src)
+	}
 
 	if l.mode.IsWrite() {
-		return l.start(ctx, func(pump <-chan time.Duration, rnd *rand.Rand) Job {
-			return NewMutation(
-				l.logger.Named("Mutation"),
-				l.schema,
-				l.store,
-				&partitionRangeConfig,
-				l.globalStatus,
-				l.stopFlag,
-				rnd,
-				l.schemaCfg,
-				pump,
-				l.failFast,
-			)
-		})
+		l.startMutation(ctx, cancel, src, "Mutation", true, true)
 	}
 
-	return l.start(ctx, func(pump <-chan time.Duration, rnd *rand.Rand) Job {
+	return nil
+}
+
+func (l *Runner) startMutation(ctx context.Context, cancel context.CancelFunc, src rand.Source, name string, deletes, ddl bool) {
+	logger := l.logger.Named(name)
+
+	err := l.start(ctx, rand.New(src), func(pump <-chan time.Duration, rnd *rand.Rand) Job {
+		return NewMutation(
+			logger,
+			l.schema,
+			l.store,
+			l.globalStatus,
+			rnd,
+			pump,
+			l.failFast,
+			deletes,
+			ddl,
+		)
+	})
+
+	if err != nil {
+		logger.Error("Mutation job failed", zap.Error(err))
+		if l.failFast {
+			cancel()
+		}
+	}
+}
+
+func (l *Runner) startValidation(ctx context.Context, cancel context.CancelFunc, src rand.Source) {
+	err := l.start(ctx, rand.New(src), func(pump <-chan time.Duration, rnd *rand.Rand) Job {
 		return NewValidation(
 			l.logger,
 			pump,
-			l.schema, l.schemaCfg,
+			l.schema,
 			l.store,
 			rnd,
-			&partitionRangeConfig,
 			l.globalStatus,
-			l.stopFlag,
 			l.failFast,
 		)
 	})
+
+	if err != nil {
+		l.logger.Error("Validation job failed", zap.Error(err))
+		if l.failFast {
+			cancel()
+		}
+	}
 }
 
-func (l *Runner) start(ctx context.Context, job func(<-chan time.Duration, *rand.Rand) Job) error {
+func (l *Runner) start(ctx context.Context, rnd *rand.Rand, job func(<-chan time.Duration, *rand.Rand) Job) error {
 	g, gCtx := errgroup.WithContext(ctx)
-
 	g.SetLimit(int(l.workers))
-
-	partitionRangeConfig := l.schemaCfg.GetPartitionRangeConfig()
 
 	for j, table := range l.schema.Tables {
 		gen := l.generators[j]
-		pump := NewPump(l.stopFlag, l.logger.Named("Pump-"+table.Name))
-		rnd := rand.New(rand.NewSource(l.random.Uint64()))
+		pump := burst.New(ctx, 10, 10*time.Millisecond)
 
-		v := NewValidation(l.logger, pump, l.schema, l.schemaCfg, l.store, rnd, &partitionRangeConfig, l.globalStatus, l.stopFlag, l.failFast)
-		j := job(pump, rnd)
-
-		g.TryGo(func() error {
-			return v.Do(gCtx, gen, table)
-		})
-
-		for i := 0; i < int(l.workers)-1; i++ {
+		for range l.workers {
+			src := rand.NewSource(rnd.Uint64())
 			g.TryGo(func() error {
-				return j.Do(gCtx, gen, table)
+				return job(pump, rand.New(src)).Do(gCtx, gen, table)
 			})
 		}
 	}

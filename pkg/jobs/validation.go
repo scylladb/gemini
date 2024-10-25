@@ -13,48 +13,38 @@ import (
 	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/status"
-	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type Validation struct {
-	logger               *zap.Logger
-	pump                 <-chan time.Duration
-	schema               *typedef.Schema
-	schemaConfig         *typedef.SchemaConfig
-	store                store.Store
-	random               *rand.Rand
-	partitionRangeConfig *typedef.PartitionRangeConfig
-	globalStatus         *status.GlobalStatus
-	stopFlag             *stop.Flag
-	failFast             bool
+	logger       *zap.Logger
+	pump         <-chan time.Duration
+	schema       *typedef.Schema
+	store        store.Store
+	random       *rand.Rand
+	globalStatus *status.GlobalStatus
+	failFast     bool
 }
 
 func NewValidation(
 	logger *zap.Logger,
 	pump <-chan time.Duration,
 	schema *typedef.Schema,
-	schemaConfig *typedef.SchemaConfig,
 	store store.Store,
 	random *rand.Rand,
-	partitionRangeConfig *typedef.PartitionRangeConfig,
 	globalStatus *status.GlobalStatus,
-	stopFlag *stop.Flag,
 	failFast bool,
 ) *Validation {
 	return &Validation{
-		logger:               logger.Named("validation"),
-		pump:                 pump,
-		schema:               schema,
-		schemaConfig:         schemaConfig,
-		store:                store,
-		random:               random,
-		partitionRangeConfig: partitionRangeConfig,
-		globalStatus:         globalStatus,
-		stopFlag:             stopFlag,
-		failFast:             failFast,
+		logger:       logger.Named("validation"),
+		pump:         pump,
+		schema:       schema,
+		store:        store,
+		random:       random,
+		globalStatus: globalStatus,
+		failFast:     failFast,
 	}
 }
 
@@ -63,10 +53,11 @@ func (v *Validation) Name() string {
 }
 
 func (v *Validation) validate(ctx context.Context, generator generators.Interface, table *typedef.Table) error {
-	stmt, cleanup := statements.GenCheckStmt(v.schema, table, generator, v.random, v.partitionRangeConfig)
+	partitionRangeConfig := v.schema.Config.GetPartitionRangeConfig()
+	stmt, cleanup := statements.GenCheckStmt(v.schema, table, generator, v.random, &partitionRangeConfig)
 	defer cleanup()
 
-	err := validation(ctx, v.schemaConfig, table, v.store, stmt, v.logger)
+	err := validation(ctx, &v.schema.Config, table, v.store, stmt, v.logger)
 
 	switch {
 	case err == nil:
@@ -95,7 +86,7 @@ func (v *Validation) validate(ctx context.Context, generator generators.Interfac
 		}
 	}
 
-	return nil
+	return err
 }
 
 func (v *Validation) Do(ctx context.Context, generator generators.Interface, table *typedef.Table) error {
@@ -103,11 +94,8 @@ func (v *Validation) Do(ctx context.Context, generator generators.Interface, tab
 	defer v.logger.Info("ending validation loop")
 
 	for {
-		if v.stopFlag.IsHardOrSoft() {
-			return nil
-		}
 		select {
-		case <-v.stopFlag.SignalChannel():
+		case <-ctx.Done():
 			return nil
 		case hb := <-v.pump:
 			time.Sleep(hb)
@@ -118,7 +106,6 @@ func (v *Validation) Do(ctx context.Context, generator generators.Interface, tab
 		}
 
 		if v.failFast && v.globalStatus.HasErrors() {
-			v.stopFlag.SetSoft(true)
 			return nil
 		}
 	}
