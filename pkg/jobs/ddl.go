@@ -11,20 +11,21 @@ import (
 
 	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func (m *mutation) DDL(ctx context.Context) error {
-	m.table.RLock()
+func (m *mutation) DDL(ctx context.Context, table *typedef.Table) error {
+	table.RLock()
 	// Scylla does not allow changing the DDL of a table with materialized views.
-	if len(m.table.MaterializedViews) > 0 {
-		m.table.RUnlock()
+	if len(table.MaterializedViews) > 0 {
+		table.RUnlock()
 		return nil
 	}
-	m.table.RUnlock()
+	table.RUnlock()
 
-	m.table.Lock()
-	defer m.table.Unlock()
-	ddlStmts, err := statements.GenDDLStmt(m.schema, m.table, m.random, m.partitionRangeConfig, m.schemaCfg)
+	table.Lock()
+	defer table.Unlock()
+	ddlStmts, err := statements.GenDDLStmt(m.schema, table, m.random, m.partitionRangeConfig, m.schemaCfg)
 	if err != nil {
 		m.logger.Error("Failed! DDL Mutation statement generation failed", zap.Error(err))
 		m.globalStatus.WriteErrors.Add(1)

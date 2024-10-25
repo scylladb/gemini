@@ -25,13 +25,11 @@ type (
 		stopFlag *stop.Flag
 		pump     <-chan time.Duration
 		failFast bool
-		verbose  bool
 	}
 
 	mutation struct {
 		logger               *zap.Logger
 		schema               *typedef.Schema
-		table                *typedef.Table
 		store                store.Store
 		partitionRangeConfig *typedef.PartitionRangeConfig
 		schemaCfg            *typedef.SchemaConfig
@@ -44,32 +42,30 @@ type (
 func NewMutation(
 	logger *zap.Logger,
 	schema *typedef.Schema,
-	table *typedef.Table,
 	store store.Store,
 	partitionRangeConfig *typedef.PartitionRangeConfig,
 	globalStatus *status.GlobalStatus,
 	stopFlag *stop.Flag,
+	rnd *rand.Rand,
 	schemaCfg *typedef.SchemaConfig,
 	pump <-chan time.Duration,
 	failFast bool,
-	verbose bool,
 ) *Mutation {
 	return &Mutation{
-		logger: logger.Named("mutation"),
+		logger: logger,
 		mutation: mutation{
 			logger:               logger.Named("mutation-with-deletes"),
 			schema:               schema,
-			table:                table,
 			store:                store,
 			partitionRangeConfig: partitionRangeConfig,
 			globalStatus:         globalStatus,
 			deletes:              true,
 			schemaCfg:            schemaCfg,
+			random:               rnd,
 		},
 		stopFlag: stopFlag,
 		pump:     pump,
 		failFast: failFast,
-		verbose:  verbose,
 	}
 }
 
@@ -77,7 +73,7 @@ func (m *Mutation) Name() string {
 	return "Mutation"
 }
 
-func (m *Mutation) Do(ctx context.Context, generator generators.Interface) error {
+func (m *Mutation) Do(ctx context.Context, generator generators.Interface, table *typedef.Table) error {
 	m.logger.Info("starting mutation loop")
 	defer m.logger.Info("ending mutation loop")
 
@@ -85,6 +81,7 @@ func (m *Mutation) Do(ctx context.Context, generator generators.Interface) error
 		if m.stopFlag.IsHardOrSoft() {
 			return nil
 		}
+
 		select {
 		case <-m.stopFlag.SignalChannel():
 			m.logger.Debug("mutation job terminated")
@@ -96,9 +93,9 @@ func (m *Mutation) Do(ctx context.Context, generator generators.Interface) error
 		var err error
 
 		if m.mutation.ShouldDoDDL() {
-			err = m.mutation.DDL(ctx)
+			err = m.mutation.DDL(ctx, table)
 		} else {
-			err = m.mutation.Statement(ctx, generator)
+			err = m.mutation.Statement(ctx, generator, table)
 		}
 
 		if err != nil {
@@ -112,13 +109,14 @@ func (m *Mutation) Do(ctx context.Context, generator generators.Interface) error
 	}
 }
 
-func (m *mutation) Statement(ctx context.Context, generator generators.Interface) error {
-	mutateStmt, err := statements.GenMutateStmt(m.schema, m.table, generator, m.random, m.partitionRangeConfig, m.deletes)
+func (m *mutation) Statement(ctx context.Context, generator generators.Interface, table *typedef.Table) error {
+	mutateStmt, err := statements.GenMutateStmt(m.schema, table, generator, m.random, m.partitionRangeConfig, m.deletes)
 	if err != nil {
 		m.logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		m.globalStatus.WriteErrors.Add(1)
 		return err
 	}
+
 	if mutateStmt == nil {
 		if w := m.logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
 			w.Write(zap.String("job", "mutation"))
@@ -177,6 +175,7 @@ func (m *mutation) ShouldDoDDL() bool {
 		return false
 	}
 
-	ind := m.random.Intn(1000000)
-	return ind%100000 == 0
+	// 2% Change of DDL Happening
+	ind := m.random.Intn(100)
+	return ind < 2
 }

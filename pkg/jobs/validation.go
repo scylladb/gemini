@@ -24,7 +24,6 @@ type Validation struct {
 	pump                 <-chan time.Duration
 	schema               *typedef.Schema
 	schemaConfig         *typedef.SchemaConfig
-	table                *typedef.Table
 	store                store.Store
 	random               *rand.Rand
 	partitionRangeConfig *typedef.PartitionRangeConfig
@@ -38,7 +37,6 @@ func NewValidation(
 	pump <-chan time.Duration,
 	schema *typedef.Schema,
 	schemaConfig *typedef.SchemaConfig,
-	table *typedef.Table,
 	store store.Store,
 	random *rand.Rand,
 	partitionRangeConfig *typedef.PartitionRangeConfig,
@@ -51,7 +49,6 @@ func NewValidation(
 		pump:                 pump,
 		schema:               schema,
 		schemaConfig:         schemaConfig,
-		table:                table,
 		store:                store,
 		random:               random,
 		partitionRangeConfig: partitionRangeConfig,
@@ -65,11 +62,11 @@ func (v *Validation) Name() string {
 	return "Validation"
 }
 
-func (v *Validation) validate(ctx context.Context, generator generators.Interface) error {
-	stmt, cleanup := statements.GenCheckStmt(v.schema, v.table, generator, v.random, v.partitionRangeConfig)
+func (v *Validation) validate(ctx context.Context, generator generators.Interface, table *typedef.Table) error {
+	stmt, cleanup := statements.GenCheckStmt(v.schema, table, generator, v.random, v.partitionRangeConfig)
 	defer cleanup()
 
-	err := validation(ctx, v.schemaConfig, v.table, v.store, stmt, v.logger)
+	err := validation(ctx, v.schemaConfig, table, v.store, stmt, v.logger)
 
 	switch {
 	case err == nil:
@@ -101,7 +98,7 @@ func (v *Validation) validate(ctx context.Context, generator generators.Interfac
 	return nil
 }
 
-func (v *Validation) Do(ctx context.Context, generator generators.Interface) error {
+func (v *Validation) Do(ctx context.Context, generator generators.Interface, table *typedef.Table) error {
 	v.logger.Info("starting validation loop")
 	defer v.logger.Info("ending validation loop")
 
@@ -116,7 +113,7 @@ func (v *Validation) Do(ctx context.Context, generator generators.Interface) err
 			time.Sleep(hb)
 		}
 
-		if err := v.validate(ctx, generator); errors.Is(err, context.Canceled) {
+		if err := v.validate(ctx, generator, table); errors.Is(err, context.Canceled) {
 			return nil
 		}
 
@@ -160,6 +157,13 @@ func validation(
 	var lastErr, err error
 	attempt := 1
 	for ; ; attempt++ {
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			logger.Info(fmt.Sprintf("Retring failed validation stoped by done context. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
+			return nil
+		}
+
 		lastErr = err
 		err = s.Check(ctx, table, stmt, attempt == maxAttempts)
 
@@ -181,13 +185,6 @@ func validation(
 			logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error same as at attempt before. ", attempt, maxAttempts))
 		} else {
 			logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
-		}
-
-		select {
-		case <-time.After(delay):
-		case <-ctx.Done():
-			logger.Info(fmt.Sprintf("Retring failed validation stoped by done context. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
-			return nil
 		}
 	}
 

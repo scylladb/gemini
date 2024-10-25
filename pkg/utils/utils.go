@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/pkg/errors"
+	"golang.org/x/exp/constraints"
 	"strconv"
 	"strings"
 	"time"
@@ -55,22 +56,34 @@ func RandTime(rnd *rand.Rand) int64 {
 	return rnd.Int63n(86400000000000)
 }
 
-func RandIPV4Address(rnd *rand.Rand, v, pos int) string {
+func ipV4Builder[T constraints.Integer](bytes [4]T) string {
+	var builder strings.Builder
+	builder.Grow(16) // Maximum length of an IPv4 address
+
+	for _, b := range bytes {
+		builder.WriteString(strconv.FormatUint(uint64(b), 10))
+		builder.WriteRune('.')
+	}
+
+	return builder.String()[:builder.Len()-1]
+}
+
+func RandIPV4Address(rnd *rand.Rand) string {
+	return ipV4Builder([4]int{rnd.Intn(256), rnd.Intn(256), rnd.Intn(256), rnd.Intn(256)})
+}
+
+func RandIPV4AddressPositional(rnd *rand.Rand, v, pos int) string {
 	if pos < 0 || pos > 4 {
 		panic(fmt.Sprintf("invalid position for the desired value of the IP part %d, 0-3 supported", pos))
 	}
 	if v < 0 || v > 255 {
 		panic(fmt.Sprintf("invalid value for the desired position %d of the IP, 0-255 suppoerted", v))
 	}
-	var blocks []string
-	for i := 0; i < 4; i++ {
-		if i == pos {
-			blocks = append(blocks, strconv.Itoa(v))
-		} else {
-			blocks = append(blocks, strconv.Itoa(rnd.Intn(255)))
-		}
-	}
-	return strings.Join(blocks, ".")
+
+	data := [4]int{rnd.Intn(255), rnd.Intn(255), rnd.Intn(255), rnd.Intn(255)}
+	data[pos] = v
+
+	return ipV4Builder(data)
 }
 
 func RandInt2(rnd *rand.Rand, min, max int) int {

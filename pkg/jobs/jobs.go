@@ -28,47 +28,26 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-type Mode []string
-
-const (
-	WriteMode  = "write"
-	ReadMode   = "read"
-	MixedMode  = "mixed"
-	WarmupMode = "warmup"
-)
-
-func ModeFromString(m string) Mode {
-	switch m {
-	case WriteMode:
-		return Mode{WriteMode}
-	case ReadMode:
-		return Mode{ReadMode}
-	case MixedMode:
-		return Mode{WriteMode, ReadMode}
-	case WarmupMode:
-		return Mode{WarmupMode}
-	default:
-		return Mode{}
-	}
-}
-
-type List struct {
-	name       string
-	duration   time.Duration
-	logger     *zap.Logger
-	random     *rand.Rand
-	stopFlag   *stop.Flag
-	workers    uint64
-	jobs       []Job
-	generators []*generators.Generator
-	schema     *typedef.Schema
-	verbose    bool
-	failFast   bool
+type Runner struct {
+	duration     time.Duration
+	logger       *zap.Logger
+	random       *rand.Rand
+	stopFlag     *stop.Flag
+	workers      uint64
+	generators   []*generators.Generator
+	schema       *typedef.Schema
+	failFast     bool
+	schemaCfg    *typedef.SchemaConfig
+	warmup       time.Duration
+	globalStatus *status.GlobalStatus
+	pump         <-chan time.Duration
+	store        store.Store
+	mode         Mode
 }
 
 type Job interface {
 	Name() string
-	Do(context.Context, generators.Interface) error
+	Do(context.Context, generators.Interface, *typedef.Table) error
 }
 
 func New(
@@ -77,70 +56,121 @@ func New(
 	workers uint64,
 	logger *zap.Logger,
 	schema *typedef.Schema,
-	table *typedef.Table,
 	store store.Store,
 	globalStatus *status.GlobalStatus,
 	schemaCfg *typedef.SchemaConfig,
 	seed uint64,
 	gens []*generators.Generator,
-	pump <-chan time.Duration,
 	failFast bool,
-	verbose bool,
-) List {
-	partitionRangeConfig := schemaCfg.GetPartitionRangeConfig()
-	rnd := rand.New(rand.NewSource(seed))
+	warmup time.Duration,
+) *Runner {
+	return &Runner{
+		warmup:       warmup,
+		globalStatus: globalStatus,
+		pump:         NewPump(stopFlag, logger.Named("Pump")),
+		store:        store,
+		mode:         ModeFromString(mode),
+		logger:       logger,
+		schemaCfg:    schemaCfg,
+		duration:     duration,
+		workers:      workers,
+		stopFlag:     stopFlag,
+		failFast:     failFast,
+		random:       rand.New(rand.NewSource(seed)),
+		generators:   gens,
+		schema:       schema,
+	}
+}
 
-	jobs := make([]Job, 0, 2)
-	name := "work cycle"
-	for _, m := range ModeFromString(mode) {
-		switch m {
-		case WriteMode:
-			jobs = append(jobs, NewMutation(logger, schema, table, store, &partitionRangeConfig, globalStatus, stopFlag, schemaCfg, pump, failFast, verbose))
-		case ReadMode:
-			jobs = append(jobs, NewValidation(logger, pump, schema, schemaCfg, table, store, rnd, &partitionRangeConfig, globalStatus, stopFlag, failFast))
-		case WarmupMode:
-			jobs = append(jobs, NewWarmup(logger, schema, table, store, &partitionRangeConfig, globalStatus, stopFlag, failFast, verbose))
-			name = "warmup cycle"
+func (l *Runner) Name() string {
+	return "Runner"
+}
+
+func (l *Runner) Run(ctx context.Context) error {
+	ctx = l.stopFlag.CancelContextOnSignal(ctx, stop.SignalHardStop)
+	partitionRangeConfig := l.schemaCfg.GetPartitionRangeConfig()
+
+	l.logger.Info("start jobs")
+
+	if l.warmup > 0 {
+		l.logger.Info("Warmup Job Started",
+			zap.Int("duration", int(l.warmup.Seconds())),
+			zap.Int("workers", int(l.workers)),
+		)
+		time.AfterFunc(l.warmup, func() {
+			l.logger.Info("jobs time is up, begins jobs completion")
+			l.stopFlag.SetSoft(true)
+		})
+
+		warmup := func(_ <-chan time.Duration, rnd *rand.Rand) Job {
+			return NewWarmup(l.logger, l.schema, l.store, &partitionRangeConfig, l.globalStatus, l.schemaCfg, l.stopFlag, rnd, l.failFast)
+		}
+
+		if err := l.start(ctx, warmup); err != nil {
+			return err
 		}
 	}
 
-	return List{
-		name:       name,
-		jobs:       jobs,
-		duration:   duration,
-		workers:    workers,
-		stopFlag:   stopFlag,
-		failFast:   failFast,
-		verbose:    verbose,
-		random:     rnd,
-		generators: gens,
-		schema:     schema,
-	}
-}
-
-func (l List) Name() string {
-	return l.name
-}
-
-func (l List) Do(ctx context.Context) error {
-	ctx = l.stopFlag.CancelContextOnSignal(ctx, stop.SignalHardStop)
-	g, gCtx := errgroup.WithContext(ctx)
 	time.AfterFunc(l.duration, func() {
 		l.logger.Info("jobs time is up, begins jobs completion")
 		l.stopFlag.SetSoft(true)
 	})
 
-	l.logger.Info("start jobs")
+	if l.mode.IsWrite() {
+		return l.start(ctx, func(pump <-chan time.Duration, rnd *rand.Rand) Job {
+			return NewMutation(
+				l.logger.Named("Mutation"),
+				l.schema,
+				l.store,
+				&partitionRangeConfig,
+				l.globalStatus,
+				l.stopFlag,
+				rnd,
+				l.schemaCfg,
+				pump,
+				l.failFast,
+			)
+		})
+	}
 
-	for j := range l.schema.Tables {
+	return l.start(ctx, func(pump <-chan time.Duration, rnd *rand.Rand) Job {
+		return NewValidation(
+			l.logger,
+			pump,
+			l.schema, l.schemaCfg,
+			l.store,
+			rnd,
+			&partitionRangeConfig,
+			l.globalStatus,
+			l.stopFlag,
+			l.failFast,
+		)
+	})
+}
+
+func (l *Runner) start(ctx context.Context, job func(<-chan time.Duration, *rand.Rand) Job) error {
+	g, gCtx := errgroup.WithContext(ctx)
+
+	g.SetLimit(int(l.workers))
+
+	partitionRangeConfig := l.schemaCfg.GetPartitionRangeConfig()
+
+	for j, table := range l.schema.Tables {
 		gen := l.generators[j]
-		for i := 0; i < int(l.workers); i++ {
-			for idx := range l.jobs {
-				jobF := l.jobs[idx]
-				g.Go(func() error {
-					return jobF.Do(gCtx, gen)
-				})
-			}
+		pump := NewPump(l.stopFlag, l.logger.Named("Pump-"+table.Name))
+		rnd := rand.New(rand.NewSource(l.random.Uint64()))
+
+		v := NewValidation(l.logger, pump, l.schema, l.schemaCfg, l.store, rnd, &partitionRangeConfig, l.globalStatus, l.stopFlag, l.failFast)
+		j := job(pump, rnd)
+
+		g.TryGo(func() error {
+			return v.Do(gCtx, gen, table)
+		})
+
+		for i := 0; i < int(l.workers)-1; i++ {
+			g.TryGo(func() error {
+				return j.Do(gCtx, gen, table)
+			})
 		}
 	}
 

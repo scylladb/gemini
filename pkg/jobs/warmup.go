@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"golang.org/x/exp/rand"
 
 	"go.uber.org/zap"
 
@@ -17,34 +18,33 @@ type Warmup struct {
 	logger   *zap.Logger
 	stopFlag *stop.Flag
 	failFast bool
-	verbose  bool
 }
 
 func NewWarmup(
 	logger *zap.Logger,
 	schema *typedef.Schema,
-	table *typedef.Table,
 	store store.Store,
 	partitionRangeConfig *typedef.PartitionRangeConfig,
 	globalStatus *status.GlobalStatus,
+	schemaCfg *typedef.SchemaConfig,
 	stopFlag *stop.Flag,
+	rnd *rand.Rand,
 	failFast bool,
-	verbose bool,
 ) *Warmup {
 	return &Warmup{
 		logger: logger.Named("mutation"),
 		mutation: mutation{
 			logger:               logger.Named("mutation-without-deletes"),
 			schema:               schema,
-			table:                table,
 			store:                store,
 			partitionRangeConfig: partitionRangeConfig,
+			schemaCfg:            schemaCfg,
 			globalStatus:         globalStatus,
+			random:               rnd,
 			deletes:              false,
 		},
 		stopFlag: stopFlag,
 		failFast: failFast,
-		verbose:  verbose,
 	}
 }
 
@@ -52,7 +52,7 @@ func (w *Warmup) Name() string {
 	return "Warmup"
 }
 
-func (w *Warmup) Do(ctx context.Context, generator generators.Interface) error {
+func (w *Warmup) Do(ctx context.Context, generator generators.Interface, table *typedef.Table) error {
 	w.logger.Info("starting warmup loop")
 	defer w.logger.Info("ending warmup loop")
 
@@ -62,7 +62,7 @@ func (w *Warmup) Do(ctx context.Context, generator generators.Interface) error {
 			return nil
 		}
 
-		_ = w.mutation.Statement(ctx, generator)
+		_ = w.mutation.Statement(ctx, generator, table)
 		if w.failFast && w.mutation.globalStatus.HasErrors() {
 			w.stopFlag.SetSoft(true)
 			return nil

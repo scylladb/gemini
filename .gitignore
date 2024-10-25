@@ -5,3 +5,4 @@ cmd/gemini/dist/
 bin/
 coverage.txt
 dist/
+results/*.log

@@ -8,7 +8,6 @@
     <package value="github.com/scylladb/gemini/cmd/gemini" />
     <directory value="$PROJECT_DIR$" />
     <filePath value="$PROJECT_DIR$/cmd/gemini/main.go" />
-    <output_directory value="bin/" />
     <method v="2" />
   </configuration>
 </component>
