@@ -48,21 +48,30 @@ func (t *UDTType) CQLHolder() string {
 	return "?"
 }
 
-func (t *UDTType) CQLPretty(value any) string {
+func (t *UDTType) CQLPretty(builder *strings.Builder, value any) {
 	s, ok := value.(map[string]any)
 	if !ok {
 		panic(fmt.Sprintf("udt pretty, unknown type %v", t))
 	}
 
-	out := make([]string, 0, len(t.ValueTypes))
+	builder.WriteRune('{')
+	defer builder.WriteRune('}')
+
+	i := 0
 	for k, v := range t.ValueTypes {
 		keyVal, kexExists := s[k]
 		if !kexExists {
 			continue
 		}
-		out = append(out, fmt.Sprintf("%s:%s", k, v.CQLPretty(keyVal)))
+
+		builder.WriteString(k)
+		builder.WriteRune(':')
+		v.CQLPretty(builder, keyVal)
+		if i != len(s)-1 {
+			builder.WriteRune(',')
+		}
+		i++
 	}
-	return fmt.Sprintf("{%s}", strings.Join(out, ","))
 }
 
 func (t *UDTType) Indexable() bool {

@@ -59,20 +59,27 @@ func (ct *BagType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *BagType) CQLPretty(value any) string {
+func (ct *BagType) CQLPretty(builder *strings.Builder, value any) {
 	if reflect.TypeOf(value).Kind() != reflect.Slice {
 		panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
 	}
-	s := reflect.ValueOf(value)
-	format := "[%s]"
+
 	if ct.ComplexType == TYPE_SET {
-		format = "{%s}"
+		builder.WriteRune('{')
+		defer builder.WriteRune('}')
+	} else {
+		builder.WriteRune('[')
+		defer builder.WriteRune(']')
 	}
-	out := make([]string, s.Len())
+
+	s := reflect.ValueOf(value)
+
 	for i := 0; i < s.Len(); i++ {
-		out[i] = ct.ValueType.CQLPretty(s.Index(i).Interface())
+		ct.ValueType.CQLPretty(builder, s.Index(i).Interface())
+		if i < s.Len()-1 {
+			builder.WriteRune(',')
+		}
 	}
-	return fmt.Sprintf(format, strings.Join(out, ","))
 }
 
 func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 
@@ -140,19 +141,26 @@ func (mt *MapType) CQLHolder() string {
 	return "?"
 }
 
-func (mt *MapType) CQLPretty(value any) string {
+func (mt *MapType) CQLPretty(builder *strings.Builder, value any) {
 	if reflect.TypeOf(value).Kind() != reflect.Map {
 		panic(fmt.Sprintf("map cql pretty, unknown type %v", mt))
 	}
+
+	builder.WriteRune('{')
+	defer builder.WriteRune('}')
+
 	vof := reflect.ValueOf(value)
 	s := vof.MapRange()
-	out := make([]string, len(vof.MapKeys()))
-	id := 0
-	for s.Next() {
-		out[id] = fmt.Sprintf("%s:%s", mt.KeyType.CQLPretty(s.Key().Interface()), mt.ValueType.CQLPretty(s.Value().Interface()))
-		id++
+	length := vof.Len()
+
+	for id := 0; s.Next(); id++ {
+		mt.KeyType.CQLPretty(builder, s.Key().Interface())
+		builder.WriteRune(':')
+		mt.ValueType.CQLPretty(builder, s.Value().Interface())
+		if id < length-1 {
+			builder.WriteRune(',')
+		}
 	}
-	return fmt.Sprintf("{%s}", strings.Join(out, ","))
 }
 
 func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
@@ -209,8 +217,21 @@ func (ct *CounterType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *CounterType) CQLPretty(value any) string {
-	return fmt.Sprintf("%d", value)
+func (ct *CounterType) CQLPretty(builder *strings.Builder, value interface{}) {
+	switch v := value.(type) {
+	case int64:
+		builder.WriteString(strconv.FormatInt(v, 10))
+	case int:
+		builder.WriteString(strconv.FormatInt(int64(v), 10))
+	case int32:
+		builder.WriteString(strconv.FormatInt(int64(v), 10))
+	case uint64:
+		builder.WriteString(strconv.FormatUint(v, 10))
+	case uint32:
+		builder.WriteString(strconv.FormatUint(uint64(v), 10))
+	case uint:
+		builder.WriteString(strconv.FormatUint(uint64(v), 10))
+	}
 }
 
 func (ct *CounterType) GenJSONValue(r *rand.Rand, _ *PartitionRangeConfig) any {

@@ -16,9 +16,7 @@ package typedef
 
 import (
 	"fmt"
-	"iter"
 	"strings"
-	"sync"
 
 	"github.com/scylladb/gocqlx/v2/qb"
 
@@ -199,78 +197,26 @@ const (
 	CacheArrayLen
 )
 
-func splitString(str, delimiter string) func(func(int, string) bool) {
-	lastPos := 0
-	delLen := len(delimiter)
-	return func(yield func(int, string) bool) {
-		for i := 0; ; i++ {
-			pos := strings.Index(str[lastPos:], delimiter)
-
-			if pos == -1 || str[lastPos:] == "" {
-				yield(-1, str[lastPos:])
-
-				break
-			}
-
-			if str[lastPos:lastPos+pos] == "" || !yield(i, str[lastPos:lastPos+pos]) {
-				break
-			}
-
-			lastPos += pos + delLen
-		}
-	}
-}
-
-var builderPool = &sync.Pool{
-	New: func() any {
-		builder := &strings.Builder{}
-
-		builder.Grow(1024)
-
-		return builder
-	},
-}
-
-func prettyCQL(query string, values Values, types Types) string {
-	if len(values) == 0 {
+func prettyCQL(query string, values Values, types []Type) string {
+	if len(types) == 0 {
 		return query
 	}
 
-	out := builderPool.Get().(*strings.Builder)
-	defer func() {
-		out.Reset()
-		builderPool.Put(out)
-	}()
+	var (
+		index   int
+		builder strings.Builder
+	)
 
-	next, stop := iter.Pull2(splitString(query, "?"))
+	builder.Grow(len(query))
 
-	for {
-		i, str, more := next()
+	for pos, i := strings.Index(query[index:], "?"), 0; pos != -1; pos, i = strings.Index(query[index:], "?"), i+1 {
+		actualPos := index + pos
+		builder.WriteString(query[index:actualPos])
+		types[i].CQLPretty(&builder, values[i])
 
-		_, _ = out.WriteString(str)
-
-		if !more || i == -1 {
-			stop()
-			break
-		}
-
-		switch ty := types[i].(type) {
-		case *TupleType:
-			for count, t := range ty.ValueTypes {
-				_, _ = out.WriteString(t.CQLPretty(values[count]))
-
-				_, str, more = next()
-				if !more {
-					stop()
-					break
-				}
-
-				_, _ = out.WriteString(str)
-			}
-		default:
-			_, _ = out.WriteString(ty.CQLPretty(values[i]))
-		}
+		index = actualPos + 1
 	}
 
-	return out.String()
+	builder.WriteString(query[index:])
+	return builder.String()
 }

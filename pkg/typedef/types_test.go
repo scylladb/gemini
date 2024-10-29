@@ -196,18 +196,33 @@ var prettytests = []struct {
 			ValueTypes: []SimpleType{TYPE_ASCII},
 			Frozen:     false,
 		},
-		query:    "SELECT * FROM tbl WHERE pk0=?",
-		values:   []any{"a"},
-		expected: "SELECT * FROM tbl WHERE pk0='a'",
+		query: "SELECT * FROM tbl WHERE pk0=?",
+		values: []interface{}{
+			[]any{"a"},
+		},
+		expected: "SELECT * FROM tbl WHERE pk0=('a')",
 	},
 	{
 		typ: &TupleType{
 			ValueTypes: []SimpleType{TYPE_ASCII, TYPE_ASCII},
 			Frozen:     false,
 		},
-		query:    "SELECT * FROM tbl WHERE pk0={?,?}",
-		values:   []any{"a", "b"},
-		expected: "SELECT * FROM tbl WHERE pk0={'a','b'}",
+		query: "SELECT * FROM tbl WHERE pk0=?",
+		values: []interface{}{
+			[]any{"a", "b"},
+		},
+		expected: "SELECT * FROM tbl WHERE pk0=('a','b')",
+	},
+	{
+		typ: &TupleType{
+			ValueTypes: []SimpleType{TYPE_ASCII, TYPE_ASCII},
+			Frozen:     false,
+		},
+		query: "SELECT * FROM tbl WHERE pk0=?",
+		values: []interface{}{
+			[]any{"a", "b"},
+		},
+		expected: "SELECT * FROM tbl WHERE pk0=('a','b')",
 	},
 }
 

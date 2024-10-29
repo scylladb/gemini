@@ -20,6 +20,8 @@ import (
 	"math"
 	"math/big"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -66,50 +68,120 @@ func (st SimpleType) LenValue() int {
 	return 1
 }
 
-func (st SimpleType) CQLPretty(value any) string {
+func (st SimpleType) CQLPretty(builder *strings.Builder, value any) {
 	switch st {
-	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR, TYPE_INET, TYPE_DATE:
-		return fmt.Sprintf("'%s'", value)
+	case TYPE_INET:
+		builder.WriteRune('\'')
+		defer builder.WriteRune('\'')
+		switch v := value.(type) {
+		case net.IP:
+			builder.WriteString(v.String())
+		case net.IPMask:
+			builder.WriteString(v.String())
+		case string:
+			builder.WriteString(v)
+		}
+	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR, TYPE_DATE:
+		builder.WriteRune('\'')
+		builder.WriteString(value.(string))
+		builder.WriteRune('\'')
 	case TYPE_BLOB:
 		if v, ok := value.(string); ok {
 			if len(v) > 100 {
 				v = v[:100]
 			}
-			return "textasblob('" + v + "')"
+			builder.WriteString("textasblob('")
+			builder.WriteString(v)
+			builder.WriteString("')")
+			return
 		}
+
 		panic(fmt.Sprintf("unexpected blob value [%T]%+v", value, value))
 	case TYPE_BIGINT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT:
-		return fmt.Sprintf("%d", value)
+		var i int64
+		switch v := value.(type) {
+		case int8:
+			i = int64(v)
+		case int16:
+			i = int64(v)
+		case int32:
+			i = int64(v)
+		case int:
+			i = int64(v)
+		case int64:
+			i = v
+		case *big.Int:
+			builder.WriteString(v.Text(10))
+			return
+		default:
+			panic(fmt.Sprintf("unexpected int value [%T]%+v", value, value))
+		}
+		builder.WriteString(strconv.FormatInt(i, 10))
 	case TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT:
-		return fmt.Sprintf("%.2f", value)
+		var f float64
+		switch v := value.(type) {
+		case float32:
+			f = float64(v)
+		case float64:
+			f = v
+		case *inf.Dec:
+			builder.WriteString(v.String())
+			return
+		default:
+			panic(fmt.Sprintf("unexpected float value [%T]%+v", value, value))
+		}
+		builder.WriteString(strconv.FormatFloat(f, 'f', 2, 64))
 	case TYPE_BOOLEAN:
 		if v, ok := value.(bool); ok {
-			return fmt.Sprintf("%t", v)
+			builder.WriteString(strconv.FormatBool(v))
+			return
 		}
+
 		panic(fmt.Sprintf("unexpected boolean value [%T]%+v", value, value))
 	case TYPE_TIME:
 		if v, ok := value.(int64); ok {
+			builder.WriteRune('\'')
 			// CQL supports only 3 digits microseconds:
 			// '10:10:55.83275+0000': marshaling error: Milliseconds length exceeds expected (5)"
-			return fmt.Sprintf("'%s'", time.Time{}.Add(time.Duration(v)).Format("15:04:05.999"))
+			builder.WriteString(time.Time{}.Add(time.Duration(v)).Format("15:04:05.999"))
+			builder.WriteRune('\'')
+			return
 		}
+
 		panic(fmt.Sprintf("unexpected time value [%T]%+v", value, value))
 	case TYPE_TIMESTAMP:
 		if v, ok := value.(int64); ok {
 			// CQL supports only 3 digits milliseconds:
 			// '1976-03-25T10:10:55.83275+0000': marshaling error: Milliseconds length exceeds expected (5)"
-			return time.UnixMilli(v).UTC().Format("'2006-01-02T15:04:05.999-0700'")
+			builder.WriteString(time.UnixMilli(v).UTC().Format("'2006-01-02T15:04:05.999-0700'"))
+			return
 		}
+
 		panic(fmt.Sprintf("unexpected timestamp value [%T]%+v", value, value))
 	case TYPE_DURATION, TYPE_TIMEUUID, TYPE_UUID:
-		return fmt.Sprintf("%s", value)
+		switch v := value.(type) {
+		case string:
+			builder.WriteString(v)
+			return
+		case time.Duration:
+			builder.WriteString(v.String())
+			return
+		case gocql.UUID:
+			builder.WriteString(v.String())
+			return
+		}
+
+		panic(fmt.Sprintf("unexpected (duration|timeuuid|uuid) value [%T]%+v", value, value))
 	case TYPE_VARINT:
 		if s, ok := value.(*big.Int); ok {
-			return fmt.Sprintf("%d", s.Int64())
+			builder.WriteString(s.Text(10))
+			return
 		}
+
 		panic(fmt.Sprintf("unexpected varint value [%T]%+v", value, value))
 	default:
-		panic(fmt.Sprintf("cql pretty: not supported type %s", st))
+		panic(fmt.Sprintf("cql pretty: not supported type %s [%T]%+v", st, value, value))
+
 	}
 }
 
