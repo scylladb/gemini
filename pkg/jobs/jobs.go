@@ -239,12 +239,17 @@ func validationJob(
 		case errors.Is(err, context.Canceled):
 			return nil
 		default:
+			query, prettyErr := stmt.PrettyCQL()
 			globalStatus.AddReadError(&joberror.JobError{
 				Timestamp: time.Now(),
 				StmtType:  stmt.QueryType.ToString(),
 				Message:   "Validation failed: " + err.Error(),
-				Query:     stmt.PrettyCQL(),
+				Query:     query,
 			})
+
+			if prettyErr != nil {
+				return prettyErr
+			}
 		}
 
 		if failFast && globalStatus.HasErrors() {
@@ -327,18 +332,31 @@ func ddl(
 	}
 	for _, ddlStmt := range ddlStmts.List {
 		if w := logger.Check(zap.DebugLevel, "ddl statement"); w != nil {
-			w.Write(zap.String("pretty_cql", ddlStmt.PrettyCQL()))
+			prettyCQL, prettyCQLErr := ddlStmt.PrettyCQL()
+			if prettyCQLErr != nil {
+				logger.Error("Failed! DDL PrettyCQL failed", zap.Error(prettyCQLErr))
+			} else {
+				w.Write(zap.String("pretty_cql", prettyCQL))
+			}
 		}
+
 		if err = s.Mutate(ctx, ddlStmt); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
+
+			prettyCQL, prettyCQLErr := ddlStmt.PrettyCQL()
 			globalStatus.AddWriteError(&joberror.JobError{
 				Timestamp: time.Now(),
 				StmtType:  ddlStmts.QueryType.ToString(),
 				Message:   "DDL failed: " + err.Error(),
-				Query:     ddlStmt.PrettyCQL(),
+				Query:     prettyCQL,
 			})
+
+			if prettyCQLErr != nil {
+				logger.Error("Failed! DDL PrettyCQL failed", zap.Error(prettyCQLErr))
+			}
+
 			return err
 		}
 		globalStatus.WriteOps.Add(1)
@@ -378,22 +396,36 @@ func mutation(
 	}
 
 	if w := logger.Check(zap.DebugLevel, "mutation statement"); w != nil {
-		w.Write(zap.String("pretty_cql", mutateStmt.PrettyCQL()))
+		prettyCQL, prettyCQLErr := mutateStmt.PrettyCQL()
+		if prettyCQLErr != nil {
+			logger.Error("Failed! mutation PrettyCQL failed", zap.Error(prettyCQLErr))
+		} else {
+			w.Write(zap.String("pretty_cql", prettyCQL))
+		}
 	}
 	if err = s.Mutate(ctx, mutateStmt); err != nil {
 		if errors.Is(err, context.Canceled) {
 			return nil
 		}
+
+		prettyCQL, prettyCQLErr := mutateStmt.PrettyCQL()
 		globalStatus.AddWriteError(&joberror.JobError{
 			Timestamp: time.Now(),
 			StmtType:  mutateStmt.QueryType.ToString(),
 			Message:   "Mutation failed: " + err.Error(),
-			Query:     mutateStmt.PrettyCQL(),
+			Query:     prettyCQL,
 		})
-	} else {
-		globalStatus.WriteOps.Add(1)
-		g.GiveOlds(mutateStmt.ValuesWithToken)
+
+		if prettyCQLErr != nil {
+			logger.Error("Failed! DDL PrettyCQL failed", zap.Error(prettyCQLErr))
+		}
+
+		return err
 	}
+
+	globalStatus.WriteOps.Add(1)
+	g.GiveOlds(mutateStmt.ValuesWithToken)
+
 	return nil
 }
 
@@ -406,7 +438,12 @@ func validation(
 	logger *zap.Logger,
 ) error {
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
-		w.Write(zap.String("pretty_cql", stmt.PrettyCQL()))
+		prettyCQL, prettyCQLErr := stmt.PrettyCQL()
+		if prettyCQLErr != nil {
+			logger.Error("Failed! validation PrettyCQL failed", zap.Error(prettyCQLErr))
+		} else {
+			w.Write(zap.String("pretty_cql", prettyCQL))
+		}
 	}
 
 	maxAttempts := 1

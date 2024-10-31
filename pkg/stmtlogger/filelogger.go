@@ -15,6 +15,7 @@
 package stmtlogger
 
 import (
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -37,11 +38,10 @@ type StmtToFile interface {
 	Close() error
 }
 
-type fileLogger struct {
-	fd                   *os.File
+type logger struct {
+	fd                   io.Writer
 	activeChannel        atomic.Pointer[loggerChan]
 	channel              loggerChan
-	filename             string
 	isFileNonOperational bool
 }
 
@@ -52,7 +52,7 @@ type logRec struct {
 	ts   time.Time
 }
 
-func (fl *fileLogger) LogStmt(stmt *typedef.Stmt) {
+func (fl *logger) LogStmt(stmt *typedef.Stmt) {
 	ch := fl.activeChannel.Load()
 	if ch != nil {
 		*ch <- logRec{
@@ -61,7 +61,7 @@ func (fl *fileLogger) LogStmt(stmt *typedef.Stmt) {
 	}
 }
 
-func (fl *fileLogger) LogStmtWithTimeStamp(stmt *typedef.Stmt, ts time.Time) {
+func (fl *logger) LogStmtWithTimeStamp(stmt *typedef.Stmt, ts time.Time) {
 	ch := fl.activeChannel.Load()
 	if ch != nil {
 		*ch <- logRec{
@@ -71,11 +71,15 @@ func (fl *fileLogger) LogStmtWithTimeStamp(stmt *typedef.Stmt, ts time.Time) {
 	}
 }
 
-func (fl *fileLogger) Close() error {
-	return fl.fd.Close()
+func (fl *logger) Close() error {
+	if closer, ok := fl.fd.(io.Closer); ok {
+		return closer.Close()
+	}
+
+	return nil
 }
 
-func (fl *fileLogger) committer() {
+func (fl *logger) committer() {
 	var err2 error
 
 	defer func() {
@@ -90,7 +94,13 @@ func (fl *fileLogger) committer() {
 			continue
 		}
 
-		_, err1 := fl.fd.Write([]byte(rec.stmt.PrettyCQL()))
+		query, err := rec.stmt.PrettyCQL()
+		if err != nil {
+			log.Printf("failed to pretty print query: %s", err)
+			continue
+		}
+
+		_, err1 := fl.fd.Write([]byte(query))
 		opType := rec.stmt.QueryType.OpType()
 		if rec.ts.IsZero() || !(opType == typedef.OpInsert || opType == typedef.OpUpdate || opType == typedef.OpDelete) {
 			_, err2 = fl.fd.Write([]byte(";\n"))
@@ -115,7 +125,8 @@ func (fl *fileLogger) committer() {
 		if err2 != nil {
 			err1 = err2
 		}
-		log.Printf("failed to write to file %q: %s", fl.filename, err1)
+
+		log.Printf("failed to write to writer %v", err1)
 		return
 	}
 }
@@ -129,10 +140,13 @@ func NewFileLogger(filename string) (StmtToFile, error) {
 		return nil, err
 	}
 
-	out := &fileLogger{
-		filename: filename,
-		fd:       fd,
-		channel:  make(loggerChan, defaultChanSize),
+	return NewLogger(fd)
+}
+
+func NewLogger(w io.Writer) (StmtToFile, error) {
+	out := &logger{
+		fd:      w,
+		channel: make(loggerChan, defaultChanSize),
 	}
 	out.activeChannel.Store(&out.channel)
 

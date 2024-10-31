@@ -15,12 +15,13 @@
 package typedef
 
 import (
-	"fmt"
 	"math"
 	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"github.com/pkg/errors"
 
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
@@ -141,9 +142,9 @@ func (mt *MapType) CQLHolder() string {
 	return "?"
 }
 
-func (mt *MapType) CQLPretty(builder *strings.Builder, value any) {
+func (mt *MapType) CQLPretty(builder *strings.Builder, value any) error {
 	if reflect.TypeOf(value).Kind() != reflect.Map {
-		panic(fmt.Sprintf("map cql pretty, unknown type %v", mt))
+		return errors.Errorf("expected map, got [%T]%v", value, value)
 	}
 
 	builder.WriteRune('{')
@@ -154,13 +155,21 @@ func (mt *MapType) CQLPretty(builder *strings.Builder, value any) {
 	length := vof.Len()
 
 	for id := 0; s.Next(); id++ {
-		mt.KeyType.CQLPretty(builder, s.Key().Interface())
+		if err := mt.KeyType.CQLPretty(builder, s.Key().Interface()); err != nil {
+			return err
+		}
 		builder.WriteRune(':')
-		mt.ValueType.CQLPretty(builder, s.Value().Interface())
+
+		if err := mt.ValueType.CQLPretty(builder, s.Value().Interface()); err != nil {
+			return err
+		}
+
 		if id < length-1 {
 			builder.WriteRune(',')
 		}
 	}
+
+	return nil
 }
 
 func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
@@ -217,7 +226,7 @@ func (ct *CounterType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *CounterType) CQLPretty(builder *strings.Builder, value interface{}) {
+func (ct *CounterType) CQLPretty(builder *strings.Builder, value any) error {
 	switch v := value.(type) {
 	case int64:
 		builder.WriteString(strconv.FormatInt(v, 10))
@@ -231,7 +240,11 @@ func (ct *CounterType) CQLPretty(builder *strings.Builder, value interface{}) {
 		builder.WriteString(strconv.FormatUint(uint64(v), 10))
 	case uint:
 		builder.WriteString(strconv.FormatUint(uint64(v), 10))
+	default:
+		return errors.Errorf("counter cql pretty, unknown type [%T]%v", value, value)
 	}
+
+	return nil
 }
 
 func (ct *CounterType) GenJSONValue(r *rand.Rand, _ *PartitionRangeConfig) any {

@@ -15,10 +15,11 @@
 package typedef
 
 import (
-	"fmt"
 	"math"
 	"reflect"
 	"strings"
+
+	"github.com/pkg/errors"
 
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
@@ -59,9 +60,11 @@ func (ct *BagType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *BagType) CQLPretty(builder *strings.Builder, value any) {
+type Tuple []any
+
+func (ct *BagType) CQLPretty(builder *strings.Builder, value any) error {
 	if reflect.TypeOf(value).Kind() != reflect.Slice {
-		panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
+		return errors.Errorf("expected slice, got [%T]%v", value, value)
 	}
 
 	if ct.ComplexType == TYPE_SET {
@@ -75,11 +78,16 @@ func (ct *BagType) CQLPretty(builder *strings.Builder, value any) {
 	s := reflect.ValueOf(value)
 
 	for i := 0; i < s.Len(); i++ {
-		ct.ValueType.CQLPretty(builder, s.Index(i).Interface())
+		if err := ct.ValueType.CQLPretty(builder, s.Index(i).Interface()); err != nil {
+			return err
+		}
+
 		if i < s.Len()-1 {
 			builder.WriteRune(',')
 		}
 	}
+
+	return nil
 }
 
 func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {

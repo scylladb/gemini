@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/pkg/errors"
 	"golang.org/x/exp/rand"
 	"gopkg.in/inf.v0"
 
@@ -68,11 +69,12 @@ func (st SimpleType) LenValue() int {
 	return 1
 }
 
-func (st SimpleType) CQLPretty(builder *strings.Builder, value any) {
+func (st SimpleType) CQLPretty(builder *strings.Builder, value any) error {
 	switch st {
 	case TYPE_INET:
 		builder.WriteRune('\'')
 		defer builder.WriteRune('\'')
+
 		switch v := value.(type) {
 		case net.IP:
 			builder.WriteString(v.String())
@@ -80,11 +82,20 @@ func (st SimpleType) CQLPretty(builder *strings.Builder, value any) {
 			builder.WriteString(v.String())
 		case string:
 			builder.WriteString(v)
+		default:
+			return errors.Errorf("unexpected inet value [%T]%+v", value, value)
 		}
+
+		return nil
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR, TYPE_DATE:
-		builder.WriteRune('\'')
-		builder.WriteString(value.(string))
-		builder.WriteRune('\'')
+		if v, ok := value.(string); ok {
+			builder.WriteRune('\'')
+			builder.WriteString(v)
+			builder.WriteRune('\'')
+			return nil
+		}
+
+		return errors.Errorf("unexpected string value [%T]%+v", value, value)
 	case TYPE_BLOB:
 		if v, ok := value.(string); ok {
 			if len(v) > 100 {
@@ -93,10 +104,10 @@ func (st SimpleType) CQLPretty(builder *strings.Builder, value any) {
 			builder.WriteString("textasblob('")
 			builder.WriteString(v)
 			builder.WriteString("')")
-			return
+			return nil
 		}
 
-		panic(fmt.Sprintf("unexpected blob value [%T]%+v", value, value))
+		return errors.Errorf("unexpected blob value [%T]%+v", value, value)
 	case TYPE_BIGINT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT:
 		var i int64
 		switch v := value.(type) {
@@ -112,11 +123,15 @@ func (st SimpleType) CQLPretty(builder *strings.Builder, value any) {
 			i = v
 		case *big.Int:
 			builder.WriteString(v.Text(10))
-			return
+
+			return nil
 		default:
-			panic(fmt.Sprintf("unexpected int value [%T]%+v", value, value))
+			return errors.Errorf("unexpected int value [%T]%+v", value, value)
 		}
+
 		builder.WriteString(strconv.FormatInt(i, 10))
+
+		return nil
 	case TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT:
 		var f float64
 		switch v := value.(type) {
@@ -126,18 +141,22 @@ func (st SimpleType) CQLPretty(builder *strings.Builder, value any) {
 			f = v
 		case *inf.Dec:
 			builder.WriteString(v.String())
-			return
+
+			return nil
 		default:
-			panic(fmt.Sprintf("unexpected float value [%T]%+v", value, value))
+			return errors.Errorf("unexpected float value [%T]%+v", value, value)
 		}
+
 		builder.WriteString(strconv.FormatFloat(f, 'f', 2, 64))
+		return nil
 	case TYPE_BOOLEAN:
 		if v, ok := value.(bool); ok {
 			builder.WriteString(strconv.FormatBool(v))
-			return
+
+			return nil
 		}
 
-		panic(fmt.Sprintf("unexpected boolean value [%T]%+v", value, value))
+		return errors.Errorf("unexpected boolean value [%T]%+v", value, value)
 	case TYPE_TIME:
 		if v, ok := value.(int64); ok {
 			builder.WriteRune('\'')
@@ -145,43 +164,41 @@ func (st SimpleType) CQLPretty(builder *strings.Builder, value any) {
 			// '10:10:55.83275+0000': marshaling error: Milliseconds length exceeds expected (5)"
 			builder.WriteString(time.Time{}.Add(time.Duration(v)).Format("15:04:05.999"))
 			builder.WriteRune('\'')
-			return
+
+			return nil
 		}
 
-		panic(fmt.Sprintf("unexpected time value [%T]%+v", value, value))
+		return errors.Errorf("unexpected time value [%T]%+v", value, value)
 	case TYPE_TIMESTAMP:
 		if v, ok := value.(int64); ok {
 			// CQL supports only 3 digits milliseconds:
 			// '1976-03-25T10:10:55.83275+0000': marshaling error: Milliseconds length exceeds expected (5)"
 			builder.WriteString(time.UnixMilli(v).UTC().Format("'2006-01-02T15:04:05.999-0700'"))
-			return
+			return nil
 		}
 
-		panic(fmt.Sprintf("unexpected timestamp value [%T]%+v", value, value))
+		return errors.Errorf("unexpected timestamp value [%T]%+v", value, value)
 	case TYPE_DURATION, TYPE_TIMEUUID, TYPE_UUID:
 		switch v := value.(type) {
 		case string:
 			builder.WriteString(v)
-			return
 		case time.Duration:
 			builder.WriteString(v.String())
-			return
 		case gocql.UUID:
 			builder.WriteString(v.String())
-			return
+		default:
+			return errors.Errorf("unexpected (duration|timeuuid|uuid) value [%T]%+v", value, value)
 		}
-
-		panic(fmt.Sprintf("unexpected (duration|timeuuid|uuid) value [%T]%+v", value, value))
+		return nil
 	case TYPE_VARINT:
 		if s, ok := value.(*big.Int); ok {
 			builder.WriteString(s.Text(10))
-			return
+			return nil
 		}
 
-		panic(fmt.Sprintf("unexpected varint value [%T]%+v", value, value))
+		return errors.Errorf("unexpected varint value [%T]%+v", value, value)
 	default:
-		panic(fmt.Sprintf("cql pretty: not supported type %s [%T]%+v", st, value, value))
-
+		return errors.Errorf("cql pretty: not supported type %s [%T]%+v", st, value, value)
 	}
 }
 

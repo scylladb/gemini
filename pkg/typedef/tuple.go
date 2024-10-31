@@ -17,6 +17,8 @@ package typedef
 import (
 	"strings"
 
+	"github.com/pkg/errors"
+
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
 )
@@ -54,21 +56,30 @@ func (t *TupleType) CQLHolder() string {
 	return "(" + strings.TrimRight(strings.Repeat("?,", len(t.ValueTypes)), ",") + ")"
 }
 
-func (t *TupleType) CQLPretty(builder *strings.Builder, value any) {
+func (t *TupleType) CQLPretty(builder *strings.Builder, value any) error {
 	values, ok := value.([]any)
 	if !ok {
-		builder.WriteString("()")
+		values, ok = value.(Values)
+		if !ok {
+			return errors.Errorf("expected []any, got [%T]%v", value, value)
+		}
 	}
 
-	builder.WriteRune('(')
-	defer builder.WriteRune(')')
+	if len(values) == 0 {
+		return nil
+	}
 
 	for i, tp := range t.ValueTypes {
-		tp.CQLPretty(builder, values[i])
+		if err := tp.CQLPretty(builder, values[i]); err != nil {
+			return err
+		}
+
 		if i < len(values)-1 {
 			builder.WriteRune(',')
 		}
 	}
+
+	return nil
 }
 
 func (t *TupleType) Indexable() bool {

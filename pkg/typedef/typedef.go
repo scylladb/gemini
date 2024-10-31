@@ -88,13 +88,21 @@ func SimpleStmt(query string, queryType StatementType) *Stmt {
 	}
 }
 
-func (s *Stmt) PrettyCQL() string {
+func (s *Stmt) PrettyCQL() (string, error) {
 	query, _ := s.Query.ToCql()
 	values := s.Values.Copy()
-	if len(values) == 0 {
-		return query
-	}
 	return prettyCQL(query, values, s.Types)
+}
+
+func (s *Stmt) ToCql() (string, []string) {
+	return s.Query.ToCql()
+}
+
+func (s *Stmt) Clone() *Stmt {
+	return &Stmt{
+		StmtCache: s.StmtCache,
+		Values:    s.Values.Copy(),
+	}
 }
 
 type StatementType uint8
@@ -197,26 +205,49 @@ const (
 	CacheArrayLen
 )
 
-func prettyCQL(query string, values Values, types []Type) string {
+func prettyCQL(q string, values Values, types []Type) (string, error) {
 	if len(types) == 0 {
-		return query
+		return q, nil
 	}
 
 	var (
-		index   int
+		skip    int
+		idx     int
 		builder strings.Builder
 	)
 
-	builder.Grow(len(query))
+	builder.Grow(len(q))
 
-	for pos, i := strings.Index(query[index:], "?"), 0; pos != -1; pos, i = strings.Index(query[index:], "?"), i+1 {
-		actualPos := index + pos
-		builder.WriteString(query[index:actualPos])
-		types[i].CQLPretty(&builder, values[i])
+	for pos, i := strings.Index(q[idx:], "?"), 0; pos != -1; pos = strings.Index(q[idx:], "?") {
+		str := q[idx : idx+pos]
+		// Just to skip the ? in the query, happens only in TUPLE TYPES
+		if skip > 0 {
+			skip--
+			idx += pos + 1
+			continue
+		}
 
-		index = actualPos + 1
+		builder.WriteString(str)
+
+		var value any
+
+		switch tt := types[i].(type) {
+		case *TupleType:
+			skip = tt.LenValue()
+			value = values[i : i+skip]
+			values = values[skip:]
+		default:
+			value = values[i]
+		}
+
+		if err := types[i].CQLPretty(&builder, value); err != nil {
+			return "", err
+		}
+
+		i++
+		idx += pos + 1
 	}
 
-	builder.WriteString(query[index:])
-	return builder.String()
+	builder.WriteString(q[idx:])
+	return builder.String(), nil
 }

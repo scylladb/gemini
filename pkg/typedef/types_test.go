@@ -196,10 +196,8 @@ var prettytests = []struct {
 			ValueTypes: []SimpleType{TYPE_ASCII},
 			Frozen:     false,
 		},
-		query: "SELECT * FROM tbl WHERE pk0=?",
-		values: []interface{}{
-			[]any{"a"},
-		},
+		query:    "SELECT * FROM tbl WHERE pk0=(?)",
+		values:   []interface{}{"a"},
 		expected: "SELECT * FROM tbl WHERE pk0=('a')",
 	},
 	{
@@ -207,21 +205,8 @@ var prettytests = []struct {
 			ValueTypes: []SimpleType{TYPE_ASCII, TYPE_ASCII},
 			Frozen:     false,
 		},
-		query: "SELECT * FROM tbl WHERE pk0=?",
-		values: []interface{}{
-			[]any{"a", "b"},
-		},
-		expected: "SELECT * FROM tbl WHERE pk0=('a','b')",
-	},
-	{
-		typ: &TupleType{
-			ValueTypes: []SimpleType{TYPE_ASCII, TYPE_ASCII},
-			Frozen:     false,
-		},
-		query: "SELECT * FROM tbl WHERE pk0=?",
-		values: []interface{}{
-			[]any{"a", "b"},
-		},
+		query:    "SELECT * FROM tbl WHERE pk0=(?,?)",
+		values:   []interface{}{"a", "b"},
 		expected: "SELECT * FROM tbl WHERE pk0=('a','b')",
 	},
 }
@@ -232,9 +217,10 @@ func TestCQLPretty(t *testing.T) {
 	for id := range prettytests {
 		test := prettytests[id]
 		t.Run(test.typ.Name(), func(t *testing.T) {
-			t.Parallel()
-
-			result := prettyCQL(test.query, test.values, []Type{test.typ})
+			result, err := prettyCQL(test.query, test.values, []Type{test.typ})
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
 			if result != test.expected {
 				t.Errorf("expected '%s', got '%s' for values %v and type '%v'", test.expected, result, test.values, test.typ)
 			}
