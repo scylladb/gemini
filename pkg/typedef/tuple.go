@@ -15,6 +15,7 @@
 package typedef
 
 import (
+	"bytes"
 	"strings"
 
 	"github.com/pkg/errors"
@@ -56,7 +57,7 @@ func (t *TupleType) CQLHolder() string {
 	return "(" + strings.TrimRight(strings.Repeat("?,", len(t.ValueTypes)), ",") + ")"
 }
 
-func (t *TupleType) CQLPretty(builder *strings.Builder, value any) error {
+func (t *TupleType) CQLPretty(builder *bytes.Buffer, value any) error {
 	values, ok := value.([]any)
 	if !ok {
 		values, ok = value.(Values)

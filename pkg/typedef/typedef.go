@@ -15,6 +15,7 @@
 package typedef
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -89,9 +90,19 @@ func SimpleStmt(query string, queryType StatementType) *Stmt {
 }
 
 func (s *Stmt) PrettyCQL() (string, error) {
+	buffer := bytes.NewBuffer(nil)
+
+	if err := s.PrettyCQLBuffered(buffer); err != nil {
+		return "", err
+	}
+
+	return buffer.String(), nil
+}
+
+func (s *Stmt) PrettyCQLBuffered(buffer *bytes.Buffer) error {
 	query, _ := s.Query.ToCql()
 	values := s.Values.Copy()
-	return prettyCQL(query, values, s.Types)
+	return prettyCQL(buffer, query, values, s.Types)
 }
 
 func (s *Stmt) ToCql() (string, []string) {
@@ -205,18 +216,18 @@ const (
 	CacheArrayLen
 )
 
-func prettyCQL(q string, values Values, types []Type) (string, error) {
+func prettyCQL(builder *bytes.Buffer, q string, values Values, types []Type) error {
+	builder.Grow(len(q))
+
 	if len(types) == 0 {
-		return q, nil
+		builder.WriteString(q)
+		return nil
 	}
 
 	var (
-		skip    int
-		idx     int
-		builder strings.Builder
+		skip int
+		idx  int
 	)
-
-	builder.Grow(len(q))
 
 	for pos, i := strings.Index(q[idx:], "?"), 0; pos != -1; pos = strings.Index(q[idx:], "?") {
 		str := q[idx : idx+pos]
@@ -240,8 +251,8 @@ func prettyCQL(q string, values Values, types []Type) (string, error) {
 			value = values[i]
 		}
 
-		if err := types[i].CQLPretty(&builder, value); err != nil {
-			return "", err
+		if err := types[i].CQLPretty(builder, value); err != nil {
+			return err
 		}
 
 		i++
@@ -249,5 +260,5 @@ func prettyCQL(q string, values Values, types []Type) (string, error) {
 	}
 
 	builder.WriteString(q[idx:])
-	return builder.String(), nil
+	return nil
 }

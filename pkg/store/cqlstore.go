@@ -72,12 +72,14 @@ func (cs *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) (err error) 
 func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Time) error {
 	queryBody, _ := stmt.Query.ToCql()
 	query := cs.session.Query(queryBody, stmt.Values...).WithContext(ctx)
+	defer query.Release()
+
 	if cs.useServerSideTimestamps {
 		query = query.DefaultTimestamp(false)
 		cs.stmtLogger.LogStmt(stmt)
 	} else {
 		query = query.WithTimestamp(ts.UnixNano() / 1000)
-		cs.stmtLogger.LogStmtWithTimeStamp(stmt, ts)
+		cs.stmtLogger.LogStmt(stmt, ts)
 	}
 
 	if err := query.Exec(); err != nil {
@@ -94,14 +96,17 @@ func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Ti
 }
 
 func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (result []map[string]any, err error) {
-	query, _ := stmt.Query.ToCql()
+	cql, _ := stmt.Query.ToCql()
 	cs.stmtLogger.LogStmt(stmt)
-	iter := cs.session.Query(query, stmt.Values...).WithContext(ctx).Iter()
+	query := cs.session.Query(cql, stmt.Values...).WithContext(ctx)
+	defer query.Release()
+
+	iter := query.Iter()
 	cs.ops.WithLabelValues(cs.system, opType(stmt)).Inc()
 	return loadSet(iter), iter.Close()
 }
 
-func (cs cqlStore) close() error {
+func (cs *cqlStore) close() error {
 	cs.session.Close()
 	return nil
 }

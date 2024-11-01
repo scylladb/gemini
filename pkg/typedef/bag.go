@@ -15,9 +15,9 @@
 package typedef
 
 import (
+	"bytes"
 	"math"
 	"reflect"
-	"strings"
 
 	"github.com/pkg/errors"
 
@@ -60,9 +60,7 @@ func (ct *BagType) CQLHolder() string {
 	return "?"
 }
 
-type Tuple []any
-
-func (ct *BagType) CQLPretty(builder *strings.Builder, value any) error {
+func (ct *BagType) CQLPretty(builder *bytes.Buffer, value any) error {
 	if reflect.TypeOf(value).Kind() != reflect.Slice {
 		return errors.Errorf("expected slice, got [%T]%v", value, value)
 	}

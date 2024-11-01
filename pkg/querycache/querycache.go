@@ -181,6 +181,7 @@ func genDeleteStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache 
 		builder = builder.Where(qb.GtOrEq(ck.Name)).Where(qb.LtOrEq(ck.Name))
 		allTypes = append(allTypes, ck.Type, ck.Type)
 	}
+
 	return &typedef.StmtCache{
 		Query:     builder,
 		Types:     allTypes,

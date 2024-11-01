@@ -15,7 +15,7 @@
 package typedef
 
 import (
-	"strings"
+	"bytes"
 
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
@@ -25,7 +25,7 @@ type Type interface {
 	Name() string
 	CQLDef() string
 	CQLHolder() string
-	CQLPretty(*strings.Builder, any) error
+	CQLPretty(*bytes.Buffer, any) error
 	GenValue(*rand.Rand, *PartitionRangeConfig) []any
 	GenJSONValue(*rand.Rand, *PartitionRangeConfig) any
 	LenValue() int

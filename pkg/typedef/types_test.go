@@ -15,6 +15,7 @@
 package typedef
 
 import (
+	"bytes"
 	"math/big"
 	"net"
 	"testing"
@@ -217,10 +218,13 @@ func TestCQLPretty(t *testing.T) {
 	for id := range prettytests {
 		test := prettytests[id]
 		t.Run(test.typ.Name(), func(t *testing.T) {
-			result, err := prettyCQL(test.query, test.values, []Type{test.typ})
+			builder := bytes.NewBuffer(nil)
+			err := prettyCQL(builder, test.query, test.values, []Type{test.typ})
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
+
+			result := builder.String()
 			if result != test.expected {
 				t.Errorf("expected '%s', got '%s' for values %v and type '%v'", test.expected, result, test.values, test.typ)
 			}

@@ -15,10 +15,10 @@
 package typedef
 
 import (
+	"bytes"
 	"math"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -142,7 +142,7 @@ func (mt *MapType) CQLHolder() string {
 	return "?"
 }
 
-func (mt *MapType) CQLPretty(builder *strings.Builder, value any) error {
+func (mt *MapType) CQLPretty(builder *bytes.Buffer, value any) error {
 	if reflect.TypeOf(value).Kind() != reflect.Map {
 		return errors.Errorf("expected map, got [%T]%v", value, value)
 	}
@@ -226,7 +226,7 @@ func (ct *CounterType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *CounterType) CQLPretty(builder *strings.Builder, value any) error {
+func (ct *CounterType) CQLPretty(builder *bytes.Buffer, value any) error {
 	switch v := value.(type) {
 	case int64:
 		builder.WriteString(strconv.FormatInt(v, 10))

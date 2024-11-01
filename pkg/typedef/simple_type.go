@@ -15,13 +15,13 @@
 package typedef
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"math"
 	"math/big"
 	"net"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -69,7 +69,7 @@ func (st SimpleType) LenValue() int {
 	return 1
 }
 
-func (st SimpleType) CQLPretty(builder *strings.Builder, value any) error {
+func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 	switch st {
 	case TYPE_INET:
 		builder.WriteRune('\'')

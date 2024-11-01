@@ -15,6 +15,7 @@
 package typedef
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"net"
@@ -130,12 +131,12 @@ func prettyCQLOld(query string, values Values, types Types) string {
 	queryChunks := strings.Split(query, "?")
 	out = append(out, queryChunks[0])
 	qID := 1
-	var builder strings.Builder
+	builder := bytes.NewBuffer(nil)
 	for _, typ := range types {
 		builder.Reset()
 		tupleType, ok := typ.(*TupleType)
 		if !ok {
-			_ = typ.CQLPretty(&builder, values[k])
+			_ = typ.CQLPretty(builder, values[k])
 			out = append(out, builder.String())
 			out = append(out, queryChunks[qID])
 			qID++
@@ -144,7 +145,7 @@ func prettyCQLOld(query string, values Values, types Types) string {
 		}
 		for _, t := range tupleType.ValueTypes {
 			builder.Reset()
-			_ = t.CQLPretty(&builder, values[k])
+			_ = t.CQLPretty(builder, values[k])
 			out = append(out, builder.String())
 			out = append(out, queryChunks[qID])
 			qID++
@@ -163,8 +164,9 @@ func BenchmarkPrettyCQLOLD(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			query, _ := stmt.Query.ToCql()
 			values := stmt.Values.Copy()
-			_, err := prettyCQL(query, values, stmt.Types)
-			if err != nil {
+			builder := bytes.NewBuffer(nil)
+
+			if err := prettyCQL(builder, query, values, stmt.Types); err != nil {
 				b.Error(err)
 			}
 		}

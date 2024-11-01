@@ -15,7 +15,7 @@
 package typedef
 
 import (
-	"strings"
+	"bytes"
 
 	"github.com/pkg/errors"
 
@@ -49,7 +49,7 @@ func (t *UDTType) CQLHolder() string {
 	return "?"
 }
 
-func (t *UDTType) CQLPretty(builder *strings.Builder, value any) error {
+func (t *UDTType) CQLPretty(builder *bytes.Buffer, value any) error {
 	s, ok := value.(map[string]any)
 	if !ok {
 		return errors.Errorf("udt pretty, expected map[string]any, got [%T]%v", value, value)
