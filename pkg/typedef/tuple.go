@@ -70,6 +70,10 @@ func (t *TupleType) CQLPretty(builder *bytes.Buffer, value any) error {
 		return nil
 	}
 
+	if len(values) != len(t.ValueTypes) {
+		return errors.Errorf("expected %d values, got %d", len(t.ValueTypes), len(values))
+	}
+
 	for i, tp := range t.ValueTypes {
 		if err := tp.CQLPretty(builder, values[i]); err != nil {
 			return err

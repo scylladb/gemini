@@ -17,21 +17,20 @@ package jobs
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
-	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/store"
-	"github.com/scylladb/gemini/pkg/typedef"
-
-	"github.com/scylladb/gemini/pkg/joberror"
-	"github.com/scylladb/gemini/pkg/status"
-	"github.com/scylladb/gemini/pkg/stop"
-
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/status"
+	"github.com/scylladb/gemini/pkg/stop"
+	"github.com/scylladb/gemini/pkg/store"
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 const (
@@ -177,9 +176,15 @@ func mutationJob(
 		}
 		ind := r.Intn(1000000)
 		if ind%100000 == 0 {
-			_ = ddl(ctx, schema, schemaConfig, table, s, r, p, globalStatus, logger, verbose)
+			err := ddl(ctx, schema, schemaConfig, table, s, r, p, globalStatus, logger, verbose)
+			if err != nil {
+				return err
+			}
 		} else {
-			_ = mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, true, logger)
+			err := mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, true, logger)
+			if err != nil {
+				return err
+			}
 		}
 		if failFast && globalStatus.HasErrors() {
 			stopFlag.SetSoft(true)
@@ -240,16 +245,20 @@ func validationJob(
 			return nil
 		default:
 			query, prettyErr := stmt.PrettyCQL()
+			if prettyErr != nil {
+				return PrettyCQLError{
+					PrettyCQL: prettyErr,
+					Stmt:      stmt,
+					Err:       err,
+				}
+			}
+
 			globalStatus.AddReadError(&joberror.JobError{
 				Timestamp: time.Now(),
-				StmtType:  stmt.QueryType.ToString(),
+				StmtType:  stmt.QueryType.String(),
 				Message:   "Validation failed: " + err.Error(),
 				Query:     query,
 			})
-
-			if prettyErr != nil {
-				return prettyErr
-			}
 		}
 
 		if failFast && globalStatus.HasErrors() {
@@ -288,7 +297,11 @@ func warmupJob(
 			return nil
 		}
 		// Do we care about errors during warmup?
-		_ = mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
+		err := mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
+		if err != nil {
+			return err
+		}
+
 		if failFast && globalStatus.HasErrors() {
 			stopFlag.SetSoft(true)
 			return nil
@@ -324,20 +337,25 @@ func ddl(
 		globalStatus.WriteErrors.Add(1)
 		return err
 	}
+
 	if ddlStmts == nil {
 		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
 			w.Write(zap.String("job", "ddl"))
 		}
 		return nil
 	}
+
 	for _, ddlStmt := range ddlStmts.List {
 		if w := logger.Check(zap.DebugLevel, "ddl statement"); w != nil {
 			prettyCQL, prettyCQLErr := ddlStmt.PrettyCQL()
 			if prettyCQLErr != nil {
-				logger.Error("Failed! DDL PrettyCQL failed", zap.Error(prettyCQLErr))
-			} else {
-				w.Write(zap.String("pretty_cql", prettyCQL))
+				return PrettyCQLError{
+					PrettyCQL: prettyCQLErr,
+					Stmt:      ddlStmt,
+				}
 			}
+
+			w.Write(zap.String("pretty_cql", prettyCQL))
 		}
 
 		if err = s.Mutate(ctx, ddlStmt); err != nil {
@@ -346,16 +364,20 @@ func ddl(
 			}
 
 			prettyCQL, prettyCQLErr := ddlStmt.PrettyCQL()
+			if prettyCQLErr != nil {
+				return PrettyCQLError{
+					PrettyCQL: prettyCQLErr,
+					Stmt:      ddlStmt,
+					Err:       err,
+				}
+			}
+
 			globalStatus.AddWriteError(&joberror.JobError{
 				Timestamp: time.Now(),
-				StmtType:  ddlStmts.QueryType.ToString(),
+				StmtType:  ddlStmts.QueryType.String(),
 				Message:   "DDL failed: " + err.Error(),
 				Query:     prettyCQL,
 			})
-
-			if prettyCQLErr != nil {
-				logger.Error("Failed! DDL PrettyCQL failed", zap.Error(prettyCQLErr))
-			}
 
 			return err
 		}
@@ -398,10 +420,14 @@ func mutation(
 	if w := logger.Check(zap.DebugLevel, "mutation statement"); w != nil {
 		prettyCQL, prettyCQLErr := mutateStmt.PrettyCQL()
 		if prettyCQLErr != nil {
-			logger.Error("Failed! mutation PrettyCQL failed", zap.Error(prettyCQLErr))
-		} else {
-			w.Write(zap.String("pretty_cql", prettyCQL))
+			return PrettyCQLError{
+				PrettyCQL: prettyCQLErr,
+				Stmt:      mutateStmt,
+				Err:       err,
+			}
 		}
+
+		w.Write(zap.String("pretty_cql", prettyCQL))
 	}
 	if err = s.Mutate(ctx, mutateStmt); err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -409,16 +435,20 @@ func mutation(
 		}
 
 		prettyCQL, prettyCQLErr := mutateStmt.PrettyCQL()
+		if prettyCQLErr != nil {
+			return PrettyCQLError{
+				PrettyCQL: prettyCQLErr,
+				Stmt:      mutateStmt,
+				Err:       err,
+			}
+		}
+
 		globalStatus.AddWriteError(&joberror.JobError{
 			Timestamp: time.Now(),
-			StmtType:  mutateStmt.QueryType.ToString(),
+			StmtType:  mutateStmt.QueryType.String(),
 			Message:   "Mutation failed: " + err.Error(),
 			Query:     prettyCQL,
 		})
-
-		if prettyCQLErr != nil {
-			logger.Error("Failed! DDL PrettyCQL failed", zap.Error(prettyCQLErr))
-		}
 
 		return err
 	}
@@ -440,10 +470,13 @@ func validation(
 	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
 		prettyCQL, prettyCQLErr := stmt.PrettyCQL()
 		if prettyCQLErr != nil {
-			logger.Error("Failed! validation PrettyCQL failed", zap.Error(prettyCQLErr))
-		} else {
-			w.Write(zap.String("pretty_cql", prettyCQL))
+			return PrettyCQLError{
+				PrettyCQL: prettyCQLErr,
+				Stmt:      stmt,
+			}
 		}
+
+		w.Write(zap.String("pretty_cql", prettyCQL))
 	}
 
 	maxAttempts := 1

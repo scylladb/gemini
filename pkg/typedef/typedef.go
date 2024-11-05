@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pkg/errors"
 	"github.com/scylladb/gocqlx/v2/qb"
 
 	"github.com/scylladb/gemini/pkg/replication"
@@ -118,7 +119,7 @@ func (s *Stmt) Clone() *Stmt {
 
 type StatementType uint8
 
-func (st StatementType) ToString() string {
+func (st StatementType) String() string {
 	switch st {
 	case SelectStatementType:
 		return "SelectStatement"
@@ -224,6 +225,10 @@ func prettyCQL(builder *bytes.Buffer, q string, values Values, types []Type) err
 		return nil
 	}
 
+	if len(values) < len(types) {
+		return errors.Errorf("expected at least %d values, got %d", len(types), len(values))
+	}
+
 	var (
 		skip int
 		idx  int
@@ -241,6 +246,10 @@ func prettyCQL(builder *bytes.Buffer, q string, values Values, types []Type) err
 		builder.WriteString(str)
 
 		var value any
+
+		if i >= len(types) {
+			return errors.Errorf("there are more(%d) ? in the query than types(%d), invalid Query: %s", len(types), i, q)
+		}
 
 		switch tt := types[i].(type) {
 		case *TupleType:
