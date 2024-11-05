@@ -19,7 +19,7 @@ FROM busybox AS production
 
 WORKDIR /gemini
 
-COPY --from=build gemini .
+COPY --from=build /gemini/bin/gemini .
 
 ENV PATH="/gemini:${PATH}"
 
