@@ -28,14 +28,13 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     strategy:
-      max-parallel: 4
       matrix:
         gemini-features: ["basic", "normal", "all"]
-        gemini-concurrency: [16]
+        gemini-concurrency: [4]
         duration: ["5m"]
         dataset-size: [large, small]
         oracle-scylla-version: ["6.1"]
-        test-scylla-version: ["6.1"]
+        test-scylla-version: ["6.2"]
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -69,4 +68,4 @@ jobs:
           name: results-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}-${{ matrix.duration }}-${{ matrix.dataset-size }}-${{ matrix.test-scylla-version }}-${{ matrix.oracle-scylla-version }}-${{ github.run_number }}
           path: ./results
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 1
