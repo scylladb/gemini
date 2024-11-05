@@ -39,10 +39,10 @@ fix: $(GOBIN)/golangci-lint
 
 .PHONY: build
 build:
-	@CGO_ENABLED=0 go build  -o bin/gemini ./cmd/gemini
+	@CGO_ENABLED=0 go build -ldflags="-s -w"  -o bin/gemini ./cmd/gemini
 
 debug-build:
-	@CGO_ENABLED=0 go build -ldflags="-asan" -gcflags "all=-N -l" -o bin/gemini ./cmd/gemini
+	@CGO_ENABLED=0 go build -gcflags "all=-N -l" -o bin/gemini ./cmd/gemini
 
 .PHONY: build-docker
 build-docker:
