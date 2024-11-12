@@ -15,135 +15,158 @@
 package stmtlogger
 
 import (
+	"bufio"
+	"bytes"
+	"context"
+	"io"
 	"log"
 	"os"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
+	"go.uber.org/multierr"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 const (
-	defaultChanSize   = 1000
+	defaultChanSize   = 1024
+	defaultBufferSize = 2048
 	errorsOnFileLimit = 5
 )
 
-type StmtToFile interface {
-	LogStmt(*typedef.Stmt)
-	LogStmtWithTimeStamp(stmt *typedef.Stmt, ts time.Time)
-	Close() error
-}
-
-type fileLogger struct {
-	fd                   *os.File
-	activeChannel        atomic.Pointer[loggerChan]
-	channel              loggerChan
-	filename             string
-	isFileNonOperational bool
-}
-
-type loggerChan chan logRec
-
-type logRec struct {
-	stmt *typedef.Stmt
-	ts   time.Time
-}
-
-func (fl *fileLogger) LogStmt(stmt *typedef.Stmt) {
-	ch := fl.activeChannel.Load()
-	if ch != nil {
-		*ch <- logRec{
-			stmt: stmt,
-		}
+type (
+	StmtToFile interface {
+		LogStmt(stmt *typedef.Stmt, ts ...time.Time)
+		Close() error
 	}
-}
 
-func (fl *fileLogger) LogStmtWithTimeStamp(stmt *typedef.Stmt, ts time.Time) {
-	ch := fl.activeChannel.Load()
-	if ch != nil {
-		*ch <- logRec{
-			stmt: stmt,
-			ts:   ts,
-		}
+	logger struct {
+		writer  *bufio.Writer
+		fd      io.Writer
+		channel chan *bytes.Buffer
+		cancel  context.CancelFunc
+		pool    sync.Pool
+		wg      sync.WaitGroup
+		active  atomic.Bool
 	}
-}
-
-func (fl *fileLogger) Close() error {
-	return fl.fd.Close()
-}
-
-func (fl *fileLogger) committer() {
-	var err2 error
-
-	defer func() {
-		fl.activeChannel.Swap(nil)
-		close(fl.channel)
-	}()
-
-	errsAtRow := 0
-
-	for rec := range fl.channel {
-		if fl.isFileNonOperational {
-			continue
-		}
-
-		_, err1 := fl.fd.Write([]byte(rec.stmt.PrettyCQL()))
-		opType := rec.stmt.QueryType.OpType()
-		if rec.ts.IsZero() || !(opType == typedef.OpInsert || opType == typedef.OpUpdate || opType == typedef.OpDelete) {
-			_, err2 = fl.fd.Write([]byte(";\n"))
-		} else {
-			_, err2 = fl.fd.Write([]byte(" USING TIMESTAMP " + strconv.FormatInt(rec.ts.UnixNano()/1000, 10) + ";\n"))
-		}
-		if err2 == nil && err1 == nil {
-			errsAtRow = 0
-			continue
-		}
-
-		if errors.Is(err2, os.ErrClosed) || errors.Is(err1, os.ErrClosed) {
-			fl.isFileNonOperational = true
-			return
-		}
-
-		errsAtRow++
-		if errsAtRow > errorsOnFileLimit {
-			fl.isFileNonOperational = true
-		}
-
-		if err2 != nil {
-			err1 = err2
-		}
-		log.Printf("failed to write to file %q: %s", fl.filename, err1)
-		return
-	}
-}
+)
 
 func NewFileLogger(filename string) (StmtToFile, error) {
 	if filename == "" {
 		return &nopFileLogger{}, nil
 	}
+
 	fd, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
 	}
 
-	out := &fileLogger{
-		filename: filename,
-		fd:       fd,
-		channel:  make(loggerChan, defaultChanSize),
-	}
-	out.activeChannel.Store(&out.channel)
+	return NewLogger(fd)
+}
 
-	go out.committer()
+func NewLogger(w io.Writer) (StmtToFile, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	out := &logger{
+		writer:  bufio.NewWriterSize(w, 8192),
+		fd:      w,
+		channel: make(chan *bytes.Buffer, defaultChanSize),
+		cancel:  cancel,
+		pool: sync.Pool{
+			New: func() any {
+				return bytes.NewBuffer(make([]byte, 0, defaultBufferSize))
+			},
+		},
+	}
+	out.active.Store(true)
+
+	go out.committer(ctx)
 	return out, nil
+}
+
+func (fl *logger) LogStmt(stmt *typedef.Stmt, ts ...time.Time) {
+	buffer := fl.pool.Get().(*bytes.Buffer)
+	if err := stmt.PrettyCQLBuffered(buffer); err != nil {
+		log.Printf("failed to pretty print query: %s", err)
+		return
+	}
+
+	opType := stmt.QueryType.OpType()
+
+	if len(ts) > 0 && !ts[0].IsZero() && (opType == typedef.OpInsert || opType == typedef.OpUpdate || opType == typedef.OpDelete) {
+		buffer.WriteString(" USING TIMESTAMP ")
+		buffer.WriteString(strconv.FormatInt(ts[0].UnixMicro(), 10))
+	}
+
+	buffer.WriteString(";\n")
+
+	if fl.active.Load() {
+		fl.channel <- buffer
+	}
+}
+
+func (fl *logger) Close() error {
+	fl.cancel()
+	fl.active.Swap(false)
+	close(fl.channel)
+
+	// Wait for commiter to drain the channel
+	fl.wg.Wait()
+
+	err := multierr.Append(nil, fl.writer.Flush())
+
+	if closer, ok := fl.fd.(io.Closer); ok {
+		err = multierr.Append(err, closer.Close())
+	}
+
+	return err
+}
+
+func (fl *logger) committer(ctx context.Context) {
+	fl.wg.Add(1)
+	defer fl.wg.Done()
+	errsAtRow := 0
+
+	drain := func(rec *bytes.Buffer) {
+		defer func() {
+			rec.Reset()
+			fl.pool.Put(rec)
+		}()
+
+		if _, err := rec.WriteTo(fl.writer); err != nil {
+			if errors.Is(err, os.ErrClosed) || errsAtRow > errorsOnFileLimit {
+				return
+			}
+			errsAtRow++
+			log.Printf("failed to write to writer %+v", err)
+		} else {
+			errsAtRow = 0
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			for rec := range fl.channel {
+				drain(rec)
+			}
+			return
+		case rec, ok := <-fl.channel:
+			if !ok {
+				return
+			}
+
+			drain(rec)
+		}
+	}
 }
 
 type nopFileLogger struct{}
 
-func (n *nopFileLogger) LogStmtWithTimeStamp(_ *typedef.Stmt, _ time.Time) {}
+func (n *nopFileLogger) LogStmt(_ *typedef.Stmt, _ ...time.Time) {}
 
 func (n *nopFileLogger) Close() error { return nil }
-
-func (n *nopFileLogger) LogStmt(_ *typedef.Stmt) {}

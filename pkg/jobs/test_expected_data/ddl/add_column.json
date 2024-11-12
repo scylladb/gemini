@@ -5,7 +5,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -15,7 +15,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -25,7 +25,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -35,7 +35,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -45,7 +45,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -55,7 +55,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -65,7 +65,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -75,7 +75,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -85,7 +85,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -95,7 +95,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -105,7 +105,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -115,7 +115,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -125,7 +125,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -135,7 +135,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -145,7 +145,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -155,7 +155,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -165,7 +165,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -175,7 +175,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ],
@@ -185,7 +185,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "0",
+      "QueryType": "SelectStatement",
       "TokenValues": null
     }
   ]

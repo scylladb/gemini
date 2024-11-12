@@ -15,7 +15,15 @@
 package typedef
 
 import (
+	"bytes"
+	"fmt"
+	"math/big"
+	"net"
+	"strings"
 	"testing"
+	"time"
+
+	"gopkg.in/inf.v0"
 
 	"github.com/google/go-cmp/cmp"
 )
@@ -40,4 +48,137 @@ func TestValues(t *testing.T) {
 	if !cmp.Equal(tmp, expected3) {
 		t.Error("%i != %i", tmp, expected)
 	}
+}
+
+var stmt = &Stmt{
+	StmtCache: &StmtCache{
+		//nolint:lll
+		Query:     SimpleQuery{`INSERT INTO tbl(col1, col2, col3, col4, col5, col6,col7,col8,col9,cold10,col11,col12,col13,col14,col15,col16,col17,col18,col19,col20) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);`},
+		QueryType: InsertStatementType,
+		Types: Types{
+			TYPE_ASCII,
+			TYPE_BIGINT,
+			TYPE_BLOB,
+			TYPE_BOOLEAN,
+			TYPE_DATE,
+			TYPE_DECIMAL,
+			TYPE_DOUBLE,
+			TYPE_DURATION,
+			TYPE_FLOAT,
+			TYPE_INET,
+			TYPE_INT,
+			TYPE_SMALLINT,
+			TYPE_TEXT,
+			TYPE_TIME,
+			TYPE_TIMESTAMP,
+			TYPE_TIMEUUID,
+			TYPE_UUID,
+			TYPE_TINYINT,
+			TYPE_VARCHAR,
+			TYPE_VARINT,
+		},
+	},
+	Values: Values{
+		"a",
+		big.NewInt(10),
+		"a",
+		true,
+		millennium.Format("2006-01-02"),
+		inf.NewDec(1000, 0),
+		10.0,
+		10 * time.Minute,
+		10.0,
+		net.ParseIP("192.168.0.1"),
+		10,
+		2,
+		"a",
+		millennium.UnixNano(),
+		millennium.UnixMilli(),
+		"63176980-bfde-11d3-bc37-1c4d704231dc",
+		"63176980-bfde-11d3-bc37-1c4d704231dc",
+		1,
+		"a",
+		big.NewInt(1001),
+	},
+}
+
+func TestPrettyCQL(t *testing.T) {
+	t.Parallel()
+
+	query, err := stmt.PrettyCQL()
+	if err != nil {
+		t.Errorf("failed to generate prettyCQL %v", err)
+	}
+	//nolint:lll
+	expected := fmt.Sprintf(
+		`INSERT INTO tbl(col1, col2, col3, col4, col5, col6,col7,col8,col9,cold10,col11,col12,col13,col14,col15,col16,col17,col18,col19,col20) VALUES ('a',10,textasblob('a'),true,'1999-12-31',1000,10.00,10m0s,10.00,'192.168.0.1',10,2,'a','%s','%s',63176980-bfde-11d3-bc37-1c4d704231dc,63176980-bfde-11d3-bc37-1c4d704231dc,1,'a',1001);`,
+		millennium.Format("15:04:05.999"),
+		millennium.Format("2006-01-02T15:04:05.999-0700"),
+	)
+
+	if query != expected {
+		t.Error("expected", expected, "got", query)
+	}
+}
+
+func prettyCQLOld(query string, values Values, types Types) string {
+	if len(values) == 0 {
+		return query
+	}
+
+	k := 0
+	out := make([]string, 0, len(values)*2)
+	queryChunks := strings.Split(query, "?")
+	out = append(out, queryChunks[0])
+	qID := 1
+	builder := bytes.NewBuffer(nil)
+	for _, typ := range types {
+		builder.Reset()
+		tupleType, ok := typ.(*TupleType)
+		if !ok {
+			_ = typ.CQLPretty(builder, values[k])
+			out = append(out, builder.String())
+			out = append(out, queryChunks[qID])
+			qID++
+			k++
+			continue
+		}
+		for _, t := range tupleType.ValueTypes {
+			builder.Reset()
+			_ = t.CQLPretty(builder, values[k])
+			out = append(out, builder.String())
+			out = append(out, queryChunks[qID])
+			qID++
+			k++
+		}
+	}
+	out = append(out, queryChunks[qID:]...)
+	return strings.Join(out, "")
+}
+
+func BenchmarkPrettyCQLOLD(b *testing.B) {
+	b.Run("New", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			query, _ := stmt.Query.ToCql()
+			values := stmt.Values.Copy()
+			builder := bytes.NewBuffer(nil)
+
+			if err := prettyCQL(builder, query, values, stmt.Types); err != nil {
+				b.Error(err)
+			}
+		}
+	})
+
+	b.Run("Old", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			query, _ := stmt.Query.ToCql()
+			values := stmt.Values.Copy()
+			prettyCQLOld(query, values, stmt.Types)
+		}
+	})
 }

@@ -5,7 +5,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "9",
+      "QueryType": "DropColumnStatement",
       "TokenValues": null
     }
   ],
@@ -15,7 +15,7 @@
       "Names": "[]",
       "Values": "[]",
       "Types": "",
-      "QueryType": "9",
+      "QueryType": "DropColumnStatement",
       "TokenValues": null
     }
   ]

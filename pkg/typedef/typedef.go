@@ -15,9 +15,11 @@
 package typedef
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
+	"github.com/pkg/errors"
 	"github.com/scylladb/gocqlx/v2/qb"
 
 	"github.com/scylladb/gemini/pkg/replication"
@@ -88,18 +90,36 @@ func SimpleStmt(query string, queryType StatementType) *Stmt {
 	}
 }
 
-func (s *Stmt) PrettyCQL() string {
+func (s *Stmt) PrettyCQL() (string, error) {
+	buffer := bytes.NewBuffer(nil)
+
+	if err := s.PrettyCQLBuffered(buffer); err != nil {
+		return "", err
+	}
+
+	return buffer.String(), nil
+}
+
+func (s *Stmt) PrettyCQLBuffered(buffer *bytes.Buffer) error {
 	query, _ := s.Query.ToCql()
 	values := s.Values.Copy()
-	if len(values) == 0 {
-		return query
+	return prettyCQL(buffer, query, values, s.Types)
+}
+
+func (s *Stmt) ToCql() (string, []string) {
+	return s.Query.ToCql()
+}
+
+func (s *Stmt) Clone() *Stmt {
+	return &Stmt{
+		StmtCache: s.StmtCache,
+		Values:    s.Values.Copy(),
 	}
-	return prettyCQL(query, values, s.Types)
 }
 
 type StatementType uint8
 
-func (st StatementType) ToString() string {
+func (st StatementType) String() string {
 	switch st {
 	case SelectStatementType:
 		return "SelectStatement"
@@ -197,32 +217,57 @@ const (
 	CacheArrayLen
 )
 
-func prettyCQL(query string, values Values, types Types) string {
-	if len(values) == 0 {
-		return query
+func prettyCQL(builder *bytes.Buffer, q string, values Values, types []Type) error {
+	builder.Grow(len(q))
+
+	if len(types) == 0 {
+		builder.WriteString(q)
+		return nil
 	}
 
-	k := 0
-	out := make([]string, 0, len(values)*2)
-	queryChunks := strings.Split(query, "?")
-	out = append(out, queryChunks[0])
-	qID := 1
-	for _, typ := range types {
-		tupleType, ok := typ.(*TupleType)
-		if !ok {
-			out = append(out, typ.CQLPretty(values[k]))
-			out = append(out, queryChunks[qID])
-			qID++
-			k++
+	if len(values) < len(types) {
+		return errors.Errorf("expected at least %d values, got %d", len(types), len(values))
+	}
+
+	var (
+		skip int
+		idx  int
+	)
+
+	for pos, i := strings.Index(q[idx:], "?"), 0; pos != -1; pos = strings.Index(q[idx:], "?") {
+		str := q[idx : idx+pos]
+		// Just to skip the ? in the query, happens only in TUPLE TYPES
+		if skip > 0 {
+			skip--
+			idx += pos + 1
 			continue
 		}
-		for _, t := range tupleType.ValueTypes {
-			out = append(out, t.CQLPretty(values[k]))
-			out = append(out, queryChunks[qID])
-			qID++
-			k++
+
+		builder.WriteString(str)
+
+		var value any
+
+		if i >= len(types) {
+			return errors.Errorf("there are more(%d) ? in the query than types(%d), invalid Query: %s", len(types), i, q)
 		}
+
+		switch tt := types[i].(type) {
+		case *TupleType:
+			skip = tt.LenValue()
+			value = values[i : i+skip]
+			values = values[skip:]
+		default:
+			value = values[i]
+		}
+
+		if err := types[i].CQLPretty(builder, value); err != nil {
+			return err
+		}
+
+		i++
+		idx += pos + 1
 	}
-	out = append(out, queryChunks[qID:]...)
-	return strings.Join(out, "")
+
+	builder.WriteString(q[idx:])
+	return nil
 }

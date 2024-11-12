@@ -184,7 +184,7 @@ func convertStmtToResults(stmt *typedef.Stmt) *result {
 		Names:       strings.TrimSpace(fmt.Sprintf("%s", names)),
 		Values:      strings.TrimSpace(fmt.Sprintf("%v", stmt.Values)),
 		Types:       types,
-		QueryType:   fmt.Sprintf("%v", stmt.QueryType),
+		QueryType:   stmt.QueryType.String(),
 	}
 }
 

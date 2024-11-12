@@ -15,8 +15,9 @@
 package typedef
 
 import (
-	"fmt"
-	"strings"
+	"bytes"
+
+	"github.com/pkg/errors"
 
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
@@ -48,29 +49,44 @@ func (t *UDTType) CQLHolder() string {
 	return "?"
 }
 
-func (t *UDTType) CQLPretty(value any) string {
+func (t *UDTType) CQLPretty(builder *bytes.Buffer, value any) error {
 	s, ok := value.(map[string]any)
 	if !ok {
-		panic(fmt.Sprintf("udt pretty, unknown type %v", t))
+		return errors.Errorf("udt pretty, expected map[string]any, got [%T]%v", value, value)
 	}
 
-	out := make([]string, 0, len(t.ValueTypes))
+	builder.WriteRune('{')
+	defer builder.WriteRune('}')
+
+	i := 0
 	for k, v := range t.ValueTypes {
 		keyVal, kexExists := s[k]
 		if !kexExists {
 			continue
 		}
-		out = append(out, fmt.Sprintf("%s:%s", k, v.CQLPretty(keyVal)))
+
+		builder.WriteString(k)
+		builder.WriteRune(':')
+		if err := v.CQLPretty(builder, keyVal); err != nil {
+			return err
+		}
+
+		if i != len(s)-1 {
+			builder.WriteRune(',')
+		}
+		i++
 	}
-	return fmt.Sprintf("{%s}", strings.Join(out, ","))
+
+	return nil
 }
 
 func (t *UDTType) Indexable() bool {
-	for _, t := range t.ValueTypes {
-		if t == TYPE_DURATION {
+	for _, ty := range t.ValueTypes {
+		if ty == TYPE_DURATION {
 			return false
 		}
 	}
+
 	return true
 }
 

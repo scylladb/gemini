@@ -5,7 +5,7 @@
       "Names": "[pk0 ck0 ck0]",
       "Values": "[1 1970-01-01 1970-01-01]",
       "Types": " bigint date date",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "6292367497774912474",
@@ -20,7 +20,7 @@
       "Names": "[col0 pk0 ck0 ck0]",
       "Values": "[1970-01-01 1 1970-01-01 1970-01-01]",
       "Types": " date bigint date date",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "6292367497774912474",
@@ -35,7 +35,7 @@
       "Names": "[pk0 ck0 ck0]",
       "Values": "[1 1970-01-01 1970-01-01]",
       "Types": " bigint date date",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "6292367497774912474",
@@ -50,7 +50,7 @@
       "Names": "[pk0 pk1 pk2 ck0 ck1 ck2 ck2]",
       "Values": "[1 1.110223e-16 1.1.1.1 01 1970-01-01 0.001 0.001]",
       "Types": " bigint float inet ascii date decimal decimal",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "4281341066124197361",
@@ -65,7 +65,7 @@
       "Names": "[pk0 pk1 pk2 ck0 ck0]",
       "Values": "[1 1.110223e-16 1.1.1.1 01 00]",
       "Types": " bigint float inet ascii ascii",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "4281341066124197361",
@@ -80,7 +80,7 @@
       "Names": "[pk0 pk1 pk2 ck0 ck1 ck2 ck2]",
       "Values": "[1 1.110223e-16 1.1.1.1 01 1970-01-01 0.001 0.001]",
       "Types": " bigint float inet ascii date decimal decimal",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "4281341066124197361",
@@ -95,7 +95,7 @@
       "Names": "[col0 pk0 pk1 pk2 ck0 ck0]",
       "Values": "[01 1 1.110223e-16 1.1.1.1 00 00]",
       "Types": " ascii bigint float inet ascii ascii",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "4281341066124197361",
@@ -110,7 +110,7 @@
       "Names": "[col0 pk0 pk1 pk2 ck0 ck1 ck2 ck2]",
       "Values": "[01 1 1.110223e-16 1.1.1.1 00 1970-01-01 0.001 0.001]",
       "Types": " ascii bigint float inet ascii date decimal decimal",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "4281341066124197361",
@@ -125,7 +125,7 @@
       "Names": "[pk0 pk1 pk2 pk3 pk4 pk5 pk6 pk7 pk8 pk9 pk10 pk11 pk12 pk13 pk14 pk15 pk16 pk17 pk18 ck0 ck0]",
       "Values": "[01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 1 00 1 00000001-0000-1000-8000-3132372e302e 1 00000001-0000-1000-8000-3132372e302e 00 1 1 01 00]",
       "Types": " ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time ascii ascii",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "16493010564613190464",
@@ -140,7 +140,7 @@
       "Names": "[pk0 pk1 pk2 pk3 pk4 pk5 pk6 pk7 pk8 pk9 pk10 pk11 pk12 pk13 pk14 pk15 pk16 pk17 pk18 ck0 ck1 ck2 ck3 ck4 ck5 ck6 ck7 ck8 ck9 ck10 ck11 ck12 ck13 ck14 ck15 ck16 ck17 ck18 ck18]",
       "Values": "[01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 1 00 1 00000001-0000-1000-8000-3132372e302e 1 00000001-0000-1000-8000-3132372e302e 00 1 1 01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 1 00 1 00000001-0000-1000-8000-3132372e302e 1 00000001-0000-1000-8000-3132372e302e 00 1 1 1]",
       "Types": " ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time time",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "16493010564613190464",
@@ -155,7 +155,7 @@
       "Names": "[col1 pk0 pk1 pk2 pk3 pk4 pk5 pk6 pk7 pk8 pk9 pk10 pk11 pk12 pk13 pk14 pk15 pk16 pk17 pk18 ck0 ck0]",
       "Values": "[01 01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 1 00 1 00000001-0000-1000-8000-3132372e302e 1 00000001-0000-1000-8000-3132372e302e 00 1 1 00 00]",
       "Types": " ascii ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time ascii ascii",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "16493010564613190464",
@@ -170,7 +170,7 @@
       "Names": "[col1 pk0 pk1 pk2 pk3 pk4 pk5 pk6 pk7 pk8 pk9 pk10 pk11 pk12 pk13 pk14 pk15 pk16 pk17 pk18 ck0 ck1 ck2 ck3 ck4 ck5 ck6 ck7 ck8 ck9 ck10 ck11 ck12 ck13 ck14 ck15 ck16 ck17 ck18 ck18]",
       "Values": "[01 01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 1 00 1 00000001-0000-1000-8000-3132372e302e 1 00000001-0000-1000-8000-3132372e302e 00 1 1 00 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 1 00 1 00000001-0000-1000-8000-3132372e302e 1 00000001-0000-1000-8000-3132372e302e 01 1 1 1]",
       "Types": " ascii ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time time",
-      "QueryType": "1",
+      "QueryType": "SelectRangeStatement",
       "TokenValues": [
         {
           "Token": "16493010564613190464",

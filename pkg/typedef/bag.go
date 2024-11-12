@@ -15,10 +15,11 @@
 package typedef
 
 import (
-	"fmt"
+	"bytes"
 	"math"
 	"reflect"
-	"strings"
+
+	"github.com/pkg/errors"
 
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
@@ -59,20 +60,32 @@ func (ct *BagType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *BagType) CQLPretty(value any) string {
+func (ct *BagType) CQLPretty(builder *bytes.Buffer, value any) error {
 	if reflect.TypeOf(value).Kind() != reflect.Slice {
-		panic(fmt.Sprintf("set cql pretty, unknown type %v", ct))
+		return errors.Errorf("expected slice, got [%T]%v", value, value)
 	}
-	s := reflect.ValueOf(value)
-	format := "[%s]"
+
 	if ct.ComplexType == TYPE_SET {
-		format = "{%s}"
+		builder.WriteRune('{')
+		defer builder.WriteRune('}')
+	} else {
+		builder.WriteRune('[')
+		defer builder.WriteRune(']')
 	}
-	out := make([]string, s.Len())
+
+	s := reflect.ValueOf(value)
+
 	for i := 0; i < s.Len(); i++ {
-		out[i] = ct.ValueType.CQLPretty(s.Index(i).Interface())
+		if err := ct.ValueType.CQLPretty(builder, s.Index(i).Interface()); err != nil {
+			return err
+		}
+
+		if i < s.Len()-1 {
+			builder.WriteRune(',')
+		}
 	}
-	return fmt.Sprintf(format, strings.Join(out, ","))
+
+	return nil
 }
 
 func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
