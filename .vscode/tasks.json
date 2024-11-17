@@ -1,0 +1,80 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Debug",
+            "type": "process",
+            "command": "make",
+            "args": [
+                "debug-build"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+        },
+        {
+            "label": "Build",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "build"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+        },
+        {
+            "label": "Tests",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "test"
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Integration Tests",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "integration-test"
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Scylla Setup",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "scylla-setup"
+            ],
+            "isBackground": true,
+        },
+        {
+            "label": "Scylla Shutdown",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "scylla-shutdown"
+            ],
+            "isBackground": true,
+        },
+        {
+            "label": "Format",
+            "type": "shell",
+            "command": "make",
+            "args": [
+                "fmt"
+            ],
+            "isBackground": true,
+        },
+    ]
+}

@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"strings"
 	"testing"
 	"time"
 
@@ -121,64 +120,17 @@ func TestPrettyCQL(t *testing.T) {
 	}
 }
 
-func prettyCQLOld(query string, values Values, types Types) string {
-	if len(values) == 0 {
-		return query
-	}
+func BenchmarkPrettyCQL(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
 
-	k := 0
-	out := make([]string, 0, len(values)*2)
-	queryChunks := strings.Split(query, "?")
-	out = append(out, queryChunks[0])
-	qID := 1
-	builder := bytes.NewBuffer(nil)
-	for _, typ := range types {
-		builder.Reset()
-		tupleType, ok := typ.(*TupleType)
-		if !ok {
-			_ = typ.CQLPretty(builder, values[k])
-			out = append(out, builder.String())
-			out = append(out, queryChunks[qID])
-			qID++
-			k++
-			continue
-		}
-		for _, t := range tupleType.ValueTypes {
-			builder.Reset()
-			_ = t.CQLPretty(builder, values[k])
-			out = append(out, builder.String())
-			out = append(out, queryChunks[qID])
-			qID++
-			k++
+	for i := 0; i < b.N; i++ {
+		query, _ := stmt.Query.ToCql()
+		values := stmt.Values.Copy()
+		builder := bytes.NewBuffer(nil)
+
+		if err := prettyCQL(builder, query, values, stmt.Types); err != nil {
+			b.Error(err)
 		}
 	}
-	out = append(out, queryChunks[qID:]...)
-	return strings.Join(out, "")
-}
-
-func BenchmarkPrettyCQLOLD(b *testing.B) {
-	b.Run("New", func(b *testing.B) {
-		b.ReportAllocs()
-		b.ResetTimer()
-
-		for i := 0; i < b.N; i++ {
-			query, _ := stmt.Query.ToCql()
-			values := stmt.Values.Copy()
-			builder := bytes.NewBuffer(nil)
-
-			if err := prettyCQL(builder, query, values, stmt.Types); err != nil {
-				b.Error(err)
-			}
-		}
-	})
-
-	b.Run("Old", func(b *testing.B) {
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			query, _ := stmt.Query.ToCql()
-			values := stmt.Values.Copy()
-			prettyCQLOld(query, values, stmt.Types)
-		}
-	})
 }

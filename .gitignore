@@ -1,7 +1,6 @@
 cmd/gemini/dist/
 /gemini
 .idea
-.vscode
 bin/
 coverage.txt
 dist/
