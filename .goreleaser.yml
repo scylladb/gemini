@@ -1,28 +1,25 @@
 version: 2
 
-env:
-  - GO111MODULE=on
-  # ARM crypto extension for RANDOM Number generation
-  - GOARM64=v8.0,crypto
-  - CFLAGS="-O3"
-  - CXXFLAGS="-O3"
-
-before:
-  hooks:
-    - go mod download
+report_sizes: true
 
 builds:
-  - env:
-      - CGO_ENABLED=0
+  - id: gemini
     goos:
       - linux
-    ldflags: -s -w
+    binary: gemini
+    no_unique_dist_dir: false
+    env:
+      - CGO_ENABLED=0
+      - CFLAGS="-O3"
+      - CXXFLAGS="-O3"
     goarch:
       - amd64
       - arm64
     main: ./cmd/gemini
     goamd64:
       - v3 # v3 Enables AMD64 SIMD (SSE4.x,AVX2) optimizations
+    goarm64:
+      - v8.3  # ARM crypto extension for RANDOM Number generation
 
 archives:
   - name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'
@@ -86,3 +83,4 @@ release:
   make_latest: true
   prerelease: auto
   skip_upload: false
+  include_meta: true

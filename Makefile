@@ -21,7 +21,7 @@ define dl_tgz
 	fi
 endef
 
-$(GOBIN)/golangci-lint: GOLANGCI_VERSION = 1.60.3
+$(GOBIN)/golangci-lint: GOLANGCI_VERSION = 1.62.0
 $(GOBIN)/golangci-lint: Makefile
 	$(call dl_tgz,golangci-lint,https://github.com/golangci/golangci-lint/releases/download/v$(GOLANGCI_VERSION)/golangci-lint-$(GOLANGCI_VERSION)-$(GOOS)-amd64.tar.gz)
 
@@ -48,6 +48,10 @@ debug-build:
 build-docker:
 	@docker build --target production -t scylladb/gemini:$(DOCKER_VERSION) --compress .
 
+.PHONY: setup
+setup: $(GOBIN)/golangci-lint scylla-setup debug-build
+	@pre-commit install
+
 .PHONY: scylla-setup
 scylla-setup:
 	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml up -d
@@ -63,49 +67,105 @@ scylla-shutdown:
 test:
 	@go test -covermode=atomic -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | gotestfmt -showteststatus
 
-CQL_FEATURES ?= normal
-CONCURRENCY ?= 16
-DURATION ?= 1m
+CQL_FEATURES ?= all
+CONCURRENCY ?= 50
+DURATION ?= 10m
 WARMUP ?= 1m
 DATASET_SIZE ?= large
-SEED ?= $(shell date +%s | tee ./results/gemini_seed)
+SEED ?= $(shell date +%s)
+GEMINI_BINARY ?= $(PWD)/bin/gemini
+GEMINI_TEST_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-test)
+GEMINI_ORACLE_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-oracle)
+GEMINI_DOCKER_NETWORK ?= gemini
+GEMINI_FLAGS =	--fail-fast \
+	--level=info \
+	--non-interactive \
+	--materialized-views=false \
+	--consistency=LOCAL_QUORUM \
+	--test-host-selection-policy=token-aware \
+	--oracle-host-selection-policy=token-aware \
+	--mode=mixed \
+	--non-interactive \
+	--request-timeout=5s \
+	--connect-timeout=15s \
+	--use-server-timestamps=false \
+	--async-objects-stabilization-attempts=10 \
+	--max-mutation-retries=10 \
+	--async-objects-stabilization-backoff=1000ms \
+	--max-mutation-retries-backoff=1000ms \
+	--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
+	--oracle-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
+	--concurrency=$(CONCURRENCY) \
+	--use-lwt=true \
+	--dataset-size=$(DATASET_SIZE) \
+	--seed=$(SEED) \
+	--schema-seed=$(SEED) \
+	--cql-features=$(CQL_FEATURES) \
+	--duration=$(DURATION) \
+	--warmup=$(WARMUP) \
+	--profiling-port=6060 \
+	--drop-schema=true
 
-.PHONY: integration-test
-integration-test: debug-build
+.PHONY: pprof-profile
+pprof-profile:
+	go tool pprof -http=:8080 -intel_syntax -call_tree -seconds 60 http://localhost:6060/debug/pprof/profile
+
+.PHONY: pprof-heap
+pprof-heap:
+	go tool pprof -http=:8080 -intel_syntax -call_tree -seconds 60 http://localhost:6060/debug/pprof/heap
+
+.PHONY: pprof-goroutine
+pprof-goroutine:
+	go tool pprof -http=:8080 -intel_syntax -call_tree -seconds 60 http://localhost:6060/debug/pprof/goroutine
+
+.PHONY: pprof-block
+pprof-block:
+	go tool pprof -http=:8080 -intel_syntax -call_tree -seconds 60 http://localhost:6060/debug/pprof/block
+
+.PHONY: docker-integration-test
+docker-integration-test:
 	@mkdir -p $(PWD)/results
 	@touch $(PWD)/results/gemini_seed
-	@./bin/gemini \
-		--dataset-size=$(DATASET_SIZE) \
-		--seed=$(SEED) \
-		--schema-seed=$(SEED) \
-		--cql-features $(CQL_FEATURES) \
-		--duration $(DURATION) \
-		--warmup $(WARMUP) \
-		--drop-schema true \
-		--fail-fast \
-		--level info \
-		--non-interactive \
-		--materialized-views false \
-		--consistency LOCAL_QUORUM \
-		--outfile $(PWD)/results/gemini.log \
-		--test-statement-log-file $(PWD)/results/gemini_test_statements.log \
-		--oracle-statement-log-file $(PWD)/results/gemini_oracle_statements.log \
-		--test-host-selection-policy token-aware \
-		--oracle-host-selection-policy token-aware \
-		--test-cluster=$(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-test) \
-		--oracle-cluster=$(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-oracle) \
-		--outfile $(PWD)/results/gemini_result.log \
-		--mode mixed \
-		--non-interactive \
-		--request-timeout 180s \
-		--connect-timeout 120s \
-		--consistency LOCAL_QUORUM \
-		--use-server-timestamps false \
-		--async-objects-stabilization-attempts 10 \
-		--async-objects-stabilization-backoff 100ms \
-		--replication-strategy "{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
-		--oracle-replication-strategy "{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
-		--max-mutation-retries 5 \
-		--max-mutation-retries-backoff 1000ms \
-		--concurrency $(CONCURRENCY) \
-		--tracing-outfile $(PWD)/results/gemini_tracing.log
+	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
+	docker run \
+		-it \
+		--rm \
+		-p 6060:6060 \
+		--name gemini \
+		--network $(GEMINI_DOCKER_NETWORK) \
+		-v $(PWD)/results:/results \
+		-w / \
+		scylladb/gemini:$(DOCKER_VERSION) \
+			--test-cluster=gemini-test \
+			--oracle-cluster=gemini-oracle \
+			--outfile=/results/gemini_result.log \
+			--tracing-outfile=/results/gemini_tracing.log \
+			--test-statement-log-file=/results/gemini_test_statement.log \
+			--oracle-statement-log-file=/results/gemini_oracle_statement.log \
+			$(GEMINI_FLAGS)
+
+.PHONY: integration-test
+integration-test:
+	@mkdir -p $(PWD)/results
+	@touch $(PWD)/results/gemini_seed
+	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
+	@$(GEMINI_BINARY) \
+		--test-cluster=$(GEMINI_TEST_CLUSTER) \
+		--oracle-cluster=$(GEMINI_ORACLE_CLUSTER) \
+		--outfile=$(PWD)/results/gemini_result.log \
+		--tracing-outfile=$(PWD)/results/gemini_tracing.log \
+		--test-statement-log-file=$(PWD)/results/gemini_test_statement.log \
+		--oracle-statement-log-file=$(PWD)/results/gemini_oracle_statement.log \
+		$(GEMINI_FLAGS)
+
+.PHONY: clean
+clean: clean-bin clean-results
+
+.PHONY: clean-bin
+clean-bin:
+	@rm -rf bin
+
+.PHONY: clean-results
+clean-results:
+	@sudo rm -rf results/*.log
+	@sudo rm -rf results/gemini_seed

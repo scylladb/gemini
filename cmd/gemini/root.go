@@ -484,7 +484,7 @@ func init() {
 		"Specify the desired replication strategy of the oracle cluster as either the coded short hand simple|network to get the default for each "+
 			"type or provide the entire specification in the form {'class':'....'}")
 	rootCmd.Flags().StringArrayVarP(&tableOptions, "table-options", "", []string{}, "Repeatable argument to set table options to be added to the created tables")
-	rootCmd.Flags().StringVarP(&consistency, "consistency", "", "QUORUM", "Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE")
+	rootCmd.Flags().StringVarP(&consistency, "consistency", "", "LOCAL_QUORUM", "Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE")
 	rootCmd.Flags().IntVarP(&maxTables, "max-tables", "", 1, "Maximum number of generated tables")
 	rootCmd.Flags().IntVarP(&maxPartitionKeys, "max-partition-keys", "", 6, "Maximum number of generated partition keys")
 	rootCmd.Flags().IntVarP(&minPartitionKeys, "min-partition-keys", "", 2, "Minimum number of generated partition keys")
@@ -519,10 +519,10 @@ func init() {
 		"Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
 	rootCmd.Flags().BoolVarP(&useLWT, "use-lwt", "", false, "Emit LWT based updates")
 	rootCmd.Flags().StringVarP(
-		&oracleClusterHostSelectionPolicy, "oracle-host-selection-policy", "", "round-robin",
+		&oracleClusterHostSelectionPolicy, "oracle-host-selection-policy", "", "token-aware",
 		"Host selection policy used by the driver for the oracle cluster: round-robin|host-pool|token-aware")
 	rootCmd.Flags().StringVarP(
-		&testClusterHostSelectionPolicy, "test-host-selection-policy", "", "round-robin",
+		&testClusterHostSelectionPolicy, "test-host-selection-policy", "", "token-aware",
 		"Host selection policy used by the driver for the test cluster: round-robin|host-pool|token-aware")
 	rootCmd.Flags().BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
 	rootCmd.Flags().DurationVarP(&requestTimeout, "request-timeout", "", 30*time.Second, "Duration of waiting request execution")
