@@ -4,12 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/scylladb/gemini/pkg/generators"
-
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
 
+	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/status"
@@ -21,7 +20,6 @@ type (
 	Mutation struct {
 		logger   *zap.Logger
 		mutation mutation
-		pump     <-chan time.Duration
 		failFast bool
 	}
 
@@ -42,7 +40,6 @@ func NewMutation(
 	store store.Store,
 	globalStatus *status.GlobalStatus,
 	rnd *rand.Rand,
-	pump <-chan time.Duration,
 	failFast bool,
 	deletes bool,
 	ddl bool,
@@ -58,7 +55,6 @@ func NewMutation(
 			random:       rnd,
 			ddl:          ddl,
 		},
-		pump:     pump,
 		failFast: failFast,
 	}
 }
@@ -76,8 +72,7 @@ func (m *Mutation) Do(ctx context.Context, generator generators.Interface, table
 		case <-ctx.Done():
 			m.logger.Debug("mutation job terminated")
 			return nil
-		case hb := <-m.pump:
-			time.Sleep(hb)
+		default:
 		}
 
 		var err error
@@ -89,7 +84,7 @@ func (m *Mutation) Do(ctx context.Context, generator generators.Interface, table
 		}
 
 		if err != nil {
-			// TODO: handle error
+			return err
 		}
 
 		if m.failFast && m.mutation.HasErrors() {
@@ -156,9 +151,8 @@ func (m *mutation) HasErrors() bool {
 
 func (m *mutation) ShouldDoDDL() bool {
 	if m.ddl && m.schema.Config.CQLFeature == typedef.CQL_FEATURE_ALL {
-		// 2% Change of DDL Happening
-		ind := m.random.Intn(100)
-		return ind < 2
+		ind := m.random.Intn(100000)
+		return ind < 100
 	}
 
 	return false

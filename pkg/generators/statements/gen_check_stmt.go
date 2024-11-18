@@ -41,7 +41,7 @@ func GenCheckStmt(
 	}
 
 	return stmt, func() {
-		if stmt.ValuesWithToken != nil {
+		if stmt != nil && stmt.ValuesWithToken != nil {
 			for _, v := range stmt.ValuesWithToken {
 				g.ReleaseToken(v.Token)
 			}

@@ -67,10 +67,11 @@ scylla-shutdown:
 test:
 	@go test -covermode=atomic -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | gotestfmt -showteststatus
 
-CQL_FEATURES ?= all
-CONCURRENCY ?= 50
+CQL_FEATURES ?= normal
+CONCURRENCY ?= 1
 DURATION ?= 10m
-WARMUP ?= 1m
+WARMUP ?= 0
+MODE ?= mixed
 DATASET_SIZE ?= large
 SEED ?= $(shell date +%s)
 GEMINI_BINARY ?= $(PWD)/bin/gemini
@@ -78,13 +79,12 @@ GEMINI_TEST_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Netw
 GEMINI_ORACLE_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-oracle)
 GEMINI_DOCKER_NETWORK ?= gemini
 GEMINI_FLAGS =	--fail-fast \
-	--level=info \
+	--level=debug \
 	--non-interactive \
-	--materialized-views=false \
 	--consistency=LOCAL_QUORUM \
 	--test-host-selection-policy=token-aware \
 	--oracle-host-selection-policy=token-aware \
-	--mode=mixed \
+	--mode=$(MODE) \
 	--non-interactive \
 	--request-timeout=5s \
 	--connect-timeout=15s \
@@ -108,19 +108,27 @@ GEMINI_FLAGS =	--fail-fast \
 
 .PHONY: pprof-profile
 pprof-profile:
-	go tool pprof -http=:8080 -intel_syntax -call_tree -seconds 60 http://localhost:6060/debug/pprof/profile
+	go tool pprof -http=:8080 -seconds 60 http://localhost:6060/debug/pprof/profile
 
 .PHONY: pprof-heap
 pprof-heap:
-	go tool pprof -http=:8080 -intel_syntax -call_tree -seconds 60 http://localhost:6060/debug/pprof/heap
+	go tool pprof -http=:8081 http://localhost:6060/debug/pprof/heap
 
 .PHONY: pprof-goroutine
 pprof-goroutine:
-	go tool pprof -http=:8080 -intel_syntax -call_tree -seconds 60 http://localhost:6060/debug/pprof/goroutine
+	go tool pprof -http=:8082 http://localhost:6060/debug/pprof/goroutine
 
 .PHONY: pprof-block
 pprof-block:
-	go tool pprof -http=:8080 -intel_syntax -call_tree -seconds 60 http://localhost:6060/debug/pprof/block
+	go tool pprof -http=:8083 http://localhost:6060/debug/pprof/block
+
+.PHONY: pprof-mutex
+pprof-mutex:
+	go tool pprof -http=:8084 http://localhost:6060/debug/pprof/mutex
+
+.PHONY: pprof-trace
+pprof-trace:
+	go tool pprof -http=:8085 -seconds 60 http://localhost:6060/debug/pprof/trace
 
 .PHONY: docker-integration-test
 docker-integration-test:
@@ -138,24 +146,16 @@ docker-integration-test:
 		scylladb/gemini:$(DOCKER_VERSION) \
 			--test-cluster=gemini-test \
 			--oracle-cluster=gemini-oracle \
-			--outfile=/results/gemini_result.log \
-			--tracing-outfile=/results/gemini_tracing.log \
-			--test-statement-log-file=/results/gemini_test_statement.log \
-			--oracle-statement-log-file=/results/gemini_oracle_statement.log \
 			$(GEMINI_FLAGS)
 
 .PHONY: integration-test
 integration-test:
-	@mkdir -p $(PWD)/results
-	@touch $(PWD)/results/gemini_seed
-	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
-	@$(GEMINI_BINARY) \
+	mkdir -p $(PWD)/results
+	touch $(PWD)/results/gemini_seed
+	echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
+	$(GEMINI_BINARY) \
 		--test-cluster=$(GEMINI_TEST_CLUSTER) \
 		--oracle-cluster=$(GEMINI_ORACLE_CLUSTER) \
-		--outfile=$(PWD)/results/gemini_result.log \
-		--tracing-outfile=$(PWD)/results/gemini_tracing.log \
-		--test-statement-log-file=$(PWD)/results/gemini_test_statement.log \
-		--oracle-statement-log-file=$(PWD)/results/gemini_oracle_statement.log \
 		$(GEMINI_FLAGS)
 
 .PHONY: clean

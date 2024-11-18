@@ -15,13 +15,25 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 
+	"go.uber.org/zap"
+
+	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/typedef"
+)
 
-	"go.uber.org/zap"
+const (
+	MaxBlobLength   = 1e4
+	MinBlobLength   = 0
+	MaxStringLength = 1000
+	MinStringLength = 0
+	MaxTupleParts   = 20
+	MaxUDTParts     = 20
 )
 
 func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
@@ -43,11 +55,13 @@ func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 			MaxTupleParts:                    2,
 			MaxBlobLength:                    20,
 			MaxStringLength:                  20,
+			MinBlobLength:                    0,
+			MinStringLength:                  0,
 			UseCounters:                      defaultConfig.UseCounters,
 			UseLWT:                           defaultConfig.UseLWT,
+			UseMaterializedViews:             defaultConfig.UseMaterializedViews,
 			CQLFeature:                       defaultConfig.CQLFeature,
 			AsyncObjectStabilizationAttempts: defaultConfig.AsyncObjectStabilizationAttempts,
-			UseMaterializedViews:             defaultConfig.UseMaterializedViews,
 			AsyncObjectStabilizationDelay:    defaultConfig.AsyncObjectStabilizationDelay,
 		}
 	default:
@@ -56,19 +70,9 @@ func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 }
 
 func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
-	const (
-		MaxBlobLength   = 1e4
-		MinBlobLength   = 0
-		MaxStringLength = 1000
-		MinStringLength = 0
-		MaxTupleParts   = 20
-		MaxUDTParts     = 20
-	)
-	rs := getReplicationStrategy(replicationStrategy, replication.NewSimpleStrategy(), logger)
-	ors := getReplicationStrategy(oracleReplicationStrategy, rs, logger)
 	return typedef.SchemaConfig{
-		ReplicationStrategy:              rs,
-		OracleReplicationStrategy:        ors,
+		ReplicationStrategy:              replication.MustParseReplication(replicationStrategy),
+		OracleReplicationStrategy:        replication.MustParseReplication(oracleReplicationStrategy),
 		TableOptions:                     tableopts.CreateTableOptions(tableOptions, logger),
 		MaxTables:                        maxTables,
 		MaxPartitionKeys:                 maxPartitionKeys,
@@ -85,9 +89,31 @@ func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 		MinStringLength:                  MinStringLength,
 		UseCounters:                      useCounters,
 		UseLWT:                           useLWT,
-		CQLFeature:                       getCQLFeature(cqlFeatures),
+		CQLFeature:                       typedef.ParseCQLFeature(cqlFeatures),
 		UseMaterializedViews:             useMaterializedViews,
 		AsyncObjectStabilizationAttempts: asyncObjectStabilizationAttempts,
 		AsyncObjectStabilizationDelay:    asyncObjectStabilizationDelay,
 	}
+}
+
+func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Schema, error) {
+	byteValue, err := os.ReadFile(confFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var shm typedef.Schema
+
+	err = json.Unmarshal(byteValue, &shm)
+	if err != nil {
+		return nil, err
+	}
+
+	schemaBuilder := builders.NewSchemaBuilder()
+	schemaBuilder.Keyspace(shm.Keyspace).Config(schemaConfig)
+	for t, tbl := range shm.Tables {
+		shm.Tables[t].LinkIndexAndColumns()
+		schemaBuilder.Table(tbl)
+	}
+	return schemaBuilder.Build(), nil
 }

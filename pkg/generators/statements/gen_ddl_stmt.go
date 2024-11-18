@@ -32,7 +32,7 @@ func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, sc *typedef.S
 		maxVariant = 2
 	}
 	switch n := r.Intn(maxVariant + 2); n {
-	//case 0: // Alter column not supported in Cassandra from 3.0.11
+	// case 0: // Alter column not supported in Cassandra from 3.0.11
 	//	return t.alterColumn(s.Keyspace.Name)
 	case 2:
 		return genDropColumnStmt(t, s.Keyspace.Name, validCols.Random(r))

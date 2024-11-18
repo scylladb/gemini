@@ -233,9 +233,11 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt 
 			}),
 			cmp.Comparer(func(x, y *inf.Dec) bool {
 				return x.Cmp(y) == 0
-			}), cmp.Comparer(func(x, y *big.Int) bool {
+			}),
+			cmp.Comparer(func(x, y *big.Int) bool {
 				return x.Cmp(y) == 0
-			}))
+			}),
+		)
 		if diff != "" {
 			return fmt.Errorf("rows differ (-%v +%v): %v", oracleRow, testRow, diff)
 		}

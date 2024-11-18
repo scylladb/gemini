@@ -15,12 +15,10 @@ import (
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type Validation struct {
 	logger       *zap.Logger
-	pump         <-chan time.Duration
 	schema       *typedef.Schema
 	store        store.Store
 	random       *rand.Rand
@@ -30,7 +28,6 @@ type Validation struct {
 
 func NewValidation(
 	logger *zap.Logger,
-	pump <-chan time.Duration,
 	schema *typedef.Schema,
 	store store.Store,
 	random *rand.Rand,
@@ -39,7 +36,6 @@ func NewValidation(
 ) *Validation {
 	return &Validation{
 		logger:       logger.Named("validation"),
-		pump:         pump,
 		schema:       schema,
 		store:        store,
 		random:       random,
@@ -53,11 +49,8 @@ func (v *Validation) Name() string {
 }
 
 func (v *Validation) validate(ctx context.Context, generator generators.Interface, table *typedef.Table) error {
-	partitionRangeConfig := v.schema.Config.GetPartitionRangeConfig()
-	stmt, cleanup := statements.GenCheckStmt(v.schema, table, generator, v.random, &partitionRangeConfig)
-	defer cleanup()
 
-	err := validation(ctx, &v.schema.Config, table, v.store, stmt, v.logger)
+	err := v.validation(ctx, table, generator)
 
 	switch {
 	case err == nil:
@@ -65,20 +58,10 @@ func (v *Validation) validate(ctx context.Context, generator generators.Interfac
 	case errors.Is(err, context.Canceled):
 		return context.Canceled
 	default:
-		query, prettyErr := stmt.PrettyCQL()
-		if prettyErr != nil {
-			return PrettyCQLError{
-				PrettyCQL: prettyErr,
-				Stmt:      stmt,
-				Err:       err,
-			}
-		}
-
 		v.globalStatus.AddReadError(&joberror.JobError{
 			Timestamp: time.Now(),
-			StmtType:  stmt.QueryType.String(),
-			Message:   "Validation failed: " + err.Error(),
-			Query:     query,
+			//StmtType:  stmt.QueryType.String(),
+			Message: "Validation failed: " + err.Error(),
 		})
 
 		if v.failFast && v.globalStatus.HasErrors() {
@@ -96,9 +79,9 @@ func (v *Validation) Do(ctx context.Context, generator generators.Interface, tab
 	for {
 		select {
 		case <-ctx.Done():
+			v.logger.Info("Context Done...")
 			return nil
-		case hb := <-v.pump:
-			time.Sleep(hb)
+		default:
 		}
 
 		if err := v.validate(ctx, generator, table); errors.Is(err, context.Canceled) {
@@ -111,75 +94,66 @@ func (v *Validation) Do(ctx context.Context, generator generators.Interface, tab
 	}
 }
 
-func validation(
+func (v *Validation) validation(
 	ctx context.Context,
-	sc *typedef.SchemaConfig,
 	table *typedef.Table,
-	s store.Store,
-	stmt *typedef.Stmt,
-	logger *zap.Logger,
+	generator generators.Interface,
 ) error {
-	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
+	partitionRangeConfig := v.schema.Config.GetPartitionRangeConfig()
+	stmt, cleanup := statements.GenCheckStmt(v.schema, table, generator, v.random, &partitionRangeConfig)
+	defer cleanup()
+
+	if w := v.logger.Check(zap.DebugLevel, "validation statement"); w != nil {
 		prettyCQL, prettyCQLErr := stmt.PrettyCQL()
 		if prettyCQLErr != nil {
 			return PrettyCQLError{
 				PrettyCQL: prettyCQLErr,
-				Stmt:      stmt,
 			}
 		}
 
 		w.Write(zap.String("pretty_cql", prettyCQL))
 	}
 
-	maxAttempts := 1
-	delay := 10 * time.Millisecond
-	if stmt.QueryType.PossibleAsyncOperation() {
-		maxAttempts = sc.AsyncObjectStabilizationAttempts
-		if maxAttempts < 1 {
-			maxAttempts = 1
-		}
-		delay = sc.AsyncObjectStabilizationDelay
+	maxAttempts := v.schema.Config.AsyncObjectStabilizationAttempts
+	delay := time.Duration(0)
+	if maxAttempts < 1 {
+		maxAttempts = 1
 	}
 
-	var lastErr, err error
-	attempt := 1
-	for ; ; attempt++ {
+	var err error
+
+	for attempt := 1; ; attempt++ {
 		select {
-		case <-time.After(delay):
 		case <-ctx.Done():
-			logger.Info(fmt.Sprintf("Retring failed validation stoped by done context. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
-			return nil
+			v.logger.Info("Context Done... validation exiting")
+			return context.Canceled
+		case <-time.After(delay):
+			delay = v.schema.Config.AsyncObjectStabilizationDelay
 		}
 
-		lastErr = err
-		err = s.Check(ctx, table, stmt, attempt == maxAttempts)
+		err = v.store.Check(ctx, table, stmt, attempt == maxAttempts)
 
 		if err == nil {
 			if attempt > 1 {
-				logger.Info(fmt.Sprintf("Validation successfully completed on %d attempt.", attempt))
+				v.logger.Info(fmt.Sprintf("Validation successfully completed on %d attempt.", attempt))
 			}
 			return nil
 		}
+
 		if errors.Is(err, context.Canceled) {
-			// When context is canceled it means that test was commanded to stop
-			// to skip logging part it is returned here
+			return context.Canceled
+		}
+
+		if attempt == maxAttempts {
+			if attempt > 1 {
+				v.logger.Info(fmt.Sprintf("Retring failed validation stoped by reach of max attempts %d. Error: %s", maxAttempts, err))
+			} else {
+				v.logger.Info(fmt.Sprintf("Validation failed. Error: %s", err))
+			}
+
 			return err
 		}
-		if attempt == maxAttempts {
-			break
-		}
-		if errors.Is(err, utils.UnwrapErr(lastErr)) {
-			logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error same as at attempt before. ", attempt, maxAttempts))
-		} else {
-			logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
-		}
-	}
 
-	if attempt > 1 {
-		logger.Info(fmt.Sprintf("Retring failed validation stoped by reach of max attempts %d. Error: %s", maxAttempts, err))
-	} else {
-		logger.Info(fmt.Sprintf("Validation failed. Error: %s", err))
+		v.logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
 	}
-
-	return err
 }

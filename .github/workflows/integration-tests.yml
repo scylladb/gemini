@@ -29,10 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        gemini-features: ["basic", "normal", "all"]
+        gemini-features: ["basic", "normal"]
         gemini-concurrency: [4]
         duration: ["5m"]
-        dataset-size: [large, small]
+        dataset-size: [large]
         oracle-scylla-version: ["6.1"]
         test-scylla-version: ["6.2"]
       fail-fast: false

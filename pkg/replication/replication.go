@@ -21,9 +21,30 @@ import (
 
 type Replication map[string]any
 
+var (
+	singleQuoteReplacer = strings.NewReplacer("'", "\"")
+	doubleQuoteReplacer = strings.NewReplacer("\"", "'")
+)
+
 func (r *Replication) ToCQL() string {
 	b, _ := json.Marshal(r)
-	return strings.ReplaceAll(string(b), "\"", "'")
+	return doubleQuoteReplacer.Replace(string(b))
+}
+
+func MustParseReplication(rs string) *Replication {
+	switch rs {
+	case "network":
+		return NewNetworkTopologyStrategy()
+	case "simple":
+		return NewSimpleStrategy()
+	default:
+		var strategy Replication
+
+		if err := json.Unmarshal([]byte(singleQuoteReplacer.Replace(rs)), &strategy); err != nil {
+			panic("unable to parse replication strategy: " + rs + " Error: " + err.Error())
+		}
+		return &strategy
+	}
 }
 
 func NewSimpleStrategy() *Replication {

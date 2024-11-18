@@ -16,13 +16,12 @@ package jobs
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
-	"golang.org/x/sync/errgroup"
 
-	"github.com/scylladb/gemini/pkg/burst"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/store"
@@ -35,13 +34,13 @@ type (
 		logger       *zap.Logger
 		random       *rand.Rand
 		workers      uint64
-		generators   []*generators.Generator
+		generators   *generators.Generators
 		schema       *typedef.Schema
-		failFast     bool
 		warmup       time.Duration
 		globalStatus *status.GlobalStatus
 		store        store.Store
 		mode         Mode
+		failFast     bool
 	}
 	Job interface {
 		Name() string
@@ -58,9 +57,9 @@ func New(
 	store store.Store,
 	globalStatus *status.GlobalStatus,
 	seed uint64,
-	gens []*generators.Generator,
-	failFast bool,
+	gens *generators.Generators,
 	warmup time.Duration,
+	failFast bool,
 ) *Runner {
 	return &Runner{
 		warmup:       warmup,
@@ -79,6 +78,7 @@ func New(
 
 func (l *Runner) Run(ctx context.Context) error {
 	l.logger.Info("start jobs")
+	var wg sync.WaitGroup
 
 	if l.warmup > 0 {
 		l.logger.Info("Warmup Job Started",
@@ -88,7 +88,8 @@ func (l *Runner) Run(ctx context.Context) error {
 
 		warmupCtx, cancel := context.WithTimeout(ctx, l.warmup)
 		defer cancel()
-		l.startMutation(warmupCtx, cancel, l.random, "Warmup", false, false)
+		l.startMutation(warmupCtx, cancel, &wg, l.random, "Warmup", false, false)
+		wg.Wait()
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, l.duration+1*time.Second)
@@ -97,33 +98,33 @@ func (l *Runner) Run(ctx context.Context) error {
 	src := rand.NewSource(l.random.Uint64())
 
 	if l.mode.IsRead() {
-		go l.startValidation(ctx, cancel, src)
+		l.startValidation(ctx, &wg, cancel, src)
 	}
 
 	if l.mode.IsWrite() {
-		l.startMutation(ctx, cancel, src, "Mutation", true, true)
+		l.startMutation(ctx, cancel, &wg, src, "Mutation", true, true)
 	}
+
+	wg.Wait()
 
 	return nil
 }
 
-func (l *Runner) startMutation(ctx context.Context, cancel context.CancelFunc, src rand.Source, name string, deletes, ddl bool) {
+func (l *Runner) startMutation(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, src rand.Source, name string, deletes, ddl bool) {
 	logger := l.logger.Named(name)
 
-	err := l.start(ctx, rand.New(src), func(pump <-chan time.Duration, rnd *rand.Rand) Job {
+	err := l.start(ctx, wg, rand.New(src), func(rnd *rand.Rand) Job {
 		return NewMutation(
 			logger,
 			l.schema,
 			l.store,
 			l.globalStatus,
 			rnd,
-			pump,
 			l.failFast,
 			deletes,
 			ddl,
 		)
 	})
-
 	if err != nil {
 		logger.Error("Mutation job failed", zap.Error(err))
 		if l.failFast {
@@ -132,11 +133,10 @@ func (l *Runner) startMutation(ctx context.Context, cancel context.CancelFunc, s
 	}
 }
 
-func (l *Runner) startValidation(ctx context.Context, cancel context.CancelFunc, src rand.Source) {
-	err := l.start(ctx, rand.New(src), func(pump <-chan time.Duration, rnd *rand.Rand) Job {
+func (l *Runner) startValidation(ctx context.Context, wg *sync.WaitGroup, cancel context.CancelFunc, src rand.Source) {
+	err := l.start(ctx, wg, rand.New(src), func(rnd *rand.Rand) Job {
 		return NewValidation(
 			l.logger,
-			pump,
 			l.schema,
 			l.store,
 			rnd,
@@ -144,7 +144,6 @@ func (l *Runner) startValidation(ctx context.Context, cancel context.CancelFunc,
 			l.failFast,
 		)
 	})
-
 	if err != nil {
 		l.logger.Error("Validation job failed", zap.Error(err))
 		if l.failFast {
@@ -153,21 +152,21 @@ func (l *Runner) startValidation(ctx context.Context, cancel context.CancelFunc,
 	}
 }
 
-func (l *Runner) start(ctx context.Context, rnd *rand.Rand, job func(<-chan time.Duration, *rand.Rand) Job) error {
-	g, gCtx := errgroup.WithContext(ctx)
-	g.SetLimit(int(l.workers))
+func (l *Runner) start(ctx context.Context, wg *sync.WaitGroup, rnd *rand.Rand, job func(*rand.Rand) Job) error {
+	wg.Add(int(l.workers))
 
-	for j, table := range l.schema.Tables {
-		gen := l.generators[j]
-		pump := burst.New(ctx, 10, 10*time.Millisecond)
-
+	for _, table := range l.schema.Tables {
+		gen := l.generators.Get()
 		for range l.workers {
-			src := rand.NewSource(rnd.Uint64())
-			g.TryGo(func() error {
-				return job(pump, rand.New(src)).Do(gCtx, gen, table)
-			})
+			j := job(rand.New(rand.NewSource(rnd.Uint64())))
+			go func(j Job) {
+				defer wg.Done()
+				if err := j.Do(ctx, gen, table); err != nil {
+					l.logger.Error("job failed", zap.String("table", table.Name), zap.Error(err))
+				}
+			}(j)
 		}
 	}
 
-	return g.Wait()
+	return nil
 }

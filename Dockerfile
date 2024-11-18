@@ -1,5 +1,4 @@
 FROM golang:1.23-bookworm AS build
-
 ENV GO111MODULE=on
 ENV GOAMD64=v3
 ENV GOARM64=v8.3,crypto

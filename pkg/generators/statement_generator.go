@@ -101,7 +101,7 @@ func GetCreateKeyspaces(s *typedef.Schema) (string, string) {
 		fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = %s", s.Keyspace.Name, s.Keyspace.OracleReplication.ToCQL())
 }
 
-func GetCreateSchema(s *typedef.Schema) []string {
+func GetCreateSchema(s *typedef.Schema, enableMV bool) []string {
 	var stmts []string
 
 	for _, t := range s.Tables {
@@ -124,17 +124,21 @@ func GetCreateSchema(s *typedef.Schema) []string {
 			for _, ck := range mv.ClusteringKeys {
 				mvPrimaryKeysNotNull = append(mvPrimaryKeysNotNull, fmt.Sprintf("%s IS NOT NULL", ck.Name))
 			}
-			var createMaterializedView string
-			if len(mv.PartitionKeys) == 1 {
-				createMaterializedView = "CREATE MATERIALIZED VIEW IF NOT EXISTS %s.%s AS SELECT * FROM %s.%s WHERE %s PRIMARY KEY (%s"
-			} else {
-				createMaterializedView = "CREATE MATERIALIZED VIEW IF NOT EXISTS %s.%s AS SELECT * FROM %s.%s WHERE %s PRIMARY KEY ((%s)"
+
+			if enableMV {
+				var createMaterializedView string
+				if len(mv.PartitionKeys) == 1 {
+					createMaterializedView = "CREATE MATERIALIZED VIEW IF NOT EXISTS %s.%s AS SELECT * FROM %s.%s WHERE %s PRIMARY KEY (%s"
+				} else {
+					createMaterializedView = "CREATE MATERIALIZED VIEW IF NOT EXISTS %s.%s AS SELECT * FROM %s.%s WHERE %s PRIMARY KEY ((%s)"
+				}
+				createMaterializedView += ",%s)"
+				stmts = append(stmts, fmt.Sprintf(createMaterializedView,
+					s.Keyspace.Name, mv.Name, s.Keyspace.Name, t.Name,
+					strings.Join(mvPrimaryKeysNotNull, " AND "),
+					strings.Join(mvPartitionKeys, ","), strings.Join(t.ClusteringKeys.Names(), ",")),
+				)
 			}
-			createMaterializedView += ",%s)"
-			stmts = append(stmts, fmt.Sprintf(createMaterializedView,
-				s.Keyspace.Name, mv.Name, s.Keyspace.Name, t.Name,
-				strings.Join(mvPrimaryKeysNotNull, " AND "),
-				strings.Join(mvPartitionKeys, ","), strings.Join(t.ClusteringKeys.Names(), ",")))
 		}
 	}
 	return stmts

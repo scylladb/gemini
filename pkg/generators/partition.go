@@ -15,7 +15,7 @@
 package generators
 
 import (
-	"sync"
+	"sync/atomic"
 
 	"github.com/scylladb/gemini/pkg/inflight"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -26,29 +26,32 @@ type Partition struct {
 	oldValues    chan *typedef.ValueWithToken
 	inFlight     inflight.InFlight
 	wakeUpSignal chan<- struct{} // wakes up generator
-	closed       bool
-	lock         sync.RWMutex
-	isStale      bool
+	closed       atomic.Bool
+	isStale      atomic.Bool
+}
+
+func NewPartition(wakeUpSignal chan<- struct{}, pkBufferSize int) *Partition {
+	return &Partition{
+		values:       make(chan *typedef.ValueWithToken, pkBufferSize),
+		oldValues:    make(chan *typedef.ValueWithToken, pkBufferSize),
+		inFlight:     inflight.New(),
+		wakeUpSignal: wakeUpSignal,
+	}
 }
 
 func (s *Partition) MarkStale() {
-	s.isStale = true
+	s.isStale.Store(true)
 	s.Close()
 }
 
 func (s *Partition) Stale() bool {
-	return s.isStale
+	return s.isStale.Load()
 }
 
 // get returns a new value and ensures that it's corresponding token
 // is not already in-flight.
 func (s *Partition) get() *typedef.ValueWithToken {
-	for {
-		v := s.pick()
-		if v == nil || s.inFlight.AddIfNotPresent(v.Token) {
-			return v
-		}
-	}
+	return s.pick()
 }
 
 // getOld returns a previously used value and token or a new if
@@ -91,7 +94,10 @@ func (s *Partition) wakeUp() {
 
 func (s *Partition) pick() *typedef.ValueWithToken {
 	select {
-	case val := <-s.values:
+	case val, more := <-s.values:
+		if !more {
+			return nil
+		}
 		if len(s.values) <= cap(s.values)/4 {
 			s.wakeUp() // channel at 25% capacity, trigger generator
 		}
@@ -103,50 +109,20 @@ func (s *Partition) pick() *typedef.ValueWithToken {
 }
 
 func (s *Partition) safelyGetOldValuesChannel() chan *typedef.ValueWithToken {
-	s.lock.RLock()
-	if s.closed {
+	if s.closed.Load() {
 		// Since only giveOld could have been potentially called after partition is closed
 		// we need to protect it against writing to closed channel
 		return nil
 	}
-	defer s.lock.RUnlock()
+
 	return s.oldValues
 }
 
-func (s *Partition) Close() {
-	s.lock.RLock()
-	if s.closed {
-		s.lock.RUnlock()
-		return
+func (s *Partition) Close() error {
+	if !s.closed.Swap(true) {
+		close(s.values)
+		close(s.oldValues)
 	}
-	s.lock.RUnlock()
-	s.lock.Lock()
-	if s.closed {
-		return
-	}
-	s.closed = true
-	close(s.values)
-	close(s.oldValues)
-	s.lock.Unlock()
-}
 
-type Partitions []*Partition
-
-func (p Partitions) CloseAll() {
-	for _, part := range p {
-		part.Close()
-	}
-}
-
-func NewPartitions(count, pkBufferSize int, wakeUpSignal chan struct{}) Partitions {
-	partitions := make(Partitions, count)
-	for i := 0; i < len(partitions); i++ {
-		partitions[i] = &Partition{
-			values:       make(chan *typedef.ValueWithToken, pkBufferSize),
-			oldValues:    make(chan *typedef.ValueWithToken, pkBufferSize),
-			inFlight:     inflight.New(),
-			wakeUpSignal: wakeUpSignal,
-		}
-	}
-	return partitions
+	return nil
 }

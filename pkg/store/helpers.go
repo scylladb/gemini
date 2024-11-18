@@ -79,7 +79,6 @@ func lt(mi, mj map[string]any) bool {
 		return true
 	default:
 		msg := fmt.Sprintf("unhandled type %T\n", mis)
-		time.Sleep(time.Second)
 		panic(msg)
 	}
 }

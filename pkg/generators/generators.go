@@ -11,47 +11,81 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package main
+
+package generators
 
 import (
-	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/typedef"
+	"context"
+	"sync"
 
 	"go.uber.org/zap"
+
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func createGenerators(
+type Generators struct {
+	wg         sync.WaitGroup
+	generators []Generator
+	cancel     context.CancelFunc
+	idx        int
+}
+
+func (g *Generators) Get() *Generator {
+	gen := &g.generators[g.idx%len(g.generators)]
+	g.idx++
+	return gen
+}
+
+func (g *Generators) Close() error {
+	g.cancel()
+	g.wg.Wait()
+
+	return nil
+}
+
+func New(
+	ctx context.Context,
 	schema *typedef.Schema,
 	schemaConfig typedef.SchemaConfig,
-	seed, distributionSize uint64,
+	seed, partitionsCount uint64,
 	logger *zap.Logger,
-) (generators.Generators, error) {
+	distFunc DistributionFunc,
+	pkBufferReuseSize uint64,
+) (*Generators, error) {
 	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
+	ctx, cancel := context.WithCancel(ctx)
 
-	var gs []*generators.Generator
-	for id := range schema.Tables {
-		table := schema.Tables[id]
+	gens := &Generators{
+		generators: make([]Generator, 0, len(schema.Tables)),
+		cancel:     cancel,
+	}
+
+	gens.wg.Add(len(schema.Tables))
+	for _, table := range schema.Tables {
 		pkVariations := table.PartitionKeys.ValueVariationsNumber(&partitionRangeConfig)
 
-		distFunc, err := createDistributionFunc(partitionKeyDistribution, distributionSize, seed, stdDistMean, oneStdDev)
-		if err != nil {
-			return nil, err
-		}
-
-		tablePartConfig := &generators.Config{
+		tablePartConfig := Config{
 			PartitionsRangeConfig:      partitionRangeConfig,
-			PartitionsCount:            distributionSize,
+			PartitionsCount:            partitionsCount,
 			PartitionsDistributionFunc: distFunc,
 			Seed:                       seed,
 			PkUsedBufferSize:           pkBufferReuseSize,
 		}
-		g := generators.NewGenerator(table, tablePartConfig, logger.Named("generators"))
+		g := NewGenerator(table, tablePartConfig, logger.Named("generators"))
 		if pkVariations < 2^32 {
 			// Low partition key variation can lead to having staled partitions
 			// Let's detect and mark them before running test
 			g.FindAndMarkStalePartitions()
 		}
-		gs = append(gs, g)
+
+		gens.generators = append(gens.generators, g)
+
+		go func(g *Generator) {
+			defer gens.wg.Done()
+
+			g.Start(ctx)
+		}(&g)
 	}
-	return gs, nil
+
+	return gens, nil
 }

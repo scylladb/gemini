@@ -45,6 +45,8 @@ type Interface interface {
 	ReleaseToken(uint64)
 }
 
+var _ Interface = &Generator{}
+
 type Generator struct {
 	logger            *zap.Logger
 	table             *typedef.Table
@@ -64,14 +66,6 @@ func (g *Generator) PartitionCount() uint64 {
 	return g.partitionCount
 }
 
-type Generators []*Generator
-
-func (g Generators) StartAll(ctx context.Context) {
-	for _, gen := range g {
-		gen.Start(ctx)
-	}
-}
-
 type Config struct {
 	PartitionsDistributionFunc DistributionFunc
 	PartitionsRangeConfig      typedef.PartitionRangeConfig
@@ -80,9 +74,10 @@ type Config struct {
 	PkUsedBufferSize           uint64
 }
 
-func NewGenerator(table *typedef.Table, config *Config, logger *zap.Logger) *Generator {
-	wakeUpSignal := make(chan struct{})
-	return &Generator{
+func NewGenerator(table *typedef.Table, config Config, logger *zap.Logger) Generator {
+	wakeUpSignal := make(chan struct{}, int(config.PartitionsCount))
+
+	return Generator{
 		partitions:        NewPartitions(int(config.PartitionsCount), int(config.PkUsedBufferSize), wakeUpSignal),
 		partitionCount:    config.PartitionsCount,
 		table:             table,
@@ -131,21 +126,15 @@ func (g *Generator) ReleaseToken(token uint64) {
 }
 
 func (g *Generator) Start(ctx context.Context) {
-	go func() {
-		g.logger.Info("starting partition key generation loop")
-		defer g.partitions.CloseAll()
-		for {
-			g.fillAllPartitions(ctx)
-			select {
-			case <-ctx.Done():
-				g.logger.Debug("stopping partition key generation loop",
-					zap.Uint64("keys_created", g.cntCreated),
-					zap.Uint64("keys_emitted", g.cntEmitted))
-				return
-			case <-g.wakeUpSignal:
-			}
-		}
+	g.logger.Info("starting partition key generation loop")
+	defer func() {
+		g.partitions.Close()
+		g.logger.Debug("stopping partition key generation loop",
+			zap.Uint64("keys_created", g.cntCreated),
+			zap.Uint64("keys_emitted", g.cntEmitted))
 	}()
+
+	g.fillAllPartitions(ctx)
 }
 
 func (g *Generator) FindAndMarkStalePartitions() {
@@ -183,35 +172,41 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 		}
 		return true
 	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case <-g.wakeUpSignal:
 		}
 
-		values := CreatePartitionKeyValues(g.table, g.r, &g.partitionsConfig)
-		token, err := g.routingKeyCreator.GetHash(g.table, values)
-		if err != nil {
-			g.logger.Panic(errors.Wrap(err, "failed to get primary key hash").Error())
-		}
-		g.cntCreated++
-		idx := token % g.partitionCount
-		partition := g.partitions[idx]
-		if partition.Stale() || partition.inFlight.Has(token) {
-			continue
-		}
-		select {
-		case partition.values <- &typedef.ValueWithToken{Token: token, Value: values}:
-			g.cntEmitted++
-		default:
-			if !pFilled[idx] {
-				pFilled[idx] = true
-				if allFilled() {
-					return
+		for !allFilled() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			values := CreatePartitionKeyValues(g.table, g.r, &g.partitionsConfig)
+			token, err := g.routingKeyCreator.GetHash(g.table, values)
+			if err != nil {
+				g.logger.Panic(errors.Wrap(err, "failed to get primary key hash").Error())
+			}
+			g.cntCreated++
+			idx := token % g.partitionCount
+			partition := g.partitions[idx]
+			if partition.Stale() || partition.inFlight.Has(token) {
+				continue
+			}
+			select {
+			case partition.values <- &typedef.ValueWithToken{Token: token, Value: values}:
+				g.cntEmitted++
+			default:
+				if !pFilled[idx] {
+					pFilled[idx] = true
 				}
 			}
 		}
+
 	}
 }
 

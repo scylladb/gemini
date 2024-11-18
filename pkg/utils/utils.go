@@ -17,11 +17,12 @@ package utils
 import (
 	"encoding/hex"
 	"fmt"
-	"github.com/pkg/errors"
-	"golang.org/x/exp/constraints"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
+	"golang.org/x/exp/constraints"
 
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"

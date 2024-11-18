@@ -1,5 +1,7 @@
 package jobs
 
+import "strings"
+
 type Mode []string
 
 const (
@@ -13,11 +15,15 @@ func (m Mode) IsWrite() bool {
 }
 
 func (m Mode) IsRead() bool {
+	if len(m) == 1 {
+		return m[0] == ReadMode
+	}
+
 	return m[0] == ReadMode || m[1] == ReadMode
 }
 
 func ModeFromString(m string) Mode {
-	switch m {
+	switch strings.ToLower(m) {
 	case WriteMode:
 		return Mode{WriteMode}
 	case ReadMode:
@@ -25,6 +31,6 @@ func ModeFromString(m string) Mode {
 	case MixedMode:
 		return Mode{WriteMode, ReadMode}
 	default:
-		return Mode{}
+		panic("unknown mode " + m)
 	}
 }

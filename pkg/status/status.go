@@ -43,15 +43,11 @@ type GlobalStatus struct {
 }
 
 func (gs *GlobalStatus) AddWriteError(err *joberror.JobError) {
-	// TODO: https://github.com/scylladb/gemini/issues/302 - Move out and add logging
-	fmt.Printf("Error detected: %#v", err)
 	gs.Errors.AddError(err)
 	gs.WriteErrors.Add(1)
 }
 
 func (gs *GlobalStatus) AddReadError(err *joberror.JobError) {
-	// TODO: https://github.com/scylladb/gemini/issues/302 - Move out and add logging
-	fmt.Printf("Error detected: %#v", err)
 	gs.Errors.AddError(err)
 	gs.ReadErrors.Add(1)
 }
@@ -61,7 +57,6 @@ func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, v
 		"result":         gs,
 		"gemini_version": version,
 		"schemaHash":     schema.GetHash(),
-		"schema":         schema,
 	}
 	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
@@ -94,8 +89,6 @@ func (gs *GlobalStatus) PrintResult(w io.Writer, schema *typedef.Schema, version
 		for i, err := range gs.Errors.Errors() {
 			fmt.Printf("Error %d: %s\n", i, err)
 		}
-		jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
-		fmt.Printf("Schema: %v\n", string(jsonSchema))
 	}
 }
 
