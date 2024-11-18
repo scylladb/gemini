@@ -78,8 +78,8 @@ GEMINI_BINARY ?= $(PWD)/bin/gemini
 GEMINI_TEST_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-test)
 GEMINI_ORACLE_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-oracle)
 GEMINI_DOCKER_NETWORK ?= gemini
-GEMINI_FLAGS =	--fail-fast \
-	--level=debug \
+GEMINI_FLAGS =--fail-fast \
+	--level=info \
 	--non-interactive \
 	--consistency=LOCAL_QUORUM \
 	--test-host-selection-policy=token-aware \
