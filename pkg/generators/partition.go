@@ -51,7 +51,11 @@ func (s *Partition) Stale() bool {
 // get returns a new value and ensures that it's corresponding token
 // is not already in-flight.
 func (s *Partition) get() *typedef.ValueWithToken {
-	return s.pick()
+	if v := s.pick(); v != nil && !s.inFlight.Has(v.Token) {
+		return v
+	}
+
+	return nil
 }
 
 // getOld returns a previously used value and token or a new if
@@ -69,12 +73,12 @@ func (s *Partition) getOld() *typedef.ValueWithToken {
 // is empty in which case it removes the corresponding token from the
 // in-flight tracking.
 func (s *Partition) giveOld(v *typedef.ValueWithToken) {
-	ch := s.safelyGetOldValuesChannel()
-	if ch == nil {
+	if s.closed.Load() {
 		return
 	}
+
 	select {
-	case ch <- v:
+	case s.oldValues <- v:
 	default:
 		// Old partition buffer is full, just drop the value
 	}
@@ -94,28 +98,15 @@ func (s *Partition) wakeUp() {
 
 func (s *Partition) pick() *typedef.ValueWithToken {
 	select {
-	case val, more := <-s.values:
-		if !more {
-			return nil
-		}
+	case val := <-s.values:
 		if len(s.values) <= cap(s.values)/4 {
 			s.wakeUp() // channel at 25% capacity, trigger generator
 		}
 		return val
 	default:
 		s.wakeUp() // channel empty, need to wait for new values
-		return <-s.values
-	}
-}
-
-func (s *Partition) safelyGetOldValuesChannel() chan *typedef.ValueWithToken {
-	if s.closed.Load() {
-		// Since only giveOld could have been potentially called after partition is closed
-		// we need to protect it against writing to closed channel
 		return nil
 	}
-
-	return s.oldValues
 }
 
 func (s *Partition) Close() error {

@@ -25,13 +25,13 @@ import (
 
 type Generators struct {
 	wg         sync.WaitGroup
-	generators []Generator
+	generators []*Generator
 	cancel     context.CancelFunc
 	idx        int
 }
 
 func (g *Generators) Get() *Generator {
-	gen := &g.generators[g.idx%len(g.generators)]
+	gen := g.generators[g.idx%len(g.generators)]
 	g.idx++
 	return gen
 }
@@ -56,11 +56,11 @@ func New(
 	ctx, cancel := context.WithCancel(ctx)
 
 	gens := &Generators{
-		generators: make([]Generator, 0, len(schema.Tables)),
+		generators: make([]*Generator, 0, len(schema.Tables)),
 		cancel:     cancel,
 	}
-
 	gens.wg.Add(len(schema.Tables))
+
 	for _, table := range schema.Tables {
 		pkVariations := table.PartitionKeys.ValueVariationsNumber(&partitionRangeConfig)
 
@@ -72,6 +72,10 @@ func New(
 			PkUsedBufferSize:           pkBufferReuseSize,
 		}
 		g := NewGenerator(table, tablePartConfig, logger.Named("generators"))
+		go func() {
+			defer gens.wg.Done()
+			g.start(ctx)
+		}()
 		if pkVariations < 2^32 {
 			// Low partition key variation can lead to having staled partitions
 			// Let's detect and mark them before running test
@@ -79,12 +83,6 @@ func New(
 		}
 
 		gens.generators = append(gens.generators, g)
-
-		go func(g *Generator) {
-			defer gens.wg.Done()
-
-			g.Start(ctx)
-		}(&g)
 	}
 
 	return gens, nil

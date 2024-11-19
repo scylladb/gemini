@@ -16,6 +16,10 @@ package main
 
 import (
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"log"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strconv"
@@ -49,6 +53,8 @@ func interactive() bool {
 }
 
 func run(_ *cobra.Command, _ []string) error {
+	start := time.Now()
+
 	logger := createLogger(level)
 	globalStatus := status.NewGlobalStatus(1000)
 	defer utils.IgnoreError(logger.Sync)
@@ -79,23 +85,23 @@ func run(_ *cobra.Command, _ []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGABRT, syscall.SIGTERM)
 	defer cancel()
 
-	//go func() {
-	//	mux := http.NewServeMux()
-	//	mux.Handle("GET /metrics", promhttp.Handler())
-	//	log.Fatal(http.ListenAndServe(bind, mux))
-	//}()
-	//
-	//if profilingPort != 0 {
-	//	go func() {
-	//		mux := http.NewServeMux()
-	//		mux.HandleFunc("GET /debug/pprof/", pprof.Index)
-	//		mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
-	//		mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
-	//		mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
-	//		mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
-	//		log.Fatal(http.ListenAndServe(":"+strconv.Itoa(profilingPort), mux))
-	//	}()
-	//}
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("GET /metrics", promhttp.Handler())
+		log.Fatal(http.ListenAndServe(bind, mux))
+	}()
+
+	if profilingPort != 0 {
+		go func() {
+			mux := http.NewServeMux()
+			mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+			mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+			mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+			mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+			mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+			log.Fatal(http.ListenAndServe(":"+strconv.Itoa(profilingPort), mux))
+		}()
+	}
 
 	outFile, err := createFile(outFileArg, os.Stdout)
 	if err != nil {
@@ -153,7 +159,7 @@ func run(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	//defer utils.IgnoreError(st.Close)
+	defer utils.IgnoreError(st.Close)
 
 	if dropSchema && mode != jobs.ReadMode {
 		for _, stmt := range generators.GetDropKeyspace(schema) {
@@ -218,7 +224,7 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 
 	logger.Info("test finished")
-	globalStatus.PrintResult(outFile, schema, version)
+	globalStatus.PrintResult(outFile, schema, version, start)
 
 	if globalStatus.HasErrors() {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")

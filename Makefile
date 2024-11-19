@@ -91,12 +91,9 @@ GEMINI_FLAGS =--fail-fast \
 	--use-server-timestamps=false \
 	--async-objects-stabilization-attempts=10 \
 	--max-mutation-retries=10 \
-	--async-objects-stabilization-backoff=1000ms \
-	--max-mutation-retries-backoff=1000ms \
 	--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 	--oracle-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 	--concurrency=$(CONCURRENCY) \
-	--use-lwt=true \
 	--dataset-size=$(DATASET_SIZE) \
 	--seed=$(SEED) \
 	--schema-seed=$(SEED) \
@@ -108,7 +105,7 @@ GEMINI_FLAGS =--fail-fast \
 
 .PHONY: pprof-profile
 pprof-profile:
-	go tool pprof -http=:8080 -seconds 60 http://localhost:6060/debug/pprof/profile
+	go tool pprof -http=:8080 http://localhost:6060/debug/pprof/profile
 
 .PHONY: pprof-heap
 pprof-heap:
@@ -125,10 +122,6 @@ pprof-block:
 .PHONY: pprof-mutex
 pprof-mutex:
 	go tool pprof -http=:8084 http://localhost:6060/debug/pprof/mutex
-
-.PHONY: pprof-trace
-pprof-trace:
-	go tool pprof -http=:8085 -seconds 60 http://localhost:6060/debug/pprof/trace
 
 .PHONY: docker-integration-test
 docker-integration-test:

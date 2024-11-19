@@ -16,6 +16,7 @@ package generators
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -58,8 +59,8 @@ type Generator struct {
 	partitionsConfig  typedef.PartitionRangeConfig
 	partitionCount    uint64
 
-	cntCreated uint64
-	cntEmitted uint64
+	cntCreated atomic.Uint64
+	cntEmitted atomic.Uint64
 }
 
 func (g *Generator) PartitionCount() uint64 {
@@ -74,10 +75,10 @@ type Config struct {
 	PkUsedBufferSize           uint64
 }
 
-func NewGenerator(table *typedef.Table, config Config, logger *zap.Logger) Generator {
+func NewGenerator(table *typedef.Table, config Config, logger *zap.Logger) *Generator {
 	wakeUpSignal := make(chan struct{}, int(config.PartitionsCount))
 
-	return Generator{
+	return &Generator{
 		partitions:        NewPartitions(int(config.PartitionsCount), int(config.PkUsedBufferSize), wakeUpSignal),
 		partitionCount:    config.PartitionsCount,
 		table:             table,
@@ -91,12 +92,18 @@ func NewGenerator(table *typedef.Table, config Config, logger *zap.Logger) Gener
 }
 
 func (g *Generator) Get() *typedef.ValueWithToken {
-	targetPart := g.GetPartitionForToken(g.idxFunc())
-	for targetPart.Stale() {
-		targetPart = g.GetPartitionForToken(g.idxFunc())
+	var out *typedef.ValueWithToken
+
+	for out == nil {
+		targetPart := g.GetPartitionForToken(g.idxFunc())
+		for targetPart.Stale() {
+			targetPart = g.GetPartitionForToken(g.idxFunc())
+		}
+		out = targetPart.get()
 	}
-	out := targetPart.get()
+
 	return out
+
 }
 
 func (g *Generator) GetPartitionForToken(token TokenIndex) *Partition {
@@ -106,11 +113,17 @@ func (g *Generator) GetPartitionForToken(token TokenIndex) *Partition {
 // GetOld returns a previously used value and token or a new if
 // the old queue is empty.
 func (g *Generator) GetOld() *typedef.ValueWithToken {
-	targetPart := g.GetPartitionForToken(g.idxFunc())
-	for targetPart.Stale() {
-		targetPart = g.GetPartitionForToken(g.idxFunc())
+	var out *typedef.ValueWithToken
+
+	for out == nil {
+		targetPart := g.GetPartitionForToken(g.idxFunc())
+		for targetPart.Stale() {
+			targetPart = g.GetPartitionForToken(g.idxFunc())
+		}
+		out = targetPart.getOld()
 	}
-	return targetPart.getOld()
+
+	return out
 }
 
 // GiveOld returns the supplied value for later reuse
@@ -125,16 +138,27 @@ func (g *Generator) ReleaseToken(token uint64) {
 	g.GetPartitionForToken(TokenIndex(token)).releaseToken(token)
 }
 
-func (g *Generator) Start(ctx context.Context) {
+func (g *Generator) start(ctx context.Context) {
 	g.logger.Info("starting partition key generation loop")
 	defer func() {
-		g.partitions.Close()
-		g.logger.Debug("stopping partition key generation loop",
-			zap.Uint64("keys_created", g.cntCreated),
-			zap.Uint64("keys_emitted", g.cntEmitted))
+		g.logger.Info("stopping partition key generation loop",
+			zap.Uint64("keys_created", g.cntCreated.Load()),
+			zap.Uint64("keys_emitted", g.cntEmitted.Load()),
+		)
+
+		if err := g.partitions.Close(); err != nil {
+			g.logger.Error("failed to close partitions", zap.Error(err))
+		}
 	}()
 
-	g.fillAllPartitions(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-g.wakeUpSignal:
+			g.fillAllPartitions(ctx)
+		}
+	}
 }
 
 func (g *Generator) FindAndMarkStalePartitions() {
@@ -156,57 +180,41 @@ func (g *Generator) FindAndMarkStalePartitions() {
 	}
 }
 
+func (g *Generator) fillPartition() {
+	// Be a bit smarter on how to fill partitions
+
+	values := CreatePartitionKeyValues(g.table, g.r, &g.partitionsConfig)
+	token, err := g.routingKeyCreator.GetHash(g.table, values)
+	if err != nil {
+		g.logger.Panic("failed to get primary key hash", zap.Error(err))
+	}
+	g.cntCreated.Add(1)
+	idx := token % g.partitionCount
+	partition := g.partitions[idx]
+	if partition.Stale() || partition.inFlight.Has(token) {
+		return
+	}
+	select {
+	case partition.values <- &typedef.ValueWithToken{Token: token, Value: values}:
+		g.cntEmitted.Add(1)
+	default:
+	}
+
+	return
+}
+
 // fillAllPartitions guarantees that each partition was tested to be full
 // at least once since the function started and before it ended.
 // In other words no partition will be starved.
 func (g *Generator) fillAllPartitions(ctx context.Context) {
-	pFilled := make([]bool, len(g.partitions))
-	allFilled := func() bool {
-		for idx, filled := range pFilled {
-			if !filled {
-				if g.partitions[idx].Stale() {
-					continue
-				}
-				return false
-			}
-		}
-		return true
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-g.wakeUpSignal:
+		default:
 		}
 
-		for !allFilled() {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			values := CreatePartitionKeyValues(g.table, g.r, &g.partitionsConfig)
-			token, err := g.routingKeyCreator.GetHash(g.table, values)
-			if err != nil {
-				g.logger.Panic(errors.Wrap(err, "failed to get primary key hash").Error())
-			}
-			g.cntCreated++
-			idx := token % g.partitionCount
-			partition := g.partitions[idx]
-			if partition.Stale() || partition.inFlight.Has(token) {
-				continue
-			}
-			select {
-			case partition.values <- &typedef.ValueWithToken{Token: token, Value: values}:
-				g.cntEmitted++
-			default:
-				if !pFilled[idx] {
-					pFilled[idx] = true
-				}
-			}
-		}
-
+		g.fillPartition()
 	}
 }
 

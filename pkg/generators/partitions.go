@@ -14,7 +14,7 @@ func (p Partitions) Close() error {
 	return err
 }
 
-func NewPartitions(count, pkBufferSize int, wakeUpSignal chan struct{}) Partitions {
+func NewPartitions(count, pkBufferSize int, wakeUpSignal chan<- struct{}) Partitions {
 	partitions := make(Partitions, 0, count)
 
 	for i := 0; i < count; i++ {
