@@ -17,7 +17,6 @@ require (
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20241108190413-2d47ceb2692f
 	golang.org/x/net v0.31.0
-	golang.org/x/sync v0.9.0
 	gonum.org/v1/gonum v0.15.1
 	gopkg.in/inf.v0 v0.9.1
 )
@@ -42,4 +41,4 @@ require (
 	google.golang.org/protobuf v1.35.2 // indirect
 )
 
-replace github.com/gocql/gocql => github.com/scylladb/gocql v1.14.3
+replace github.com/gocql/gocql => github.com/scylladb/gocql v1.14.4

@@ -20,7 +20,7 @@ define dl_tgz
 		chmod +x "$(GOBIN)/$(1)"; \
 	fi
 endef
-
+	
 $(GOBIN)/golangci-lint: GOLANGCI_VERSION = 1.62.0
 $(GOBIN)/golangci-lint: Makefile
 	$(call dl_tgz,golangci-lint,https://github.com/golangci/golangci-lint/releases/download/v$(GOLANGCI_VERSION)/golangci-lint-$(GOLANGCI_VERSION)-$(GOOS)-amd64.tar.gz)
@@ -131,6 +131,7 @@ docker-integration-test:
 	docker run \
 		-it \
 		--rm \
+		--memory=4G \
 		-p 6060:6060 \
 		--name gemini \
 		--network $(GEMINI_DOCKER_NETWORK) \

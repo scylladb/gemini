@@ -16,7 +16,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
 	"net/http"
 	"net/http/pprof"
@@ -28,6 +27,16 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/gocql/gocql"
+	"github.com/hailocab/go-hostpool"
+	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"golang.org/x/exp/rand"
+	"golang.org/x/net/context"
+
 	"github.com/scylladb/gemini/pkg/auth"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/jobs"
@@ -37,15 +46,6 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 
 	"github.com/scylladb/gemini/pkg/status"
-
-	"github.com/gocql/gocql"
-	"github.com/hailocab/go-hostpool"
-	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	"golang.org/x/exp/rand"
-	"golang.org/x/net/context"
 )
 
 func interactive() bool {

@@ -16,6 +16,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -113,7 +114,7 @@ func (l *Runner) Run(ctx context.Context) error {
 func (l *Runner) startMutation(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, src rand.Source, name string, deletes, ddl bool) {
 	logger := l.logger.Named(name)
 
-	err := l.start(ctx, wg, rand.New(src), func(rnd *rand.Rand) Job {
+	err := l.start(ctx, cancel, wg, rand.New(src), func(rnd *rand.Rand) Job {
 		return NewMutation(
 			logger,
 			l.schema,
@@ -134,7 +135,7 @@ func (l *Runner) startMutation(ctx context.Context, cancel context.CancelFunc, w
 }
 
 func (l *Runner) startValidation(ctx context.Context, wg *sync.WaitGroup, cancel context.CancelFunc, src rand.Source) {
-	err := l.start(ctx, wg, rand.New(src), func(rnd *rand.Rand) Job {
+	err := l.start(ctx, cancel, wg, rand.New(src), func(rnd *rand.Rand) Job {
 		return NewValidation(
 			l.logger,
 			l.schema,
@@ -152,7 +153,7 @@ func (l *Runner) startValidation(ctx context.Context, wg *sync.WaitGroup, cancel
 	}
 }
 
-func (l *Runner) start(ctx context.Context, wg *sync.WaitGroup, rnd *rand.Rand, job func(*rand.Rand) Job) error {
+func (l *Runner) start(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, rnd *rand.Rand, job func(*rand.Rand) Job) error {
 	wg.Add(int(l.workers))
 
 	for _, table := range l.schema.Tables {
@@ -162,7 +163,15 @@ func (l *Runner) start(ctx context.Context, wg *sync.WaitGroup, rnd *rand.Rand, 
 			go func(j Job) {
 				defer wg.Done()
 				if err := j.Do(ctx, gen, table); err != nil {
+					if errors.Is(err, context.Canceled) {
+						return
+					}
+
 					l.logger.Error("job failed", zap.String("table", table.Name), zap.Error(err))
+
+					if l.failFast {
+						cancel()
+					}
 				}
 			}(j)
 		}

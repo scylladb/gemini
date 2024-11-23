@@ -71,7 +71,7 @@ func (m *Mutation) Do(ctx context.Context, generator generators.Interface, table
 		select {
 		case <-ctx.Done():
 			m.logger.Debug("mutation job terminated")
-			return nil
+			return context.Canceled
 		default:
 		}
 
@@ -84,11 +84,7 @@ func (m *Mutation) Do(ctx context.Context, generator generators.Interface, table
 		}
 
 		if err != nil {
-			return err
-		}
-
-		if m.failFast && m.mutation.HasErrors() {
-			return nil
+			return errors.WithStack(err)
 		}
 	}
 }
@@ -99,17 +95,17 @@ func (m *mutation) Statement(ctx context.Context, generator generators.Interface
 	if err != nil {
 		m.logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		m.globalStatus.WriteErrors.Add(1)
-		return err
+		return errors.WithStack(err)
 	}
 
 	if w := m.logger.Check(zap.DebugLevel, "mutation statement"); w != nil {
 		prettyCQL, prettyCQLErr := mutateStmt.PrettyCQL()
 		if prettyCQLErr != nil {
-			return PrettyCQLError{
+			return errors.WithStack(PrettyCQLError{
 				PrettyCQL: prettyCQLErr,
 				Stmt:      mutateStmt,
 				Err:       err,
-			}
+			})
 		}
 
 		w.Write(zap.String("pretty_cql", prettyCQL))
@@ -122,11 +118,11 @@ func (m *mutation) Statement(ctx context.Context, generator generators.Interface
 
 		prettyCQL, prettyCQLErr := mutateStmt.PrettyCQL()
 		if prettyCQLErr != nil {
-			return PrettyCQLError{
+			return errors.WithStack(PrettyCQLError{
 				PrettyCQL: prettyCQLErr,
 				Stmt:      mutateStmt,
 				Err:       err,
-			}
+			})
 		}
 
 		m.globalStatus.AddWriteError(&joberror.JobError{
