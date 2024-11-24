@@ -53,7 +53,7 @@ dockers:
     goos: linux
     id: gemini-amd64
     build_flag_templates:
-      - '--platform=linux/amd64'
+      - '--platform=linux/amd64/v3'
       - '--target=production-goreleaser'
 
   - image_templates:
