@@ -1,0 +1,32 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Debug Gemini Docker" type="docker-deploy" factoryName="dockerfile" server-name="Docker">
+    <deployment type="dockerfile">
+      <settings>
+        <option name="imageTag" value="scylladb/gemini:dev" />
+        <option name="attachToContainerNeeded" value="true" />
+        <option name="buildCliOptions" value="--compress --target debug --platform linux/amd64/v3" />
+        <option name="command" value="--fail-fast --level=info --non-interactive --consistency=LOCAL_QUORUM --test-host-selection-policy=token-aware --oracle-host-selection-policy=token-aware --mode=mixed --non-interactive --request-timeout=5s --connect-timeout=15s --use-server-timestamps=false --async-objects-stabilization-attempts=10 --max-mutation-retries=10 --replication-strategy=&quot;{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}&quot; --oracle-replication-strategy=&quot;{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}&quot; --concurrency=16 --dataset-size=large --seed=93 --schema-seed=93 --cql-features=normal --duration=15m --warmup=1m --profiling-port=6060 --drop-schema=true --test-cluster=gemini-test --oracle-cluster=gemini-oracle --outfile=stdout --verbose=true --test-statement-log-file=/test.log --oracle-statement-log-file=/oracle.log" />
+        <option name="containerName" value="gemini" />
+        <option name="portBindings">
+          <list>
+            <DockerPortBindingImpl>
+              <option name="containerPort" value="6060" />
+              <option name="hostPort" value="6060" />
+            </DockerPortBindingImpl>
+            <DockerPortBindingImpl>
+              <option name="containerPort" value="2112" />
+              <option name="hostPort" value="2112" />
+            </DockerPortBindingImpl>
+            <DockerPortBindingImpl>
+              <option name="containerPort" value="2345" />
+              <option name="hostPort" value="2345" />
+            </DockerPortBindingImpl>
+          </list>
+        </option>
+        <option name="commandLineOptions" value="-m 4G -w / --network gemini" />
+        <option name="sourceFilePath" value="Dockerfile" />
+      </settings>
+    </deployment>
+    <method v="2" />
+  </configuration>
+</component>

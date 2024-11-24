@@ -1,0 +1,13 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Cassandra Oracle" type="docker-deploy" factoryName="docker-compose.yml" server-name="Docker">
+    <deployment type="docker-compose.yml">
+      <settings>
+        <option name="envFilePath" value="" />
+        <option name="removeVolumesOnComposeDown" value="true" />
+        <option name="sourceFilePath" value="docker/docker-compose-cassandra.yml" />
+        <option name="upTimeout" value="60" />
+      </settings>
+    </deployment>
+    <method v="2" />
+  </configuration>
+</component>
