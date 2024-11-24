@@ -40,7 +40,7 @@ const (
 
 type (
 	StmtToFile interface {
-		LogStmt(stmt *typedef.Stmt, ts ...time.Time)
+		LogStmt(stmt *typedef.Stmt, ts ...time.Time) error
 		Close() error
 	}
 
@@ -88,11 +88,10 @@ func NewLogger(w io.Writer) (StmtToFile, error) {
 	return out, nil
 }
 
-func (fl *logger) LogStmt(stmt *typedef.Stmt, ts ...time.Time) {
+func (fl *logger) LogStmt(stmt *typedef.Stmt, ts ...time.Time) error {
 	buffer := fl.pool.Get().(*bytes.Buffer)
 	if err := stmt.PrettyCQLBuffered(buffer); err != nil {
-		log.Printf("failed to pretty print query: %s", err)
-		return
+		return err
 	}
 
 	opType := stmt.QueryType.OpType()
@@ -107,6 +106,8 @@ func (fl *logger) LogStmt(stmt *typedef.Stmt, ts ...time.Time) {
 	if fl.active.Load() {
 		fl.channel <- buffer
 	}
+
+	return nil
 }
 
 func (fl *logger) Close() error {
@@ -167,6 +168,6 @@ func (fl *logger) committer(ctx context.Context) {
 
 type nopFileLogger struct{}
 
-func (n *nopFileLogger) LogStmt(_ *typedef.Stmt, _ ...time.Time) {}
+func (n *nopFileLogger) LogStmt(_ *typedef.Stmt, _ ...time.Time) error { return nil }
 
 func (n *nopFileLogger) Close() error { return nil }

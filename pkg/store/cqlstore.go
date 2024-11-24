@@ -16,10 +16,8 @@ package store
 
 import (
 	"context"
-	"os"
+	"io"
 	"time"
-
-	errs "errors"
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
@@ -47,63 +45,62 @@ func (cs *cqlStore) name() string {
 	return cs.system
 }
 
-func (cs *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) (err error) {
-	var i int
-	for i = 0; i < cs.maxRetriesMutate; i++ {
-		// retry with new timestamp as list modification with the same ts
-		// will produce duplicated values, see https://github.com/scylladb/scylladb/issues/7937
-		err = cs.doMutate(ctx, stmt, time.Now())
-		if err == nil {
+func (cs *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) error {
+	for range cs.maxRetriesMutate {
+		if err := cs.doMutate(ctx, stmt); err == nil {
 			cs.ops.WithLabelValues(cs.system, opType(stmt)).Inc()
 			return nil
 		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(cs.maxRetriesMutateSleep):
 		}
 	}
-	if w := cs.logger.Check(zap.ErrorLevel, "failed to apply mutation"); w != nil {
-		w.Write(zap.Int("attempts", i), zap.Error(err))
-	}
-	return err
+
+	return errors.Errorf("failed to mutate after %d retries", cs.maxRetriesMutate)
 }
 
-func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Time) error {
+func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt) error {
 	queryBody, _ := stmt.Query.ToCql()
-	query := cs.session.Query(queryBody, stmt.Values...).WithContext(ctx)
+	query := cs.session.Query(queryBody, stmt.Values...).WithContext(ctx).DefaultTimestamp(false)
 	defer query.Release()
 
-	if cs.useServerSideTimestamps {
-		query = query.DefaultTimestamp(false)
-		cs.stmtLogger.LogStmt(stmt)
-	} else {
-		query = query.WithTimestamp(ts.UnixNano() / 1000)
-		cs.stmtLogger.LogStmt(stmt, ts)
+	var ts time.Time
+
+	if !cs.useServerSideTimestamps {
+		ts = time.Now()
+		query = query.WithTimestamp(ts.UnixMicro())
 	}
 
 	if err := query.Exec(); err != nil {
-		if errs.Is(err, context.DeadlineExceeded) {
-			if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for mutation query"); w != nil {
-				w.Write(zap.String("system", cs.system), zap.String("query", queryBody), zap.Error(err))
-			}
-		}
-		if !ignore(err) {
-			return errors.Wrapf(err, "[cluster = %s, query = '%s']", cs.system, queryBody)
-		}
+		return errors.Wrapf(err, "[cluster = %s, query = '%s']", cs.system, queryBody)
 	}
+
+	if err := cs.stmtLogger.LogStmt(stmt, ts); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (result []map[string]any, err error) {
+func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) ([]map[string]any, error) {
 	cql, _ := stmt.Query.ToCql()
-	cs.stmtLogger.LogStmt(stmt)
+
 	query := cs.session.Query(cql, stmt.Values...).WithContext(ctx)
 	defer query.Release()
 
 	iter := query.Iter()
 	cs.ops.WithLabelValues(cs.system, opType(stmt)).Inc()
-	return loadSet(iter), iter.Close()
+
+	result := loadSet(iter)
+
+	if err := cs.stmtLogger.LogStmt(stmt); err != nil {
+		return nil, err
+	}
+
+	return result, iter.Close()
 }
 
 func (cs *cqlStore) close() error {
@@ -111,7 +108,7 @@ func (cs *cqlStore) close() error {
 	return nil
 }
 
-func newSession(cluster *gocql.ClusterConfig, out *os.File) (*gocql.Session, error) {
+func newSession(cluster *gocql.ClusterConfig, out io.Writer) (*gocql.Session, error) {
 	session, err := cluster.CreateSession()
 	if err != nil {
 		return nil, err

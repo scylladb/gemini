@@ -17,8 +17,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/big"
-	"os"
 	"reflect"
 	"sort"
 	"sync"
@@ -71,7 +71,7 @@ type Config struct {
 	UseServerSideTimestamps bool
 }
 
-func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut *os.File, logger *zap.Logger) (Store, error) {
+func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut io.Writer, logger *zap.Logger) (Store, error) {
 	ops := promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gemini_cql_requests",
 		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
@@ -132,15 +132,20 @@ type delegatingStore struct {
 }
 
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error {
-	if ds.statementLogger != nil {
-		ds.statementLogger.LogStmt(testBuilder)
-	}
 	if err := mutate(ctx, ds.oracleStore, oracleBuilder); err != nil {
 		return errors.Wrap(err, "oracle failed store creation")
 	}
+
 	if err := mutate(ctx, ds.testStore, testBuilder); err != nil {
 		return errors.Wrap(err, "test failed store creation")
 	}
+
+	if ds.statementLogger != nil {
+		if err := ds.statementLogger.LogStmt(testBuilder); err != nil {
+			return errors.Wrap(err, "failed to log test create statement")
+		}
+	}
+
 	return nil
 }
 
@@ -184,8 +189,8 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt 
 	wg.Add(1)
 
 	go func() {
+		defer wg.Done()
 		testRows, testErr = ds.testStore.load(ctx, stmt)
-		wg.Done()
 	}()
 	oracleRows, oracleErr = ds.oracleStore.load(ctx, stmt)
 	if oracleErr != nil {
@@ -258,7 +263,7 @@ func getStore(
 	clusterConfig *gocql.ClusterConfig,
 	cfg Config,
 	stmtLogFile string,
-	traceOut *os.File,
+	traceOut io.Writer,
 	logger *zap.Logger,
 	ops *prometheus.CounterVec,
 ) (out storeLoader, err error) {
