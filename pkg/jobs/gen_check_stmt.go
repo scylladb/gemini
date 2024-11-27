@@ -28,7 +28,7 @@ import (
 func GenCheckStmt(
 	s *typedef.Schema,
 	table *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	rnd *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 ) *typedef.Stmt {
@@ -114,7 +114,7 @@ func GenCheckStmt(
 func genSinglePartitionQuery(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 ) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
@@ -144,7 +144,7 @@ func genSinglePartitionQuery(
 func genSinglePartitionQueryMv(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	mvNum int,
@@ -183,7 +183,7 @@ func genSinglePartitionQueryMv(
 func genMultiplePartitionQuery(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	numQueryPKs int,
 ) *typedef.Stmt {
 	t.RLock()
@@ -223,7 +223,7 @@ func genMultiplePartitionQuery(
 func genMultiplePartitionQueryMv(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	mvNum, numQueryPKs int,
@@ -274,7 +274,7 @@ func genMultiplePartitionQueryMv(
 func genClusteringRangeQuery(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	maxClusteringRels int,
@@ -321,7 +321,7 @@ func genClusteringRangeQuery(
 func genClusteringRangeQueryMv(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	mvNum, maxClusteringRels int,
@@ -374,7 +374,7 @@ func genClusteringRangeQueryMv(
 func genMultiplePartitionClusteringRangeQuery(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	numQueryPKs, maxClusteringRels int,
@@ -435,7 +435,7 @@ func genMultiplePartitionClusteringRangeQuery(
 func genMultiplePartitionClusteringRangeQueryMv(
 	s *typedef.Schema,
 	t *typedef.Table,
-	g generators.GeneratorInterface,
+	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	mvNum, numQueryPKs, maxClusteringRels int,
@@ -516,7 +516,7 @@ func genMultiplePartitionClusteringRangeQueryMv(
 func genSingleIndexQuery(
 	s *typedef.Schema,
 	t *typedef.Table,
-	_ generators.GeneratorInterface,
+	_ generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	idxCount int,
