@@ -22,8 +22,8 @@ import (
 )
 
 type SchemaConfig struct {
-	ReplicationStrategy              *replication.Replication
-	OracleReplicationStrategy        *replication.Replication
+	ReplicationStrategy              replication.Replication
+	OracleReplicationStrategy        replication.Replication
 	TableOptions                     []tableopts.Option
 	MaxTables                        int
 	MaxPartitionKeys                 int

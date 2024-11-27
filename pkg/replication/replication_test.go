@@ -23,7 +23,7 @@ import (
 func TestToCQL(t *testing.T) {
 	t.Parallel()
 	tests := map[string]struct {
-		rs   *replication.Replication
+		rs   replication.Replication
 		want string
 	}{
 		"simple": {

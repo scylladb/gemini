@@ -107,7 +107,7 @@ func (l List) Run(
 	schemaConfig typedef.SchemaConfig,
 	s store.Store,
 	pump <-chan time.Duration,
-	generators []*generators.Generator,
+	generators *generators.Generators,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
 	seed uint64,
@@ -124,19 +124,19 @@ func (l List) Run(
 
 	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 	logger.Info("start jobs")
-	for j := range schema.Tables {
-		gen := generators[j]
-		table := schema.Tables[j]
+	for j, table := range schema.Tables {
+		generator := &generators.Gens[j]
 		for i := 0; i < int(l.workers); i++ {
 			for idx := range l.jobs {
 				jobF := l.jobs[idx].function
 				r := rand.New(rand.NewSource(seed))
 				g.Go(func() error {
-					return jobF(gCtx, pump, schema, schemaConfig, table, s, r, &partitionRangeConfig, gen, globalStatus, logger, stopFlag, failFast, verbose)
+					return jobF(gCtx, pump, schema, schemaConfig, table, s, r, &partitionRangeConfig, generator, globalStatus, logger, stopFlag, failFast, verbose)
 				})
 			}
 		}
 	}
+
 	return g.Wait()
 }
 

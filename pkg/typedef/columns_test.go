@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scylladb/gemini/pkg/replication"
+
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"golang.org/x/exp/rand"
@@ -253,14 +255,16 @@ func TestValidColumnsForDelete(t *testing.T) {
 
 func getTestSchema(r *rand.Rand) *typedef.Schema {
 	sc := &typedef.SchemaConfig{
-		MaxPartitionKeys:  3,
-		MinPartitionKeys:  2,
-		MaxClusteringKeys: 3,
-		MinClusteringKeys: 2,
-		MaxColumns:        3,
-		MinColumns:        2,
-		MaxTupleParts:     2,
-		MaxUDTParts:       2,
+		ReplicationStrategy:       replication.NewSimpleStrategy(),
+		OracleReplicationStrategy: replication.NewSimpleStrategy(),
+		MaxPartitionKeys:          3,
+		MinPartitionKeys:          2,
+		MaxClusteringKeys:         3,
+		MinClusteringKeys:         2,
+		MaxColumns:                3,
+		MinColumns:                2,
+		MaxTupleParts:             2,
+		MaxUDTParts:               2,
 	}
 	columns := typedef.Columns{
 		&typedef.ColumnDef{
@@ -286,6 +290,11 @@ func getTestSchema(r *rand.Rand) *typedef.Schema {
 	}
 
 	sch := &typedef.Schema{
+		Keyspace: typedef.Keyspace{
+			Replication:       replication.NewSimpleStrategy(),
+			OracleReplication: replication.NewNetworkTopologyStrategy(),
+			Name:              "test_keyspace",
+		},
 		Tables: []*typedef.Table{
 			{
 				Name: "table",

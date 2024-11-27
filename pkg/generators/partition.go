@@ -15,7 +15,9 @@
 package generators
 
 import (
-	"sync"
+	"sync/atomic"
+
+	"go.uber.org/multierr"
 
 	"github.com/scylladb/gemini/pkg/inflight"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -26,18 +28,17 @@ type Partition struct {
 	oldValues    chan *typedef.ValueWithToken
 	inFlight     inflight.InFlight
 	wakeUpSignal chan<- struct{} // wakes up generator
-	closed       bool
-	lock         sync.RWMutex
-	isStale      bool
+	closed       atomic.Bool
+	isStale      atomic.Bool
 }
 
-func (s *Partition) MarkStale() {
-	s.isStale = true
-	s.Close()
+func (s *Partition) MarkStale() error {
+	s.isStale.Store(true)
+	return s.Close()
 }
 
 func (s *Partition) Stale() bool {
-	return s.isStale
+	return s.isStale.Load()
 }
 
 // get returns a new value and ensures that it's corresponding token
@@ -103,39 +104,35 @@ func (s *Partition) pick() *typedef.ValueWithToken {
 }
 
 func (s *Partition) safelyGetOldValuesChannel() chan *typedef.ValueWithToken {
-	s.lock.RLock()
-	if s.closed {
+	if s.closed.Load() {
 		// Since only giveOld could have been potentially called after partition is closed
 		// we need to protect it against writing to closed channel
 		return nil
 	}
-	defer s.lock.RUnlock()
+
 	return s.oldValues
 }
 
-func (s *Partition) Close() {
-	s.lock.RLock()
-	if s.closed {
-		s.lock.RUnlock()
-		return
+func (s *Partition) Close() error {
+	for !s.closed.CompareAndSwap(false, true) { // nolint:revive
+		// Wait until the partition is closed
 	}
-	s.lock.RUnlock()
-	s.lock.Lock()
-	if s.closed {
-		return
-	}
-	s.closed = true
+
 	close(s.values)
 	close(s.oldValues)
-	s.lock.Unlock()
+
+	return nil
 }
 
 type Partitions []*Partition
 
-func (p Partitions) CloseAll() {
+func (p Partitions) Close() error {
+	var err error
 	for _, part := range p {
-		part.Close()
+		err = multierr.Append(err, part.Close())
 	}
+
+	return err
 }
 
 func NewPartitions(count, pkBufferSize int, wakeUpSignal chan struct{}) Partitions {

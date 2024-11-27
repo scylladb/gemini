@@ -21,23 +21,27 @@ import (
 
 type Replication map[string]any
 
-func (r *Replication) ToCQL() string {
+func (r Replication) ToCQL() string {
 	b, _ := json.Marshal(r)
 	return strings.ReplaceAll(string(b), "\"", "'")
 }
 
-func NewSimpleStrategy() *Replication {
-	return &Replication{
+func NewSimpleStrategy() Replication {
+	return Replication{
 		"class":              "SimpleStrategy",
 		"replication_factor": 1,
 	}
 }
 
-func NewNetworkTopologyStrategy() *Replication {
-	return &Replication{
+func NewNetworkTopologyStrategy() Replication {
+	return Replication{
 		"class":       "NetworkTopologyStrategy",
 		"datacenter1": 1,
 	}
+}
+
+func (r Replication) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any(r))
 }
 
 func (r *Replication) UnmarshalJSON(data []byte) error {
@@ -45,6 +49,11 @@ func (r *Replication) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &dataMap); err != nil {
 		return err
 	}
+
+	if dataMap == nil {
+		return nil
+	}
+
 	out := Replication{}
 	for idx := range dataMap {
 		val := dataMap[idx]

@@ -34,9 +34,9 @@ type (
 		Token uint64
 	}
 	Keyspace struct {
-		Replication       *replication.Replication `json:"replication"`
-		OracleReplication *replication.Replication `json:"oracle_replication"`
-		Name              string                   `json:"name"`
+		Replication       replication.Replication `json:"replication"`
+		OracleReplication replication.Replication `json:"oracle_replication"`
+		Name              string                  `json:"name"`
 	}
 
 	IndexDef struct {

@@ -269,17 +269,13 @@ func run(_ *cobra.Command, _ []string) error {
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
 	pump := jobs.NewPump(stopFlag, logger)
 
-	distFunc, err := createDistributionFunc(partitionKeyDistribution, partitionCount, intSeed, normalDistMean, normalDistSigma)
+	distFunc, err := createDistributionFunc(partitionKeyDistribution, partitionCount, intSeed, stdDistMean, oneStdDev)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "Faile to create distribution function: %s", partitionKeyDistribution)
 	}
 
-	gens, err := createGenerators(schema, distFunc, intSeed, partitionCount, logger)
-	if err != nil {
-		return err
-	}
-
-	gens.StartAll(ctx)
+	gens := generators.New(ctx, schema, distFunc, intSeed, partitionCount, pkBufferReuseSize, logger)
+	defer utils.IgnoreError(gens.Close)
 
 	if !nonInteractive {
 		sp := createSpinner(interactive())
@@ -413,15 +409,15 @@ func createClusters(
 	return testCluster, oracleCluster
 }
 
-func getReplicationStrategy(rs string, fallback *replication.Replication, logger *zap.Logger) *replication.Replication {
+func getReplicationStrategy(rs string, fallback replication.Replication, logger *zap.Logger) replication.Replication {
 	switch rs {
 	case "network":
 		return replication.NewNetworkTopologyStrategy()
 	case "simple":
 		return replication.NewSimpleStrategy()
 	default:
-		replicationStrategy := &replication.Replication{}
-		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), replicationStrategy); err != nil {
+		replicationStrategy := replication.Replication{}
+		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), &replicationStrategy); err != nil {
 			logger.Error("unable to parse replication strategy", zap.String("strategy", rs), zap.Error(err))
 			return fallback
 		}
