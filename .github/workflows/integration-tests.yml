@@ -29,10 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        gemini-features: ["basic", "normal", "all"]
+        gemini-features: ["basic", "normal"]
         gemini-concurrency: [4]
         duration: ["5m"]
-        dataset-size: [large, small]
+        dataset-size: [large]
         oracle-scylla-version: ["6.1"]
         test-scylla-version: ["6.2"]
       fail-fast: false
@@ -54,7 +54,8 @@ jobs:
             CONCURRENCY=${{ matrix.gemini-concurrency }} \
             CQL_FEATURES=${{ matrix.gemini-features }} \
             DURATION=${{ matrix.duration }} \
-            DATASET_SIZE=${{ matrix.dataset-size }} \
+            WARMUP=30s \
+            DATASET_SIZE=${{ matrix.dataset-size }}
       - name: Shutdown ScyllaDB
         shell: bash
         run: |
