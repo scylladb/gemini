@@ -269,12 +269,14 @@ func run(_ *cobra.Command, _ []string) error {
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
 	pump := jobs.NewPump(stopFlag, logger)
 
-	gens, err := createGenerators(schema, schemaConfig, intSeed, partitionCount, logger)
+	distFunc, err := createDistributionFunc(partitionKeyDistribution, partitionCount, intSeed, stdDistMean, oneStdDev)
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "Faile to create distribution function: %s", partitionKeyDistribution)
 	}
-	gens.StartAll(stopFlag)
 
+	gens := generators.New(ctx, schema, distFunc, schemaConfig.GetPartitionRangeConfig(), intSeed, partitionCount, pkBufferReuseSize, logger)
+	defer utils.IgnoreError(gens.Close)
+	
 	if !nonInteractive {
 		sp := createSpinner(interactive())
 		ticker := time.NewTicker(time.Second)
