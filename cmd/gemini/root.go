@@ -277,9 +277,6 @@ func run(_ *cobra.Command, _ []string) error {
 	gens := generators.New(ctx, schema, distFunc, schemaConfig.GetPartitionRangeConfig(), intSeed, partitionCount, pkBufferReuseSize, logger)
 	defer utils.IgnoreError(gens.Close)
 
-	gens := generators.New(ctx, schema, distFunc, schemaConfig.GetPartitionRangeConfig(), intSeed, partitionCount, pkBufferReuseSize, logger)
-	defer utils.IgnoreError(gens.Close)
-
 	if !nonInteractive {
 		sp := createSpinner(interactive())
 		ticker := time.NewTicker(time.Second)
