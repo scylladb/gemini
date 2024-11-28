@@ -170,7 +170,9 @@ func convertStmtToResults(stmt *typedef.Stmt) *result {
 		types = fmt.Sprintf("%s %s", types, stmt.Types[idx].Name())
 	}
 	query, names := stmt.Query.ToCql()
-	var tokens []resultToken
+
+	tokens := make([]resultToken, 0, len(stmt.ValuesWithToken))
+
 	for _, valueToken := range stmt.ValuesWithToken {
 		tokens = append(tokens, resultToken{
 			Token:       fmt.Sprintf("%v", valueToken.Token),

@@ -102,7 +102,7 @@ func GetCreateKeyspaces(s *typedef.Schema) (string, string) {
 }
 
 func GetCreateSchema(s *typedef.Schema) []string {
-	var stmts []string
+	stmts := make([]string, 0, len(s.Tables)*2)
 
 	for _, t := range s.Tables {
 		createTypes := GetCreateTypes(t, s.Keyspace)

@@ -68,7 +68,8 @@ func FromCQL(cql string) (Option, error) {
 }
 
 func CreateTableOptions(tableOptionStrings []string, logger *zap.Logger) []Option {
-	var tableOptions []Option
+	tableOptions := make([]Option, 0, len(tableOptionStrings))
+
 	for _, optionString := range tableOptionStrings {
 		o, err := FromCQL(optionString)
 		if err != nil {

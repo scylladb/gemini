@@ -57,12 +57,17 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 		def      typedef.ColumnDef
 		expected string
 	}
-	var testCases []testCase
+
+	testCases := make([]testCase, 0, len(allSimpleTypes))
+
 	for _, simpleType := range allSimpleTypes {
-		testCases = append(testCases, testCase{def: typedef.ColumnDef{
-			Name: simpleType.Name(),
-			Type: simpleType,
-		}, expected: fmt.Sprintf("{\"type\":\"%s\",\"name\":\"%s\"}", simpleType.Name(), simpleType.Name())})
+		testCases = append(testCases, testCase{
+			def: typedef.ColumnDef{
+				Name: simpleType.Name(),
+				Type: simpleType,
+			},
+			expected: fmt.Sprintf("{\"type\":\"%s\",\"name\":\"%s\"}", simpleType.Name(), simpleType.Name()),
+		})
 	}
 	udtTypes := map[string]typedef.SimpleType{}
 
@@ -94,7 +99,7 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 			fmt.Println(tcase.expected)
 
 			if diff := cmp.Diff(string(marshaledData), tcase.expected); diff != "" {
-				t.Errorf(diff)
+				t.Errorf("Comparison failed: %s", diff)
 			}
 			var unmarshaledDef typedef.ColumnDef
 			err = json.Unmarshal(marshaledData, &unmarshaledDef)
@@ -103,7 +108,7 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 			}
 
 			if diff := cmp.Diff(tcase.def, unmarshaledDef); diff != "" {
-				t.Errorf(diff)
+				t.Errorf("cmp.Diff failed: %s", diff)
 			}
 		})
 	}

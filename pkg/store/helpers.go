@@ -26,13 +26,15 @@ import (
 )
 
 func pks(t *typedef.Table, rows []map[string]any) []string {
-	var keySet []string
+	keySet := make([]string, 0, len(rows))
+
 	for _, row := range rows {
 		keys := make([]string, 0, len(t.PartitionKeys)+len(t.ClusteringKeys))
 		keys = extractRowValues(keys, t.PartitionKeys, row)
 		keys = extractRowValues(keys, t.ClusteringKeys, row)
 		keySet = append(keySet, strings.Join(keys, ", 	"))
 	}
+
 	return keySet
 }
 
