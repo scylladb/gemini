@@ -25,9 +25,15 @@ jobs:
           if-no-files-found: error
           retention-days: 1
   test:
+    cancel-timeout-minutes: 1
+    timeout-minutes: 20
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     needs: [build]
     runs-on: ubuntu-latest
     strategy:
+      max-parallel: 1
       matrix:
         gemini-features: ["basic", "normal"]
         gemini-concurrency: [4]
