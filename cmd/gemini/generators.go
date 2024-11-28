@@ -22,22 +22,17 @@ import (
 
 func createGenerators(
 	schema *typedef.Schema,
-	schemaConfig typedef.SchemaConfig,
+	distFunc generators.DistributionFunc,
 	seed, distributionSize uint64,
 	logger *zap.Logger,
 ) (generators.Generators, error) {
-	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
+	partitionRangeConfig := schema.Config.GetPartitionRangeConfig()
 
 	gs := make([]*generators.Generator, 0, len(schema.Tables))
 
 	for id := range schema.Tables {
 		table := schema.Tables[id]
 		pkVariations := table.PartitionKeys.ValueVariationsNumber(&partitionRangeConfig)
-
-		distFunc, err := createDistributionFunc(partitionKeyDistribution, distributionSize, seed, stdDistMean, oneStdDev)
-		if err != nil {
-			return nil, err
-		}
 
 		tablePartConfig := &generators.Config{
 			PartitionsRangeConfig:      partitionRangeConfig,

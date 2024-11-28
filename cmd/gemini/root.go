@@ -269,11 +269,17 @@ func run(_ *cobra.Command, _ []string) error {
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
 	pump := jobs.NewPump(stopFlag, logger)
 
-	gens, err := createGenerators(schema, schemaConfig, intSeed, partitionCount, logger)
+	distFunc, err := createDistributionFunc(partitionKeyDistribution, partitionCount, intSeed, normalDistMean, normalDistSigma)
 	if err != nil {
 		return err
 	}
-	gens.StartAll(stopFlag)
+
+	gens, err := createGenerators(schema, distFunc, intSeed, partitionCount, logger)
+	if err != nil {
+		return err
+	}
+
+	gens.StartAll(ctx)
 
 	if !nonInteractive {
 		sp := createSpinner(interactive())

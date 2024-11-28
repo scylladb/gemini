@@ -15,12 +15,13 @@
 package generators
 
 import (
+	"context"
+
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/routingkey"
-	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -66,9 +67,9 @@ func (g *Generator) PartitionCount() uint64 {
 
 type Generators []*Generator
 
-func (g Generators) StartAll(stopFlag *stop.Flag) {
+func (g Generators) StartAll(ctx context.Context) {
 	for _, gen := range g {
-		gen.Start(stopFlag)
+		gen.Start(ctx)
 	}
 }
 
@@ -135,14 +136,14 @@ func (g *Generator) ReleaseToken(token uint64) {
 	g.GetPartitionForToken(TokenIndex(token)).releaseToken(token)
 }
 
-func (g *Generator) Start(stopFlag *stop.Flag) {
+func (g *Generator) Start(ctx context.Context) {
 	go func() {
 		g.logger.Info("starting partition key generation loop")
 		defer g.partitions.CloseAll()
 		for {
-			g.fillAllPartitions(stopFlag)
+			g.fillAllPartitions(ctx)
 			select {
-			case <-stopFlag.SignalChannel():
+			case <-ctx.Done():
 				g.logger.Debug("stopping partition key generation loop",
 					zap.Uint64("keys_created", g.cntCreated),
 					zap.Uint64("keys_emitted", g.cntEmitted))
@@ -175,7 +176,7 @@ func (g *Generator) FindAndMarkStalePartitions() {
 // fillAllPartitions guarantees that each partition was tested to be full
 // at least once since the function started and before it ended.
 // In other words no partition will be starved.
-func (g *Generator) fillAllPartitions(stopFlag *stop.Flag) {
+func (g *Generator) fillAllPartitions(context context.Context) {
 	pFilled := make([]bool, len(g.partitions))
 	allFilled := func() bool {
 		for idx, filled := range pFilled {
@@ -188,7 +189,13 @@ func (g *Generator) fillAllPartitions(stopFlag *stop.Flag) {
 		}
 		return true
 	}
-	for !stopFlag.IsHardOrSoft() {
+	for {
+		select {
+		case <-context.Done():
+			return
+		default:
+		}
+
 		values := CreatePartitionKeyValues(g.table, g.r, &g.partitionsConfig)
 		token, err := g.routingKeyCreator.GetHash(g.table, values)
 		if err != nil {
