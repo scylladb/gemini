@@ -15,8 +15,9 @@
 package generators
 
 import (
-	"go.uber.org/multierr"
 	"sync/atomic"
+
+	"go.uber.org/multierr"
 
 	"github.com/scylladb/gemini/pkg/inflight"
 	"github.com/scylladb/gemini/pkg/typedef"
