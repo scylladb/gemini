@@ -114,11 +114,10 @@ func (s *Partition) safelyGetOldValuesChannel() chan *typedef.ValueWithToken {
 }
 
 func (s *Partition) Close() error {
-	for !s.closed.CompareAndSwap(false, true) {
+	if s.closed.CompareAndSwap(false, true) {
+		close(s.values)
+		close(s.oldValues)
 	}
-
-	close(s.values)
-	close(s.oldValues)
 
 	return nil
 }

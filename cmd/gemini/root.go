@@ -22,23 +22,12 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
-
-	"github.com/scylladb/gemini/pkg/auth"
-	"github.com/scylladb/gemini/pkg/builders"
-	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/jobs"
-	"github.com/scylladb/gemini/pkg/realrandom"
-	"github.com/scylladb/gemini/pkg/replication"
-	"github.com/scylladb/gemini/pkg/store"
-	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
-
-	"github.com/scylladb/gemini/pkg/status"
-	"github.com/scylladb/gemini/pkg/stop"
 
 	"github.com/gocql/gocql"
 	"github.com/hailocab/go-hostpool"
@@ -50,6 +39,17 @@ import (
 	"golang.org/x/exp/rand"
 	"golang.org/x/net/context"
 	"gonum.org/v1/gonum/stat/distuv"
+
+	"github.com/scylladb/gemini/pkg/auth"
+	"github.com/scylladb/gemini/pkg/builders"
+	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/jobs"
+	"github.com/scylladb/gemini/pkg/realrandom"
+	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/status"
+	"github.com/scylladb/gemini/pkg/store"
+	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 var (
@@ -137,8 +137,11 @@ func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Sc
 }
 
 func run(_ *cobra.Command, _ []string) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGABRT, syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
+
 	logger := createLogger(level)
-	globalStatus := status.NewGlobalStatus(1000)
+	globalStatus := status.NewGlobalStatus(int32(maxErrorsToStore))
 	defer utils.IgnoreError(logger.Sync)
 
 	if err := validateSeed(seed); err != nil {
@@ -242,7 +245,7 @@ func run(_ *cobra.Command, _ []string) error {
 	if dropSchema && mode != jobs.ReadMode {
 		for _, stmt := range generators.GetDropKeyspace(schema) {
 			logger.Debug(stmt)
-			if err = st.Mutate(context.Background(), typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
+			if err = st.Mutate(ctx, typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
 				return errors.Wrap(err, "unable to drop schema")
 			}
 		}
@@ -250,7 +253,7 @@ func run(_ *cobra.Command, _ []string) error {
 
 	testKeyspace, oracleKeyspace := generators.GetCreateKeyspaces(schema)
 	if err = st.Create(
-		context.Background(),
+		ctx,
 		typedef.SimpleStmt(testKeyspace, typedef.CreateKeyspaceStatementType),
 		typedef.SimpleStmt(oracleKeyspace, typedef.CreateKeyspaceStatementType)); err != nil {
 		return errors.Wrap(err, "unable to create keyspace")
@@ -263,11 +266,7 @@ func run(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	ctx, done := context.WithTimeout(context.Background(), duration+warmup+time.Second*2)
-	stopFlag := stop.NewFlag("main")
-	warmupStopFlag := stop.NewFlag("warmup")
-	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
-	pump := jobs.NewPump(stopFlag, logger)
+	pump := jobs.NewPump(ctx, logger)
 
 	distFunc, err := createDistributionFunc(partitionKeyDistribution, partitionCount, intSeed, normalDistMean, normalDistSigma)
 	if err != nil {
@@ -281,10 +280,9 @@ func run(_ *cobra.Command, _ []string) error {
 		sp := createSpinner(interactive())
 		ticker := time.NewTicker(time.Second)
 		go func() {
-			defer done()
 			for {
 				select {
-				case <-stopFlag.SignalChannel():
+				case <-ctx.Done():
 					return
 				case <-ticker.C:
 					sp.Set(" Running Gemini... %v", globalStatus)
@@ -293,20 +291,24 @@ func run(_ *cobra.Command, _ []string) error {
 		}()
 	}
 
-	if warmup > 0 && !stopFlag.IsHardOrSoft() {
-		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, warmupStopFlag, failFast, verbose); err != nil {
+	if warmup > 0 {
+		warmupCtx, warmupCancel := context.WithTimeout(ctx, warmup)
+		defer warmupCancel()
+
+		jobsList := jobs.ListFromMode(jobs.WarmupMode, concurrency)
+		if err = jobsList.Run(warmupCtx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, failFast, verbose); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
-			stopFlag.SetHard(true)
 		}
 	}
 
-	if !stopFlag.IsHardOrSoft() {
-		jobsList := jobs.ListFromMode(mode, duration, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, stopFlag.CreateChild("workload"), failFast, verbose); err != nil {
-			logger.Debug("error detected", zap.Error(err))
-		}
+	jobsCtx, jobsCancel := context.WithTimeout(ctx, duration)
+	defer jobsCancel()
+
+	jobsList := jobs.ListFromMode(mode, concurrency)
+	if err = jobsList.Run(jobsCtx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, failFast, verbose); err != nil {
+		logger.Debug("error detected", zap.Error(err))
 	}
+
 	logger.Info("test finished")
 	globalStatus.PrintResult(outFile, schema, version)
 	if globalStatus.HasErrors() {

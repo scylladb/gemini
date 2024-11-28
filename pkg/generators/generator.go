@@ -27,7 +27,7 @@ import (
 
 // TokenIndex represents the position of a token in the token ring.
 // A token index is translated to a token by a generators. If the generators
-// preserves the exact position, then the token index becomes the token;
+// preserve the exact position, then the token index becomes the token;
 // otherwise token index represents an approximation of the token.
 //
 // We use a token index approach, because our generators actually generate
