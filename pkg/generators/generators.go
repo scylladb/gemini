@@ -25,9 +25,9 @@ import (
 )
 
 type Generators struct {
-	Generators []Generator
 	wg         *sync.WaitGroup
 	cancel     context.CancelFunc
+	Generators []Generator
 }
 
 func New(
