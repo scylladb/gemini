@@ -119,19 +119,6 @@ func newSession(cluster *gocql.ClusterConfig, out io.Writer) (*gocql.Session, er
 	return session, nil
 }
 
-func ignore(err error) bool {
-	if err == nil {
-		return true
-	}
-	//nolint:errorlint
-	switch {
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return true
-	default:
-		return false
-	}
-}
-
 func opType(stmt *typedef.Stmt) string {
 	switch stmt.Query.(type) {
 	case *qb.InsertBuilder:

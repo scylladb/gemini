@@ -28,7 +28,8 @@ func createGenerators(
 ) (generators.Generators, error) {
 	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 
-	var gs []*generators.Generator
+	gs := make([]*generators.Generator, 0, len(schema.Tables))
+
 	for id := range schema.Tables {
 		table := schema.Tables[id]
 		pkVariations := table.PartitionKeys.ValueVariationsNumber(&partitionRangeConfig)

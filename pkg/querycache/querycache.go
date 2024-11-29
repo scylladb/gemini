@@ -137,7 +137,7 @@ func genInsertIfNotExistsStmtCache(
 }
 
 func genUpdateStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache {
-	var allTypes []typedef.Type
+	allTypes := make([]typedef.Type, 0, t.PartitionKeys.Len()+t.ClusteringKeys.Len()+t.Columns.Len())
 	builder := qb.Update(s.Keyspace.Name + "." + t.Name)
 
 	for _, cdef := range t.Columns {
@@ -169,7 +169,8 @@ func genUpdateStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache 
 }
 
 func genDeleteStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache {
-	var allTypes []typedef.Type
+	allTypes := make([]typedef.Type, 0, t.PartitionKeys.Len()+t.ClusteringKeys.Len())
+
 	builder := qb.Delete(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))

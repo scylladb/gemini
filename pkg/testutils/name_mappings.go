@@ -162,7 +162,8 @@ func getTestSchema(table *typedef.Table) (*typedef.Schema, *typedef.SchemaConfig
 func createTableOptions(cql string) []tableopts.Option {
 	opt, _ := tableopts.FromCQL(cql)
 	opts := []string{opt.ToCQL()}
-	var tableOptions []tableopts.Option
+
+	tableOptions := make([]tableopts.Option, 0, len(opts))
 
 	for _, optionString := range opts {
 		o, err := tableopts.FromCQL(optionString)

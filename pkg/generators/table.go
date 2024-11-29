@@ -25,11 +25,10 @@ func GetCreateTable(t *typedef.Table, ks typedef.Keyspace) string {
 	t.RLock()
 	defer t.RUnlock()
 
-	var (
-		partitionKeys  []string
-		clusteringKeys []string
-		columns        []string
-	)
+	partitionKeys := make([]string, 0, len(t.PartitionKeys))
+	clusteringKeys := make([]string, 0, len(t.ClusteringKeys))
+	columns := make([]string, 0, len(t.PartitionKeys)+len(t.ClusteringKeys)+len(t.Columns))
+
 	for _, pk := range t.PartitionKeys {
 		partitionKeys = append(partitionKeys, pk.Name)
 		columns = append(columns, fmt.Sprintf("%s %s", pk.Name, pk.Type.CQLDef()))
@@ -60,7 +59,8 @@ func GetCreateTypes(t *typedef.Table, keyspace typedef.Keyspace) []string {
 	t.RLock()
 	defer t.RUnlock()
 
-	var stmts []string
+	stmts := make([]string, 0, len(t.Columns))
+
 	for _, column := range t.Columns {
 		c, ok := column.Type.(*typedef.UDTType)
 		if !ok {

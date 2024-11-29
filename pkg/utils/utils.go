@@ -72,11 +72,11 @@ func RandIPV4Address(rnd *rand.Rand, v, pos int) string {
 	return strings.Join(blocks, ".")
 }
 
-func RandInt2(rnd *rand.Rand, min, max int) int {
-	if max <= min {
-		return min
+func RandInt2(rnd *rand.Rand, minimum, maximum int) int {
+	if maximum <= minimum {
+		return minimum
 	}
-	return min + rnd.Intn(max-min)
+	return minimum + rnd.Intn(maximum-minimum)
 }
 
 func IgnoreError(fn func() error) {

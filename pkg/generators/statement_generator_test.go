@@ -179,7 +179,7 @@ func TestGetCreateSchema(t *testing.T) {
 			t.Parallel()
 			got := generators.GetCreateTable(test.table, ks)
 			if diff := cmp.Diff(got, test.want); diff != "" {
-				t.Fatalf(diff)
+				t.Fatalf("cmp.Diff failed: %s", diff)
 			}
 		})
 	}

@@ -218,6 +218,7 @@ func TestCQLPretty(t *testing.T) {
 	for id := range prettytests {
 		test := prettytests[id]
 		t.Run(test.typ.Name(), func(t *testing.T) {
+			t.Parallel()
 			builder := bytes.NewBuffer(nil)
 			err := prettyCQL(builder, test.query, test.values, []Type{test.typ})
 			if err != nil {

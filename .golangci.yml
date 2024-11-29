@@ -16,7 +16,6 @@ output:
 issues:
   max-same-issues: 1
   max-issues-per-linter: 10
-  new: true
   exclude:
     - Error return value of `.*.Unlock` is not checked
     - Error return value of `.*.Completed` is not checked
