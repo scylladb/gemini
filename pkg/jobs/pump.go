@@ -15,15 +15,14 @@
 package jobs
 
 import (
+	"context"
 	"time"
-
-	"github.com/scylladb/gemini/pkg/stop"
 
 	"go.uber.org/zap"
 	"golang.org/x/exp/rand"
 )
 
-func NewPump(stopFlag *stop.Flag, logger *zap.Logger) chan time.Duration {
+func NewPump(ctx context.Context, logger *zap.Logger) <-chan time.Duration {
 	pump := make(chan time.Duration, 10000)
 	logger = logger.Named("Pump")
 	go func() {
@@ -32,8 +31,14 @@ func NewPump(stopFlag *stop.Flag, logger *zap.Logger) chan time.Duration {
 			close(pump)
 			logger.Debug("pump channel closed")
 		}()
-		for !stopFlag.IsHardOrSoft() {
-			pump <- newHeartBeat()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				pump <- newHeartBeat()
+			}
 		}
 	}()
 

@@ -14,27 +14,17 @@
 
 package generators
 
-import (
-	"golang.org/x/exp/rand"
-
-	"github.com/scylladb/gemini/pkg/typedef"
-)
-
-func CreatePartitionKeyValues(table *typedef.Table, r *rand.Rand, g *typedef.PartitionRangeConfig) []any {
-	values := make([]any, 0, table.PartitionKeysLenValues())
-	for _, pk := range table.PartitionKeys {
-		values = append(values, pk.Type.GenValue(r, g)...)
-	}
-	return values
-}
+import "github.com/scylladb/gemini/pkg/typedef"
 
 func CreatePkColumns(cnt int, prefix string) typedef.Columns {
-	var cols typedef.Columns
+	cols := make(typedef.Columns, 0, cnt)
+
 	for i := 0; i < cnt; i++ {
 		cols = append(cols, &typedef.ColumnDef{
 			Name: GenColumnName(prefix, i),
 			Type: typedef.TYPE_INT,
 		})
 	}
+
 	return cols
 }
