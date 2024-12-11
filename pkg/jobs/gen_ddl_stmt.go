@@ -20,7 +20,6 @@ import (
 
 	"golang.org/x/exp/rand"
 
-	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -60,16 +59,16 @@ func genAddColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnD
 		stmt := fmt.Sprintf(createType, keyspace, c.TypeName, strings.Join(typs, ","))
 		stmts = append(stmts, &typedef.Stmt{
 			StmtCache: &typedef.StmtCache{
-				Query: &builders.AlterTableBuilder{
+				Query: &typedef.AlterTableBuilder{
 					Stmt: stmt,
 				},
 			},
 		})
 	}
-	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " ADD " + column.Name + " " + column.Type.CQLDef()
+	stmt := "alter table " + keyspace + "." + t.Name + " ADD " + column.Name + " " + column.Type.CQLDef()
 	stmts = append(stmts, &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
-			Query: &builders.AlterTableBuilder{
+			Query: &typedef.AlterTableBuilder{
 				Stmt: stmt,
 			},
 		},
@@ -87,10 +86,10 @@ func genAddColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnD
 func genDropColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnDef) (*typedef.Stmts, error) {
 	var stmts []*typedef.Stmt
 
-	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " DROP " + column.Name
+	stmt := "alter table " + keyspace + "." + t.Name + " DROP " + column.Name
 	stmts = append(stmts, &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
-			Query: &builders.AlterTableBuilder{
+			Query: &typedef.AlterTableBuilder{
 				Stmt: stmt,
 			},
 			QueryType: typedef.DropColumnStatementType,

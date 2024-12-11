@@ -39,7 +39,7 @@ const (
 )
 
 type (
-	StmtToFile interface {
+	Interface interface {
 		LogStmt(stmt *typedef.Stmt, ts ...time.Time) error
 		Close() error
 	}
@@ -55,7 +55,7 @@ type (
 	}
 )
 
-func NewFileLogger(filename string) (StmtToFile, error) {
+func NewFileLogger(filename string) (Interface, error) {
 	if filename == "" {
 		return &nopFileLogger{}, nil
 	}
@@ -68,7 +68,7 @@ func NewFileLogger(filename string) (StmtToFile, error) {
 	return NewLogger(fd)
 }
 
-func NewLogger(w io.Writer) (StmtToFile, error) {
+func NewLogger(w io.Writer) (Interface, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	out := &logger{

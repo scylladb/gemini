@@ -12,18 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package builders
-
-import (
-	"github.com/scylladb/gemini/pkg/querycache"
-	"github.com/scylladb/gemini/pkg/typedef"
-)
+package typedef
 
 type SchemaBuilder interface {
-	Config(config typedef.SchemaConfig) SchemaBuilder
-	Keyspace(typedef.Keyspace) SchemaBuilder
-	Table(*typedef.Table) SchemaBuilder
-	Build() *typedef.Schema
+	Config(config SchemaConfig) SchemaBuilder
+	Keyspace(Keyspace) SchemaBuilder
+	Table(*Table) SchemaBuilder
+	Build() *Schema
 }
 
 type AlterTableBuilder struct {
@@ -35,30 +30,30 @@ func (atb *AlterTableBuilder) ToCql() (string, []string) {
 }
 
 type schemaBuilder struct {
-	keyspace typedef.Keyspace
-	tables   []*typedef.Table
-	config   typedef.SchemaConfig
+	keyspace Keyspace
+	tables   []*Table
+	config   SchemaConfig
 }
 
-func (s *schemaBuilder) Keyspace(keyspace typedef.Keyspace) SchemaBuilder {
+func (s *schemaBuilder) Keyspace(keyspace Keyspace) SchemaBuilder {
 	s.keyspace = keyspace
 	return s
 }
 
-func (s *schemaBuilder) Config(config typedef.SchemaConfig) SchemaBuilder {
+func (s *schemaBuilder) Config(config SchemaConfig) SchemaBuilder {
 	s.config = config
 	return s
 }
 
-func (s *schemaBuilder) Table(table *typedef.Table) SchemaBuilder {
+func (s *schemaBuilder) Table(table *Table) SchemaBuilder {
 	s.tables = append(s.tables, table)
 	return s
 }
 
-func (s *schemaBuilder) Build() *typedef.Schema {
-	out := &typedef.Schema{Keyspace: s.keyspace, Tables: s.tables, Config: s.config}
+func (s *schemaBuilder) Build() *Schema {
+	out := &Schema{Keyspace: s.keyspace, Tables: s.tables, Config: s.config}
 	for id := range s.tables {
-		s.tables[id].Init(out, querycache.New(out))
+		s.tables[id].Init(out, New(out))
 	}
 	return out
 }

@@ -16,6 +16,7 @@ package typedef
 
 import (
 	"encoding/json"
+	"os"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -35,6 +36,28 @@ type Schema struct {
 	Keyspace Keyspace     `json:"keyspace"`
 	Tables   []*Table     `json:"tables"`
 	Config   SchemaConfig `json:"-"`
+}
+
+func NewSchemaFromFile(confFile string, schemaConfig SchemaConfig) (*Schema, error) {
+	byteValue, err := os.ReadFile(confFile)
+	if err != nil {
+		return nil, err
+	}
+
+	shm := &Schema{}
+
+	if err = json.Unmarshal(byteValue, shm); err != nil {
+		return nil, err
+	}
+
+	sb := NewSchemaBuilder()
+	sb.Keyspace(shm.Keyspace).Config(schemaConfig)
+	for t, tbl := range shm.Tables {
+		shm.Tables[t].LinkIndexAndColumns()
+		sb.Table(tbl)
+	}
+
+	return sb.Build(), nil
 }
 
 func (s *Schema) GetHash() string {

@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package querycache
+package typedef
 
 import (
 	"fmt"
 	"sync"
 
 	"github.com/scylladb/gocqlx/v2/qb"
-
-	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-type QueryCache [typedef.CacheArrayLen]*typedef.StmtCache
+type QueryCache [CacheArrayLen]*StmtCache
 
 func (c QueryCache) Reset() {
 	for id := range c {
@@ -32,19 +30,19 @@ func (c QueryCache) Reset() {
 }
 
 type Cache struct {
-	schema *typedef.Schema
-	table  *typedef.Table
+	schema *Schema
+	table  *Table
 	cache  QueryCache
 	mu     sync.RWMutex
 }
 
-func New(s *typedef.Schema) *Cache {
+func New(s *Schema) *Cache {
 	return &Cache{
 		schema: s,
 	}
 }
 
-func (c *Cache) BindToTable(t *typedef.Table) {
+func (c *Cache) BindToTable(t *Table) {
 	c.table = t
 }
 
@@ -54,14 +52,14 @@ func (c *Cache) Reset() {
 	c.cache.Reset()
 }
 
-func (c *Cache) getQuery(qct typedef.StatementCacheType) *typedef.StmtCache {
+func (c *Cache) getQuery(qct StatementCacheType) *StmtCache {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	rec := c.cache[qct]
 	return rec
 }
 
-func (c *Cache) GetQuery(qct typedef.StatementCacheType) *typedef.StmtCache {
+func (c *Cache) GetQuery(qct StatementCacheType) *StmtCache {
 	rec := c.getQuery(qct)
 	if rec != nil {
 		return rec
@@ -73,35 +71,35 @@ func (c *Cache) GetQuery(qct typedef.StatementCacheType) *typedef.StmtCache {
 	return rec
 }
 
-type CacheBuilderFn func(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache
+type CacheBuilderFn func(s *Schema, t *Table) *StmtCache
 
-type CacheBuilderFnMap map[typedef.StatementCacheType]CacheBuilderFn
+type CacheBuilderFnMap map[StatementCacheType]CacheBuilderFn
 
-func (m CacheBuilderFnMap) ToList() [typedef.CacheArrayLen]CacheBuilderFn {
-	out := [typedef.CacheArrayLen]CacheBuilderFn{}
+func (m CacheBuilderFnMap) ToList() [CacheArrayLen]CacheBuilderFn {
+	out := [CacheArrayLen]CacheBuilderFn{}
 	for idx, builderFn := range m {
 		out[idx] = builderFn
 	}
 	for idx := range out {
 		if out[idx] == nil {
-			panic(fmt.Sprintf("no builder for %s", typedef.StatementCacheType(idx).ToString()))
+			panic(fmt.Sprintf("no builder for %s", StatementCacheType(idx).ToString()))
 		}
 	}
 	return out
 }
 
 var CacheBuilders = CacheBuilderFnMap{
-	typedef.CacheInsert:            genInsertStmtCache,
-	typedef.CacheInsertIfNotExists: genInsertIfNotExistsStmtCache,
-	typedef.CacheDelete:            genDeleteStmtCache,
-	typedef.CacheUpdate:            genUpdateStmtCache,
+	CacheInsert:            genInsertStmtCache,
+	CacheInsertIfNotExists: genInsertIfNotExistsStmtCache,
+	CacheDelete:            genDeleteStmtCache,
+	CacheUpdate:            genUpdateStmtCache,
 }.ToList()
 
 func genInsertStmtCache(
-	s *typedef.Schema,
-	t *typedef.Table,
-) *typedef.StmtCache {
-	allTypes := make([]typedef.Type, 0, t.PartitionKeys.Len()+t.ClusteringKeys.Len()+t.Columns.Len())
+	s *Schema,
+	t *Table,
+) *StmtCache {
+	allTypes := make([]Type, 0, t.PartitionKeys.Len()+t.ClusteringKeys.Len()+t.Columns.Len())
 	builder := qb.Insert(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Columns(pk.Name)
@@ -113,38 +111,38 @@ func genInsertStmtCache(
 	}
 	for _, col := range t.Columns {
 		switch colType := col.Type.(type) {
-		case *typedef.TupleType:
+		case *TupleType:
 			builder = builder.TupleColumn(col.Name, len(colType.ValueTypes))
 		default:
 			builder = builder.Columns(col.Name)
 		}
 		allTypes = append(allTypes, col.Type)
 	}
-	return &typedef.StmtCache{
+	return &StmtCache{
 		Query:     builder,
 		Types:     allTypes,
-		QueryType: typedef.InsertStatementType,
+		QueryType: InsertStatementType,
 	}
 }
 
 func genInsertIfNotExistsStmtCache(
-	s *typedef.Schema,
-	t *typedef.Table,
-) *typedef.StmtCache {
+	s *Schema,
+	t *Table,
+) *StmtCache {
 	out := genInsertStmtCache(s, t)
 	out.Query = out.Query.(*qb.InsertBuilder).Unique()
 	return out
 }
 
-func genUpdateStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache {
-	allTypes := make([]typedef.Type, 0, t.PartitionKeys.Len()+t.ClusteringKeys.Len()+t.Columns.Len())
+func genUpdateStmtCache(s *Schema, t *Table) *StmtCache {
+	var allTypes []Type
 	builder := qb.Update(s.Keyspace.Name + "." + t.Name)
 
 	for _, cdef := range t.Columns {
 		switch t := cdef.Type.(type) {
-		case *typedef.TupleType:
+		case *TupleType:
 			builder = builder.SetTuple(cdef.Name, len(t.ValueTypes))
-		case *typedef.CounterType:
+		case *CounterType:
 			builder = builder.SetLit(cdef.Name, cdef.Name+"+1")
 			continue
 		default:
@@ -161,16 +159,15 @@ func genUpdateStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache 
 		builder = builder.Where(qb.Eq(ck.Name))
 		allTypes = append(allTypes, ck.Type)
 	}
-	return &typedef.StmtCache{
+	return &StmtCache{
 		Query:     builder,
 		Types:     allTypes,
-		QueryType: typedef.UpdateStatementType,
+		QueryType: UpdateStatementType,
 	}
 }
 
-func genDeleteStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache {
-	allTypes := make([]typedef.Type, 0, t.PartitionKeys.Len()+t.ClusteringKeys.Len())
-
+func genDeleteStmtCache(s *Schema, t *Table) *StmtCache {
+	var allTypes []Type
 	builder := qb.Delete(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
@@ -183,9 +180,9 @@ func genDeleteStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache 
 		allTypes = append(allTypes, ck.Type, ck.Type)
 	}
 
-	return &typedef.StmtCache{
+	return &StmtCache{
 		Query:     builder,
 		Types:     allTypes,
-		QueryType: typedef.DeleteStatementType,
+		QueryType: DeleteStatementType,
 	}
 }
