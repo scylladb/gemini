@@ -28,7 +28,6 @@ import (
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/status"
-	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -53,10 +52,9 @@ var (
 )
 
 type List struct {
-	name     string
-	jobs     []job
-	duration time.Duration
-	workers  uint64
+	name    string
+	jobs    []job
+	workers uint64
 }
 
 type job struct {
@@ -72,16 +70,16 @@ type job struct {
 		*generators.Generator,
 		*status.GlobalStatus,
 		*zap.Logger,
-		*stop.Flag,
 		bool,
 		bool,
 	) error
 	name string
 }
 
-func ListFromMode(mode string, duration time.Duration, workers uint64) List {
+func ListFromMode(mode string, workers uint64) List {
 	jobs := make([]job, 0, 2)
 	name := "work cycle"
+
 	switch mode {
 	case WriteMode:
 		jobs = append(jobs, mutate)
@@ -93,11 +91,11 @@ func ListFromMode(mode string, duration time.Duration, workers uint64) List {
 	default:
 		jobs = append(jobs, mutate, validate)
 	}
+
 	return List{
-		name:     name,
-		jobs:     jobs,
-		duration: duration,
-		workers:  workers,
+		name:    name,
+		jobs:    jobs,
+		workers: workers,
 	}
 }
 
@@ -107,36 +105,30 @@ func (l List) Run(
 	schemaConfig typedef.SchemaConfig,
 	s store.Store,
 	pump <-chan time.Duration,
-	generators []*generators.Generator,
+	generators *generators.Generators,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
 	seed uint64,
-	stopFlag *stop.Flag,
 	failFast, verbose bool,
 ) error {
 	logger = logger.Named(l.name)
-	ctx = stopFlag.CancelContextOnSignal(ctx, stop.SignalHardStop)
 	g, gCtx := errgroup.WithContext(ctx)
-	time.AfterFunc(l.duration, func() {
-		logger.Info("jobs time is up, begins jobs completion")
-		stopFlag.SetSoft(true)
-	})
 
 	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 	logger.Info("start jobs")
-	for j := range schema.Tables {
-		gen := generators[j]
-		table := schema.Tables[j]
+	for j, table := range schema.Tables {
+		generator := &generators.Generators[j]
 		for i := 0; i < int(l.workers); i++ {
 			for idx := range l.jobs {
 				jobF := l.jobs[idx].function
 				r := rand.New(rand.NewSource(seed))
 				g.Go(func() error {
-					return jobF(gCtx, pump, schema, schemaConfig, table, s, r, &partitionRangeConfig, gen, globalStatus, logger, stopFlag, failFast, verbose)
+					return jobF(gCtx, pump, schema, schemaConfig, table, s, r, &partitionRangeConfig, generator, globalStatus, logger, failFast, verbose)
 				})
 			}
 		}
 	}
+
 	return g.Wait()
 }
 
@@ -154,7 +146,6 @@ func mutationJob(
 	g *generators.Generator,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
-	stopFlag *stop.Flag,
 	failFast, verbose bool,
 ) error {
 	schemaConfig := &schemaCfg
@@ -164,11 +155,8 @@ func mutationJob(
 		logger.Info("ending mutation loop")
 	}()
 	for {
-		if stopFlag.IsHardOrSoft() {
-			return nil
-		}
 		select {
-		case <-stopFlag.SignalChannel():
+		case <-ctx.Done():
 			logger.Debug("mutation job terminated")
 			return nil
 		case hb := <-pump:
@@ -187,7 +175,6 @@ func mutationJob(
 			}
 		}
 		if failFast && globalStatus.HasErrors() {
-			stopFlag.SetSoft(true)
 			return nil
 		}
 	}
@@ -207,7 +194,6 @@ func validationJob(
 	g *generators.Generator,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
-	stopFlag *stop.Flag,
 	failFast, _ bool,
 ) error {
 	schemaConfig := &schemaCfg
@@ -218,11 +204,8 @@ func validationJob(
 	}()
 
 	for {
-		if stopFlag.IsHardOrSoft() {
-			return nil
-		}
 		select {
-		case <-stopFlag.SignalChannel():
+		case <-ctx.Done():
 			return nil
 		case hb := <-pump:
 			time.Sleep(hb)
@@ -262,7 +245,6 @@ func validationJob(
 		}
 
 		if failFast && globalStatus.HasErrors() {
-			stopFlag.SetSoft(true)
 			return nil
 		}
 	}
@@ -282,7 +264,6 @@ func warmupJob(
 	g *generators.Generator,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
-	stopFlag *stop.Flag,
 	failFast, _ bool,
 ) error {
 	schemaConfig := &schemaCfg
@@ -292,10 +273,13 @@ func warmupJob(
 		logger.Info("ending warmup loop")
 	}()
 	for {
-		if stopFlag.IsHardOrSoft() {
+		select {
+		case <-ctx.Done():
 			logger.Debug("warmup job terminated")
 			return nil
+		default:
 		}
+
 		// Do we care about errors during warmup?
 		err := mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
 		if err != nil {
@@ -303,7 +287,6 @@ func warmupJob(
 		}
 
 		if failFast && globalStatus.HasErrors() {
-			stopFlag.SetSoft(true)
 			return nil
 		}
 	}
