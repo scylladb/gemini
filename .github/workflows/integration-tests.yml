@@ -49,6 +49,10 @@ jobs:
         id: scylla
         shell: bash
         run: |
+          ulimit -n 65536
+          sudo sysctl -w fs.aio-max-nr=30000000
+          sudo sysctl -w fs.file-max=30000000
+
           chmod +x ./bin/gemini
           make scylla-setup \
             SCYLLA_TEST_VERSION=${{ matrix.test-scylla-version }} \

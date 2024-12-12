@@ -95,6 +95,10 @@ setup: $(GOBIN)/golangci-lint scylla-setup debug-build
 scylla-setup:
 	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml up -d
 
+	until docker logs gemini-oracle 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
+	until docker logs gemini-test 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
+
+
 .PHONY: scylla-shutdown
 scylla-shutdown:
 	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml down --volumes
