@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     name: Lint Test and Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name:
         uses: actions/checkout@v4
