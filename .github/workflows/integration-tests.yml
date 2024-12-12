@@ -33,7 +33,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     strategy:
-      max-parallel: 1
+      max-parallel: 4
       matrix:
         gemini-features: ["basic", "normal"]
         gemini-concurrency: [4]
