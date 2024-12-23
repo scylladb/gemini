@@ -22,7 +22,6 @@ import (
 
 	"golang.org/x/exp/rand"
 
-	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/tableopts"
@@ -176,7 +175,7 @@ func createTableOptions(cql string) []tableopts.Option {
 }
 
 func genTestSchema(sc typedef.SchemaConfig, table *typedef.Table) *typedef.Schema {
-	builder := builders.NewSchemaBuilder()
+	builder := typedef.NewSchemaBuilder()
 	builder.Config(sc)
 	keyspace := typedef.Keyspace{
 		Name:              "ks1",

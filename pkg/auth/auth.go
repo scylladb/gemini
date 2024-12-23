@@ -20,6 +20,11 @@ import (
 	"github.com/gocql/gocql"
 )
 
+var (
+	ErrUsernameNotProvided   = errors.New("username not provided")
+	ErrorPasswordNotProvided = errors.New("password not provided")
+)
+
 // BuildAuthenticator : Returns a new gocql.PasswordAuthenticator
 // if both username and password are provided.
 func BuildAuthenticator(username, password string) (*gocql.PasswordAuthenticator, error) {
@@ -34,7 +39,7 @@ func BuildAuthenticator(username, password string) (*gocql.PasswordAuthenticator
 		return &authenticator, nil
 	}
 	if username != "" {
-		return nil, errors.New("Password not provided")
+		return nil, ErrorPasswordNotProvided
 	}
-	return nil, errors.New("Username not provided")
+	return nil, ErrUsernameNotProvided
 }

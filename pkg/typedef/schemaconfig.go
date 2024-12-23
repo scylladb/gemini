@@ -50,12 +50,15 @@ func (sc *SchemaConfig) Valid() error {
 	if sc.MaxPartitionKeys <= sc.MinPartitionKeys {
 		return ErrSchemaConfigInvalidRangePK
 	}
+
 	if sc.MaxClusteringKeys <= sc.MinClusteringKeys {
 		return ErrSchemaConfigInvalidRangeCK
 	}
+
 	if sc.MaxColumns <= sc.MinColumns {
 		return ErrSchemaConfigInvalidRangeCols
 	}
+
 	return nil
 }
 

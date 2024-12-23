@@ -17,9 +17,14 @@ package utils
 import (
 	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/gocql/gocql"
 	"golang.org/x/exp/rand"
@@ -106,4 +111,31 @@ func UUIDFromTime(rnd *rand.Rand) string {
 		return gocql.TimeUUIDWith(rnd.Int63(), 0, []byte("127.0.0.1")).String()
 	}
 	return gocql.UUIDFromTime(RandDate(rnd)).String()
+}
+
+func CreateFile(input string, def ...io.Writer) (io.Writer, error) {
+	switch input {
+	case "":
+		if len(def) > 0 && def[0] != nil {
+			return def[0], nil
+		}
+
+		return io.Discard, nil
+	case "stderr":
+		return os.Stderr, nil
+	case "stdout":
+		return os.Stdout, nil
+	default:
+		tracingWriter, err := os.OpenFile(input, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to open file %s", input)
+		}
+
+		runtime.SetFinalizer(tracingWriter, func(f *os.File) {
+			IgnoreError(f.Sync)
+			IgnoreError(f.Close)
+		})
+
+		return tracingWriter, nil
+	}
 }

@@ -20,30 +20,39 @@ GEMINI_TEST_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Netw
 GEMINI_ORACLE_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-oracle)
 GEMINI_DOCKER_NETWORK ?= gemini
 GEMINI_FLAGS ?= --fail-fast \
-	--level=info \
-	--non-interactive \
-	--consistency=LOCAL_QUORUM \
-	--test-host-selection-policy=token-aware \
-	--oracle-host-selection-policy=token-aware \
-	--mode=$(MODE) \
-	--non-interactive \
-	--request-timeout=5s \
-	--connect-timeout=15s \
-	--use-server-timestamps=false \
 	--async-objects-stabilization-attempts=10 \
-	--max-mutation-retries=10 \
-	--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
-	--oracle-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
+	--async-objects-stabilization-backoff=1s \
 	--concurrency=$(CONCURRENCY) \
-	--dataset-size=$(DATASET_SIZE) \
+ 	--cql-features=$(CQL_FEATURES) \
+ 	--dataset-size=$(DATASET_SIZE) \
+ 	--mode=$(MODE) \
+ 	--duration=$(DURATION) \
 	--seed=$(SEED) \
 	--schema-seed=$(SEED) \
-	--cql-features=$(CQL_FEATURES) \
-	--duration=$(DURATION) \
 	--warmup=$(WARMUP) \
+ 	--drop-schema=true \
+ 	--level=info \
+ 	--materialized-views=false \
+	--async-objects-stabilization-attempts=10 \
 	--profiling-port=6060 \
-	--drop-schema=true
-
+	--token-range-slices=10000 \
+	--partition-key-buffer-reuse-size=100 \
+	--oracle-connect-timeout=15s \
+	--oracle-request-timeout=5s \
+	--oracle-consistency=LOCAL_QUORUM \
+	--oracle-max-mutation-retries=10 \
+	--oracle-max-mutation-retries-backoff=1s \
+	--oracle-use-server-timestamps=false \
+	--oracle-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
+	--oracle-host-selection-policy=token-aware \
+	--test-consistency=LOCAL_QUORUM \
+	--test-request-timeout=5s \
+	--test-connect-timeout=15s \
+	--test-use-server-timestamps=false \
+	--test-host-selection-policy=token-aware \
+	--test-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
+	--test-max-mutation-retries=10 \
+	--test-dc=datacenter1
 
 ifndef GOBIN
 	export GOBIN := $(MAKEFILE_PATH)/bin
