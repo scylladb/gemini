@@ -16,7 +16,7 @@ require (
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20241108190413-2d47ceb2692f
-	golang.org/x/net v0.32.0
+	golang.org/x/net v0.34.0
 	golang.org/x/sync v0.10.0
 	gonum.org/v1/gonum v0.15.1
 	gopkg.in/inf.v0 v0.9.1
@@ -37,8 +37,8 @@ require (
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/scylladb/go-reflectx v1.0.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/term v0.27.0 // indirect
+	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/term v0.28.0 // indirect
 	google.golang.org/protobuf v1.35.2 // indirect
 )
 
