@@ -17,7 +17,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"log"
 	"math"
 	"net/http"
@@ -40,6 +39,8 @@ import (
 
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
+
+	"github.com/scylladb/gemini/pkg/stmtlogger"
 
 	"github.com/gocql/gocql"
 	"github.com/hailocab/go-hostpool"
@@ -413,9 +414,12 @@ func createClusters(
 func getLogStatementFileCompression(input string) stmtlogger.Compression {
 	switch input {
 	case "zstd":
-		return stmtlogger.ZSTD
+		return stmtlogger.ZSTDCompression
+	case "gzip":
+		return stmtlogger.GZIPCompresssion
+	default:
+		return stmtlogger.NoCompression
 	}
-	return stmtlogger.NoCompression
 }
 
 func getReplicationStrategy(rs string, fallback *replication.Replication, logger *zap.Logger) *replication.Replication {

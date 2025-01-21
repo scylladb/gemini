@@ -17,8 +17,8 @@ package stmtlogger
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
-	"github.com/klauspost/compress/zstd"
 	"io"
 	"log"
 	"os"
@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
 
@@ -60,7 +61,8 @@ type (
 
 const (
 	NoCompression Compression = iota
-	ZSTD
+	ZSTDCompression
+	GZIPCompresssion
 )
 
 func NewFileLogger(filename string, compression Compression) (StmtToFile, error) {
@@ -81,7 +83,7 @@ func NewLogger(w io.Writer, compression Compression) (StmtToFile, error) {
 
 	var writer *bufio.Writer
 	switch compression {
-	case ZSTD:
+	case ZSTDCompression:
 		zstdWriter, err := zstd.NewWriter(w,
 			zstd.WithEncoderLevel(zstd.SpeedFastest),
 			zstd.WithAllLitEntropyCompression(true),
@@ -92,6 +94,14 @@ func NewLogger(w io.Writer, compression Compression) (StmtToFile, error) {
 		}
 
 		writer = bufio.NewWriterSize(zstdWriter, 8192)
+	case GZIPCompresssion:
+		gzipWriter, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+
+		writer = bufio.NewWriterSize(gzipWriter, 8192)
 	default:
 		writer = bufio.NewWriterSize(w, 8192)
 	}
