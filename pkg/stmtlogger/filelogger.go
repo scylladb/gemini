@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"github.com/klauspost/compress/zstd"
 	"io"
 	"log"
 	"os"
@@ -53,9 +54,16 @@ type (
 		wg      sync.WaitGroup
 		active  atomic.Bool
 	}
+
+	Compression int
 )
 
-func NewFileLogger(filename string) (StmtToFile, error) {
+const (
+	NoCompression Compression = iota
+	ZSTD
+)
+
+func NewFileLogger(filename string, compression Compression) (StmtToFile, error) {
 	if filename == "" {
 		return &nopFileLogger{}, nil
 	}
@@ -65,14 +73,31 @@ func NewFileLogger(filename string) (StmtToFile, error) {
 		return nil, err
 	}
 
-	return NewLogger(fd)
+	return NewLogger(fd, compression)
 }
 
-func NewLogger(w io.Writer) (StmtToFile, error) {
+func NewLogger(w io.Writer, compression Compression) (StmtToFile, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	var writer *bufio.Writer
+	switch compression {
+	case ZSTD:
+		zstdWriter, err := zstd.NewWriter(w,
+			zstd.WithEncoderLevel(zstd.SpeedFastest),
+			zstd.WithAllLitEntropyCompression(true),
+		)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+
+		writer = bufio.NewWriterSize(zstdWriter, 8192)
+	default:
+		writer = bufio.NewWriterSize(w, 8192)
+	}
+
 	out := &logger{
-		writer:  bufio.NewWriterSize(w, 8192),
+		writer:  writer,
 		fd:      w,
 		channel: make(chan *bytes.Buffer, defaultChanSize),
 		cancel:  cancel,

@@ -64,11 +64,12 @@ type Store interface {
 }
 
 type Config struct {
-	TestLogStatementsFile   string
-	OracleLogStatementsFile string
-	MaxRetriesMutate        int
-	MaxRetriesMutateSleep   time.Duration
-	UseServerSideTimestamps bool
+	TestLogStatementsFile       string
+	OracleLogStatementsFile     string
+	LogStatementFileCompression stmtlogger.Compression
+	MaxRetriesMutate            int
+	MaxRetriesMutateSleep       time.Duration
+	UseServerSideTimestamps     bool
 }
 
 func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut io.Writer, logger *zap.Logger) (Store, error) {
@@ -78,7 +79,7 @@ func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig
 	}, []string{"system", "method"},
 	)
 
-	oracleStore, err := getStore("oracle", schema, oracleCluster, cfg, cfg.OracleLogStatementsFile, traceOut, logger, ops)
+	oracleStore, err := getStore("oracle", schema, oracleCluster, cfg, cfg.OracleLogStatementsFile, cfg.LogStatementFileCompression, traceOut, logger, ops)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +87,7 @@ func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig
 	if testCluster == nil {
 		return nil, errors.New("test cluster is empty")
 	}
-	testStore, err := getStore("test", schema, testCluster, cfg, cfg.TestLogStatementsFile, traceOut, logger, ops)
+	testStore, err := getStore("test", schema, testCluster, cfg, cfg.TestLogStatementsFile, cfg.LogStatementFileCompression, traceOut, logger, ops)
 	if err != nil {
 		return nil, err
 	}
@@ -263,6 +264,7 @@ func getStore(
 	clusterConfig *gocql.ClusterConfig,
 	cfg Config,
 	stmtLogFile string,
+	compression stmtlogger.Compression,
 	traceOut io.Writer,
 	logger *zap.Logger,
 	ops *prometheus.CounterVec,
@@ -272,17 +274,17 @@ func getStore(
 			system: name,
 		}, nil
 	}
-	oracleSession, err := newSession(clusterConfig, traceOut)
+	session, err := newSession(clusterConfig, traceOut)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to connect to %s cluster", name)
 	}
-	oracleFileLogger, err := stmtlogger.NewFileLogger(stmtLogFile)
+	oracleFileLogger, err := stmtlogger.NewFileLogger(stmtLogFile, compression)
 	if err != nil {
 		return nil, err
 	}
 
 	return &cqlStore{
-		session:                 oracleSession,
+		session:                 session,
 		schema:                  schema,
 		system:                  name,
 		ops:                     ops,
