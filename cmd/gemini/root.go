@@ -27,6 +27,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/scylladb/gemini/pkg/stmtlogger"
+
 	"github.com/scylladb/gemini/pkg/auth"
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/generators"
@@ -39,6 +41,8 @@ import (
 
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
+
+	"github.com/scylladb/gemini/pkg/stmtlogger"
 
 	"github.com/gocql/gocql"
 	"github.com/hailocab/go-hostpool"
@@ -108,6 +112,7 @@ var (
 	profilingPort                    int
 	testStatementLogFile             string
 	oracleStatementLogFile           string
+	statementLogFileCompression      string
 )
 
 func interactive() bool {
@@ -211,11 +216,12 @@ func run(_ *cobra.Command, _ []string) error {
 
 	testCluster, oracleCluster := createClusters(cons, testHostSelectionPolicy, oracleHostSelectionPolicy, logger)
 	storeConfig := store.Config{
-		MaxRetriesMutate:        maxRetriesMutate,
-		MaxRetriesMutateSleep:   maxRetriesMutateSleep,
-		UseServerSideTimestamps: useServerSideTimestamps,
-		TestLogStatementsFile:   testStatementLogFile,
-		OracleLogStatementsFile: oracleStatementLogFile,
+		MaxRetriesMutate:            maxRetriesMutate,
+		MaxRetriesMutateSleep:       maxRetriesMutateSleep,
+		UseServerSideTimestamps:     useServerSideTimestamps,
+		TestLogStatementsFile:       testStatementLogFile,
+		OracleLogStatementsFile:     oracleStatementLogFile,
+		LogStatementFileCompression: getLogStatementFileCompression(statementLogFileCompression),
 	}
 	var tracingFile *os.File
 	if tracingOutFile != "" {
@@ -409,6 +415,17 @@ func createClusters(
 	return testCluster, oracleCluster
 }
 
+func getLogStatementFileCompression(input string) stmtlogger.Compression {
+	switch input {
+	case "zstd":
+		return stmtlogger.ZSTDCompression
+	case "gzip":
+		return stmtlogger.GZIPCompresssion
+	default:
+		return stmtlogger.NoCompression
+	}
+}
+
 func getReplicationStrategy(rs string, fallback replication.Replication, logger *zap.Logger) replication.Replication {
 	switch rs {
 	case "network":
@@ -536,6 +553,7 @@ func init() {
 	rootCmd.Flags().IntVarP(&maxErrorsToStore, "max-errors-to-store", "", 1000, "Maximum number of errors to store and output at the end")
 	rootCmd.Flags().StringVarP(&testStatementLogFile, "test-statement-log-file", "", "", "File to write statements flow to")
 	rootCmd.Flags().StringVarP(&oracleStatementLogFile, "oracle-statement-log-file", "", "", "File to write statements flow to")
+	rootCmd.Flags().StringVarP(&statementLogFileCompression, "statement-log-file-compression", "", "zstd", "Compression algorithm to use for statement log files")
 }
 
 func printSetup(seed, schemaSeed uint64) {
