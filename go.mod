@@ -3,7 +3,7 @@ module github.com/scylladb/gemini
 go 1.23
 
 require (
-	github.com/briandowns/spinner v1.23.1
+	github.com/briandowns/spinner v1.23.2
 	github.com/gocql/gocql v1.8.0
 	github.com/google/go-cmp v0.6.0
 	github.com/hailocab/go-hostpool v0.0.0-20160125115350-e80d13ce29ed
