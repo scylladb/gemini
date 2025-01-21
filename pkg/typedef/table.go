@@ -18,7 +18,7 @@ import (
 	"sync"
 )
 
-type QueryCache interface {
+type QueryCacheInterface interface {
 	GetQuery(qct StatementCacheType) *StmtCache
 	Reset()
 	BindToTable(t *Table)
@@ -27,7 +27,7 @@ type QueryCache interface {
 type KnownIssues map[string]bool
 
 type Table struct {
-	queryCache             QueryCache
+	queryCache             QueryCacheInterface
 	schema                 *Schema
 	Name                   string             `json:"name"`
 	PartitionKeys          Columns            `json:"partition_keys"`
@@ -83,7 +83,7 @@ func (t *Table) ResetQueryCache() {
 	t.partitionKeysLenValues = 0
 }
 
-func (t *Table) Init(s *Schema, c QueryCache) {
+func (t *Table) Init(s *Schema, c QueryCacheInterface) {
 	t.schema = s
 	t.queryCache = c
 	t.queryCache.BindToTable(t)

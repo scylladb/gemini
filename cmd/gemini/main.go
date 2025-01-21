@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+
+	_ "github.com/scylladb/gemini/pkg/metrics"
 )
 
 //go:generate sh -c "git describe --tags --abbrev=0 | tr -d '\n' > ./Version"

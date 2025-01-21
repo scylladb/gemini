@@ -20,14 +20,13 @@ import (
 
 	"golang.org/x/exp/rand"
 
-	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
 func GenSchema(sc typedef.SchemaConfig, seed uint64) *typedef.Schema {
 	r := rand.New(rand.NewSource(seed))
-	builder := builders.NewSchemaBuilder()
+	builder := typedef.NewSchemaBuilder()
 	builder.Config(sc)
 	keyspace := typedef.Keyspace{
 		Name:              "ks1",
@@ -36,10 +35,12 @@ func GenSchema(sc typedef.SchemaConfig, seed uint64) *typedef.Schema {
 	}
 	builder.Keyspace(keyspace)
 	numTables := utils.RandInt2(r, 1, sc.GetMaxTables())
+
 	for i := 0; i < numTables; i++ {
-		table := genTable(sc, fmt.Sprintf("table%d", i+1), r)
+		table := genTable(sc, fmt.Sprintf("table_%d", i+1), r)
 		builder.Table(table)
 	}
+
 	return builder.Build()
 }
 
@@ -60,9 +61,11 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 			typedef.KnownIssuesJSONWithTuples: true,
 		},
 	}
+
 	for _, option := range sc.TableOptions {
 		table.TableOptions = append(table.TableOptions, option.ToCQL())
 	}
+
 	if sc.UseCounters {
 		table.Columns = typedef.Columns{
 			{
@@ -78,20 +81,16 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 	for i := 0; i < len(columns); i++ {
 		columns[i] = &typedef.ColumnDef{Name: GenColumnName("col", i), Type: GenColumnType(len(columns), &sc, r)}
 	}
+
 	table.Columns = columns
 
-	var indexes []typedef.IndexDef
 	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && len(columns) > 0 {
-		indexes = CreateIndexesForColumn(&table, utils.RandInt2(r, 1, len(columns)))
+		table.Indexes = CreateIndexesForColumn(&table, utils.RandInt2(r, 1, len(columns)))
 	}
-	table.Indexes = indexes
 
-	var mvs []typedef.MaterializedView
 	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && sc.UseMaterializedViews && len(clusteringKeys) > 0 && columns.ValidColumnsForPrimaryKey().Len() != 0 {
-		mvs = CreateMaterializedViews(columns, table.Name, partitionKeys, clusteringKeys, r)
+		table.MaterializedViews = CreateMaterializedViews(columns, table.Name, partitionKeys, clusteringKeys, r)
 	}
-
-	table.MaterializedViews = mvs
 
 	return &table
 }
