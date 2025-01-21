@@ -9,7 +9,7 @@ DOCKER_VERSION ?= latest
 GOLANGCI_VERSION ?= 1.62.0
 
 CQL_FEATURES ?= normal
-CONCURRENCY ?= 1
+CONCURRENCY ?= 4
 DURATION ?= 10m
 WARMUP ?= 0
 MODE ?= mixed
@@ -42,7 +42,10 @@ GEMINI_FLAGS ?= --fail-fast \
 	--duration=$(DURATION) \
 	--warmup=$(WARMUP) \
 	--profiling-port=6060 \
-	--drop-schema=true
+	--drop-schema=true \
+	--oracle-statement-log-file=$(PWD)/results/oracle-statements.log.zst \
+	--test-statement-log-file=$(PWD)/results/test-statements.log.zst \
+	--statement-log-file-compression=zstd
 
 
 ifndef GOBIN
