@@ -30,8 +30,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
 
@@ -72,13 +70,7 @@ type Config struct {
 }
 
 func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut io.Writer, logger *zap.Logger) (Store, error) {
-	ops := promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "gemini_cql_requests",
-		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
-	}, []string{"system", "method"},
-	)
-
-	oracleStore, err := getStore("oracle", schema, oracleCluster, cfg, cfg.OracleLogStatementsFile, traceOut, logger, ops)
+	oracleStore, err := getStore("oracle", schema, oracleCluster, cfg, cfg.OracleLogStatementsFile, traceOut, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +78,7 @@ func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig
 	if testCluster == nil {
 		return nil, errors.New("test cluster is empty")
 	}
-	testStore, err := getStore("test", schema, testCluster, cfg, cfg.TestLogStatementsFile, traceOut, logger, ops)
+	testStore, err := getStore("test", schema, testCluster, cfg, cfg.TestLogStatementsFile, traceOut, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +257,6 @@ func getStore(
 	stmtLogFile string,
 	traceOut io.Writer,
 	logger *zap.Logger,
-	ops *prometheus.CounterVec,
 ) (out storeLoader, err error) {
 	if clusterConfig == nil {
 		return &noOpStore{
@@ -285,7 +276,6 @@ func getStore(
 		session:                 oracleSession,
 		schema:                  schema,
 		system:                  name,
-		ops:                     ops,
 		maxRetriesMutate:        cfg.MaxRetriesMutate + 10,
 		maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
 		useServerSideTimestamps: cfg.UseServerSideTimestamps,

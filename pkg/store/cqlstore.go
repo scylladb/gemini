@@ -21,10 +21,10 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/scylladb/gocqlx/v2/qb"
 	"go.uber.org/zap"
 
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -32,7 +32,6 @@ import (
 type cqlStore struct { //nolint:govet
 	session                 *gocql.Session
 	schema                  *typedef.Schema
-	ops                     *prometheus.CounterVec
 	logger                  *zap.Logger
 	system                  string
 	maxRetriesMutate        int
@@ -48,7 +47,7 @@ func (cs *cqlStore) name() string {
 func (cs *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) error {
 	for range cs.maxRetriesMutate {
 		if err := cs.doMutate(ctx, stmt); err == nil {
-			cs.ops.WithLabelValues(cs.system, opType(stmt)).Inc()
+			metrics.CQLRequests.WithLabelValues(cs.system, opType(stmt)).Inc()
 			return nil
 		}
 
@@ -92,7 +91,7 @@ func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) ([]map[string]
 	defer query.Release()
 
 	iter := query.Iter()
-	cs.ops.WithLabelValues(cs.system, opType(stmt)).Inc()
+	metrics.CQLRequests.WithLabelValues(cs.system, opType(stmt)).Inc()
 
 	result := loadSet(iter)
 
