@@ -27,23 +27,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/scylladb/gemini/pkg/stmtlogger"
-
-	"github.com/scylladb/gemini/pkg/auth"
-	"github.com/scylladb/gemini/pkg/builders"
-	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/jobs"
-	"github.com/scylladb/gemini/pkg/realrandom"
-	"github.com/scylladb/gemini/pkg/replication"
-	"github.com/scylladb/gemini/pkg/store"
-	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
-
-	"github.com/scylladb/gemini/pkg/status"
-	"github.com/scylladb/gemini/pkg/stop"
-
-	"github.com/scylladb/gemini/pkg/stmtlogger"
-
 	"github.com/gocql/gocql"
 	"github.com/hailocab/go-hostpool"
 	"github.com/pkg/errors"
@@ -54,6 +37,19 @@ import (
 	"golang.org/x/exp/rand"
 	"golang.org/x/net/context"
 	"gonum.org/v1/gonum/stat/distuv"
+
+	"github.com/scylladb/gemini/pkg/auth"
+	"github.com/scylladb/gemini/pkg/builders"
+	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/jobs"
+	"github.com/scylladb/gemini/pkg/realrandom"
+	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/status"
+	"github.com/scylladb/gemini/pkg/stmtlogger"
+	"github.com/scylladb/gemini/pkg/stop"
+	"github.com/scylladb/gemini/pkg/store"
+	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 var (
