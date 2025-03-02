@@ -1,6 +1,8 @@
 module github.com/scylladb/gemini
 
-go 1.23
+go 1.23.0
+
+toolchain go1.24.0
 
 require (
 	github.com/briandowns/spinner v1.23.1
@@ -15,9 +17,9 @@ require (
 	github.com/spf13/cobra v1.8.1
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/exp v0.0.0-20241108190413-2d47ceb2692f
+	golang.org/x/exp v0.0.0-20250228200357-dead58393ab7
 	golang.org/x/net v0.34.0
-	golang.org/x/sync v0.10.0
+	golang.org/x/sync v0.11.0
 	gonum.org/v1/gonum v0.15.1
 	gopkg.in/inf.v0 v0.9.1
 )
