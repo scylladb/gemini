@@ -35,7 +35,6 @@ func options(cql string) []string {
 }
 
 func TestGetCreateSchema(t *testing.T) {
-	t.Parallel()
 	ks := typedef.Keyspace{Name: "ks1"}
 	tests := map[string]struct {
 		table *typedef.Table

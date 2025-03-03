@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	"github.com/scylladb/gemini/pkg/testutils"
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 var mutateDataPath = "./test_expected_data/mutate/"
@@ -67,7 +66,7 @@ func TestGenDeleteRows(t *testing.T) {
 }
 
 func BenchmarkGenInsertStmt(t *testing.B) {
-	utils.SetUnderTest()
+
 	for idx := range genInsertStmtCases {
 		caseName := genInsertStmtCases[idx]
 		t.Run(caseName,
@@ -84,7 +83,7 @@ func BenchmarkGenInsertStmt(t *testing.B) {
 }
 
 func BenchmarkGenInsertJSONStmt(t *testing.B) {
-	utils.SetUnderTest()
+
 	for idx := range genInsertJSONStmtCases {
 		caseName := genInsertJSONStmtCases[idx]
 		t.Run(caseName,
@@ -100,7 +99,7 @@ func BenchmarkGenInsertJSONStmt(t *testing.B) {
 }
 
 func BenchmarkGenUpdateStmt(t *testing.B) {
-	utils.SetUnderTest()
+
 	for idx := range genUpdateStmtCases {
 		caseName := genUpdateStmtCases[idx]
 		t.Run(caseName,
@@ -116,7 +115,7 @@ func BenchmarkGenUpdateStmt(t *testing.B) {
 }
 
 func BenchmarkGenDeleteRows(t *testing.B) {
-	utils.SetUnderTest()
+
 	for idx := range genDeleteStmtCases {
 		caseName := genDeleteStmtCases[idx]
 		t.Run(caseName,

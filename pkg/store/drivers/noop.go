@@ -12,27 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package metrics
+package drivers
 
 import (
-	"net/http"
+	"context"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-var CQLRequests = promauto.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "gemini_cql_requests",
-		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
-	},
-	[]string{"system", "method"},
-)
+type Nop struct{}
 
-func init() {
-	go func() {
-		http.Handle("/metrics", promhttp.Handler())
-		_ = http.ListenAndServe("0.0.0.0:2112", nil)
-	}()
+func NewNop() Nop {
+	return Nop{}
+}
+
+func (n Nop) Execute(context.Context, *typedef.Stmt) error {
+	return nil
+}
+
+func (n Nop) Fetch(context.Context, *typedef.Stmt) ([]map[string]any, error) {
+	return nil, nil
 }
