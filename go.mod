@@ -44,4 +44,4 @@ require (
 	google.golang.org/protobuf v1.35.2 // indirect
 )
 
-replace github.com/gocql/gocql => github.com/scylladb/gocql v1.14.3
+replace github.com/gocql/gocql => github.com/scylladb/gocql v1.14.5
