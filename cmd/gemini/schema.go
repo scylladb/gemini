@@ -64,7 +64,7 @@ func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 		MaxTupleParts   = 20
 		MaxUDTParts     = 20
 	)
-	rs := getReplicationStrategy(replicationStrategy, replication.NewSimpleStrategy(), logger)
+	rs := getReplicationStrategy(testReplicationStrategy, replication.NewSimpleStrategy(), logger)
 	ors := getReplicationStrategy(oracleReplicationStrategy, rs, logger)
 	return typedef.SchemaConfig{
 		ReplicationStrategy:              rs,

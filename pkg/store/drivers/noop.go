@@ -12,33 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package store
+package drivers
 
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-type (
-	Driver interface {
-		Execute(ctx context.Context, stmt *typedef.Stmt) error
-		Fetch(ctx context.Context, stmt *typedef.Stmt) ([]map[string]any, error)
-	}
+type Nop struct{}
 
-	Store interface {
-		Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
-		Mutate(context.Context, *typedef.Stmt) error
-		Check(context.Context, *typedef.Table, *typedef.Stmt, bool) error
-	}
-)
+func NewNop() Nop {
+	return Nop{}
+}
 
-func New(logger *zap.Logger, testStore, oracleStore Driver) (*ValidatingStore, error) {
-	return &ValidatingStore{
-		testStore:   testStore,
-		oracleStore: oracleStore,
-		logger:      logger.Named("delegating_store"),
-	}, nil
+func (n Nop) Execute(context.Context, *typedef.Stmt) error {
+	return nil
+}
+
+func (n Nop) Fetch(context.Context, *typedef.Stmt) ([]map[string]any, error) {
+	return nil, nil
 }

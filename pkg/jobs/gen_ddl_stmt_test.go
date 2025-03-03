@@ -24,7 +24,6 @@ import (
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 var ddlDataPath = "./test_expected_data/ddl/"
@@ -52,7 +51,6 @@ func TestGenAddColumnStmt(t *testing.T) {
 }
 
 func BenchmarkGenDropColumnStmt(t *testing.B) {
-	utils.SetUnderTest()
 	for idx := range genDropColumnStmtCases {
 		caseName := genDropColumnStmtCases[idx]
 		t.Run(caseName,
@@ -69,7 +67,6 @@ func BenchmarkGenDropColumnStmt(t *testing.B) {
 }
 
 func BenchmarkGenAddColumnStmt(t *testing.B) {
-	utils.SetUnderTest()
 	for idx := range genAddColumnStmtCases {
 		caseName := genAddColumnStmtCases[idx]
 		t.Run(caseName,

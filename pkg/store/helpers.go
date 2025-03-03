@@ -85,15 +85,3 @@ func lt(mi, mj map[string]any) bool {
 		panic(msg)
 	}
 }
-
-func loadSet(iter *gocql.Iter) []map[string]any {
-	var rows []map[string]any
-	for {
-		row := make(map[string]any)
-		if !iter.MapScan(row) {
-			break
-		}
-		rows = append(rows, row)
-	}
-	return rows
-}

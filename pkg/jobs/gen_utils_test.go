@@ -21,7 +21,6 @@ import (
 
 	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type resultToken struct {
@@ -197,7 +196,7 @@ func RunStmtTest[T testutils.ExpectedEntry[T]](
 	testBody func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[T]),
 ) {
 	t.Helper()
-	utils.SetUnderTest()
+
 	t.Parallel()
 	expected := testutils.LoadExpectedFromFile[T](t, filePath, cases, *testutils.UpdateExpectedFlag)
 	if *testutils.UpdateExpectedFlag {
