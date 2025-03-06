@@ -17,9 +17,9 @@ require (
 	github.com/spf13/cobra v1.8.1
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/exp v0.0.0-20250228200357-dead58393ab7
+	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394
 	golang.org/x/net v0.34.0
-	golang.org/x/sync v0.11.0
+	golang.org/x/sync v0.12.0
 	gonum.org/v1/gonum v0.15.1
 	gopkg.in/inf.v0 v0.9.1
 )
