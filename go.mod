@@ -14,6 +14,7 @@ require (
 	github.com/prometheus/client_golang v1.20.5
 	github.com/scylladb/go-set v1.0.2
 	github.com/scylladb/gocqlx/v2 v2.8.0
+	github.com/scylladb/gocqlx/v3 v3.0.1
 	github.com/spf13/cobra v1.8.1
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
@@ -28,7 +29,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/fatih/color v1.18.0 // indirect
-	github.com/golang/snappy v0.0.4 // indirect
+	github.com/golang/snappy v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
