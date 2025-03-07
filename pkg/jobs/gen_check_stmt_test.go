@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	"github.com/scylladb/gemini/pkg/testutils"
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 var checkDataPath = "./test_expected_data/check/"
@@ -150,7 +149,6 @@ func TestGenSingleIndexQuery(t *testing.T) {
 }
 
 func BenchmarkGenSinglePartitionQuery(t *testing.B) {
-	utils.SetUnderTest()
 	for idx := range genSinglePartitionQueryCases {
 		caseName := genSinglePartitionQueryCases[idx]
 		t.Run(caseName,
@@ -165,7 +163,6 @@ func BenchmarkGenSinglePartitionQuery(t *testing.B) {
 }
 
 func BenchmarkGenSinglePartitionQueryMv(t *testing.B) {
-	utils.SetUnderTest()
 	for idx := range genSinglePartitionQueryMvCases {
 		caseName := genSinglePartitionQueryMvCases[idx]
 		t.Run(caseName,
@@ -181,7 +178,6 @@ func BenchmarkGenSinglePartitionQueryMv(t *testing.B) {
 }
 
 func BenchmarkGenMultiplePartitionQuery(t *testing.B) {
-	utils.SetUnderTest()
 	for idx := range genMultiplePartitionQueryCases {
 		caseName := genMultiplePartitionQueryCases[idx]
 		t.Run(caseName,
@@ -197,7 +193,6 @@ func BenchmarkGenMultiplePartitionQuery(t *testing.B) {
 }
 
 func BenchmarkGenMultiplePartitionQueryMv(t *testing.B) {
-	utils.SetUnderTest()
 	for idx := range genMultiplePartitionQueryMvCases {
 		caseName := genMultiplePartitionQueryMvCases[idx]
 		t.Run(caseName,
@@ -221,7 +216,6 @@ func BenchmarkGenMultiplePartitionQueryMv(t *testing.B) {
 }
 
 func BenchmarkGenClusteringRangeQuery(t *testing.B) {
-	utils.SetUnderTest()
 	for idx := range genClusteringRangeQueryCases {
 		caseName := genClusteringRangeQueryCases[idx]
 		t.Run(caseName,
@@ -238,7 +232,6 @@ func BenchmarkGenClusteringRangeQuery(t *testing.B) {
 }
 
 func BenchmarkGenClusteringRangeQueryMv(t *testing.B) {
-	utils.SetUnderTest()
 	for idx := range genClusteringRangeQueryMvCases {
 		caseName := genClusteringRangeQueryMvCases[idx]
 		t.Run(caseName,
@@ -262,7 +255,6 @@ func BenchmarkGenClusteringRangeQueryMv(t *testing.B) {
 }
 
 func BenchmarkGenMultiplePartitionClusteringRangeQuery(t *testing.B) {
-	utils.SetUnderTest()
 	for idx := range genMultiplePartitionClusteringRangeQueryCases {
 		caseName := genMultiplePartitionClusteringRangeQueryCases[idx]
 		t.Run(caseName,
@@ -286,7 +278,6 @@ func BenchmarkGenMultiplePartitionClusteringRangeQuery(t *testing.B) {
 }
 
 func BenchmarkGenMultiplePartitionClusteringRangeQueryMv(t *testing.B) {
-	utils.SetUnderTest()
 	for idx := range genMultiplePartitionClusteringRangeQueryMvCases {
 		caseName := genMultiplePartitionClusteringRangeQueryMvCases[idx]
 		t.Run(caseName,
@@ -311,7 +302,6 @@ func BenchmarkGenMultiplePartitionClusteringRangeQueryMv(t *testing.B) {
 }
 
 func BenchmarkGenSingleIndexQuery(t *testing.B) {
-	utils.SetUnderTest()
 	for idx := range genSingleIndexQueryCases {
 		caseName := genSingleIndexQueryCases[idx]
 		t.Run(caseName,
