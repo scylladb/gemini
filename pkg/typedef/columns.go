@@ -16,10 +16,10 @@ package typedef
 
 import (
 	"encoding/json"
+	"math/rand/v2"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
-	"golang.org/x/exp/rand"
 )
 
 type ColumnDef struct {
@@ -125,7 +125,7 @@ func (c Columns) ValidColumnsForPrimaryKey() Columns {
 }
 
 func (c Columns) Random(r *rand.Rand) *ColumnDef {
-	return c[r.Intn(len(c))]
+	return c[r.IntN(len(c))]
 }
 
 func (c Columns) LenValues() int {

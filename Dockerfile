@@ -1,4 +1,4 @@
-FROM golang:1.23-bookworm AS build
+FROM golang:1.24-bookworm AS build
 
 ENV GO111MODULE=on
 ENV GOAMD64=v3
@@ -32,10 +32,10 @@ EXPOSE 2121
 EXPOSE 2345
 
 ENTRYPOINT [ \
-	"dlv", "exec", "--log", "--listen=0.0.0.0:2345", "--allow-non-terminal-interactive", \
-	"--headless", "--api-version=2", "--accept-multiclient", \
-	"/gemini/bin/gemini", "--" \
-]
+    "dlv", "exec", "--log", "--listen=0.0.0.0:2345", "--allow-non-terminal-interactive", \
+    "--headless", "--api-version=2", "--accept-multiclient", \
+    "/gemini/bin/gemini", "--" \
+    ]
 
 FROM busybox AS production
 

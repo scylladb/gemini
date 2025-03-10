@@ -16,9 +16,8 @@ package jobs
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"strings"
-
-	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/generators"
@@ -31,7 +30,7 @@ func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, _ *typedef.Pa
 	if validCols.Len() > 0 {
 		maxVariant = 2
 	}
-	switch n := r.Intn(maxVariant + 2); n {
+	switch n := r.IntN(maxVariant + 2); n {
 	// case 0: // Alter column not supported in Cassandra from 3.0.11
 	//	return t.alterColumn(s.Keyspace.Name)
 	case 2:

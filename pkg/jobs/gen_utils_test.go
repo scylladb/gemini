@@ -207,11 +207,10 @@ func RunStmtTest[T testutils.ExpectedEntry[T]](
 	}
 	for idx := range cases {
 		caseName := cases[idx]
-		t.Run(caseName,
-			func(subT *testing.T) {
-				subT.Parallel()
-				testBody(subT, caseName, expected)
-			})
+		t.Run(caseName, func(subT *testing.T) {
+			subT.Parallel()
+			testBody(subT, caseName, expected)
+		})
 	}
 }
 

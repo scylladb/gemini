@@ -17,10 +17,10 @@ package jobs
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/scylladb/gocqlx/v3/qb"
-	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -42,11 +42,11 @@ func GenMutateStmt(s *typedef.Schema, t *typedef.Table, g generators.Interface, 
 	if !deletes {
 		return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, useLWT)
 	}
-	switch n := r.Intn(1000); n {
+	switch n := r.IntN(1000); n {
 	case 10, 100:
 		return genDeleteRows(s, t, valuesWithToken, r, p)
 	default:
-		switch r.Intn(2) {
+		switch r.IntN(2) {
 		case 0:
 			if t.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
 				return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, useLWT)

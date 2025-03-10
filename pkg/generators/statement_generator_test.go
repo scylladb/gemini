@@ -16,12 +16,12 @@ package generators_test
 
 import (
 	"encoding/json"
+	"math/rand/v2"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/replication"
@@ -187,15 +187,15 @@ func TestGetCreateSchema(t *testing.T) {
 
 func TestGenSchema(t *testing.T) {
 	seeds := [10]uint64{
-		uint64(10 + rand.Intn(10)),
-		uint64(100 + rand.Intn(100)),
-		uint64(1000 + rand.Intn(1000)),
-		uint64(10000 + rand.Intn(10000)),
-		uint64(100000 + rand.Intn(100000)),
-		uint64(1000000 + rand.Intn(1000000)),
-		uint64(10000000 + rand.Intn(10000000)),
-		uint64(100000000 + rand.Intn(100000000)),
-		uint64(1000000000 + rand.Intn(1000000000)),
+		uint64(10 + rand.IntN(10)),
+		uint64(100 + rand.IntN(100)),
+		uint64(1000 + rand.IntN(1000)),
+		uint64(10000 + rand.IntN(10000)),
+		uint64(100000 + rand.IntN(100000)),
+		uint64(1000000 + rand.IntN(1000000)),
+		uint64(10000000 + rand.IntN(10000000)),
+		uint64(100000000 + rand.IntN(100000000)),
+		uint64(1000000000 + rand.IntN(1000000000)),
 		uint64(time.Now().Nanosecond()),
 	}
 

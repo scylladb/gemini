@@ -16,12 +16,12 @@ package typedef
 
 import (
 	"bytes"
+	"math/rand/v2"
 	"strings"
 
 	"github.com/pkg/errors"
 
 	"github.com/gocql/gocql"
-	"golang.org/x/exp/rand"
 )
 
 type TupleType struct {

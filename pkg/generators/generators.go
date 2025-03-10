@@ -19,6 +19,8 @@ import (
 	"math"
 	"sync"
 
+	"github.com/scylladb/gemini/pkg/distributions"
+
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -33,7 +35,7 @@ type Generators struct {
 func New(
 	ctx context.Context,
 	schema *typedef.Schema,
-	distFunc DistributionFunc,
+	distFunc distributions.DistributionFunc,
 	seed, distributionSize, pkBufferReuseSize uint64,
 	logger *zap.Logger,
 ) *Generators {

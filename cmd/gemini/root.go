@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -34,12 +35,11 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"golang.org/x/exp/rand"
 	"golang.org/x/net/context"
-	"gonum.org/v1/gonum/stat/distuv"
 
 	"github.com/scylladb/gemini/pkg/auth"
 	"github.com/scylladb/gemini/pkg/builders"
+	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/jobs"
 	"github.com/scylladb/gemini/pkg/realrandom"
@@ -68,7 +68,6 @@ var (
 	verbose                          bool
 	mode                             string
 	failFast                         bool
-	nonInteractive                   bool
 	duration                         time.Duration
 	bind                             string
 	warmup                           time.Duration
@@ -111,10 +110,6 @@ var (
 	statementLogFileCompression      string
 )
 
-func interactive() bool {
-	return !nonInteractive
-}
-
 func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Schema, error) {
 	byteValue, err := os.ReadFile(confFile)
 	if err != nil {
@@ -151,8 +146,6 @@ func run(_ *cobra.Command, _ []string) error {
 
 	intSeed := seedFromString(seed)
 	intSchemaSeed := seedFromString(schemaSeed)
-
-	rand.Seed(intSeed)
 
 	cons, err := gocql.ParseConsistencyWrapper(consistency)
 	if err != nil {
@@ -272,7 +265,7 @@ func run(_ *cobra.Command, _ []string) error {
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
 	pump := jobs.NewPump(stopFlag, logger)
 
-	distFunc, err := createDistributionFunc(partitionKeyDistribution, partitionCount, intSeed, stdDistMean, oneStdDev)
+	distFunc, err := distributions.New(partitionKeyDistribution, partitionCount, intSeed, stdDistMean, oneStdDev)
 	if err != nil {
 		return errors.Wrapf(err, "Faile to create distribution function: %s", partitionKeyDistribution)
 	}
@@ -317,32 +310,6 @@ const (
 	stdDistMean = math.MaxUint64 / 2
 	oneStdDev   = 0.341 * math.MaxUint64
 )
-
-func createDistributionFunc(distribution string, size, seed uint64, mu, sigma float64) (generators.DistributionFunc, error) {
-	switch strings.ToLower(distribution) {
-	case "zipf":
-		dist := rand.NewZipf(rand.New(rand.NewSource(seed)), 1.1, 1.1, size)
-		return func() generators.TokenIndex {
-			return generators.TokenIndex(dist.Uint64())
-		}, nil
-	case "normal":
-		dist := distuv.Normal{
-			Src:   rand.NewSource(seed),
-			Mu:    mu,
-			Sigma: sigma,
-		}
-		return func() generators.TokenIndex {
-			return generators.TokenIndex(dist.Rand())
-		}, nil
-	case "uniform":
-		rnd := rand.New(rand.NewSource(seed))
-		return func() generators.TokenIndex {
-			return generators.TokenIndex(rnd.Uint64n(size))
-		}, nil
-	default:
-		return nil, errors.Errorf("unsupported distribution: %s", distribution)
-	}
-}
 
 func createLogger(level string) *zap.Logger {
 	lvl := zap.NewAtomicLevel()
@@ -473,7 +440,6 @@ func init() {
 	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
 	rootCmd.Flags().BoolVarP(&failFast, "fail-fast", "f", false, "Stop on the first failure")
-	rootCmd.Flags().BoolVarP(&nonInteractive, "non-interactive", "", false, "Run in non-interactive mode (disable progress indicator)")
 	rootCmd.Flags().DurationVarP(&duration, "duration", "", 30*time.Second, "")
 	rootCmd.Flags().StringVarP(&outFileArg, "outfile", "", "", "Specify the name of the file where the results should go")
 	rootCmd.Flags().StringVarP(&bind, "bind", "b", "0.0.0.0:2112", "Specify the interface and port which to bind prometheus metrics on. Default is ':2112'")

@@ -207,14 +207,14 @@ func TestSendToParent(t *testing.T) {
 // nolint: govet
 type parentChildInfo struct {
 	parent        *stop.Flag
-	parentSignal  uint32
 	child1        *stop.Flag
-	child1Signal  uint32
 	child11       *stop.Flag
-	child11Signal uint32
 	child12       *stop.Flag
-	child12Signal uint32
 	child2        *stop.Flag
+	parentSignal  uint32
+	child1Signal  uint32
+	child11Signal uint32
+	child12Signal uint32
 	child2Signal  uint32
 }
 

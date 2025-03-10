@@ -15,14 +15,15 @@
 package utils
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gocql/gocql"
-	"golang.org/x/exp/rand"
 )
 
 var maxDateMs = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC).UTC().UnixMilli()
@@ -31,7 +32,7 @@ var maxDateMs = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC).UTC().U
 // it is done in such way because we wanted to make JSON statement to work
 // but scylla supports only string representation of date in JSON format
 func RandDateStr(rnd *rand.Rand) string {
-	return time.UnixMilli(rnd.Int63n(maxDateMs)).UTC().Format("2006-01-02")
+	return time.UnixMilli(rnd.Int64N(maxDateMs)).UTC().Format("2006-01-02")
 }
 
 // RandTimestamp generates timestamp in nanoseconds
@@ -39,11 +40,11 @@ func RandDateStr(rnd *rand.Rand) string {
 // Currently CQL fails: unable to parse date '95260-10-10T19:09:07.148+0000': marshaling error: Unable to parse timestamp from '95260-10-10t19:09:07.148+0000'"
 // if year is bigger than 9999, same as golang time.Parse
 func RandTimestamp(rnd *rand.Rand) int64 {
-	return rnd.Int63n(maxDateMs)
+	return rnd.Int64N(maxDateMs)
 }
 
 func RandDate(rnd *rand.Rand) time.Time {
-	return time.Unix(rnd.Int63n(1<<63-2), rnd.Int63n(999999999)).UTC()
+	return time.Unix(rnd.Int64N(1<<63-2), rnd.Int64N(999999999)).UTC()
 }
 
 // According to the CQL binary protocol, time is an int64 in range [0;86399999999999]
@@ -51,7 +52,7 @@ func RandDate(rnd *rand.Rand) time.Time {
 // An 8 byte two's complement long representing nanoseconds since midnight.
 // Valid values are in the range 0 to 86399999999999
 func RandTime(rnd *rand.Rand) int64 {
-	return rnd.Int63n(86400000000000)
+	return rnd.Int64N(86400000000000)
 }
 
 func RandIPV4Address(rnd *rand.Rand, v, pos int) string {
@@ -66,7 +67,7 @@ func RandIPV4Address(rnd *rand.Rand, v, pos int) string {
 		if i == pos {
 			blocks = append(blocks, strconv.Itoa(v))
 		} else {
-			blocks = append(blocks, strconv.Itoa(rnd.Intn(255)))
+			blocks = append(blocks, strconv.Itoa(rnd.IntN(255)))
 		}
 	}
 	return strings.Join(blocks, ".")
@@ -76,7 +77,7 @@ func RandInt2(rnd *rand.Rand, minimum, maximum int) int {
 	if maximum <= minimum {
 		return minimum
 	}
-	return minimum + rnd.Intn(maximum-minimum)
+	return minimum + rnd.IntN(maximum-minimum)
 }
 
 func IgnoreError(fn func() error) {
@@ -84,26 +85,23 @@ func IgnoreError(fn func() error) {
 }
 
 func RandString(rnd *rand.Rand, ln int) string {
-	buffLen := ln
-	if buffLen > 32 {
-		buffLen = 32
+	length := ln
+	if length%4 != 0 {
+		length += 4 - (length % 4)
 	}
-	binBuff := make([]byte, buffLen/2+1)
-	_, _ = rnd.Read(binBuff)
-	buff := hex.EncodeToString(binBuff)[:buffLen]
-	if ln <= 32 {
-		return buff
+
+	binBuff := make([]byte, length)
+
+	for i := 0; i < len(binBuff); i += 4 {
+		binary.LittleEndian.PutUint32(binBuff[i:], rnd.Uint32())
 	}
-	out := make([]byte, ln)
-	for idx := 0; idx < ln; idx += buffLen {
-		copy(out[idx:], buff)
-	}
-	return string(out[:ln])
+
+	return hex.EncodeToString(binBuff)[:ln]
 }
 
 func UUIDFromTime(rnd *rand.Rand) string {
 	if UnderTest {
-		return gocql.TimeUUIDWith(rnd.Int63(), 0, []byte("127.0.0.1")).String()
+		return gocql.TimeUUIDWith(rnd.Int64(), 0, []byte("127.0.0.1")).String()
 	}
 	return gocql.UUIDFromTime(RandDate(rnd)).String()
 }

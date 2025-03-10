@@ -8,7 +8,7 @@ DOCKER_COMPOSE_TESTING ?= scylla
 DOCKER_VERSION ?= latest
 
 CQL_FEATURES ?= normal
-CONCURRENCY ?= 4
+CONCURRENCY ?= 16
 DURATION ?= 10m
 WARMUP ?= 0
 MODE ?= mixed
@@ -20,12 +20,10 @@ GEMINI_ORACLE_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Ne
 GEMINI_DOCKER_NETWORK ?= gemini
 GEMINI_FLAGS ?= --fail-fast \
 	--level=info \
-	--non-interactive \
-	--consistency=LOCAL_QUORUM \
+	--consistency=QUORUM \
 	--test-host-selection-policy=token-aware \
 	--oracle-host-selection-policy=token-aware \
 	--mode=$(MODE) \
-	--non-interactive \
 	--request-timeout=5s \
 	--connect-timeout=15s \
 	--use-server-timestamps=false \
@@ -56,12 +54,12 @@ check:
 
 .PHONY: fix
 fix:
-	@go tool golangci-lint --fix
+	@go tool golangci-lint run --fix
 
 .PHONY: fieldalign
 fieldalign:
-	@go tool fieldalignment -fix github.com/scylladb/gemini
-	@go tool fieldalignment -fix github.com/scylladb/gemini/pkg/cmd
+	@go tool fieldalignment -fix ./cmd/...
+	@go tool fieldalignment -fix ./pkg/...
 
 .PHONY: fmt
 fmt:

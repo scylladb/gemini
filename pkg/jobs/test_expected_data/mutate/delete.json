@@ -48,13 +48,13 @@
     {
       "Query": "DELETE FROM ks1.pk3_ck3_col3cr WHERE pk0=? AND pk1=? AND pk2=? AND ck0\u003e=? AND ck0\u003c=?",
       "Names": "[pk0 pk1 pk2 ck0 ck0]",
-      "Values": "[1 1.110223e-16 1.1.1.1 01 00]",
+      "Values": "[1 0 0.0.0.0 0 0]",
       "Types": " bigint float inet ascii ascii",
       "QueryType": "DeleteStatement",
       "TokenValues": [
         {
-          "Token": "4281341066124197361",
-          "TokenValues": "[1 1.110223e-16 1.1.1.1]"
+          "Token": "11459553336732795163",
+          "TokenValues": "[1 0 0.0.0.0]"
         }
       ]
     }
@@ -63,13 +63,13 @@
     {
       "Query": "DELETE FROM ks1.pk3_ck3_col5 WHERE pk0=? AND pk1=? AND pk2=? AND ck0\u003e=? AND ck0\u003c=?",
       "Names": "[pk0 pk1 pk2 ck0 ck0]",
-      "Values": "[1 1.110223e-16 1.1.1.1 01 00]",
+      "Values": "[1 0 0.0.0.0 0 0]",
       "Types": " bigint float inet ascii ascii",
       "QueryType": "DeleteStatement",
       "TokenValues": [
         {
-          "Token": "4281341066124197361",
-          "TokenValues": "[1 1.110223e-16 1.1.1.1]"
+          "Token": "11459553336732795163",
+          "TokenValues": "[1 0 0.0.0.0]"
         }
       ]
     }
@@ -78,13 +78,13 @@
     {
       "Query": "DELETE FROM ks1.pkAll_ckAll_colAll WHERE pk0=? AND pk1=? AND pk2=? AND pk3=? AND pk4=? AND pk5=? AND pk6=? AND pk7=? AND pk8=? AND pk9=? AND pk10=? AND pk11=? AND pk12=? AND pk13=? AND pk14=? AND pk15=? AND pk16=? AND pk17=? AND pk18=? AND ck0\u003e=? AND ck0\u003c=?",
       "Names": "[pk0 pk1 pk2 pk3 pk4 pk5 pk6 pk7 pk8 pk9 pk10 pk11 pk12 pk13 pk14 pk15 pk16 pk17 pk18 ck0 ck0]",
-      "Values": "[01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 1 00 1 00000001-0000-1000-8000-3132372e302e 1 00000001-0000-1000-8000-3132372e302e 00 1 1 01 00]",
+      "Values": "[0 1 30 false 1970-01-01 0.001 1.1102230246251565e-16 0 0.0.0.0 0 1 0 0 00000001-0000-1000-8000-3132372e302e 1 00000001-0000-1000-8000-3132372e302e 0 1 0 0 0]",
       "Types": " ascii bigint blob boolean date decimal double float inet int smallint text timestamp timeuuid tinyint uuid varchar varint time ascii ascii",
       "QueryType": "DeleteStatement",
       "TokenValues": [
         {
-          "Token": "16493010564613190464",
-          "TokenValues": "[01 1 3030 false 1970-01-01 0.001 1.1102230246251565e-16 1.110223e-16 1.1.1.1 0 1 00 1 00000001-0000-1000-8000-3132372e302e 1 00000001-0000-1000-8000-3132372e302e 00 1 1]"
+          "Token": "12698766085058287773",
+          "TokenValues": "[0 1 30 false 1970-01-01 0.001 1.1102230246251565e-16 0 0.0.0.0 0 1 0 0 00000001-0000-1000-8000-3132372e302e 1 00000001-0000-1000-8000-3132372e302e 0 1 0]"
         }
       ]
     }

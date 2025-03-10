@@ -15,9 +15,10 @@
 package generators_test
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
+
+	"github.com/scylladb/gemini/pkg/distributions"
 
 	"go.uber.org/zap"
 
@@ -41,13 +42,13 @@ func TestGenerator(t *testing.T) {
 		},
 		PkUsedBufferSize: 10000,
 		PartitionsCount:  1000,
-		PartitionsDistributionFunc: func() generators.TokenIndex {
-			return generators.TokenIndex(atomic.LoadUint64(&current))
+		PartitionsDistributionFunc: func() distributions.TokenIndex {
+			return distributions.TokenIndex(atomic.LoadUint64(&current))
 		},
 	}
 	logger, _ := zap.NewDevelopment()
 	generator := generators.NewGenerator(table, cfg, logger)
-	generator.Start(context.Background())
+	go generator.Start(t.Context())
 	for i := uint64(0); i < cfg.PartitionsCount; i++ {
 		atomic.StoreUint64(&current, i)
 		v := generator.Get()

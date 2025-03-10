@@ -15,12 +15,12 @@
 package jobs
 
 import (
+	"math/rand/v2"
 	"time"
 
 	"github.com/scylladb/gemini/pkg/stop"
 
 	"go.uber.org/zap"
-	"golang.org/x/exp/rand"
 )
 
 func NewPump(stopFlag *stop.Flag, logger *zap.Logger) chan time.Duration {
@@ -41,7 +41,7 @@ func NewPump(stopFlag *stop.Flag, logger *zap.Logger) chan time.Duration {
 }
 
 func newHeartBeat() time.Duration {
-	r := rand.Intn(10)
+	r := rand.IntN(10)
 	switch r {
 	case 0:
 		return 10 * time.Millisecond

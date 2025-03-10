@@ -17,10 +17,9 @@ package testutils
 import (
 	"flag"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"time"
-
-	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/replication"

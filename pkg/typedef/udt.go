@@ -16,11 +16,11 @@ package typedef
 
 import (
 	"bytes"
+	"math/rand/v2"
 
 	"github.com/pkg/errors"
 
 	"github.com/gocql/gocql"
-	"golang.org/x/exp/rand"
 )
 
 type UDTType struct {

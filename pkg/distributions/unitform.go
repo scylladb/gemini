@@ -12,39 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package utils_test
+package distributions
 
 import (
 	"math/rand/v2"
-	"testing"
-	"time"
-
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
-var currentTime = uint64(time.Now().UnixNano())
-
-var rnd = rand.New(rand.NewPCG(currentTime, currentTime))
-
-func BenchmarkUtilsRandString100(t *testing.B) {
-	for x := 0; x < t.N; x++ {
-		utils.RandString(rnd, 100)
-	}
+type Uniform struct {
+	Src rand.Source
+	Min float64
+	Max float64
 }
 
-func BenchmarkUtilsRandString1000(t *testing.B) {
-	for x := 0; x < t.N; x++ {
-		utils.RandString(rnd, 1000)
+func (u Uniform) Rand() float64 {
+	var rnd float64
+	if u.Src == nil {
+		rnd = rand.Float64()
+	} else {
+		rnd = rand.New(u.Src).Float64()
 	}
+
+	return rnd*(u.Max-u.Min) + u.Min
 }
 
-func TestRandString(t *testing.T) {
-	t.Parallel()
-
-	for _, ln := range []int{1, 3, 5, 16, 45, 100, 1000} {
-		out := utils.RandString(rnd, ln)
-		if len(out) != ln {
-			t.Fatalf("%d != %d", ln, len(out))
-		}
+func (u Uniform) Uint64() uint64 {
+	var rnd uint64
+	if u.Src == nil {
+		rnd = rand.Uint64N(uint64(u.Max))
+	} else {
+		rnd = rand.New(u.Src).Uint64N(uint64(u.Max))
 	}
+
+	return rnd*(uint64(u.Max-u.Min)) + uint64(u.Min)
 }
