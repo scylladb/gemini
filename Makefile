@@ -6,7 +6,6 @@ GOARCH := $(shell go env GOARCH)
 
 DOCKER_COMPOSE_TESTING ?= scylla
 DOCKER_VERSION ?= latest
-GOLANGCI_VERSION ?= 1.62.0
 
 CQL_FEATURES ?= normal
 CONCURRENCY ?= 4
@@ -47,36 +46,26 @@ GEMINI_FLAGS ?= --fail-fast \
 	--test-statement-log-file=$(PWD)/results/test-statements.log.zst \
 	--statement-log-file-compression=zstd
 
+.PHONY: tidy
+tidy:
+	@go mod tidy
 
-ifndef GOBIN
-	export GOBIN := $(MAKEFILE_PATH)/bin
-endif
+.PHONY: check
+check:
+	@go tool golangci-lint run
 
-define dl_tgz
-	@mkdir -p $(GOBIN) 2>/dev/null
+.PHONY: fix
+fix:
+	@go tool golangci-lint --fix
 
-	@if [ ! -f "$(GOBIN)/$(1)" ]; then \
-		echo "Downloading $(GOBIN)/$(1)"; \
-		curl --progress-bar -L $(2) | tar zxf - --wildcards --strip 1 -C $(GOBIN) '*/$(1)'; \
-		chmod +x "$(GOBIN)/$(1)"; \
-	fi
-endef
-
-$(GOBIN)/golangci-lint:
-$(GOBIN)/golangci-lint: Makefile
-	$(call dl_tgz,golangci-lint,https://github.com/golangci/golangci-lint/releases/download/v$(GOLANGCI_VERSION)/golangci-lint-$(GOLANGCI_VERSION)-$(GOOS)-amd64.tar.gz)
+.PHONY: fieldalign
+fieldalign:
+	@go tool fieldalignment -fix github.com/scylladb/gemini
+	@go tool fieldalignment -fix github.com/scylladb/gemini/pkg/cmd
 
 .PHONY: fmt
 fmt:
-	@gofumpt -w -extra .
-
-.PHONY: check
-check: $(GOBIN)/golangci-lint
-	@$(GOBIN)/golangci-lint run
-
-.PHONY: fix
-fix: $(GOBIN)/golangci-lint
-	@$(GOBIN)/golangci-lint run --fix
+	@go tool gofumpt -w -extra .
 
 .PHONY: build
 build:
@@ -91,7 +80,7 @@ build-docker:
 	@docker build --target production -t scylladb/gemini:$(DOCKER_VERSION) --compress .
 
 .PHONY: setup
-setup: $(GOBIN)/golangci-lint scylla-setup debug-build
+setup: scylla-setup debug-build
 	@pre-commit install
 
 .PHONY: scylla-setup

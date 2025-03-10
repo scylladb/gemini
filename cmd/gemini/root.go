@@ -266,6 +266,7 @@ func run(_ *cobra.Command, _ []string) error {
 	}
 
 	ctx, done := context.WithTimeout(context.Background(), duration+warmup+time.Second*2)
+	defer done()
 	stopFlag := stop.NewFlag("main")
 	warmupStopFlag := stop.NewFlag("warmup")
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
@@ -278,22 +279,6 @@ func run(_ *cobra.Command, _ []string) error {
 
 	gens := generators.New(ctx, schema, distFunc, intSeed, partitionCount, pkBufferReuseSize, logger)
 	defer utils.IgnoreError(gens.Close)
-
-	if !nonInteractive {
-		sp := createSpinner(interactive())
-		ticker := time.NewTicker(time.Second)
-		go func() {
-			defer done()
-			for {
-				select {
-				case <-stopFlag.SignalChannel():
-					return
-				case <-ticker.C:
-					sp.Set(" Running Gemini... %v", globalStatus)
-				}
-			}
-		}()
-	}
 
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)

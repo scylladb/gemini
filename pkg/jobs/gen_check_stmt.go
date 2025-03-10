@@ -17,7 +17,7 @@ package jobs
 import (
 	"math"
 
-	"github.com/scylladb/gocqlx/v2/qb"
+	"github.com/scylladb/gocqlx/v3/qb"
 	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/generators"

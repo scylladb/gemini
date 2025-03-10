@@ -21,7 +21,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
-	"github.com/scylladb/gocqlx/v2/qb"
+	"github.com/scylladb/gocqlx/v3/qb"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/metrics"
