@@ -140,17 +140,30 @@ func (g *Generator) Start(ctx context.Context) {
 func (g *Generator) FindAndMarkStalePartitions() {
 	val := rand.Uint64()
 	r := rand.New(rand.NewPCG(val, val))
-
+	stalePartitions := 0
+	nonStale := make([]bool, g.partitionCount)
 	for range g.partitionCount * 100 {
 		token, _, err := g.createPartitionKeyValues(r)
 		if err != nil {
 			g.logger.Panic("failed to get primary key hash", zap.Error(err))
 		}
 
-		if err = g.partition(token).MarkStale(); err != nil {
-			g.logger.Panic("failed to mark partition as stale", zap.Error(err))
+		nonStale[g.shardOf(token)] = true
+	}
+
+	for idx, v := range nonStale {
+		if !v {
+			stalePartitions++
+			if err := g.partitions[idx].MarkStale(); err != nil {
+				g.logger.Panic("failed to mark partition as stale", zap.Error(err))
+			}
 		}
 	}
+
+	g.logger.Info("marked stale partitions",
+		zap.Int("stale_partitions", stalePartitions),
+		zap.Int("total_partitions", len(g.partitions)),
+	)
 }
 
 // fillAllPartitions guarantees that each partition was tested to be full

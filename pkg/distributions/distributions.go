@@ -48,7 +48,7 @@ func New(distribution string, size, seed uint64, mu, sigma float64) (Distributio
 	case "uniform":
 		rnd = Uniform{
 			Src: src,
-			Min: 0,
+			Min: 1,
 			Max: math.MaxUint64,
 		}
 	default:
