@@ -18,11 +18,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/scylladb/gemini/pkg/generators"
@@ -129,7 +129,7 @@ func (l List) Run(
 		for i := 0; i < int(l.workers); i++ {
 			for idx := range l.jobs {
 				jobF := l.jobs[idx].function
-				r := rand.New(rand.NewSource(seed))
+				r := rand.New(rand.NewPCG(seed, seed))
 				g.Go(func() error {
 					return jobF(gCtx, pump, schema, schemaConfig, table, s, r, &partitionRangeConfig, generator, globalStatus, logger, stopFlag, failFast, verbose)
 				})
@@ -174,7 +174,7 @@ func mutationJob(
 		case hb := <-pump:
 			time.Sleep(hb)
 		}
-		ind := r.Intn(1000000)
+		ind := r.IntN(1000000)
 		if ind%100000 == 0 {
 			err := ddl(ctx, schema, schemaConfig, table, s, r, p, globalStatus, logger, verbose)
 			if err != nil {

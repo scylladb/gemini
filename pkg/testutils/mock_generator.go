@@ -16,8 +16,7 @@ package testutils
 
 import (
 	"fmt"
-
-	"golang.org/x/exp/rand"
+	"math/rand/v2"
 
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/typedef"

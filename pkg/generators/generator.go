@@ -16,11 +16,12 @@ package generators
 
 import (
 	"context"
+	"math/rand/v2"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
-	"golang.org/x/exp/rand"
 
+	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
@@ -35,9 +36,6 @@ import (
 // partition keys, and map them to tokens. The generators, therefore, do
 // not populate the full token ring space. With token index, we can
 // approximate different token distributions from a sparse set of tokens.
-type TokenIndex uint64
-
-type DistributionFunc func() TokenIndex
 
 type Interface interface {
 	Get() *typedef.ValueWithToken
@@ -52,7 +50,7 @@ type Generator struct {
 	routingKeyCreator *routingkey.Creator
 	r                 *rand.Rand
 	wakeUpSignal      <-chan struct{}
-	idxFunc           DistributionFunc
+	idxFunc           distributions.DistributionFunc
 	partitions        Partitions
 	partitionsConfig  typedef.PartitionRangeConfig
 	partitionCount    uint64
@@ -66,7 +64,7 @@ func (g *Generator) PartitionCount() uint64 {
 }
 
 type Config struct {
-	PartitionsDistributionFunc DistributionFunc
+	PartitionsDistributionFunc distributions.DistributionFunc
 	PartitionsRangeConfig      typedef.PartitionRangeConfig
 	PartitionsCount            uint64
 	Seed                       uint64
@@ -84,7 +82,7 @@ func NewGenerator(table *typedef.Table, config Config, logger *zap.Logger) Gener
 		logger:            logger,
 		wakeUpSignal:      wakeUpSignal,
 		routingKeyCreator: &routingkey.Creator{},
-		r:                 rand.New(rand.NewSource(config.Seed)),
+		r:                 rand.New(rand.NewPCG(config.Seed, config.Seed)),
 	}
 }
 
@@ -97,7 +95,7 @@ func (g *Generator) Get() *typedef.ValueWithToken {
 	return out
 }
 
-func (g *Generator) GetPartitionForToken(token TokenIndex) *Partition {
+func (g *Generator) GetPartitionForToken(token distributions.TokenIndex) *Partition {
 	return g.partitions[g.shardOf(uint64(token))]
 }
 
@@ -114,13 +112,13 @@ func (g *Generator) GetOld() *typedef.ValueWithToken {
 // GiveOlds returns the supplied values for later reuse unless
 func (g *Generator) GiveOlds(tokens []*typedef.ValueWithToken) {
 	for _, token := range tokens {
-		g.GetPartitionForToken(TokenIndex(token.Token)).giveOld(token)
+		g.GetPartitionForToken(distributions.TokenIndex(token.Token)).giveOld(token)
 	}
 }
 
 // ReleaseToken removes the corresponding token from the in-flight tracking.
 func (g *Generator) ReleaseToken(token uint64) {
-	g.GetPartitionForToken(TokenIndex(token)).releaseToken(token)
+	g.GetPartitionForToken(distributions.TokenIndex(token)).releaseToken(token)
 }
 
 func (g *Generator) Start(ctx context.Context) {
@@ -140,18 +138,32 @@ func (g *Generator) Start(ctx context.Context) {
 }
 
 func (g *Generator) FindAndMarkStalePartitions() {
-	r := rand.New(rand.NewSource(rand.Uint64()))
-
+	val := rand.Uint64()
+	r := rand.New(rand.NewPCG(val, val))
+	stalePartitions := 0
+	nonStale := make([]bool, g.partitionCount)
 	for range g.partitionCount * 100 {
 		token, _, err := g.createPartitionKeyValues(r)
 		if err != nil {
 			g.logger.Panic("failed to get primary key hash", zap.Error(err))
 		}
 
-		if err = g.partition(token).MarkStale(); err != nil {
-			g.logger.Panic("failed to mark partition as stale", zap.Error(err))
+		nonStale[g.shardOf(token)] = true
+	}
+
+	for idx, v := range nonStale {
+		if !v {
+			stalePartitions++
+			if err := g.partitions[idx].MarkStale(); err != nil {
+				g.logger.Panic("failed to mark partition as stale", zap.Error(err))
+			}
 		}
 	}
+
+	g.logger.Info("marked stale partitions",
+		zap.Int("stale_partitions", stalePartitions),
+		zap.Int("total_partitions", len(g.partitions)),
+	)
 }
 
 // fillAllPartitions guarantees that each partition was tested to be full

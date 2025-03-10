@@ -16,8 +16,7 @@ package generators
 
 import (
 	"fmt"
-
-	"golang.org/x/exp/rand"
+	"math/rand/v2"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -27,7 +26,7 @@ func GenColumnName(prefix string, idx int) string {
 }
 
 func GenColumnType(numColumns int, sc *typedef.SchemaConfig, r *rand.Rand) typedef.Type {
-	n := r.Intn(numColumns + 5)
+	n := r.IntN(numColumns + 5)
 	switch n {
 	case numColumns:
 		return GenTupleType(sc, r)
@@ -45,11 +44,11 @@ func GenColumnType(numColumns int, sc *typedef.SchemaConfig, r *rand.Rand) typed
 }
 
 func GenSimpleType(_ *typedef.SchemaConfig, r *rand.Rand) typedef.SimpleType {
-	return typedef.AllTypes[r.Intn(len(typedef.AllTypes))]
+	return typedef.AllTypes[r.IntN(len(typedef.AllTypes))]
 }
 
 func GenTupleType(sc *typedef.SchemaConfig, r *rand.Rand) typedef.Type {
-	n := r.Intn(sc.MaxTupleParts)
+	n := r.IntN(sc.MaxTupleParts)
 	if n < 2 {
 		n = 2
 	}
@@ -69,7 +68,7 @@ func GenUDTType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.UDTType {
 	typeName := fmt.Sprintf("udt_%d", udtNum)
 	ts := make(map[string]typedef.SimpleType)
 
-	for i := 0; i < r.Intn(sc.MaxUDTParts)+1; i++ {
+	for i := 0; i < r.IntN(sc.MaxUDTParts)+1; i++ {
 		ts[typeName+fmt.Sprintf("_%d", i)] = GenSimpleType(sc, r)
 	}
 
@@ -121,11 +120,11 @@ func GenMapType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.MapType {
 }
 
 func GenPartitionKeyColumnType(r *rand.Rand) typedef.Type {
-	return typedef.PartitionKeyTypes[r.Intn(len(typedef.PartitionKeyTypes))]
+	return typedef.PartitionKeyTypes[r.IntN(len(typedef.PartitionKeyTypes))]
 }
 
 func GenPrimaryKeyColumnType(r *rand.Rand) typedef.Type {
-	return typedef.PkTypes[r.Intn(len(typedef.PkTypes))]
+	return typedef.PkTypes[r.IntN(len(typedef.PkTypes))]
 }
 
 func GenIndexName(prefix string, idx int) string {

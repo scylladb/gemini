@@ -12,39 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package utils_test
+package distributions
 
 import (
+	"math"
 	"math/rand/v2"
 	"testing"
-	"time"
-
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
-var currentTime = uint64(time.Now().UnixNano())
+const (
+	stdDistMean = math.MaxUint64 / 2
+	oneStdDev   = 0.341 * math.MaxUint64
+)
 
-var rnd = rand.New(rand.NewPCG(currentTime, currentTime))
-
-func BenchmarkUtilsRandString100(t *testing.B) {
-	for x := 0; x < t.N; x++ {
-		utils.RandString(rnd, 100)
-	}
-}
-
-func BenchmarkUtilsRandString1000(t *testing.B) {
-	for x := 0; x < t.N; x++ {
-		utils.RandString(rnd, 1000)
-	}
-}
-
-func TestRandString(t *testing.T) {
+func TestFullRandom(t *testing.T) {
 	t.Parallel()
 
-	for _, ln := range []int{1, 3, 5, 16, 45, 100, 1000} {
-		out := utils.RandString(rnd, ln)
-		if len(out) != ln {
-			t.Fatalf("%d != %d", ln, len(out))
-		}
+	rnd := Normal{
+		Src:   rand.NewPCG(100, 100),
+		Mu:    stdDistMean,
+		Sigma: oneStdDev,
+	}
+
+	if rnd.Uint64() == rnd.Uint64() { //nolint:staticcheck
+		t.Error("Expected different values")
 	}
 }

@@ -16,9 +16,9 @@ package typedef
 
 import (
 	"bytes"
+	"math/rand/v2"
 
 	"github.com/gocql/gocql"
-	"golang.org/x/exp/rand"
 )
 
 type Type interface {

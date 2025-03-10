@@ -17,6 +17,7 @@ package typedef
 import (
 	"bytes"
 	"math"
+	"math/rand/v2"
 	"reflect"
 	"strconv"
 	"sync/atomic"
@@ -24,7 +25,6 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/gocql/gocql"
-	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -173,7 +173,7 @@ func (mt *MapType) CQLPretty(builder *bytes.Buffer, value any) error {
 }
 
 func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
-	count := r.Intn(9) + 1
+	count := r.IntN(9) + 1
 	vals := reflect.MakeMap(reflect.MapOf(reflect.TypeOf(mt.KeyType.GenJSONValue(r, p)), reflect.TypeOf(mt.ValueType.GenJSONValue(r, p))))
 	for i := 0; i < count; i++ {
 		vals.SetMapIndex(reflect.ValueOf(mt.KeyType.GenJSONValue(r, p)), reflect.ValueOf(mt.ValueType.GenJSONValue(r, p)))
@@ -249,14 +249,14 @@ func (ct *CounterType) CQLPretty(builder *bytes.Buffer, value any) error {
 
 func (ct *CounterType) GenJSONValue(r *rand.Rand, _ *PartitionRangeConfig) any {
 	if utils.UnderTest {
-		return r.Int63()
+		return r.Int64()
 	}
 	return atomic.AddInt64(&ct.Value, 1)
 }
 
 func (ct *CounterType) GenValue(r *rand.Rand, _ *PartitionRangeConfig) []any {
 	if utils.UnderTest {
-		return []any{r.Int63()}
+		return []any{r.Int64()}
 	}
 	return []any{atomic.AddInt64(&ct.Value, 1)}
 }

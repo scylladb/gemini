@@ -17,12 +17,12 @@ package typedef
 import (
 	"bytes"
 	"math"
+	"math/rand/v2"
 	"reflect"
 
 	"github.com/pkg/errors"
 
 	"github.com/gocql/gocql"
-	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/utils"
 )

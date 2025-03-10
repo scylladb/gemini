@@ -16,9 +16,8 @@ package generators
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"strings"
-
-	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -26,7 +25,7 @@ import (
 )
 
 func GenSchema(sc typedef.SchemaConfig, seed uint64) *typedef.Schema {
-	r := rand.New(rand.NewSource(seed))
+	r := rand.New(rand.NewPCG(seed, seed))
 	builder := builders.NewSchemaBuilder()
 	builder.Config(sc)
 	keyspace := typedef.Keyspace{

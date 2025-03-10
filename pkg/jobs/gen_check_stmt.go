@@ -16,9 +16,9 @@ package jobs
 
 import (
 	"math"
+	"math/rand/v2"
 
 	"github.com/scylladb/gocqlx/v3/qb"
-	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -42,9 +42,9 @@ func GenCheckStmt(
 		var n int
 
 		if len(table.Indexes) > 0 {
-			n = rnd.Intn(5)
+			n = rnd.IntN(5)
 		} else {
-			n = rnd.Intn(4)
+			n = rnd.IntN(4)
 		}
 		switch n {
 		case 0:
@@ -69,7 +69,7 @@ func GenCheckStmt(
 			return genMultiplePartitionClusteringRangeQuery(s, table, g, rnd, p, numQueryPKs, maxClusteringRels)
 		case 4:
 			// Reducing the probability to hit these since they often take a long time to run
-			switch rnd.Intn(5) {
+			switch rnd.IntN(5) {
 			case 0:
 				idxCount := utils.RandInt2(rnd, 1, len(table.Indexes))
 				return genSingleIndexQuery(s, table, g, rnd, p, idxCount)
@@ -78,7 +78,7 @@ func GenCheckStmt(
 			}
 		}
 	default:
-		switch rnd.Intn(4) {
+		switch rnd.IntN(4) {
 		case 0:
 			return genSinglePartitionQueryMv(s, table, g, rnd, p, mvNum)
 		case 1:

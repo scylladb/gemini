@@ -4,3 +4,5 @@ cmd/gemini/dist/
 bin/
 coverage.txt
 dist/
+
+.qodo

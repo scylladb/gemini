@@ -17,6 +17,7 @@ package typedef_test
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -24,7 +25,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"golang.org/x/exp/rand"
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -118,7 +118,8 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 
 func TestMarshalUnmarshal(t *testing.T) {
 	t.Parallel()
-	r := rand.New(rand.NewSource(rand.Uint64()))
+	val := rand.Uint64()
+	r := rand.New(rand.NewPCG(val, val))
 
 	s1 := getTestSchema(r)
 
@@ -143,7 +144,8 @@ func TestMarshalUnmarshal(t *testing.T) {
 }
 
 func TestPrimitives(t *testing.T) {
-	r := rand.New(rand.NewSource(rand.Uint64()))
+	val := rand.Uint64()
+	r := rand.New(rand.NewPCG(val, val))
 
 	t.Parallel()
 
@@ -218,7 +220,8 @@ func TestPrimitives(t *testing.T) {
 func TestValidColumnsForDelete(t *testing.T) {
 	t.Parallel()
 
-	r := rand.New(rand.NewSource(rand.Uint64()))
+	val := rand.Uint64()
+	r := rand.New(rand.NewPCG(val, val))
 	s1 := getTestSchema(r)
 	expected := typedef.Columns{
 		s1.Tables[0].Columns[2],

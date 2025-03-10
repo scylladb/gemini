@@ -77,11 +77,11 @@ func (f *ExpectedStore[T]) CompareOrStore(t *testing.T, caseName string, receive
 	}
 	f.listLock.RLock()
 	expected := f.list[caseName]
-	f.listLock.RUnlock()
 
 	if diff := expected.Diff(received); diff != "" {
 		t.Error(diff)
 	}
+	f.listLock.RUnlock()
 }
 
 func (f *ExpectedStore[T]) UpdateExpected(t *testing.T) {

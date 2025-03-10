@@ -29,7 +29,8 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-type cqlStore struct { //nolint:govet
+type cqlStore struct {
+	stmtLogger              stmtlogger.StmtToFile
 	session                 *gocql.Session
 	schema                  *typedef.Schema
 	logger                  *zap.Logger
@@ -37,7 +38,6 @@ type cqlStore struct { //nolint:govet
 	maxRetriesMutate        int
 	maxRetriesMutateSleep   time.Duration
 	useServerSideTimestamps bool
-	stmtLogger              stmtlogger.StmtToFile
 }
 
 func (cs *cqlStore) name() string {

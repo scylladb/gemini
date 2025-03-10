@@ -18,9 +18,8 @@ import (
 	crand "crypto/rand"
 	"encoding/binary"
 	"math/bits"
+	"math/rand/v2"
 	"time"
-
-	"golang.org/x/exp/rand"
 )
 
 var Source rand.Source
@@ -41,8 +40,10 @@ type TimeSource struct {
 
 func NewTimeSource() *TimeSource {
 	now := time.Now()
+	val := uint64(now.Nanosecond() * now.Second())
+
 	return &TimeSource{
-		source: rand.NewSource(uint64(now.Nanosecond() * now.Second())),
+		source: rand.NewPCG(val, val),
 	}
 }
 

@@ -20,13 +20,13 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"math/rand/v2"
 	"net"
 	"strconv"
 	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
-	"golang.org/x/exp/rand"
 	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/utils"
@@ -48,7 +48,7 @@ func (l SimpleTypes) Contains(colType Type) bool {
 }
 
 func (l SimpleTypes) Random(r *rand.Rand) SimpleType {
-	return l[r.Intn(len(l))]
+	return l[r.IntN(len(l))]
 }
 
 type SimpleType string
@@ -256,7 +256,7 @@ func (st SimpleType) Indexable() bool {
 func (st SimpleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	switch st {
 	case TYPE_BLOB:
-		ln := r.Intn(p.MaxBlobLength) + p.MinBlobLength
+		ln := r.IntN(p.MaxBlobLength) + p.MinBlobLength
 		return "0x" + hex.EncodeToString([]byte(utils.RandString(r, ln)))
 	case TYPE_TIME:
 		return time.Unix(0, utils.RandTime(r)).UTC().Format("15:04:05.000000000")
@@ -271,13 +271,13 @@ func (st SimpleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
 func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	switch st {
 	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
-		ln := r.Intn(p.MaxStringLength) + p.MinStringLength
+		ln := r.IntN(p.MaxStringLength) + p.MinStringLength
 		return utils.RandString(r, ln)
 	case TYPE_BLOB:
-		ln := r.Intn(p.MaxBlobLength) + p.MinBlobLength
+		ln := r.IntN(p.MaxBlobLength) + p.MinBlobLength
 		return hex.EncodeToString([]byte(utils.RandString(r, ln)))
 	case TYPE_BIGINT:
-		return r.Int63()
+		return r.Int64()
 	case TYPE_BOOLEAN:
 		return r.Int()%2 == 0
 	case TYPE_DATE:
@@ -287,25 +287,25 @@ func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	case TYPE_TIMESTAMP:
 		return utils.RandTimestamp(r)
 	case TYPE_DECIMAL:
-		return inf.NewDec(r.Int63(), 3)
+		return inf.NewDec(r.Int64(), 3)
 	case TYPE_DOUBLE:
 		return r.Float64()
 	case TYPE_DURATION:
-		return (time.Minute * time.Duration(r.Intn(100))).String()
+		return (time.Minute * time.Duration(r.IntN(100))).String()
 	case TYPE_FLOAT:
 		return r.Float32()
 	case TYPE_INET:
-		return net.ParseIP(utils.RandIPV4Address(r, r.Intn(255), 2)).String()
+		return net.ParseIP(utils.RandIPV4Address(r, r.IntN(255), 2)).String()
 	case TYPE_INT:
-		return r.Int31()
+		return r.Int32()
 	case TYPE_SMALLINT:
-		return int16(r.Uint64n(65536))
+		return int16(r.Uint64N(65536))
 	case TYPE_TIMEUUID, TYPE_UUID:
 		return utils.UUIDFromTime(r)
 	case TYPE_TINYINT:
-		return int8(r.Uint64n(256))
+		return int8(r.Uint64N(256))
 	case TYPE_VARINT:
-		return big.NewInt(r.Int63())
+		return big.NewInt(r.Int64())
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", st))
 	}
