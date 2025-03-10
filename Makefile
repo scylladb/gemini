@@ -15,38 +15,43 @@ MODE ?= mixed
 DATASET_SIZE ?= large
 SEED ?= $(shell date +%s)
 GEMINI_BINARY ?= $(PWD)/bin/gemini
-GEMINI_TEST_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-test)
-GEMINI_ORACLE_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-oracle)
+GEMINI_TEST_CLUSTER ?=
 GEMINI_DOCKER_NETWORK ?= gemini
 GEMINI_FLAGS ?= --fail-fast \
-	--level=info \
-	--consistency=QUORUM \
-	--test-host-selection-policy=token-aware \
-	--oracle-host-selection-policy=token-aware \
-	--mode=$(MODE) \
-	--request-timeout=5s \
-	--connect-timeout=15s \
-	--use-server-timestamps=false \
-	--async-objects-stabilization-attempts=10 \
-	--max-mutation-retries=10 \
-	--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
-	--oracle-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 	--concurrency=$(CONCURRENCY) \
-	--dataset-size=$(DATASET_SIZE) \
+	--mode=$(MODE) \
 	--seed=$(SEED) \
 	--schema-seed=$(SEED) \
+	--level=info \
+	--async-objects-stabilization-attempts=10 \
+	--dataset-size=$(DATASET_SIZE) \
 	--cql-features=$(CQL_FEATURES) \
 	--duration=$(DURATION) \
 	--warmup=$(WARMUP) \
 	--profiling-port=6060 \
 	--drop-schema=true \
-	--oracle-statement-log-file=$(PWD)/results/oracle-statements.log.zst \
-	--test-statement-log-file=$(PWD)/results/test-statements.log.zst \
-	--statement-log-file-compression=zstd
-
-.PHONY: tidy
-tidy:
-	@go mod tidy
+	--token-range-slices=10000 \
+	--partition-key-distribution=uniform \
+	--partition-key-buffer-reuse-size=100 \
+	--max-errors-to-store=1000 \
+	--test-consistency=LOCAL_QUORUM \
+	--test-dc=datacenter1 \
+	--test-host-selection-policy=token-aware \
+	--test-statement-log-file=./results/gemini.log \
+	--test-max-mutation-retries=10 \
+	--test-request-timeout=5s \
+	--test-connect-timeout=15s \
+	--test-use-server-timestamps=false \
+	--test-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
+	--oracle-host-selection-policy=token-aware \
+	--oracle-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
+	--oracle-consistency=LOCAL_QUORUM \
+	--oracle-dc=datacenter1 \
+	--oracle-statement-log-file=./results/gemini_oracle.log \
+	--oracle-request-timeout=5s \
+	--oracle-connect-timeout=15s \
+	--oracle-use-server-timestamps=false \
+	--oracle-max-mutation-retries=10
 
 .PHONY: check
 check:
@@ -60,6 +65,46 @@ fix:
 fieldalign:
 	@go tool fieldalignment -fix ./cmd/...
 	@go tool fieldalignment -fix ./pkg/...
+
+.PHONY: integration-test
+integration-test:
+	@mkdir -p $(PWD)/results
+	@touch $(PWD)/results/gemini_seed
+	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
+	@$(GEMINI_BINARY) \
+		--test-cluster=$(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-test) \
+		--oracle-cluster=$(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-oracle) \
+		$(GEMINI_FLAGS)
+
+
+.PHONY: integration-cluster-test
+integration-cluster-test:
+	@mkdir -p $(PWD)/results
+	@touch $(PWD)/results/gemini_seed
+	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
+	$(GEMINI_BINARY) \
+		--test-cluster="$(SCYLLA_TEST_1),$(SCYLLA_TEST_2),$(SCYLLA_TEST_3)" \
+		--oracle-cluster="$(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-oracle)" \
+		$(GEMINI_FLAGS)
+
+.PHONY: docker-integration-test
+docker-integration-test:
+	@mkdir -p $(PWD)/results
+	@touch $(PWD)/results/gemini_seed
+	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
+	@docker run \
+		-it \
+		--rm \
+		--memory=4G \
+		-p 6060:6060 \
+		--name gemini \
+		--network $(GEMINI_DOCKER_NETWORK) \
+		-v $(PWD)/results:/results \
+		-w / \
+		scylladb/gemini:$(DOCKER_VERSION) \
+			--test-cluster=gemini-test \
+			--oracle-cluster=gemini-oracle \
+			$(GEMINI_FLAGS)
 
 .PHONY: fmt
 fmt:
@@ -83,19 +128,32 @@ setup: scylla-setup debug-build
 
 .PHONY: scylla-setup
 scylla-setup:
-	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml up -d
+	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml up -d --wait
 
 	until docker logs gemini-oracle 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
 	until docker logs gemini-test 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
-
 
 .PHONY: scylla-shutdown
 scylla-shutdown:
 	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml down --volumes
 
+.PHONY: scylla-setup-cluster
+scylla-setup-cluster:
+	@docker compose -f docker/docker-compose-scylla-cluster.yml up -d --wait
+
+	until docker logs gemini-oracle 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
+	until docker logs gemini-test-1 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
+	until docker logs gemini-test-2 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
+	until docker logs gemini-test-3 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
+
+.PHONY: scylla-shutdown-cluster
+scylla-shutdown-cluster:
+	@docker compose -f docker/docker-compose-scylla-cluster.yml down --volumes
+
+
 .PHONY: test
 test:
-	@go test -covermode=atomic -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | gotestfmt -showteststatus
+	@go test -covermode=atomic -tags testing -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | gotestfmt -showteststatus
 
 .PHONY: pprof-profile
 pprof-profile:
@@ -117,34 +175,6 @@ pprof-block:
 pprof-mutex:
 	@go tool pprof -http=:8084 http://localhost:6060/debug/pprof/mutex
 
-.PHONY: docker-integration-test
-docker-integration-test:
-	@mkdir -p $(PWD)/results
-	@touch $(PWD)/results/gemini_seed
-	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
-	@docker run \
-		-it \
-		--rm \
-		--memory=4G \
-		-p 6060:6060 \
-		--name gemini \
-		--network $(GEMINI_DOCKER_NETWORK) \
-		-v $(PWD)/results:/results \
-		-w / \
-		scylladb/gemini:$(DOCKER_VERSION) \
-			--test-cluster=gemini-test \
-			--oracle-cluster=gemini-oracle \
-			$(GEMINI_FLAGS)
-
-.PHONY: integration-test
-integration-test:
-	@mkdir -p $(PWD)/results
-	@touch $(PWD)/results/gemini_seed
-	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
-	@$(GEMINI_BINARY) \
-		--test-cluster=$(GEMINI_TEST_CLUSTER) \
-		--oracle-cluster=$(GEMINI_ORACLE_CLUSTER) \
-		$(GEMINI_FLAGS)
 
 .PHONY: clean
 clean: clean-bin clean-results

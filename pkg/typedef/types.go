@@ -248,14 +248,14 @@ func (ct *CounterType) CQLPretty(builder *bytes.Buffer, value any) error {
 }
 
 func (ct *CounterType) GenJSONValue(r *rand.Rand, _ *PartitionRangeConfig) any {
-	if utils.UnderTest {
+	if utils.IsUnderTest() {
 		return r.Int64()
 	}
 	return atomic.AddInt64(&ct.Value, 1)
 }
 
 func (ct *CounterType) GenValue(r *rand.Rand, _ *PartitionRangeConfig) []any {
-	if utils.UnderTest {
+	if utils.IsUnderTest() {
 		return []any{r.Int64()}
 	}
 	return []any{atomic.AddInt64(&ct.Value, 1)}

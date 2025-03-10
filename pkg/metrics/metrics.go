@@ -15,12 +15,24 @@
 package metrics
 
 import (
+	"net/http"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var CQLRequests = promauto.NewCounterVec(prometheus.CounterOpts{
-	Name: "gemini_cql_requests",
-	Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
-}, []string{"system", "method"},
+var CQLRequests = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "gemini_cql_requests",
+		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
+	},
+	[]string{"system", "method"},
 )
+
+func init() {
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		_ = http.ListenAndServe("0.0.0.0:2112", nil)
+	}()
+}

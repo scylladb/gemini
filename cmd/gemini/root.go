@@ -17,27 +17,26 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"math/rand/v2"
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
-	"github.com/gocql/gocql"
-	"github.com/hailocab/go-hostpool"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/net/context"
 
-	"github.com/scylladb/gemini/pkg/auth"
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/generators"
@@ -45,36 +44,35 @@ import (
 	"github.com/scylladb/gemini/pkg/realrandom"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/status"
-	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
+	"github.com/scylladb/gemini/pkg/store/drivers"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
 var (
-	testClusterHost                  []string
-	testClusterUsername              string
-	testClusterPassword              string
-	oracleClusterHost                []string
-	oracleClusterUsername            string
-	oracleClusterPassword            string
+	level         string
+	profilingPort int
+	mode          string
+	warmup        time.Duration
+	duration      time.Duration
+	verbose       bool
+	failFast      bool
+	concurrency   uint64
+
+	oracleConfig                drivers.CQLConfig
+	testConfig                  drivers.CQLConfig
+	statementLogFileCompression string
+	testReplicationStrategy     string
+	oracleReplicationStrategy   string
+
 	schemaFile                       string
 	outFileArg                       string
-	concurrency                      uint64
 	seed                             string
 	schemaSeed                       string
 	dropSchema                       bool
-	verbose                          bool
-	mode                             string
-	failFast                         bool
-	duration                         time.Duration
-	bind                             string
-	warmup                           time.Duration
-	replicationStrategy              string
 	tableOptions                     []string
-	oracleReplicationStrategy        string
-	consistency                      string
 	maxTables                        int
 	maxPartitionKeys                 int
 	minPartitionKeys                 int
@@ -85,29 +83,16 @@ var (
 	datasetSize                      string
 	cqlFeatures                      string
 	useMaterializedViews             bool
-	level                            string
-	maxRetriesMutate                 int
-	maxRetriesMutateSleep            time.Duration
 	maxErrorsToStore                 int
 	pkBufferReuseSize                uint64
 	partitionCount                   uint64
 	partitionKeyDistribution         string
 	normalDistMean                   float64
 	normalDistSigma                  float64
-	tracingOutFile                   string
 	useCounters                      bool
 	asyncObjectStabilizationAttempts int
 	asyncObjectStabilizationDelay    time.Duration
 	useLWT                           bool
-	testClusterHostSelectionPolicy   string
-	oracleClusterHostSelectionPolicy string
-	useServerSideTimestamps          bool
-	requestTimeout                   time.Duration
-	connectTimeout                   time.Duration
-	profilingPort                    int
-	testStatementLogFile             string
-	oracleStatementLogFile           string
-	statementLogFileCompression      string
 )
 
 func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Schema, error) {
@@ -132,7 +117,10 @@ func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Sc
 	return schemaBuilder.Build(), nil
 }
 
-func run(_ *cobra.Command, _ []string) error {
+func run(cmd *cobra.Command, _ []string) error {
+	baseCtx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGABRT)
+	defer cancel()
+
 	logger := createLogger(level)
 	globalStatus := status.NewGlobalStatus(1000)
 	defer utils.IgnoreError(logger.Sync)
@@ -147,26 +135,6 @@ func run(_ *cobra.Command, _ []string) error {
 	intSeed := seedFromString(seed)
 	intSchemaSeed := seedFromString(schemaSeed)
 
-	cons, err := gocql.ParseConsistencyWrapper(consistency)
-	if err != nil {
-		logger.Error("Unable parse consistency, error=%s. Falling back on Quorum", zap.Error(err))
-		cons = gocql.Quorum
-	}
-
-	testHostSelectionPolicy, err := getHostSelectionPolicy(testClusterHostSelectionPolicy, testClusterHost)
-	if err != nil {
-		return err
-	}
-	oracleHostSelectionPolicy, err := getHostSelectionPolicy(oracleClusterHostSelectionPolicy, oracleClusterHost)
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		http.Handle("/metrics", promhttp.Handler())
-		_ = http.ListenAndServe(bind, nil)
-	}()
-
 	if profilingPort != 0 {
 		go func() {
 			mux := http.NewServeMux()
@@ -175,11 +143,10 @@ func run(_ *cobra.Command, _ []string) error {
 		}()
 	}
 
-	outFile, err := createFile(outFileArg, os.Stdout)
+	outFile, err := utils.CreateFile(outFileArg, os.Stdout)
 	if err != nil {
 		return err
 	}
-	defer utils.IgnoreError(outFile.Sync)
 
 	schemaConfig := createSchemaConfig(logger)
 	if err = schemaConfig.Valid(); err != nil {
@@ -203,41 +170,38 @@ func run(_ *cobra.Command, _ []string) error {
 	printSetup(intSeed, intSchemaSeed)
 	fmt.Printf("Schema: %v\n", string(jsonSchema))
 
-	testCluster, oracleCluster := createClusters(cons, testHostSelectionPolicy, oracleHostSelectionPolicy, logger)
-	storeConfig := store.Config{
-		MaxRetriesMutate:            maxRetriesMutate,
-		MaxRetriesMutateSleep:       maxRetriesMutateSleep,
-		UseServerSideTimestamps:     useServerSideTimestamps,
-		TestLogStatementsFile:       testStatementLogFile,
-		OracleLogStatementsFile:     oracleStatementLogFile,
-		LogStatementFileCompression: getLogStatementFileCompression(statementLogFileCompression),
-	}
-	var tracingFile *os.File
-	if tracingOutFile != "" {
-		switch tracingOutFile {
-		case "stderr":
-			tracingFile = os.Stderr
-		case "stdout":
-			tracingFile = os.Stdout
-		default:
-			tf, ioErr := createFile(tracingOutFile, os.Stdout)
-			if ioErr != nil {
-				return ioErr
-			}
-			tracingFile = tf
-			defer utils.IgnoreError(tracingFile.Sync)
+	var oracle store.Driver
+	if len(oracleConfig.Hosts) > 0 {
+		oracle, err = drivers.NewCQL(baseCtx, "oracle", schema, oracleConfig, logger.Named("oracle_store"), statementLogFileCompression)
+		if err != nil {
+			return errors.Wrap(err, "failed to create oracle store")
 		}
+
+		defer func() {
+			if closer, ok := oracle.(io.Closer); ok {
+				utils.IgnoreError(closer.Close)
+			}
+		}()
+
+	} else {
+		oracle = drivers.NewNop()
 	}
-	st, err := store.New(schema, testCluster, oracleCluster, storeConfig, tracingFile, logger)
+
+	test, err := drivers.NewCQL(baseCtx, "test", schema, testConfig, logger.Named("test_store"), statementLogFileCompression)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to create oracle store")
 	}
-	defer utils.IgnoreError(st.Close)
+	defer utils.IgnoreError(test.Close)
+
+	st, err := store.New(logger, test, oracle)
+	if err != nil {
+		return errors.Wrap(err, "failed to create store")
+	}
 
 	if dropSchema && mode != jobs.ReadMode {
 		for _, stmt := range generators.GetDropKeyspace(schema) {
 			logger.Debug(stmt)
-			if err = st.Mutate(context.Background(), typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
+			if err = st.Mutate(baseCtx, typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
 				return errors.Wrap(err, "unable to drop schema")
 			}
 		}
@@ -245,7 +209,7 @@ func run(_ *cobra.Command, _ []string) error {
 
 	testKeyspace, oracleKeyspace := generators.GetCreateKeyspaces(schema)
 	if err = st.Create(
-		context.Background(),
+		baseCtx,
 		typedef.SimpleStmt(testKeyspace, typedef.CreateKeyspaceStatementType),
 		typedef.SimpleStmt(oracleKeyspace, typedef.CreateKeyspaceStatementType)); err != nil {
 		return errors.Wrap(err, "unable to create keyspace")
@@ -253,57 +217,46 @@ func run(_ *cobra.Command, _ []string) error {
 
 	for _, stmt := range generators.GetCreateSchema(schema) {
 		logger.Debug(stmt)
-		if err = st.Mutate(context.Background(), typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
+		if err = st.Mutate(baseCtx, typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
 			return errors.Wrap(err, "unable to create schema")
 		}
 	}
 
-	ctx, done := context.WithTimeout(context.Background(), duration+warmup+time.Second*2)
+	baseCtx, done := context.WithTimeout(baseCtx, duration+warmup+time.Second*2)
 	defer done()
 	stopFlag := stop.NewFlag("main")
 	warmupStopFlag := stop.NewFlag("warmup")
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
-	pump := jobs.NewPump(stopFlag, logger)
+	// pump := jobs.NewPump(stopFlag, logger)
 
 	distFunc, err := distributions.New(partitionKeyDistribution, partitionCount, intSeed, stdDistMean, oneStdDev)
 	if err != nil {
 		return errors.Wrapf(err, "Faile to create distribution function: %s", partitionKeyDistribution)
 	}
 
-	gens := generators.New(ctx, schema, distFunc, intSeed, partitionCount, pkBufferReuseSize, logger)
+	gens := generators.New(baseCtx, schema, distFunc, intSeed, partitionCount, pkBufferReuseSize, logger)
 	defer utils.IgnoreError(gens.Close)
 
-	if warmup > 0 && !stopFlag.IsHardOrSoft() {
-		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, warmupStopFlag, failFast, verbose); err != nil {
-			logger.Error("warmup encountered an error", zap.Error(err))
-			stopFlag.SetHard(true)
-		}
-	}
+	// if warmup > 0 && !stopFlag.IsHardOrSoft() {
+	//	jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
+	//	if err = jobsList.Run(baseCtx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, warmupStopFlag, failFast, verbose); err != nil {
+	//		logger.Error("warmup encountered an error", zap.Error(err))
+	//		stopFlag.SetHard(true)
+	//	}
+	//}
 
-	if !stopFlag.IsHardOrSoft() {
-		jobsList := jobs.ListFromMode(mode, duration, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, stopFlag.CreateChild("workload"), failFast, verbose); err != nil {
-			logger.Debug("error detected", zap.Error(err))
-		}
-	}
+	// if !stopFlag.IsHardOrSoft() {
+	//	jobsList := jobs.ListFromMode(mode, duration, concurrency)
+	//	if err = jobsList.Run(baseCtx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, stopFlag.CreateChild("workload"), failFast, verbose); err != nil {
+	//		logger.Debug("error detected", zap.Error(err))
+	//	}
+	//}
 	logger.Info("test finished")
 	globalStatus.PrintResult(outFile, schema, version)
 	if globalStatus.HasErrors() {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")
 	}
 	return nil
-}
-
-func createFile(fname string, def *os.File) (*os.File, error) {
-	if fname != "" {
-		f, err := os.Create(fname)
-		if err != nil {
-			return nil, errors.Wrapf(err, "Unable to open output file %s", fname)
-		}
-		return f, nil
-	}
-	return def, nil
 }
 
 const (
@@ -325,55 +278,6 @@ func createLogger(level string) *zap.Logger {
 	return logger
 }
 
-func createClusters(
-	consistency gocql.Consistency,
-	testHostSelectionPolicy, oracleHostSelectionPolicy gocql.HostSelectionPolicy,
-	logger *zap.Logger,
-) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
-	retryPolicy := &gocql.ExponentialBackoffRetryPolicy{
-		Min:        time.Second,
-		Max:        60 * time.Second,
-		NumRetries: 5,
-	}
-	testCluster := gocql.NewCluster(testClusterHost...)
-	testCluster.Timeout = requestTimeout
-	testCluster.ConnectTimeout = connectTimeout
-	testCluster.RetryPolicy = retryPolicy
-	testCluster.Consistency = consistency
-	testCluster.PoolConfig.HostSelectionPolicy = testHostSelectionPolicy
-	testAuthenticator, testAuthErr := auth.BuildAuthenticator(testClusterUsername, testClusterPassword)
-	if testAuthErr != nil {
-		logger.Warn("%s for test cluster", zap.Error(testAuthErr))
-	}
-	testCluster.Authenticator = testAuthenticator
-	if len(oracleClusterHost) == 0 {
-		return testCluster, nil
-	}
-	oracleCluster := gocql.NewCluster(oracleClusterHost...)
-	testCluster.Timeout = requestTimeout
-	testCluster.ConnectTimeout = connectTimeout
-	oracleCluster.RetryPolicy = retryPolicy
-	oracleCluster.Consistency = consistency
-	oracleCluster.PoolConfig.HostSelectionPolicy = oracleHostSelectionPolicy
-	oracleAuthenticator, oracleAuthErr := auth.BuildAuthenticator(oracleClusterUsername, oracleClusterPassword)
-	if oracleAuthErr != nil {
-		logger.Warn("%s for oracle cluster", zap.Error(oracleAuthErr))
-	}
-	oracleCluster.Authenticator = oracleAuthenticator
-	return testCluster, oracleCluster
-}
-
-func getLogStatementFileCompression(input string) stmtlogger.Compression {
-	switch input {
-	case "zstd":
-		return stmtlogger.ZSTDCompression
-	case "gzip":
-		return stmtlogger.GZIPCompresssion
-	default:
-		return stmtlogger.NoCompression
-	}
-}
-
 func getReplicationStrategy(rs string, fallback replication.Replication, logger *zap.Logger) replication.Replication {
 	switch rs {
 	case "network":
@@ -381,12 +285,12 @@ func getReplicationStrategy(rs string, fallback replication.Replication, logger 
 	case "simple":
 		return replication.NewSimpleStrategy()
 	default:
-		replicationStrategy := replication.Replication{}
-		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), &replicationStrategy); err != nil {
+		rf := make(replication.Replication)
+		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), &rf); err != nil {
 			logger.Error("unable to parse replication strategy", zap.String("strategy", rs), zap.Error(err))
 			return fallback
 		}
-		return replicationStrategy
+		return rf
 	}
 }
 
@@ -401,19 +305,6 @@ func getCQLFeature(feature string) typedef.CQLFeature {
 	}
 }
 
-func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionPolicy, error) {
-	switch policy {
-	case "round-robin":
-		return gocql.RoundRobinHostPolicy(), nil
-	case "host-pool":
-		return gocql.HostPoolHostPolicy(hostpool.New(hosts)), nil
-	case "token-aware":
-		return gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy()), nil
-	default:
-		return nil, fmt.Errorf("unknown host selection policy \"%s\"", policy)
-	}
-}
-
 var rootCmd = &cobra.Command{
 	Use:          "gemini",
 	Short:        "Gemini is an automatic random testing tool for Scylla.",
@@ -423,37 +314,64 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.Version = version + ", commit " + commit + ", date " + date
-	rootCmd.Flags().StringSliceVarP(&testClusterHost, "test-cluster", "t", []string{}, "Host names or IPs of the test cluster that is system under test")
-	_ = rootCmd.MarkFlagRequired("test-cluster")
-	rootCmd.Flags().StringVarP(&testClusterUsername, "test-username", "", "", "Username for the test cluster")
-	rootCmd.Flags().StringVarP(&testClusterPassword, "test-password", "", "", "Password for the test cluster")
-	rootCmd.Flags().StringSliceVarP(
-		&oracleClusterHost, "oracle-cluster", "o", []string{},
-		"Host names or IPs of the oracle cluster that provides correct answers. If omitted no oracle will be used")
-	rootCmd.Flags().StringVarP(&oracleClusterUsername, "oracle-username", "", "", "Username for the oracle cluster")
-	rootCmd.Flags().StringVarP(&oracleClusterPassword, "oracle-password", "", "", "Password for the oracle cluster")
-	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
+
+	rootCmd.Flags().IntVarP(&profilingPort, "profiling-port", "", 0, "If non-zero starts pprof profiler on given port at 'http://0.0.0.0:<port>/profile'")
 	rootCmd.Flags().StringVarP(&mode, "mode", "m", jobs.MixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	rootCmd.Flags().Uint64VarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
 	rootCmd.Flags().StringVarP(&seed, "seed", "s", "random", "Statement seed value")
 	rootCmd.Flags().StringVarP(&schemaSeed, "schema-seed", "", "random", "Schema seed value")
-	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
 	rootCmd.Flags().BoolVarP(&failFast, "fail-fast", "f", false, "Stop on the first failure")
+	rootCmd.Flags().StringVarP(&level, "level", "", "info", "Specify the logging level, debug|info|warn|error|dpanic|panic|fatal")
+
+	rootCmd.Flags().StringSliceVarP(&testConfig.Hosts, "test-cluster", "t", []string{}, "Host names or IPs of the test cluster that is system under test")
+	//nolint:lll
+	rootCmd.Flags().StringVarP(&testConfig.Trace, "test-tracing-outfile", "", "", "Specify the file to which tracing information gets written. Two magic names are available, 'stdout' and 'stderr'. By default tracing is disabled.")
+	//nolint:lll
+	rootCmd.Flags().StringVarP(&testConfig.Consistency, "test-consistency", "", "LOCAL_QUORUM", "Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE")
+	rootCmd.Flags().StringVarP(&testConfig.DC, "test-dc", "", "", "Datacenter name for the test cluster")
+	//nolint:lll
+	rootCmd.Flags().StringVarP(&testConfig.HostSelectionPolicy, "test-host-selection-policy", "", "token-aware", "Host selection policy used by the driver for the test cluster: round-robin|host-pool|token-aware")
+	rootCmd.Flags().StringVarP(&testConfig.Username, "test-username", "", "", "Username for the test cluster")
+	rootCmd.Flags().StringVarP(&testConfig.Password, "test-password", "", "", "Password for the test cluster")
+	rootCmd.Flags().StringVarP(&testConfig.StatementLog, "test-statement-log-file", "", "", "File to write statements flow to")
+	rootCmd.Flags().DurationVarP(&testConfig.RequestTimeout, "test-request-timeout", "", 30*time.Second, "Duration of waiting request execution")
+	rootCmd.Flags().DurationVarP(&testConfig.ConnectTimeout, "test-connect-timeout", "", 30*time.Second, "Duration of waiting connection established")
+	//nolint:lll
+	rootCmd.Flags().DurationVarP(&testConfig.MaxRetriesMutateSleep, "test-max-mutation-retries-backoff", "", 10*time.Millisecond, "Duration between attempts to apply a mutation for example 10ms or 1s")
+	rootCmd.Flags().IntVarP(&testConfig.MaxRetriesMutate, "test-max-mutation-retries", "", 2, "Maximum number of attempts to apply a mutation")
+	rootCmd.Flags().BoolVarP(&testConfig.UseServerSideTimestamps, "test-use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
+	//nolint:lll
+	rootCmd.Flags().StringVarP(&testReplicationStrategy, "test-replication-strategy", "", "simple", "Specify the desired replication strategy as either the coded short hand simple|network to get the default for each type or provide the entire specification in the form {'class':'....'}")
+	//nolint:lll
+	rootCmd.Flags().StringSliceVarP(&oracleConfig.Hosts, "oracle-cluster", "o", []string{}, "Host names or IPs of the oracle cluster that provides correct answers. If omitted no oracle will be used")
+	//nolint:lll
+	rootCmd.Flags().StringVarP(&oracleConfig.Trace, "oracle-tracing-outfile", "", "", "Specify the file to which tracing information gets written. Two magic names are available, 'stdout' and 'stderr'. By default tracing is disabled.")
+
+	//nolint:lll
+	rootCmd.Flags().StringVarP(&oracleConfig.Consistency, "oracle-consistency", "", "LOCAL_QUORUM", "Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE")
+	rootCmd.Flags().StringVarP(&oracleConfig.DC, "oracle-dc", "", "", "Datacenter name for the oracle cluster")
+	//nolint:lll
+	rootCmd.Flags().StringVarP(&oracleConfig.HostSelectionPolicy, "oracle-host-selection-policy", "", "token-aware", "Host selection policy used by the driver for the oracle cluster: round-robin|host-pool|token-aware")
+	rootCmd.Flags().StringVarP(&oracleConfig.Username, "oracle-username", "", "", "Username for the oracle cluster")
+	rootCmd.Flags().StringVarP(&oracleConfig.Password, "oracle-password", "", "", "Password for the oracle cluster")
+	rootCmd.Flags().StringVarP(&oracleConfig.StatementLog, "oracle-statement-log-file", "", "", "File to write statements flow to")
+	rootCmd.Flags().DurationVarP(&oracleConfig.RequestTimeout, "oracle-request-timeout", "", 30*time.Second, "Duration of waiting request execution")
+	//nolint:lll
+	rootCmd.Flags().DurationVarP(&oracleConfig.ConnectTimeout, "oracle-connect-timeout", "", 30*time.Second, "Duration of waiting connection established")
+	//nolint:lll
+	rootCmd.Flags().DurationVarP(&oracleConfig.MaxRetriesMutateSleep, "oracle-max-mutation-retries-backoff", "", 10*time.Millisecond, "Duration between attempts to apply a mutation for example 10ms or 1s")
+	rootCmd.Flags().IntVarP(&oracleConfig.MaxRetriesMutate, "oracle-max-mutation-retries", "", 2, "Maximum number of attempts to apply a mutation")
+	rootCmd.Flags().BoolVarP(&oracleConfig.UseServerSideTimestamps, "oracle-use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
+	//nolint:lll
+	rootCmd.Flags().StringVarP(&oracleReplicationStrategy, "oracle-replication-strategy", "", "simple", "Specify the desired replication strategy of the oracle cluster as either the coded short hand simple|network to get the default for each type or provide the entire specification in the form {'class':'....'}")
+
+	rootCmd.Flags().StringVarP(&schemaFile, "schema", "", "", "Schema JSON config file")
+	rootCmd.Flags().BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
 	rootCmd.Flags().DurationVarP(&duration, "duration", "", 30*time.Second, "")
 	rootCmd.Flags().StringVarP(&outFileArg, "outfile", "", "", "Specify the name of the file where the results should go")
-	rootCmd.Flags().StringVarP(&bind, "bind", "b", "0.0.0.0:2112", "Specify the interface and port which to bind prometheus metrics on. Default is ':2112'")
 	rootCmd.Flags().DurationVarP(&warmup, "warmup", "", 30*time.Second, "Specify the warmup perid as a duration for example 30s or 10h")
-	rootCmd.Flags().StringVarP(
-		&replicationStrategy, "replication-strategy", "", "simple",
-		"Specify the desired replication strategy as either the coded short hand simple|network to get the default for each type or provide "+
-			"the entire specification in the form {'class':'....'}")
-	rootCmd.Flags().StringVarP(
-		&oracleReplicationStrategy, "oracle-replication-strategy", "", "simple",
-		"Specify the desired replication strategy of the oracle cluster as either the coded short hand simple|network to get the default for each "+
-			"type or provide the entire specification in the form {'class':'....'}")
 	rootCmd.Flags().StringArrayVarP(&tableOptions, "table-options", "", []string{}, "Repeatable argument to set table options to be added to the created tables")
-	rootCmd.Flags().StringVarP(&consistency, "consistency", "", "QUORUM", "Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE")
 	rootCmd.Flags().IntVarP(&maxTables, "max-tables", "", 1, "Maximum number of generated tables")
 	rootCmd.Flags().IntVarP(&maxPartitionKeys, "max-partition-keys", "", 6, "Maximum number of generated partition keys")
 	rootCmd.Flags().IntVarP(&minPartitionKeys, "min-partition-keys", "", 2, "Minimum number of generated partition keys")
@@ -464,43 +382,22 @@ func init() {
 	rootCmd.Flags().StringVarP(&datasetSize, "dataset-size", "", "large", "Specify the type of dataset size to use, small|large")
 	rootCmd.Flags().StringVarP(&cqlFeatures, "cql-features", "", "basic", "Specify the type of cql features to use, basic|normal|all")
 	rootCmd.Flags().BoolVarP(&useMaterializedViews, "materialized-views", "", false, "Run gemini with materialized views support")
-	rootCmd.Flags().StringVarP(&level, "level", "", "info", "Specify the logging level, debug|info|warn|error|dpanic|panic|fatal")
-	rootCmd.Flags().IntVarP(&maxRetriesMutate, "max-mutation-retries", "", 2, "Maximum number of attempts to apply a mutation")
-	rootCmd.Flags().DurationVarP(
-		&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond,
-		"Duration between attempts to apply a mutation for example 10ms or 1s")
 	rootCmd.Flags().Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 100, "Number of reused buffered partition keys")
+	//nolint:lll
 	rootCmd.Flags().Uint64VarP(&partitionCount, "token-range-slices", "", 10000, "Number of slices to divide the token space into")
-	rootCmd.Flags().StringVarP(
-		&partitionKeyDistribution, "partition-key-distribution", "", "uniform",
-		"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
+	//nolint:lll
+	rootCmd.Flags().StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform", "Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
 	rootCmd.Flags().Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution")
 	rootCmd.Flags().Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, defaults to one standard deviation ~0.341")
-	rootCmd.Flags().StringVarP(
-		&tracingOutFile, "tracing-outfile", "", "",
-		"Specify the file to which tracing information gets written. Two magic names are available, 'stdout' and 'stderr'. By default tracing is disabled.")
 	rootCmd.Flags().BoolVarP(&useCounters, "use-counters", "", false, "Ensure that at least one table is a counter table")
-	rootCmd.Flags().IntVarP(
-		&asyncObjectStabilizationAttempts, "async-objects-stabilization-attempts", "", 10,
-		"Maximum number of attempts to validate result sets from MV and SI")
-	rootCmd.Flags().DurationVarP(
-		&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 10*time.Millisecond,
-		"Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
+	rootCmd.Flags().IntVarP(&asyncObjectStabilizationAttempts, "async-objects-stabilization-attempts", "", 10, "Maximum number of attempts to validate result sets from MV and SI")
+	//nolint:lll
+	rootCmd.Flags().DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 10*time.Millisecond, "Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
 	rootCmd.Flags().BoolVarP(&useLWT, "use-lwt", "", false, "Emit LWT based updates")
-	rootCmd.Flags().StringVarP(
-		&oracleClusterHostSelectionPolicy, "oracle-host-selection-policy", "", "token-aware",
-		"Host selection policy used by the driver for the oracle cluster: round-robin|host-pool|token-aware")
-	rootCmd.Flags().StringVarP(
-		&testClusterHostSelectionPolicy, "test-host-selection-policy", "", "token-aware",
-		"Host selection policy used by the driver for the test cluster: round-robin|host-pool|token-aware")
-	rootCmd.Flags().BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
-	rootCmd.Flags().DurationVarP(&requestTimeout, "request-timeout", "", 30*time.Second, "Duration of waiting request execution")
-	rootCmd.Flags().DurationVarP(&connectTimeout, "connect-timeout", "", 30*time.Second, "Duration of waiting connection established")
-	rootCmd.Flags().IntVarP(&profilingPort, "profiling-port", "", 0, "If non-zero starts pprof profiler on given port at 'http://0.0.0.0:<port>/profile'")
 	rootCmd.Flags().IntVarP(&maxErrorsToStore, "max-errors-to-store", "", 1000, "Maximum number of errors to store and output at the end")
-	rootCmd.Flags().StringVarP(&testStatementLogFile, "test-statement-log-file", "", "", "File to write statements flow to")
-	rootCmd.Flags().StringVarP(&oracleStatementLogFile, "oracle-statement-log-file", "", "", "File to write statements flow to")
 	rootCmd.Flags().StringVarP(&statementLogFileCompression, "statement-log-file-compression", "", "zstd", "Compression algorithm to use for statement log files")
+
+	_ = rootCmd.MarkFlagRequired("test-cluster")
 }
 
 func printSetup(seed, schemaSeed uint64) {
@@ -511,8 +408,8 @@ func printSetup(seed, schemaSeed uint64) {
 	fmt.Fprintf(tw, "Maximum duration:\t%s\n", duration)
 	fmt.Fprintf(tw, "Warmup duration:\t%s\n", warmup)
 	fmt.Fprintf(tw, "Concurrency:\t%d\n", concurrency)
-	fmt.Fprintf(tw, "Test cluster:\t%s\n", testClusterHost)
-	fmt.Fprintf(tw, "Oracle cluster:\t%s\n", oracleClusterHost)
+	fmt.Fprintf(tw, "Test cluster:\t%s\n", strings.Join(testConfig.Hosts, ", "))
+	fmt.Fprintf(tw, "Oracle cluster:\t%s\n", strings.Join(oracleConfig.Hosts, ", "))
 	if outFileArg == "" {
 		fmt.Fprintf(tw, "Output file:\t%s\n", "<stdout>")
 	} else {

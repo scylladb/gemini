@@ -65,6 +65,32 @@ const (
 	GZIPCompresssion
 )
 
+func (c Compression) String() string {
+	switch c {
+	case NoCompression:
+		return "none"
+	case ZSTDCompression:
+		return "zstd"
+	case GZIPCompresssion:
+		return "gzip"
+	default:
+		panic("unknown compression")
+	}
+}
+
+func ParseCompression(value string) (Compression, error) {
+	switch value {
+	case "none", "":
+		return NoCompression, nil
+	case "zstd":
+		return ZSTDCompression, nil
+	case "gzip":
+		return GZIPCompresssion, nil
+	default:
+		return NoCompression, errors.Errorf("unknown compression %q", value)
+	}
+}
+
 func NewFileLogger(filename string, compression Compression) (StmtToFile, error) {
 	if filename == "" {
 		return &nopFileLogger{}, nil

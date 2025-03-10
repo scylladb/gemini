@@ -28,8 +28,8 @@ import (
 
 type Generators struct {
 	cancel context.CancelFunc
-	wg     *sync.WaitGroup
 	Gens   []Generator
+	wg     sync.WaitGroup
 }
 
 func New(
@@ -39,43 +39,42 @@ func New(
 	seed, distributionSize, pkBufferReuseSize uint64,
 	logger *zap.Logger,
 ) *Generators {
-	gs := make([]Generator, 0, len(schema.Tables))
+	partitionRangeConfig := schema.Config.GetPartitionRangeConfig()
 
 	cfg := Config{
-		PartitionsRangeConfig:      schema.Config.GetPartitionRangeConfig(),
+		PartitionsRangeConfig:      partitionRangeConfig,
 		PartitionsCount:            distributionSize,
 		PartitionsDistributionFunc: distFunc,
 		Seed:                       seed,
 		PkUsedBufferSize:           pkBufferReuseSize,
 	}
 
-	wg := new(sync.WaitGroup)
-	wg.Add(len(schema.Tables))
-
 	ctx, cancel := context.WithCancel(ctx)
 
-	partitionRangeConfig := schema.Config.GetPartitionRangeConfig()
-	for _, table := range schema.Tables {
-		g := NewGenerator(table, cfg, logger.Named("generators-"+table.Name))
-		go func() {
-			defer wg.Done()
-			g.Start(ctx)
-		}()
-
-		if table.PartitionKeys.ValueVariationsNumber(&partitionRangeConfig) < math.MaxUint32 {
-			// Low partition key variation can lead to having staled partitions
-			// Let's detect and mark them before running test
-			g.FindAndMarkStalePartitions()
-		}
-
-		gs = append(gs, g)
-	}
-
-	return &Generators{
-		Gens:   gs,
-		wg:     wg,
+	gens := &Generators{
+		Gens:   make([]Generator, 0, len(schema.Tables)),
 		cancel: cancel,
 	}
+
+	gens.wg.Add(len(schema.Tables))
+
+	for _, table := range schema.Tables {
+		g := NewGenerator(table, cfg, logger.Named("generators-"+table.Name))
+		go func(wg *sync.WaitGroup) {
+			defer wg.Done()
+			g.Start(ctx)
+
+			if table.PartitionKeys.ValueVariationsNumber(&partitionRangeConfig) < math.MaxUint32 {
+				// Low partition key variation can lead to having staled partitions
+				// Let's detect and mark them before running test
+				g.FindAndMarkStalePartitions()
+			}
+		}(&gens.wg)
+
+		gens.Gens = append(gens.Gens, g)
+	}
+
+	return gens
 }
 
 func (g *Generators) Close() error {
