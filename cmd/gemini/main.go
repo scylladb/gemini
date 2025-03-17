@@ -20,15 +20,6 @@ import (
 	"runtime/debug"
 )
 
-//go:generate sh -c "git describe --tags --abbrev=0 | tr -d '\n' > ./Version"
-//go:embed Version
-var version string
-
-var (
-	commit = "none"
-	date   = "unknown"
-)
-
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)

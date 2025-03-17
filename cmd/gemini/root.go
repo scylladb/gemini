@@ -131,15 +131,31 @@ func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Sc
 	return schemaBuilder.Build(), nil
 }
 
-func run(_ *cobra.Command, _ []string) error {
+func run(cmd *cobra.Command, _ []string) error {
+	val, err := cmd.PersistentFlags().GetBool("version-json")
+	if err != nil {
+		return err
+	}
+
+	if val {
+		var data []byte
+		data, err = json.MarshalIndent(versionInfo, "", "    ")
+		if err != nil {
+			return err
+		}
+
+		fmt.Println(string(data))
+		return nil
+	}
+
 	logger := createLogger(level)
 	globalStatus := status.NewGlobalStatus(1000)
 	defer utils.IgnoreError(logger.Sync)
 
-	if err := validateSeed(seed); err != nil {
+	if err = validateSeed(seed); err != nil {
 		return errors.Wrapf(err, "failed to parse --seed argument")
 	}
-	if err := validateSeed(schemaSeed); err != nil {
+	if err = validateSeed(schemaSeed); err != nil {
 		return errors.Wrapf(err, "failed to parse --schema-seed argument")
 	}
 
@@ -426,17 +442,29 @@ func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionP
 	}
 }
 
-var rootCmd = &cobra.Command{
-	Use:          "gemini",
-	Short:        "Gemini is an automatic random testing tool for Scylla.",
-	RunE:         run,
-	SilenceUsage: true,
-}
+var (
+	rootCmd = &cobra.Command{
+		Use:          "gemini",
+		Short:        "Gemini is an automatic random testing tool for Scylla.",
+		RunE:         run,
+		SilenceUsage: true,
+	}
+
+	versionInfo VersionInfo
+)
 
 func init() {
-	rootCmd.Version = version + ", commit " + commit + ", date " + date
+	var err error
+
+	versionInfo, err = NewVersionInfo()
+	if err != nil {
+		panic(err)
+	}
+
+	rootCmd.Version = versionInfo.String()
+
+	rootCmd.PersistentFlags().BoolP("version-json", "", false, "Print version information in JSON format")
 	rootCmd.Flags().StringSliceVarP(&testClusterHost, "test-cluster", "t", []string{}, "Host names or IPs of the test cluster that is system under test")
-	_ = rootCmd.MarkFlagRequired("test-cluster")
 	rootCmd.Flags().StringVarP(&testClusterUsername, "test-username", "", "", "Username for the test cluster")
 	rootCmd.Flags().StringVarP(&testClusterPassword, "test-password", "", "", "Password for the test cluster")
 	rootCmd.Flags().StringSliceVarP(

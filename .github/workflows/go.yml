@@ -16,14 +16,6 @@ jobs:
         uses: actions/checkout@v4
       - name: Pull tags and refs
         run: git fetch --prune --unshallow
-      - name: Check if version is updated
-        run: |
-          export ExpectedVersion=$(git describe --tags --abbrev=0)
-          export DefinedVersion=$(cat cmd/gemini/Version)
-          if [ "$ExpectedVersion" != "$DefinedVersion" ]; then
-            echo "Expect to have '$ExpectedVersion', but got '$DefinedVersion'"
-            exit 1
-          fi
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
