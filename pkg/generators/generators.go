@@ -19,10 +19,9 @@ import (
 	"math"
 	"sync"
 
-	"github.com/scylladb/gemini/pkg/distributions"
-
 	"go.uber.org/zap"
 
+	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
