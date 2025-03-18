@@ -304,7 +304,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	logger.Info("test finished")
-	globalStatus.PrintResult(outFile, schema, version)
+	globalStatus.PrintResult(outFile, schema, version, versionInfo)
 	if globalStatus.HasErrors() {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")
 	}
