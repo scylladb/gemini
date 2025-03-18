@@ -15,6 +15,7 @@
 package store
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"strings"
@@ -49,7 +50,7 @@ func lt(mi, mj map[string]any) bool {
 	switch mis := mi["pk0"].(type) {
 	case []byte:
 		mjs, _ := mj["pk0"].([]byte)
-		return string(mis) < string(mjs)
+		return bytes.Compare(mis, mjs) < 0
 	case string:
 		mjs, _ := mj["pk0"].(string)
 		return mis < mjs
@@ -70,7 +71,7 @@ func lt(mi, mj map[string]any) bool {
 		return mis < mjs
 	case gocql.UUID:
 		mjs, _ := mj["pk0"].(gocql.UUID)
-		return mis.String() < mjs.String()
+		return bytes.Compare(mis[:], mjs[:]) < 0
 	case time.Time:
 		mjs, _ := mj["pk0"].(time.Time)
 		return mis.UnixNano() < mjs.UnixNano()

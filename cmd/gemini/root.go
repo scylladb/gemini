@@ -200,7 +200,6 @@ func run(_ *cobra.Command, _ []string) error {
 		gocql.ParseConsistency(consistency),
 		testHostSelectionPolicy,
 		oracleHostSelectionPolicy,
-		logger,
 	)
 
 	storeConfig := store.Config{
@@ -331,8 +330,15 @@ func createLogger(level string) *zap.Logger {
 func createClusters(
 	consistency gocql.Consistency,
 	testHostSelectionPolicy, oracleHostSelectionPolicy gocql.HostSelectionPolicy,
-	logger *zap.Logger,
 ) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
+	for i := range len(testClusterHost) {
+		testClusterHost[i] = strings.TrimSpace(testClusterHost[i])
+	}
+
+	for i := range len(oracleClusterHost) {
+		oracleClusterHost[i] = strings.TrimSpace(oracleClusterHost[i])
+	}
+
 	testCluster := gocql.NewCluster(testClusterHost...)
 	testCluster.Timeout = requestTimeout
 	testCluster.ConnectTimeout = connectTimeout

@@ -15,9 +15,12 @@ MODE ?= mixed
 DATASET_SIZE ?= large
 SEED ?= $(shell date +%s)
 GEMINI_BINARY ?= $(PWD)/bin/gemini
-GEMINI_TEST_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-test)
-GEMINI_ORACLE_CLUSTER ?= $(shell docker inspect --format='{{ .NetworkSettings.Networks.gemini.IPAddress }}' gemini-oracle)
 GEMINI_DOCKER_NETWORK ?= gemini
+
+define get_scylla_ip
+	$(shell docker inspect --format "{{ .NetworkSettings.Networks.$(GEMINI_DOCKER_NETWORK).IPAddress }}" "$(1)")
+endef
+
 GEMINI_FLAGS ?= --fail-fast \
 	--level=info \
 	--consistency=QUORUM \
@@ -93,6 +96,19 @@ scylla-setup:
 scylla-shutdown:
 	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml down --volumes
 
+.PHONY: scylla-setup-cluster
+scylla-setup-cluster:
+	@docker compose -f docker/docker-compose-scylla-cluster.yml up -d --wait
+
+	until docker logs gemini-oracle 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
+	until docker logs gemini-test-1 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
+	until docker logs gemini-test-2 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
+	until docker logs gemini-test-3 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
+
+.PHONY: scylla-shutdown-cluster
+scylla-shutdown-cluster:
+	@docker compose -f docker/docker-compose-scylla-cluster.yml down --volumes
+
 .PHONY: test
 test:
 	@go test -covermode=atomic -tags testing -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | gotestfmt -showteststatus
@@ -141,10 +157,21 @@ integration-test:
 	@mkdir -p $(PWD)/results
 	@touch $(PWD)/results/gemini_seed
 	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
-	@$(GEMINI_BINARY) \
-		--test-cluster=$(GEMINI_TEST_CLUSTER) \
-		--oracle-cluster=$(GEMINI_ORACLE_CLUSTER) \
+	$(GEMINI_BINARY) \
+		--test-cluster="$(call get_scylla_ip,gemini-test)" \
+		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
 		$(GEMINI_FLAGS)
+
+.PHONY: integration-cluster-test
+integration-cluster-test:
+	@mkdir -p $(PWD)/results
+	@touch $(PWD)/results/gemini_seed
+	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
+	$(GEMINI_BINARY) \
+		--test-cluster="$(call get_scylla_ip,gemini-test-1),$(call get_scylla_ip,gemini-test-2),$(call get_scylla_ip,gemini-test-3)" \
+		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
+		$(GEMINI_FLAGS)
+
 
 .PHONY: clean
 clean: clean-bin clean-results

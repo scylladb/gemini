@@ -18,7 +18,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/pkg/errors"
 	"io"
 	"math/rand/v2"
 	"os"
@@ -26,6 +25,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/gocql/gocql"
 )

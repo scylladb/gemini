@@ -51,7 +51,6 @@ func TestGenAddColumnStmt(t *testing.T) {
 }
 
 func BenchmarkGenDropColumnStmt(t *testing.B) {
-
 	for idx := range genDropColumnStmtCases {
 		caseName := genDropColumnStmtCases[idx]
 		t.Run(caseName,
@@ -68,7 +67,6 @@ func BenchmarkGenDropColumnStmt(t *testing.B) {
 }
 
 func BenchmarkGenAddColumnStmt(t *testing.B) {
-
 	for idx := range genAddColumnStmtCases {
 		caseName := genAddColumnStmtCases[idx]
 		t.Run(caseName,
