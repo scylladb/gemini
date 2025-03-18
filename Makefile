@@ -7,6 +7,11 @@ GOARCH := $(shell go env GOARCH)
 DOCKER_COMPOSE_TESTING ?= scylla
 DOCKER_VERSION ?= latest
 
+VERSION ?= $(shell git describe --tags 2>/dev/null || echo "dev")
+COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell git log -1 --format=%cd --date=format:%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS_VERSION := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(BUILD_DATE)
+
 CQL_FEATURES ?= normal
 CONCURRENCY ?= 16
 DURATION ?= 10m
@@ -70,11 +75,11 @@ fmt:
 
 .PHONY: build
 build:
-	@CGO_ENABLED=0 go build -ldflags="-s -w"  -o bin/gemini ./cmd/gemini
+	@CGO_ENABLED=0 go build -ldflags="-s -w"  -ldflags="$(LDFLAGS_VERSION)"  -o bin/gemini ./cmd/gemini
 
 .PHONY: debug-build
 debug-build:
-	@CGO_ENABLED=0 go build -gcflags="-N -l" -o bin/gemini ./cmd/gemini
+	@CGO_ENABLED=0 go build -ldflags="$(LDFLAGS_VERSION)" -gcflags="-N -l" -o bin/gemini ./cmd/gemini
 
 .PHONY: build-docker
 build-docker:
@@ -171,7 +176,6 @@ integration-cluster-test:
 		--test-cluster="$(call get_scylla_ip,gemini-test-1),$(call get_scylla_ip,gemini-test-2),$(call get_scylla_ip,gemini-test-3)" \
 		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
 		$(GEMINI_FLAGS)
-
 
 .PHONY: clean
 clean: clean-bin clean-results
