@@ -15,12 +15,43 @@
 package metrics
 
 import (
+	"context"
+	"net"
+	"net/http"
+	"time"
+
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-var CQLRequests = promauto.NewCounterVec(prometheus.CounterOpts{
-	Name: "gemini_cql_requests",
-	Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
-}, []string{"system", "method"},
+var CQLRequests = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "gemini_cql_requests",
+		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
+	},
+	[]string{"system", "method"},
 )
+
+func StartMetricsServer(ctx context.Context, bind string, logger *zap.Logger) {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+
+	server := &http.Server{
+		BaseContext: func(_ net.Listener) context.Context {
+			return ctx
+		},
+		WriteTimeout: 1 * time.Minute,
+		Handler:      mux,
+		Addr:         bind,
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("Failed to start Metrics server", zap.String("bind", bind), zap.Error(err))
+		}
+	}()
+}

@@ -23,15 +23,16 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/hailocab/go-hostpool"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -41,6 +42,7 @@ import (
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/jobs"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/realrandom"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/status"
@@ -50,6 +52,30 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
+
+var (
+	rootCmd = &cobra.Command{
+		Use:          "gemini",
+		Short:        "Gemini is an automatic random testing tool for Scylla.",
+		RunE:         run,
+		SilenceUsage: true,
+	}
+
+	versionInfo VersionInfo
+)
+
+func init() {
+	var err error
+
+	versionInfo, err = NewVersionInfo()
+	if err != nil {
+		panic(err)
+	}
+
+	rootCmd.Version = versionInfo.String()
+
+	setupFlags(rootCmd)
+}
 
 func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Schema, error) {
 	byteValue, err := os.ReadFile(confFile)
@@ -74,6 +100,9 @@ func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Sc
 }
 
 func run(cmd *cobra.Command, _ []string) error {
+	ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGABRT, syscall.SIGINT)
+	defer cancel()
+
 	val, err := cmd.PersistentFlags().GetBool("version-json")
 	if err != nil {
 		return err
@@ -91,8 +120,10 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	logger := createLogger(level)
-	globalStatus := status.NewGlobalStatus(1000)
+	globalStatus := status.NewGlobalStatus(maxErrorsToStore)
 	defer utils.IgnoreError(logger.Sync)
+
+	metrics.StartMetricsServer(ctx, bind, logger.Named("metrics"))
 
 	if err = validateSeed(seed); err != nil {
 		return errors.Wrapf(err, "failed to parse --seed argument")
@@ -103,20 +134,6 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	intSeed := seedFromString(seed)
 	intSchemaSeed := seedFromString(schemaSeed)
-
-	testHostSelectionPolicy, err := getHostSelectionPolicy(testClusterHostSelectionPolicy, testClusterHost)
-	if err != nil {
-		return err
-	}
-	oracleHostSelectionPolicy, err := getHostSelectionPolicy(oracleClusterHostSelectionPolicy, oracleClusterHost)
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		http.Handle("/metrics", promhttp.Handler())
-		_ = http.ListenAndServe(bind, nil)
-	}()
 
 	if profilingPort != 0 {
 		go func() {
@@ -143,22 +160,25 @@ func run(cmd *cobra.Command, _ []string) error {
 			return errors.Wrap(err, "cannot create schema")
 		}
 	} else {
-		schema, intSchemaSeed, err = generateSchema(logger, schemaConfig, schemaSeed)
+		schema, intSchemaSeed, err = generateSchema(schemaConfig, schemaSeed)
 		if err != nil {
 			return errors.Wrapf(err, "failed to create schema for seed %s", schemaSeed)
 		}
+	}
+
+	testCluster, oracleCluster, err := createClusters(
+		consistency,
+		testClusterHostSelectionPolicy,
+		oracleClusterHostSelectionPolicy,
+	)
+	if err != nil {
+		return err
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
 
 	printSetup(intSeed, intSchemaSeed)
 	fmt.Printf("Schema: %v\n", string(jsonSchema))
-
-	testCluster, oracleCluster := createClusters(
-		gocql.ParseConsistency(consistency),
-		testHostSelectionPolicy,
-		oracleHostSelectionPolicy,
-	)
 
 	storeConfig := store.Config{
 		MaxRetriesMutate:            maxRetriesMutate,
@@ -202,7 +222,7 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	testKeyspace, oracleKeyspace := generators.GetCreateKeyspaces(schema)
 	if err = st.Create(
-		context.Background(),
+		ctx,
 		typedef.SimpleStmt(testKeyspace, typedef.CreateKeyspaceStatementType),
 		typedef.SimpleStmt(oracleKeyspace, typedef.CreateKeyspaceStatementType)); err != nil {
 		return errors.Wrap(err, "unable to create keyspace")
@@ -210,17 +230,16 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	for _, stmt := range generators.GetCreateSchema(schema) {
 		logger.Debug(stmt)
-		if err = st.Mutate(context.Background(), typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
+		if err = st.Mutate(ctx, typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
 			return errors.Wrap(err, "unable to create schema")
 		}
 	}
 
-	ctx, done := context.WithTimeout(context.Background(), duration+warmup+time.Second*2)
+	ctx, done := context.WithTimeout(ctx, duration+warmup+time.Second*2)
 	defer done()
 	stopFlag := stop.NewFlag("main")
 	warmupStopFlag := stop.NewFlag("warmup")
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
-	pump := jobs.NewPump(stopFlag, logger)
 
 	distFunc, err := distributions.New(partitionKeyDistribution, partitionCount, intSeed, stdDistMean, oneStdDev)
 	if err != nil {
@@ -232,7 +251,7 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, warmupStopFlag, failFast, verbose); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, intSeed, warmupStopFlag, failFast, verbose); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
 			stopFlag.SetHard(true)
 		}
@@ -240,7 +259,7 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	if !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(mode, duration, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, pump, gens, globalStatus, logger, intSeed, stopFlag.CreateChild("workload"), failFast, verbose); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, intSeed, stopFlag.CreateChild("workload"), failFast, verbose); err != nil {
 			logger.Debug("error detected", zap.Error(err))
 		}
 	}
@@ -285,12 +304,24 @@ func createLogger(level string) *zap.Logger {
 	return logger
 }
 
-func createClusters(
-	consistency gocql.Consistency,
-	testHostSelectionPolicy, oracleHostSelectionPolicy gocql.HostSelectionPolicy,
-) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
+func createClusters(consistency, testSelectionPolicy, oracleSelectionPolicy string) (*gocql.ClusterConfig, *gocql.ClusterConfig, error) {
 	for i := range len(testClusterHost) {
 		testClusterHost[i] = strings.TrimSpace(testClusterHost[i])
+	}
+
+	c, err := gocql.ParseConsistencyWrapper(consistency)
+	if err != nil {
+		return nil, nil, errors.Wrapf(err, "failed to parse consistency %s", consistency)
+	}
+
+	testHostSelectionPolicy, err := getHostSelectionPolicy(testSelectionPolicy, testClusterHost)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	oracleHostSelectionPolicy, err := getHostSelectionPolicy(oracleSelectionPolicy, oracleClusterHost)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	for i := range len(oracleClusterHost) {
@@ -306,7 +337,7 @@ func createClusters(
 		NumRetries: 5,
 	}
 
-	testCluster.Consistency = consistency
+	testCluster.Consistency = c
 	testCluster.DefaultTimestamp = !useServerSideTimestamps
 	testCluster.PoolConfig.HostSelectionPolicy = testHostSelectionPolicy
 
@@ -318,7 +349,7 @@ func createClusters(
 	}
 
 	if len(oracleClusterHost) == 0 {
-		return testCluster, nil
+		return testCluster, nil, nil
 	}
 
 	oracleCluster := gocql.NewCluster(oracleClusterHost...)
@@ -330,7 +361,7 @@ func createClusters(
 		NumRetries: 5,
 	}
 
-	oracleCluster.Consistency = consistency
+	oracleCluster.Consistency = c
 	oracleCluster.DefaultTimestamp = !useServerSideTimestamps
 	oracleCluster.PoolConfig.HostSelectionPolicy = oracleHostSelectionPolicy
 
@@ -341,7 +372,7 @@ func createClusters(
 		}
 	}
 
-	return testCluster, oracleCluster
+	return testCluster, oracleCluster, nil
 }
 
 func getReplicationStrategy(rs string, fallback replication.Replication, logger *zap.Logger) replication.Replication {
@@ -384,44 +415,22 @@ func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionP
 	}
 }
 
-var (
-	rootCmd = &cobra.Command{
-		Use:          "gemini",
-		Short:        "Gemini is an automatic random testing tool for Scylla.",
-		RunE:         run,
-		SilenceUsage: true,
-	}
-
-	versionInfo VersionInfo
-)
-
-func init() {
-	var err error
-
-	versionInfo, err = NewVersionInfo()
-	if err != nil {
-		panic(err)
-	}
-
-	rootCmd.Version = versionInfo.String()
-}
-
 func printSetup(seed, schemaSeed uint64) {
 	tw := new(tabwriter.Writer)
 	tw.Init(os.Stdout, 0, 8, 2, '\t', tabwriter.AlignRight)
-	fmt.Fprintf(tw, "Seed:\t%d\n", seed)
-	fmt.Fprintf(tw, "Schema seed:\t%d\n", schemaSeed)
-	fmt.Fprintf(tw, "Maximum duration:\t%s\n", duration)
-	fmt.Fprintf(tw, "Warmup duration:\t%s\n", warmup)
-	fmt.Fprintf(tw, "Concurrency:\t%d\n", concurrency)
-	fmt.Fprintf(tw, "Test cluster:\t%s\n", testClusterHost)
-	fmt.Fprintf(tw, "Oracle cluster:\t%s\n", oracleClusterHost)
+	_, _ = fmt.Fprintf(tw, "Seed:\t%d\n", seed)
+	_, _ = fmt.Fprintf(tw, "Schema seed:\t%d\n", schemaSeed)
+	_, _ = fmt.Fprintf(tw, "Maximum duration:\t%s\n", duration)
+	_, _ = fmt.Fprintf(tw, "Warmup duration:\t%s\n", warmup)
+	_, _ = fmt.Fprintf(tw, "Concurrency:\t%d\n", concurrency)
+	_, _ = fmt.Fprintf(tw, "Test cluster:\t%s\n", testClusterHost)
+	_, _ = fmt.Fprintf(tw, "Oracle cluster:\t%s\n", oracleClusterHost)
 	if outFileArg == "" {
-		fmt.Fprintf(tw, "Output file:\t%s\n", "<stdout>")
+		_, _ = fmt.Fprintf(tw, "Output file:\t%s\n", "<stdout>")
 	} else {
-		fmt.Fprintf(tw, "Output file:\t%s\n", outFileArg)
+		_, _ = fmt.Fprintf(tw, "Output file:\t%s\n", outFileArg)
 	}
-	tw.Flush()
+	_ = tw.Flush()
 }
 
 func RealRandom() uint64 {
@@ -445,7 +454,7 @@ func seedFromString(seed string) uint64 {
 }
 
 // generateSchema generates schema, if schema seed is random and schema did not pass validation it regenerates it
-func generateSchema(logger *zap.Logger, sc typedef.SchemaConfig, schemaSeed string) (schema *typedef.Schema, intSchemaSeed uint64, err error) {
+func generateSchema(sc typedef.SchemaConfig, schemaSeed string) (schema *typedef.Schema, intSchemaSeed uint64, err error) {
 	intSchemaSeed = seedFromString(schemaSeed)
 	schema = generators.GenSchema(sc, intSchemaSeed)
 	err = schema.Validate(partitionCount)

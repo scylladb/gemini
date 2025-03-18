@@ -71,9 +71,9 @@ type Config struct {
 	PkUsedBufferSize           uint64
 }
 
-func NewGenerator(table *typedef.Table, config Config, logger *zap.Logger) Generator {
+func NewGenerator(ctx context.Context, table *typedef.Table, config Config, logger *zap.Logger) *Generator {
 	wakeUpSignal := make(chan struct{}, 1)
-	return Generator{
+	g := &Generator{
 		partitions:        NewPartitions(int(config.PartitionsCount), int(config.PkUsedBufferSize), wakeUpSignal),
 		partitionCount:    config.PartitionsCount,
 		table:             table,
@@ -84,6 +84,10 @@ func NewGenerator(table *typedef.Table, config Config, logger *zap.Logger) Gener
 		routingKeyCreator: &routingkey.Creator{},
 		r:                 rand.New(rand.NewPCG(config.Seed, config.Seed)),
 	}
+
+	go g.Start(ctx)
+
+	return g
 }
 
 func (g *Generator) Get() *typedef.ValueWithToken {

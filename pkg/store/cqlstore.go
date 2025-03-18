@@ -84,22 +84,24 @@ func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt) error {
 	return nil
 }
 
-func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) ([]map[string]any, error) {
+func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) ([]Row, error) {
 	cql, _ := stmt.Query.ToCql()
 
 	query := cs.session.Query(cql, stmt.Values...).WithContext(ctx)
 	defer query.Release()
 
-	iter := query.Iter()
 	metrics.CQLRequests.WithLabelValues(cs.system, opType(stmt)).Inc()
 
-	result := loadSet(iter)
-
-	if err := cs.stmtLogger.LogStmt(stmt); err != nil {
+	result, err := loadSet(query)
+	if err != nil {
 		return nil, err
 	}
 
-	return result, iter.Close()
+	if err = cs.stmtLogger.LogStmt(stmt); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func (cs *cqlStore) close() error {

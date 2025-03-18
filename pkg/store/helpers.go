@@ -22,11 +22,14 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/pkg/errors"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func pks(t *typedef.Table, rows []map[string]any) []string {
+type Row map[string]any
+
+func pks(t *typedef.Table, rows []Row) []string {
 	keySet := make([]string, 0, len(rows))
 
 	for _, row := range rows {
@@ -81,20 +84,25 @@ func lt(mi, mj map[string]any) bool {
 	case nil:
 		return true
 	default:
-		msg := fmt.Sprintf("unhandled type %T\n", mis)
-		time.Sleep(time.Second)
-		panic(msg)
+		panic(fmt.Sprintf("unhandled type [%T][%v]\n", mis, mis))
 	}
 }
 
-func loadSet(iter *gocql.Iter) []map[string]any {
-	var rows []map[string]any
-	for {
-		row := make(map[string]any)
+func loadSet(query *gocql.Query) ([]Row, error) {
+	iter := query.Iter()
+	var err error
+	defer func() {
+		err = iter.Close()
+	}()
+
+	rows := make([]Row, 0, iter.NumRows())
+
+	for range iter.NumRows() {
+		row := make(Row, len(iter.Columns()))
 		if !iter.MapScan(row) {
-			break
+			return nil, errors.New("failed to scan row")
 		}
-		rows = append(rows, row)
 	}
-	return rows
+
+	return rows, err
 }

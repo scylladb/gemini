@@ -38,7 +38,7 @@ func New(distribution string, size, seed uint64, mu, sigma float64) (Distributio
 
 	switch strings.ToLower(distribution) {
 	case "zipf":
-		rnd = rand.NewZipf(rand.New(src), 1.1, 1.1, size)
+		rnd = rand.NewZipf(rand.New(src), 1.001, float64(size), size)
 	case "normal":
 		rnd = Normal{
 			Src:   src,
@@ -48,7 +48,7 @@ func New(distribution string, size, seed uint64, mu, sigma float64) (Distributio
 	case "uniform":
 		rnd = Uniform{
 			Src: src,
-			Min: 1,
+			Min: 0,
 			Max: math.MaxUint64,
 		}
 	default:

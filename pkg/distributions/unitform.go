@@ -36,12 +36,5 @@ func (u Uniform) Rand() float64 {
 }
 
 func (u Uniform) Uint64() uint64 {
-	var rnd uint64
-	if u.Src == nil {
-		rnd = rand.Uint64N(uint64(u.Max))
-	} else {
-		rnd = rand.New(u.Src).Uint64N(uint64(u.Max))
-	}
-
-	return rnd*(uint64(u.Max-u.Min)) + uint64(u.Min)
+	return uint64(u.Rand())
 }

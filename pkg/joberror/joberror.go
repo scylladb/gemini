@@ -16,39 +16,58 @@ package joberror
 
 import (
 	"encoding/json"
-	"sync/atomic"
+	"fmt"
+	"strconv"
+	"strings"
+	"sync"
 	"time"
-	"unsafe"
 )
 
 type JobError struct {
 	Timestamp time.Time `json:"timestamp"`
+	Err       error     `json:"err"`
 	Message   string    `json:"message"`
 	Query     string    `json:"query"`
 	StmtType  string    `json:"stmt-type"`
 }
 
+func (j *JobError) Error() string {
+	return fmt.Sprintf(
+		"JobError(err=%v): %s (stmt-type=%s, query=%s) time=%s",
+		j.Message,
+		j.Err,
+		j.StmtType,
+		j.Query,
+		j.Timestamp.Format(time.RFC3339Nano),
+	)
+}
+
 type ErrorList struct {
-	errors []*JobError
-	idx    atomic.Int32
-	limit  int32
+	errors []JobError
+	limit  int
+	mu     sync.Mutex
 }
 
-func (el *ErrorList) AddError(err *JobError) {
-	idx := el.idx.Add(1)
-	if idx <= el.limit {
-		atomic.StorePointer((*unsafe.Pointer)(unsafe.Pointer(&el.errors[idx-1])), unsafe.Pointer(err))
+func (el *ErrorList) AddError(err JobError) {
+	el.mu.Lock()
+	defer el.mu.Unlock()
+
+	if len(el.errors) <= el.limit {
+		el.errors = append(el.errors, err)
 	}
 }
 
-func (el *ErrorList) Errors() []*JobError {
-	out := make([]*JobError, 0)
-	for id := range el.errors {
-		err := atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&el.errors[id])))
-		if err != nil {
-			out = append(out, (*JobError)(err))
-		}
-	}
+func (el *ErrorList) Errors() []JobError {
+	el.mu.Lock()
+	l := len(el.errors)
+	el.mu.Unlock()
+
+	out := make([]JobError, l)
+
+	el.mu.Lock()
+	copy(out, el.errors[:l])
+	el.mu.Unlock()
+
 	return out
 }
 
@@ -56,9 +75,24 @@ func (el *ErrorList) MarshalJSON() ([]byte, error) {
 	return json.Marshal(el.Errors())
 }
 
-func NewErrorList(limit int32) *ErrorList {
+func (el *ErrorList) Error() string {
+	var builder strings.Builder
+	builder.Grow(1024)
+
+	errors := el.Errors()
+
+	for i, err := range errors {
+		builder.WriteString(strconv.FormatInt(int64(i), 10))
+		builder.WriteString(err.Error())
+		builder.WriteString("\n")
+	}
+
+	return builder.String()
+}
+
+func NewErrorList(limit int) *ErrorList {
 	return &ErrorList{
 		limit:  limit,
-		errors: make([]*JobError, limit),
+		errors: make([]JobError, 0, limit),
 	}
 }

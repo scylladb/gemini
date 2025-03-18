@@ -17,7 +17,6 @@ package generators
 import (
 	"context"
 	"math"
-	"sync"
 
 	"go.uber.org/zap"
 
@@ -27,8 +26,7 @@ import (
 
 type Generators struct {
 	cancel context.CancelFunc
-	wg     *sync.WaitGroup
-	Gens   []Generator
+	Gens   map[string]*Generator
 }
 
 func New(
@@ -38,7 +36,7 @@ func New(
 	seed, distributionSize, pkBufferReuseSize uint64,
 	logger *zap.Logger,
 ) *Generators {
-	gs := make([]Generator, 0, len(schema.Tables))
+	base, cancel := context.WithCancel(ctx)
 
 	cfg := Config{
 		PartitionsRangeConfig:      schema.Config.GetPartitionRangeConfig(),
@@ -48,18 +46,14 @@ func New(
 		PkUsedBufferSize:           pkBufferReuseSize,
 	}
 
-	wg := new(sync.WaitGroup)
-	wg.Add(len(schema.Tables))
-
-	ctx, cancel := context.WithCancel(ctx)
+	gens := &Generators{
+		Gens:   make(map[string]*Generator, len(schema.Tables)),
+		cancel: cancel,
+	}
 
 	partitionRangeConfig := schema.Config.GetPartitionRangeConfig()
 	for _, table := range schema.Tables {
-		g := NewGenerator(table, cfg, logger.Named("generators-"+table.Name))
-		go func() {
-			defer wg.Done()
-			g.Start(ctx)
-		}()
+		g := NewGenerator(base, table, cfg, logger.Named("generators-"+table.Name))
 
 		if table.PartitionKeys.ValueVariationsNumber(&partitionRangeConfig) < math.MaxUint32 {
 			// Low partition key variation can lead to having staled partitions
@@ -67,19 +61,24 @@ func New(
 			g.FindAndMarkStalePartitions()
 		}
 
-		gs = append(gs, g)
+		gens.Gens[table.Name] = g
 	}
 
-	return &Generators{
-		Gens:   gs,
-		wg:     wg,
-		cancel: cancel,
+	return gens
+}
+
+func (g *Generators) Get(table *typedef.Table) *Generator {
+	gen, exists := g.Gens[table.Name]
+
+	if !exists {
+		panic("generator does not exist for table " + table.Name)
 	}
+
+	return gen
 }
 
 func (g *Generators) Close() error {
 	g.cancel()
-	g.wg.Wait()
 
 	return nil
 }

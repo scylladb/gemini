@@ -62,7 +62,6 @@ type List struct {
 type job struct {
 	function func(
 		context.Context,
-		<-chan time.Duration,
 		*typedef.Schema,
 		typedef.SchemaConfig,
 		*typedef.Table,
@@ -106,7 +105,6 @@ func (l List) Run(
 	schema *typedef.Schema,
 	schemaConfig typedef.SchemaConfig,
 	s store.Store,
-	pump <-chan time.Duration,
 	generators *generators.Generators,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
@@ -124,14 +122,14 @@ func (l List) Run(
 
 	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 	logger.Info("start jobs")
-	for j, table := range schema.Tables {
-		generator := &generators.Gens[j]
-		for i := 0; i < int(l.workers); i++ {
+	for _, table := range schema.Tables {
+		for range l.workers {
 			for idx := range l.jobs {
 				jobF := l.jobs[idx].function
 				r := rand.New(rand.NewPCG(seed, seed))
+				generator := generators.Get(table)
 				g.Go(func() error {
-					return jobF(gCtx, pump, schema, schemaConfig, table, s, r, &partitionRangeConfig, generator, globalStatus, logger, stopFlag, failFast, verbose)
+					return jobF(gCtx, schema, schemaConfig, table, s, r, &partitionRangeConfig, generator, globalStatus, logger, stopFlag, failFast, verbose)
 				})
 			}
 		}
@@ -144,7 +142,6 @@ func (l List) Run(
 // for as long as the pump is active.
 func mutationJob(
 	ctx context.Context,
-	pump <-chan time.Duration,
 	schema *typedef.Schema,
 	schemaCfg typedef.SchemaConfig,
 	table *typedef.Table,
@@ -171,8 +168,7 @@ func mutationJob(
 		case <-stopFlag.SignalChannel():
 			logger.Debug("mutation job terminated")
 			return nil
-		case hb := <-pump:
-			time.Sleep(hb)
+		default:
 		}
 		ind := r.IntN(1000000)
 		if ind%100000 == 0 {
@@ -197,7 +193,6 @@ func mutationJob(
 // for as long as the pump is active.
 func validationJob(
 	ctx context.Context,
-	pump <-chan time.Duration,
 	schema *typedef.Schema,
 	schemaCfg typedef.SchemaConfig,
 	table *typedef.Table,
@@ -224,8 +219,7 @@ func validationJob(
 		select {
 		case <-stopFlag.SignalChannel():
 			return nil
-		case hb := <-pump:
-			time.Sleep(hb)
+		default:
 		}
 		stmt := GenCheckStmt(schema, table, g, r, p)
 		if stmt == nil {
@@ -253,7 +247,7 @@ func validationJob(
 				}
 			}
 
-			globalStatus.AddReadError(&joberror.JobError{
+			globalStatus.AddReadError(joberror.JobError{
 				Timestamp: time.Now(),
 				StmtType:  stmt.QueryType.String(),
 				Message:   "Validation failed: " + err.Error(),
@@ -272,7 +266,6 @@ func validationJob(
 // for as long as the pump is active or the supplied duration expires.
 func warmupJob(
 	ctx context.Context,
-	_ <-chan time.Duration,
 	schema *typedef.Schema,
 	schemaCfg typedef.SchemaConfig,
 	table *typedef.Table,
@@ -372,7 +365,7 @@ func ddl(
 				}
 			}
 
-			globalStatus.AddWriteError(&joberror.JobError{
+			globalStatus.AddWriteError(joberror.JobError{
 				Timestamp: time.Now(),
 				StmtType:  ddlStmts.QueryType.String(),
 				Message:   "DDL failed: " + err.Error(),
@@ -443,10 +436,11 @@ func mutation(
 			}
 		}
 
-		globalStatus.AddWriteError(&joberror.JobError{
+		globalStatus.AddWriteError(joberror.JobError{
 			Timestamp: time.Now(),
 			StmtType:  mutateStmt.QueryType.String(),
-			Message:   "Mutation failed: " + err.Error(),
+			Err:       err,
+			Message:   "Mutation failed: ",
 			Query:     prettyCQL,
 		})
 

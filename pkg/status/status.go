@@ -42,14 +42,14 @@ type GlobalStatus struct {
 	ReadErrors  Uint64              `json:"read_errors"`
 }
 
-func (gs *GlobalStatus) AddWriteError(err *joberror.JobError) {
+func (gs *GlobalStatus) AddWriteError(err joberror.JobError) {
 	// TODO: https://github.com/scylladb/gemini/issues/302 - Move out and add logging
 	fmt.Printf("Error detected: %#v", err)
 	gs.Errors.AddError(err)
 	gs.WriteErrors.Add(1)
 }
 
-func (gs *GlobalStatus) AddReadError(err *joberror.JobError) {
+func (gs *GlobalStatus) AddReadError(err joberror.JobError) {
 	// TODO: https://github.com/scylladb/gemini/issues/302 - Move out and add logging
 	fmt.Printf("Error detected: %#v", err)
 	gs.Errors.AddError(err)
@@ -100,7 +100,7 @@ func (gs *GlobalStatus) PrintResult(w io.Writer, schema *typedef.Schema, version
 	}
 }
 
-func NewGlobalStatus(limit int32) *GlobalStatus {
+func NewGlobalStatus(limit int) *GlobalStatus {
 	return &GlobalStatus{
 		Errors: joberror.NewErrorList(limit),
 	}
