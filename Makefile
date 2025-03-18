@@ -172,7 +172,6 @@ integration-cluster-test:
 		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
 		$(GEMINI_FLAGS)
 
-
 .PHONY: clean
 clean: clean-bin clean-results
 
