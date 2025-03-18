@@ -83,7 +83,7 @@ setup: scylla-setup debug-build
 
 .PHONY: scylla-setup
 scylla-setup:
-	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml up -d
+	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml up -d --wait
 
 	until docker logs gemini-oracle 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
 	until docker logs gemini-test 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
@@ -95,7 +95,7 @@ scylla-shutdown:
 
 .PHONY: test
 test:
-	@go test -covermode=atomic -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | gotestfmt -showteststatus
+	@go test -covermode=atomic -tags testing -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | gotestfmt -showteststatus
 
 .PHONY: pprof-profile
 pprof-profile:

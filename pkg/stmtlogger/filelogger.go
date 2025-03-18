@@ -55,14 +55,6 @@ type (
 		wg      sync.WaitGroup
 		active  atomic.Bool
 	}
-
-	Compression int
-)
-
-const (
-	NoCompression Compression = iota
-	ZSTDCompression
-	GZIPCompresssion
 )
 
 func NewFileLogger(filename string, compression Compression) (StmtToFile, error) {
@@ -94,7 +86,7 @@ func NewLogger(w io.Writer, compression Compression) (StmtToFile, error) {
 		}
 
 		writer = bufio.NewWriterSize(zstdWriter, 8192)
-	case GZIPCompresssion:
+	case GZIPCompression:
 		gzipWriter, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
 		if err != nil {
 			cancel()

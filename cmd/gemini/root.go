@@ -37,7 +37,6 @@ import (
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/net/context"
 
-	"github.com/scylladb/gemini/pkg/auth"
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/generators"
@@ -147,12 +146,6 @@ func run(_ *cobra.Command, _ []string) error {
 	intSeed := seedFromString(seed)
 	intSchemaSeed := seedFromString(schemaSeed)
 
-	cons, err := gocql.ParseConsistencyWrapper(consistency)
-	if err != nil {
-		logger.Error("Unable parse consistency, error=%s. Falling back on Quorum", zap.Error(err))
-		cons = gocql.Quorum
-	}
-
 	testHostSelectionPolicy, err := getHostSelectionPolicy(testClusterHostSelectionPolicy, testClusterHost)
 	if err != nil {
 		return err
@@ -203,15 +196,22 @@ func run(_ *cobra.Command, _ []string) error {
 	printSetup(intSeed, intSchemaSeed)
 	fmt.Printf("Schema: %v\n", string(jsonSchema))
 
-	testCluster, oracleCluster := createClusters(cons, testHostSelectionPolicy, oracleHostSelectionPolicy, logger)
+	testCluster, oracleCluster := createClusters(
+		gocql.ParseConsistency(consistency),
+		testHostSelectionPolicy,
+		oracleHostSelectionPolicy,
+		logger,
+	)
+
 	storeConfig := store.Config{
 		MaxRetriesMutate:            maxRetriesMutate,
 		MaxRetriesMutateSleep:       maxRetriesMutateSleep,
 		UseServerSideTimestamps:     useServerSideTimestamps,
 		TestLogStatementsFile:       testStatementLogFile,
 		OracleLogStatementsFile:     oracleStatementLogFile,
-		LogStatementFileCompression: getLogStatementFileCompression(statementLogFileCompression),
+		LogStatementFileCompression: stmtlogger.MustParseCompression(statementLogFileCompression),
 	}
+
 	var tracingFile *os.File
 	if tracingOutFile != "" {
 		switch tracingOutFile {
@@ -287,6 +287,7 @@ func run(_ *cobra.Command, _ []string) error {
 			logger.Debug("error detected", zap.Error(err))
 		}
 	}
+
 	logger.Info("test finished")
 	globalStatus.PrintResult(outFile, schema, version)
 	if globalStatus.HasErrors() {
@@ -296,14 +297,16 @@ func run(_ *cobra.Command, _ []string) error {
 }
 
 func createFile(fname string, def *os.File) (*os.File, error) {
-	if fname != "" {
-		f, err := os.Create(fname)
-		if err != nil {
-			return nil, errors.Wrapf(err, "Unable to open output file %s", fname)
-		}
-		return f, nil
+	if fname == "" {
+		return def, nil
 	}
-	return def, nil
+
+	f, err := os.Create(fname)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Unable to open output file %s", fname)
+	}
+
+	return f, nil
 }
 
 const (
@@ -330,48 +333,51 @@ func createClusters(
 	testHostSelectionPolicy, oracleHostSelectionPolicy gocql.HostSelectionPolicy,
 	logger *zap.Logger,
 ) (*gocql.ClusterConfig, *gocql.ClusterConfig) {
-	retryPolicy := &gocql.ExponentialBackoffRetryPolicy{
+	testCluster := gocql.NewCluster(testClusterHost...)
+	testCluster.Timeout = requestTimeout
+	testCluster.ConnectTimeout = connectTimeout
+	testCluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
 		Min:        time.Second,
 		Max:        60 * time.Second,
 		NumRetries: 5,
 	}
-	testCluster := gocql.NewCluster(testClusterHost...)
-	testCluster.Timeout = requestTimeout
-	testCluster.ConnectTimeout = connectTimeout
-	testCluster.RetryPolicy = retryPolicy
+
 	testCluster.Consistency = consistency
+	testCluster.DefaultTimestamp = !useServerSideTimestamps
 	testCluster.PoolConfig.HostSelectionPolicy = testHostSelectionPolicy
-	testAuthenticator, testAuthErr := auth.BuildAuthenticator(testClusterUsername, testClusterPassword)
-	if testAuthErr != nil {
-		logger.Warn("%s for test cluster", zap.Error(testAuthErr))
+
+	if testClusterUsername != "" && testClusterPassword != "" {
+		testCluster.Authenticator = gocql.PasswordAuthenticator{
+			Username: testClusterUsername,
+			Password: testClusterPassword,
+		}
 	}
-	testCluster.Authenticator = testAuthenticator
+
 	if len(oracleClusterHost) == 0 {
 		return testCluster, nil
 	}
-	oracleCluster := gocql.NewCluster(oracleClusterHost...)
-	testCluster.Timeout = requestTimeout
-	testCluster.ConnectTimeout = connectTimeout
-	oracleCluster.RetryPolicy = retryPolicy
-	oracleCluster.Consistency = consistency
-	oracleCluster.PoolConfig.HostSelectionPolicy = oracleHostSelectionPolicy
-	oracleAuthenticator, oracleAuthErr := auth.BuildAuthenticator(oracleClusterUsername, oracleClusterPassword)
-	if oracleAuthErr != nil {
-		logger.Warn("%s for oracle cluster", zap.Error(oracleAuthErr))
-	}
-	oracleCluster.Authenticator = oracleAuthenticator
-	return testCluster, oracleCluster
-}
 
-func getLogStatementFileCompression(input string) stmtlogger.Compression {
-	switch input {
-	case "zstd":
-		return stmtlogger.ZSTDCompression
-	case "gzip":
-		return stmtlogger.GZIPCompresssion
-	default:
-		return stmtlogger.NoCompression
+	oracleCluster := gocql.NewCluster(oracleClusterHost...)
+	oracleCluster.Timeout = requestTimeout
+	oracleCluster.ConnectTimeout = connectTimeout
+	oracleCluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
+		Min:        time.Second,
+		Max:        60 * time.Second,
+		NumRetries: 5,
 	}
+
+	oracleCluster.Consistency = consistency
+	oracleCluster.DefaultTimestamp = !useServerSideTimestamps
+	oracleCluster.PoolConfig.HostSelectionPolicy = oracleHostSelectionPolicy
+
+	if oracleClusterUsername == "" || oracleClusterPassword == "" {
+		oracleCluster.Authenticator = gocql.PasswordAuthenticator{
+			Username: oracleClusterUsername,
+			Password: oracleClusterPassword,
+		}
+	}
+
+	return testCluster, oracleCluster
 }
 
 func getReplicationStrategy(rs string, fallback replication.Replication, logger *zap.Logger) replication.Replication {
@@ -381,12 +387,12 @@ func getReplicationStrategy(rs string, fallback replication.Replication, logger 
 	case "simple":
 		return replication.NewSimpleStrategy()
 	default:
-		replicationStrategy := replication.Replication{}
-		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), &replicationStrategy); err != nil {
+		strategy := replication.Replication{}
+		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), &strategy); err != nil {
 			logger.Error("unable to parse replication strategy", zap.String("strategy", rs), zap.Error(err))
 			return fallback
 		}
-		return replicationStrategy
+		return strategy
 	}
 }
 
