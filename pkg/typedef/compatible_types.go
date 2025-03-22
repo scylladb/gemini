@@ -15,44 +15,44 @@
 package typedef
 
 var CompatibleColumnTypes = map[SimpleType]SimpleTypes{
-	TYPE_ASCII: {
-		TYPE_TEXT,
-		TYPE_BLOB,
+	TypeAscii: {
+		TypeText,
+		TypeBlob,
 	},
-	TYPE_BIGINT: {
-		TYPE_BLOB,
+	TypeBigint: {
+		TypeBlob,
 	},
-	TYPE_BOOLEAN: {
-		TYPE_BLOB,
+	TypeBoolean: {
+		TypeBlob,
 	},
-	TYPE_DECIMAL: {
-		TYPE_BLOB,
+	TypeDecimal: {
+		TypeBlob,
 	},
-	TYPE_FLOAT: {
-		TYPE_BLOB,
+	TypeFloat: {
+		TypeBlob,
 	},
-	TYPE_INET: {
-		TYPE_BLOB,
+	TypeInet: {
+		TypeBlob,
 	},
-	TYPE_INT: {
-		TYPE_VARINT,
-		TYPE_BLOB,
+	TypeInt: {
+		TypeVarint,
+		TypeBlob,
 	},
-	TYPE_TIMESTAMP: {
-		TYPE_BLOB,
+	TypeTimestamp: {
+		TypeBlob,
 	},
-	TYPE_TIMEUUID: {
-		TYPE_UUID,
-		TYPE_BLOB,
+	TypeTimeuuid: {
+		TypeUuid,
+		TypeBlob,
 	},
-	TYPE_UUID: {
-		TYPE_BLOB,
+	TypeUuid: {
+		TypeBlob,
 	},
-	TYPE_VARCHAR: {
-		TYPE_TEXT,
-		TYPE_BLOB,
+	TypeVarchar: {
+		TypeText,
+		TypeBlob,
 	},
-	TYPE_VARINT: {
-		TYPE_BLOB,
+	TypeVarint: {
+		TypeBlob,
 	},
 }

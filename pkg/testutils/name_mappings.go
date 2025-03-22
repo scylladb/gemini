@@ -39,40 +39,40 @@ type FuncOptions struct {
 
 var (
 	partitionKeysCases = map[string][]typedef.Type{
-		"pk1": {typedef.TYPE_BIGINT},
-		"pk3": {typedef.TYPE_BIGINT, typedef.TYPE_FLOAT, typedef.TYPE_INET},
+		"pk1": {typedef.TypeBigint},
+		"pk3": {typedef.TypeBigint, typedef.TypeFloat, typedef.TypeInet},
 		"pkAll": {
-			typedef.TYPE_ASCII, typedef.TYPE_BIGINT, typedef.TYPE_BLOB, typedef.TYPE_BOOLEAN, typedef.TYPE_DATE,
-			typedef.TYPE_DECIMAL, typedef.TYPE_DOUBLE, typedef.TYPE_FLOAT,
-			typedef.TYPE_INET, typedef.TYPE_INT, typedef.TYPE_SMALLINT, typedef.TYPE_TEXT, typedef.TYPE_TIMESTAMP,
-			typedef.TYPE_TIMEUUID, typedef.TYPE_TINYINT, typedef.TYPE_UUID, typedef.TYPE_VARCHAR, typedef.TYPE_VARINT, typedef.TYPE_TIME,
+			typedef.TypeAscii, typedef.TypeBigint, typedef.TypeBlob, typedef.TypeBoolean, typedef.TypeDate,
+			typedef.TypeDecimal, typedef.TypeDouble, typedef.TypeFloat,
+			typedef.TypeInet, typedef.TypeInt, typedef.TypeSmallint, typedef.TypeText, typedef.TypeTimestamp,
+			typedef.TypeTimeuuid, typedef.TypeTinyint, typedef.TypeUuid, typedef.TypeVarchar, typedef.TypeVarint, typedef.TypeTime,
 		},
 	}
 
 	clusteringKeysCases = map[string][]typedef.Type{
 		"ck0": {},
-		"ck1": {typedef.TYPE_DATE},
-		"ck3": {typedef.TYPE_ASCII, typedef.TYPE_DATE, typedef.TYPE_DECIMAL},
+		"ck1": {typedef.TypeDate},
+		"ck3": {typedef.TypeAscii, typedef.TypeDate, typedef.TypeDecimal},
 		"ckAll": {
-			typedef.TYPE_ASCII, typedef.TYPE_BIGINT, typedef.TYPE_BLOB, typedef.TYPE_BOOLEAN, typedef.TYPE_DATE,
-			typedef.TYPE_DECIMAL, typedef.TYPE_DOUBLE, typedef.TYPE_FLOAT,
-			typedef.TYPE_INET, typedef.TYPE_INT, typedef.TYPE_SMALLINT, typedef.TYPE_TEXT, typedef.TYPE_TIMESTAMP,
-			typedef.TYPE_TIMEUUID, typedef.TYPE_TINYINT, typedef.TYPE_UUID, typedef.TYPE_VARCHAR, typedef.TYPE_VARINT, typedef.TYPE_TIME,
+			typedef.TypeAscii, typedef.TypeBigint, typedef.TypeBlob, typedef.TypeBoolean, typedef.TypeDate,
+			typedef.TypeDecimal, typedef.TypeDouble, typedef.TypeFloat,
+			typedef.TypeInet, typedef.TypeInt, typedef.TypeSmallint, typedef.TypeText, typedef.TypeTimestamp,
+			typedef.TypeTimeuuid, typedef.TypeTinyint, typedef.TypeUuid, typedef.TypeVarchar, typedef.TypeVarint, typedef.TypeTime,
 		},
 	}
 
 	columnsCases = map[string][]typedef.Type{
 		"col0":   {},
-		"col1":   {typedef.TYPE_DATE},
-		"col5":   {typedef.TYPE_ASCII, typedef.TYPE_DATE, typedef.TYPE_BLOB, typedef.TYPE_BIGINT, typedef.TYPE_FLOAT},
-		"col5c":  {typedef.TYPE_ASCII, &mapType, typedef.TYPE_BLOB, &tupleType, typedef.TYPE_FLOAT},
+		"col1":   {typedef.TypeDate},
+		"col5":   {typedef.TypeAscii, typedef.TypeDate, typedef.TypeBlob, typedef.TypeBigint, typedef.TypeFloat},
+		"col5c":  {typedef.TypeAscii, &mapType, typedef.TypeBlob, &tupleType, typedef.TypeFloat},
 		"col1cr": {&counterType},
 		"col3cr": {&counterType, &counterType, &counterType},
 		"colAll": {
-			typedef.TYPE_DURATION, typedef.TYPE_ASCII, typedef.TYPE_BIGINT, typedef.TYPE_BLOB, typedef.TYPE_BOOLEAN,
-			typedef.TYPE_DATE, typedef.TYPE_DECIMAL, typedef.TYPE_DOUBLE, typedef.TYPE_FLOAT,
-			typedef.TYPE_INET, typedef.TYPE_INT, typedef.TYPE_SMALLINT, typedef.TYPE_TEXT, typedef.TYPE_TIMESTAMP,
-			typedef.TYPE_TIMEUUID, typedef.TYPE_TINYINT, typedef.TYPE_UUID, typedef.TYPE_VARCHAR, typedef.TYPE_VARINT, typedef.TYPE_TIME,
+			typedef.TypeDuration, typedef.TypeAscii, typedef.TypeBigint, typedef.TypeBlob, typedef.TypeBoolean,
+			typedef.TypeDate, typedef.TypeDecimal, typedef.TypeDouble, typedef.TypeFloat,
+			typedef.TypeInet, typedef.TypeInt, typedef.TypeSmallint, typedef.TypeText, typedef.TypeTimestamp,
+			typedef.TypeTimeuuid, typedef.TypeTinyint, typedef.TypeUuid, typedef.TypeVarchar, typedef.TypeVarint, typedef.TypeTime,
 		},
 	}
 

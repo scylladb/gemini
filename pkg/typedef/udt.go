@@ -82,7 +82,7 @@ func (t *UDTType) CQLPretty(builder *bytes.Buffer, value any) error {
 
 func (t *UDTType) Indexable() bool {
 	for _, ty := range t.ValueTypes {
-		if ty == TYPE_DURATION {
+		if ty == TypeDuration {
 			return false
 		}
 	}

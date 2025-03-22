@@ -110,9 +110,9 @@ func genInsertStmt(
 	if useLWT {
 		cacheType = typedef.CacheInsertIfNotExists
 	}
-	stmtCache := t.GetQueryCache(cacheType)
+
 	return &typedef.Stmt{
-		StmtCache:       stmtCache,
+		StmtCache:       t.GetQueryCache(cacheType),
 		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
 		Values:          values,
 	}, nil
@@ -157,7 +157,7 @@ func genInsertJSONStmt(
 	return &typedef.Stmt{
 		StmtCache: &typedef.StmtCache{
 			Query:     builder,
-			Types:     []typedef.Type{typedef.TYPE_TEXT},
+			Types:     []typedef.Type{typedef.TypeText},
 			QueryType: typedef.InsertJSONStatementType,
 		},
 		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
@@ -182,10 +182,10 @@ func genDeleteRows(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef
 
 func convertForJSON(vType typedef.Type, value any) any {
 	switch vType {
-	case typedef.TYPE_BLOB:
+	case typedef.TypeBlob:
 		val, _ := value.(string)
 		return "0x" + val
-	case typedef.TYPE_TIME:
+	case typedef.TypeTime:
 		val, _ := value.(int64)
 		return time.Unix(0, val).UTC().Format("15:04:05.000000000")
 	}

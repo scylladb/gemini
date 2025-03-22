@@ -233,7 +233,7 @@ func createColumns(cnt int, prefix string) typedef.Columns {
 	for i := 0; i < cnt; i++ {
 		cols = append(cols, &typedef.ColumnDef{
 			Name: generators.GenColumnName(prefix, i),
-			Type: typedef.TYPE_TEXT,
+			Type: typedef.TypeText,
 		})
 	}
 	return cols

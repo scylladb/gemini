@@ -33,129 +33,129 @@ var prettytests = []struct {
 	values   []any
 }{
 	{
-		typ:      TYPE_ASCII,
+		typ:      TypeAscii,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{"a"},
 		expected: "SELECT * FROM tbl WHERE pk0='a'",
 	},
 	{
-		typ:      TYPE_BIGINT,
+		typ:      TypeBigint,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{big.NewInt(10)},
 		expected: "SELECT * FROM tbl WHERE pk0=10",
 	},
 	{
-		typ:      TYPE_BLOB,
+		typ:      TypeBlob,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{"a"},
 		expected: "SELECT * FROM tbl WHERE pk0=textasblob('a')",
 	},
 	{
-		typ:      TYPE_BOOLEAN,
+		typ:      TypeBoolean,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{true},
 		expected: "SELECT * FROM tbl WHERE pk0=true",
 	},
 	{
-		typ:      TYPE_DATE,
+		typ:      TypeDate,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{millennium.Format("2006-01-02")},
 		expected: "SELECT * FROM tbl WHERE pk0='1999-12-31'",
 	},
 	{
-		typ:      TYPE_DECIMAL,
+		typ:      TypeDecimal,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{inf.NewDec(1000, 0)},
 		expected: "SELECT * FROM tbl WHERE pk0=1000",
 	},
 	{
-		typ:      TYPE_DOUBLE,
+		typ:      TypeDouble,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{10.0},
 		expected: "SELECT * FROM tbl WHERE pk0=10.00",
 	},
 	{
-		typ:      TYPE_DURATION,
+		typ:      TypeDuration,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{10 * time.Minute},
 		expected: "SELECT * FROM tbl WHERE pk0=10m0s",
 	},
 	{
-		typ:      TYPE_FLOAT,
+		typ:      TypeFloat,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{10.0},
 		expected: "SELECT * FROM tbl WHERE pk0=10.00",
 	},
 	{
-		typ:      TYPE_INET,
+		typ:      TypeInet,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{net.ParseIP("192.168.0.1")},
 		expected: "SELECT * FROM tbl WHERE pk0='192.168.0.1'",
 	},
 	{
-		typ:      TYPE_INT,
+		typ:      TypeInt,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{10},
 		expected: "SELECT * FROM tbl WHERE pk0=10",
 	},
 	{
-		typ:      TYPE_SMALLINT,
+		typ:      TypeSmallint,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{2},
 		expected: "SELECT * FROM tbl WHERE pk0=2",
 	},
 	{
-		typ:      TYPE_TEXT,
+		typ:      TypeText,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{"a"},
 		expected: "SELECT * FROM tbl WHERE pk0='a'",
 	},
 	{
-		typ:      TYPE_TIME,
+		typ:      TypeTime,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{millennium.UnixNano()},
 		expected: "SELECT * FROM tbl WHERE pk0='" + millennium.Format("15:04:05.999") + "'",
 	},
 	{
-		typ:      TYPE_TIMESTAMP,
+		typ:      TypeTimestamp,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{millennium.UnixMilli()},
 		expected: "SELECT * FROM tbl WHERE pk0='" + millennium.Format("2006-01-02T15:04:05.999-0700") + "'",
 	},
 	{
-		typ:      TYPE_TIMEUUID,
+		typ:      TypeTimeuuid,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{"63176980-bfde-11d3-bc37-1c4d704231dc"},
 		expected: "SELECT * FROM tbl WHERE pk0=63176980-bfde-11d3-bc37-1c4d704231dc",
 	},
 	{
-		typ:      TYPE_TINYINT,
+		typ:      TypeTinyint,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{1},
 		expected: "SELECT * FROM tbl WHERE pk0=1",
 	},
 	{
-		typ:      TYPE_UUID,
+		typ:      TypeUuid,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{"63176980-bfde-11d3-bc37-1c4d704231dc"},
 		expected: "SELECT * FROM tbl WHERE pk0=63176980-bfde-11d3-bc37-1c4d704231dc",
 	},
 	{
-		typ:      TYPE_VARCHAR,
+		typ:      TypeVarchar,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{"a"},
 		expected: "SELECT * FROM tbl WHERE pk0='a'",
 	},
 	{
-		typ:      TYPE_VARINT,
+		typ:      TypeVarint,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
 		values:   []any{big.NewInt(1001)},
 		expected: "SELECT * FROM tbl WHERE pk0=1001",
 	},
 	{
 		typ: &BagType{
-			ComplexType: TYPE_SET,
-			ValueType:   TYPE_ASCII,
+			ComplexType: TypeSet,
+			ValueType:   TypeAscii,
 			Frozen:      false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
@@ -164,8 +164,8 @@ var prettytests = []struct {
 	},
 	{
 		typ: &BagType{
-			ComplexType: TYPE_LIST,
-			ValueType:   TYPE_ASCII,
+			ComplexType: TypeList,
+			ValueType:   TypeAscii,
 			Frozen:      false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
@@ -174,8 +174,8 @@ var prettytests = []struct {
 	},
 	{
 		typ: &MapType{
-			KeyType:   TYPE_ASCII,
-			ValueType: TYPE_ASCII,
+			KeyType:   TypeAscii,
+			ValueType: TypeAscii,
 			Frozen:    false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
@@ -184,8 +184,8 @@ var prettytests = []struct {
 	},
 	{
 		typ: &MapType{
-			KeyType:   TYPE_ASCII,
-			ValueType: TYPE_BLOB,
+			KeyType:   TypeAscii,
+			ValueType: TypeBlob,
 			Frozen:    false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=?",
@@ -194,7 +194,7 @@ var prettytests = []struct {
 	},
 	{
 		typ: &TupleType{
-			ValueTypes: []SimpleType{TYPE_ASCII},
+			ValueTypes: []SimpleType{TypeAscii},
 			Frozen:     false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=(?)",
@@ -203,7 +203,7 @@ var prettytests = []struct {
 	},
 	{
 		typ: &TupleType{
-			ValueTypes: []SimpleType{TYPE_ASCII, TYPE_ASCII},
+			ValueTypes: []SimpleType{TypeAscii, TypeAscii},
 			Frozen:     false,
 		},
 		query:    "SELECT * FROM tbl WHERE pk0=(?,?)",

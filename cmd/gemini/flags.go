@@ -130,7 +130,7 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 100, "Number of reused buffered partition keys")
 	cmd.Flags().Uint64VarP(&partitionCount, "token-range-slices", "", 10000, "Number of slices to divide the token space into")
 	cmd.Flags().StringVarP(
-		&partitionKeyDistribution, "partition-key-distribution", "", "uniform",
+		&partitionKeyDistribution, "partition-key-distribution", "", "zipf",
 		"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
 	cmd.Flags().Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution")
 	cmd.Flags().Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, defaults to one standard deviation ~0.341")

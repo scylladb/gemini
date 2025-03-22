@@ -31,35 +31,35 @@ import (
 
 // nolint:revive
 const (
-	TYPE_UDT   = "udt"
-	TYPE_MAP   = "map"
-	TYPE_LIST  = "list"
-	TYPE_SET   = "set"
-	TYPE_TUPLE = "tuple"
+	TypeUdt   = "udt"
+	TypeMap   = "map"
+	TypeList  = "list"
+	TypeSet   = "set"
+	TypeTuple = "tuple"
 )
 
 // nolint:revive
 const (
-	TYPE_ASCII     = SimpleType("ascii")
-	TYPE_BIGINT    = SimpleType("bigint")
-	TYPE_BLOB      = SimpleType("blob")
-	TYPE_BOOLEAN   = SimpleType("boolean")
-	TYPE_DATE      = SimpleType("date")
-	TYPE_DECIMAL   = SimpleType("decimal")
-	TYPE_DOUBLE    = SimpleType("double")
-	TYPE_DURATION  = SimpleType("duration")
-	TYPE_FLOAT     = SimpleType("float")
-	TYPE_INET      = SimpleType("inet")
-	TYPE_INT       = SimpleType("int")
-	TYPE_SMALLINT  = SimpleType("smallint")
-	TYPE_TEXT      = SimpleType("text")
-	TYPE_TIME      = SimpleType("time")
-	TYPE_TIMESTAMP = SimpleType("timestamp")
-	TYPE_TIMEUUID  = SimpleType("timeuuid")
-	TYPE_TINYINT   = SimpleType("tinyint")
-	TYPE_UUID      = SimpleType("uuid")
-	TYPE_VARCHAR   = SimpleType("varchar")
-	TYPE_VARINT    = SimpleType("varint")
+	TypeAscii     = SimpleType("ascii")
+	TypeBigint    = SimpleType("bigint")
+	TypeBlob      = SimpleType("blob")
+	TypeBoolean   = SimpleType("boolean")
+	TypeDate      = SimpleType("date")
+	TypeDecimal   = SimpleType("decimal")
+	TypeDouble    = SimpleType("double")
+	TypeDuration  = SimpleType("duration")
+	TypeFloat     = SimpleType("float")
+	TypeInet      = SimpleType("inet")
+	TypeInt       = SimpleType("int")
+	TypeSmallint  = SimpleType("smallint")
+	TypeText      = SimpleType("text")
+	TypeTime      = SimpleType("time")
+	TypeTimestamp = SimpleType("timestamp")
+	TypeTimeuuid  = SimpleType("timeuuid")
+	TypeTinyint   = SimpleType("tinyint")
+	TypeUuid      = SimpleType("uuid")
+	TypeVarchar   = SimpleType("varchar")
+	TypeVarint    = SimpleType("varint")
 )
 
 const (
@@ -69,22 +69,22 @@ const (
 
 var (
 	TypesMapKeyBlacklist = map[SimpleType]struct{}{
-		TYPE_BLOB:     {},
-		TYPE_DURATION: {},
+		TypeBlob:     {},
+		TypeDuration: {},
 	}
-	TypesForIndex     = SimpleTypes{TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT, TYPE_VARINT}
+	TypesForIndex     = SimpleTypes{TypeDecimal, TypeDouble, TypeFloat, TypeInt, TypeSmallint, TypeTinyint, TypeVarint}
 	PartitionKeyTypes = SimpleTypes{
-		TYPE_ASCII, TYPE_BIGINT, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE,
-		TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT, TYPE_TIME, TYPE_TIMESTAMP, TYPE_TIMEUUID,
-		TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT, TYPE_BOOLEAN,
+		TypeAscii, TypeBigint, TypeDate, TypeDecimal, TypeDouble,
+		TypeFloat, TypeInet, TypeInt, TypeSmallint, TypeText, TypeTime, TypeTimestamp, TypeTimeuuid,
+		TypeTinyint, TypeUuid, TypeVarchar, TypeVarint, TypeBoolean,
 	}
 
 	PkTypes = SimpleTypes{
-		TYPE_ASCII, TYPE_BIGINT, TYPE_BLOB, TYPE_DATE, TYPE_DECIMAL, TYPE_DOUBLE,
-		TYPE_FLOAT, TYPE_INET, TYPE_INT, TYPE_SMALLINT, TYPE_TEXT, TYPE_TIME, TYPE_TIMESTAMP, TYPE_TIMEUUID,
-		TYPE_TINYINT, TYPE_UUID, TYPE_VARCHAR, TYPE_VARINT,
+		TypeAscii, TypeBigint, TypeBlob, TypeDate, TypeDecimal, TypeDouble,
+		TypeFloat, TypeInet, TypeInt, TypeSmallint, TypeText, TypeTime, TypeTimestamp, TypeTimeuuid,
+		TypeTinyint, TypeUuid, TypeVarchar, TypeVarint,
 	}
-	AllTypes = append(append(SimpleTypes{}, PkTypes...), TYPE_BOOLEAN, TYPE_DURATION)
+	AllTypes = append(append(SimpleTypes{}, PkTypes...), TypeBoolean, TypeDuration)
 )
 
 var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
@@ -109,14 +109,14 @@ var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
 	gocql.TypeVarchar:   gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeVarchar, ""),
 	gocql.TypeVarint:    gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeVarint, ""),
 
-	// Complex coltypes
+	// Complex col-types
 	gocql.TypeList:  gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeList, ""),
 	gocql.TypeMap:   gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeMap, ""),
 	gocql.TypeSet:   gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeSet, ""),
 	gocql.TypeTuple: gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeTuple, ""),
 	gocql.TypeUDT:   gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeUDT, ""),
 
-	// Special coltypes
+	// Special col-types
 	gocql.TypeCounter: gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeCounter, ""),
 }
 

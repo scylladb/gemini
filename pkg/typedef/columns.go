@@ -58,13 +58,13 @@ func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
 			return errors.Wrapf(ErrSchemaValidation, "missing definition of column 'complex_type': [%T]%+[1]v", complexTypeMap)
 		}
 		switch complexType {
-		case TYPE_LIST, TYPE_SET:
+		case TypeList, TypeSet:
 			t, err = GetBagTypeColumn(dataMap)
-		case TYPE_MAP:
+		case TypeMap:
 			t, err = GetMapTypeColumn(dataMap)
-		case TYPE_TUPLE:
+		case TypeTuple:
 			t, err = GetTupleTypeColumn(dataMap)
-		case TYPE_UDT:
+		case TypeUdt:
 			t, err = GetUDTTypeColumn(dataMap)
 		default:
 			return errors.Wrapf(ErrSchemaValidation, "unknown 'complex_type': [%T]%+[1]v", complexType)
@@ -192,7 +192,7 @@ func GetMapTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	return &ColumnDef{
 		Name: st.Name,
 		Type: &MapType{
-			ComplexType: TYPE_MAP,
+			ComplexType: TypeMap,
 			Frozen:      frozen,
 			ValueType:   valueType,
 			KeyType:     keyType,
@@ -256,7 +256,7 @@ func GetTupleTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	return &ColumnDef{
 		Name: st.Name,
 		Type: &TupleType{
-			ComplexType: TYPE_TUPLE,
+			ComplexType: TypeTuple,
 			ValueTypes:  dbTypes,
 			Frozen:      frozen,
 		},
@@ -295,7 +295,7 @@ func GetUDTTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	return &ColumnDef{
 		Name: st.Name,
 		Type: &UDTType{
-			ComplexType: TYPE_UDT,
+			ComplexType: TypeUdt,
 			ValueTypes:  dbTypes,
 			TypeName:    typeName,
 			Frozen:      frozen,

@@ -35,7 +35,7 @@ type BagType struct {
 
 func (ct *BagType) CQLType() gocql.TypeInfo {
 	switch ct.ComplexType {
-	case TYPE_SET:
+	case TypeSet:
 		return goCQLTypeMap[gocql.TypeSet]
 	default:
 		return goCQLTypeMap[gocql.TypeList]
@@ -65,7 +65,7 @@ func (ct *BagType) CQLPretty(builder *bytes.Buffer, value any) error {
 		return errors.Errorf("expected slice, got [%T]%v", value, value)
 	}
 
-	if ct.ComplexType == TYPE_SET {
+	if ct.ComplexType == TypeSet {
 		builder.WriteRune('{')
 		defer builder.WriteRune('}')
 	} else {

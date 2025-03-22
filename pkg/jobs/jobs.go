@@ -120,16 +120,19 @@ func (l List) Run(
 		stopFlag.SetSoft(true)
 	})
 
+	r := rand.New(rand.NewPCG(seed, seed))
+
 	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 	logger.Info("start jobs")
 	for _, table := range schema.Tables {
 		for range l.workers {
 			for idx := range l.jobs {
 				jobF := l.jobs[idx].function
-				r := rand.New(rand.NewPCG(seed, seed))
+				newSeed := r.Uint64N(seed)
+				rnd := rand.New(rand.NewPCG(newSeed, newSeed))
 				generator := generators.Get(table)
 				g.Go(func() error {
-					return jobF(gCtx, schema, schemaConfig, table, s, r, &partitionRangeConfig, generator, globalStatus, logger, stopFlag, failFast, verbose)
+					return jobF(gCtx, schema, schemaConfig, table, s, rnd, &partitionRangeConfig, generator, globalStatus, logger, stopFlag, failFast, verbose)
 				})
 			}
 		}

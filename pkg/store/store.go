@@ -50,7 +50,7 @@ type storer interface {
 type storeLoader interface {
 	storer
 	loader
-	close() error
+	Close() error
 	name() string
 }
 
@@ -88,33 +88,8 @@ func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig
 	return &delegatingStore{
 		testStore:   testStore,
 		oracleStore: oracleStore,
-		validations: oracleStore != nil,
 		logger:      logger.Named("delegating_store"),
 	}, nil
-}
-
-type noOpStore struct {
-	system string
-}
-
-func (n *noOpStore) mutate(context.Context, *typedef.Stmt) error {
-	return nil
-}
-
-func (n *noOpStore) load(context.Context, *typedef.Stmt) ([]Row, error) {
-	return nil, nil
-}
-
-func (n *noOpStore) Close() error {
-	return nil
-}
-
-func (n *noOpStore) name() string {
-	return n.system
-}
-
-func (n *noOpStore) close() error {
-	return nil
 }
 
 type delegatingStore struct {
@@ -122,12 +97,13 @@ type delegatingStore struct {
 	testStore       storeLoader
 	statementLogger stmtlogger.StmtToFile
 	logger          *zap.Logger
-	validations     bool
 }
 
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error {
-	if err := mutate(ctx, ds.oracleStore, oracleBuilder); err != nil {
-		return errors.Wrap(err, "oracle failed store creation")
+	if ds.oracleStore != nil {
+		if err := mutate(ctx, ds.oracleStore, oracleBuilder); err != nil {
+			return errors.Wrap(err, "oracle failed store creation")
+		}
 	}
 
 	if err := mutate(ctx, ds.testStore, testBuilder); err != nil {
@@ -144,28 +120,36 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder
 }
 
 func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error {
-	var testErr error
+	var oracleErr error
 	var wg sync.WaitGroup
-	wg.Add(1)
 
-	go func() {
-		defer wg.Done()
-		testErr = errors.Wrapf(
-			ds.testStore.mutate(ctx, stmt),
-			"unable to apply mutations to the %s store", ds.testStore.name())
-	}()
+	doCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	if oracleErr := ds.oracleStore.mutate(ctx, stmt); oracleErr != nil {
-		// Oracle failed, transition cannot take place
-		ds.logger.Info("oracle store failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(oracleErr))
-		return oracleErr
+	if ds.oracleStore != nil {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			oracleErr = ds.oracleStore.mutate(doCtx, stmt)
+		}()
 	}
-	wg.Wait()
-	if testErr != nil {
+
+	if testErr := ds.testStore.mutate(doCtx, stmt); testErr != nil {
+		cancel()
 		// Test store failed, transition cannot take place
 		ds.logger.Info("test store failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(testErr))
 		return testErr
 	}
+
+	wg.Wait()
+
+	if oracleErr != nil {
+		// Test store failed, transition cannot take place
+		ds.logger.Info("oracle store failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(oracleErr))
+		return oracleErr
+	}
+
 	return nil
 }
 
@@ -177,29 +161,43 @@ func mutate(ctx context.Context, s storeLoader, stmt *typedef.Stmt) error {
 }
 
 func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, detailedDiff bool) error {
-	var testRows, oracleRows []Row
-	var testErr, oracleErr error
+	var oracleRows []Row
+	var oracleErr error
 	var wg sync.WaitGroup
-	wg.Add(1)
 
-	go func() {
-		defer wg.Done()
-		testRows, testErr = ds.testStore.load(ctx, stmt)
-	}()
-	oracleRows, oracleErr = ds.oracleStore.load(ctx, stmt)
+	doCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	if ds.oracleStore != nil {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			oracleRows, oracleErr = ds.oracleStore.load(doCtx, stmt)
+		}()
+	}
+
+	testRows, testErr := ds.testStore.load(doCtx, stmt)
+
+	if testErr != nil {
+		cancel()
+		return errors.Wrapf(testErr, "unable to load check data from the test store")
+	}
+
+	wg.Wait()
+
 	if oracleErr != nil {
 		return errors.Wrapf(oracleErr, "unable to load check data from the oracle store")
 	}
-	wg.Wait()
-	if testErr != nil {
-		return errors.Wrapf(testErr, "unable to load check data from the test store")
-	}
-	if !ds.validations {
+
+	if ds.oracleStore == nil {
 		return nil
 	}
+
 	if len(testRows) == 0 && len(oracleRows) == 0 {
 		return nil
 	}
+
 	if len(testRows) != len(oracleRows) {
 		if !detailedDiff {
 			return fmt.Errorf("rows count differ (test store rows %d, oracle store rows %d, detailed information will be at last attempt)", len(testRows), len(oracleRows))
@@ -242,13 +240,20 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt 
 	return nil
 }
 
-func (ds delegatingStore) Close() (err error) {
+func (ds delegatingStore) Close() error {
+	var err error
+
+	err = multierr.Append(err, ds.testStore.Close())
+
+	if ds.oracleStore != nil {
+		err = multierr.Append(err, ds.oracleStore.Close())
+	}
+
 	if ds.statementLogger != nil {
 		err = multierr.Append(err, ds.statementLogger.Close())
 	}
-	err = multierr.Append(err, ds.testStore.close())
-	err = multierr.Append(err, ds.oracleStore.close())
-	return
+
+	return err
 }
 
 func getStore(
@@ -262,10 +267,9 @@ func getStore(
 	logger *zap.Logger,
 ) (out storeLoader, err error) {
 	if clusterConfig == nil {
-		return &noOpStore{
-			system: name,
-		}, nil
+		return nil, nil
 	}
+
 	session, err := newSession(clusterConfig, traceOut)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to connect to %s cluster", name)

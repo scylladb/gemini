@@ -31,26 +31,26 @@ import (
 )
 
 var allSimpleTypes = []typedef.SimpleType{
-	typedef.TYPE_ASCII,
-	typedef.TYPE_BIGINT,
-	typedef.TYPE_BLOB,
-	typedef.TYPE_BOOLEAN,
-	typedef.TYPE_DATE,
-	typedef.TYPE_DECIMAL,
-	typedef.TYPE_DOUBLE,
-	typedef.TYPE_DURATION,
-	typedef.TYPE_FLOAT,
-	typedef.TYPE_INET,
-	typedef.TYPE_INT,
-	typedef.TYPE_SMALLINT,
-	typedef.TYPE_TEXT,
-	typedef.TYPE_TIME,
-	typedef.TYPE_TIMESTAMP,
-	typedef.TYPE_TIMEUUID,
-	typedef.TYPE_TINYINT,
-	typedef.TYPE_UUID,
-	typedef.TYPE_VARCHAR,
-	typedef.TYPE_VARINT,
+	typedef.TypeAscii,
+	typedef.TypeBigint,
+	typedef.TypeBlob,
+	typedef.TypeBoolean,
+	typedef.TypeDate,
+	typedef.TypeDecimal,
+	typedef.TypeDouble,
+	typedef.TypeDuration,
+	typedef.TypeFloat,
+	typedef.TypeInet,
+	typedef.TypeInt,
+	typedef.TypeSmallint,
+	typedef.TypeText,
+	typedef.TypeTime,
+	typedef.TypeTimestamp,
+	typedef.TypeTimeuuid,
+	typedef.TypeTinyint,
+	typedef.TypeUuid,
+	typedef.TypeVarchar,
+	typedef.TypeVarint,
 }
 
 func TestColumnMarshalUnmarshal(t *testing.T) {
@@ -80,7 +80,7 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 	testCases = append(testCases, testCase{
 		def: typedef.ColumnDef{
 			Type: &typedef.UDTType{
-				ComplexType: typedef.TYPE_UDT,
+				ComplexType: typedef.TypeUdt,
 				TypeName:    "udt1",
 				ValueTypes:  udtTypes,
 			},

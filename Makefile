@@ -30,7 +30,7 @@ GEMINI_FLAGS ?= --fail-fast \
 	--level=info \
 	--consistency=QUORUM \
 	--test-host-selection-policy=token-aware \
-	--oracle-host-selection-policy=token-aware \
+	--oracle-host-selection-policy=round-robin \
 	--mode=$(MODE) \
 	--request-timeout=5s \
 	--connect-timeout=15s \
@@ -176,7 +176,7 @@ integration-cluster-test:
 		--test-cluster="$(call get_scylla_ip,gemini-test-1),$(call get_scylla_ip,gemini-test-2),$(call get_scylla_ip,gemini-test-3)" \
 		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
 		$(GEMINI_FLAGS)
-
+ 
 .PHONY: clean
 clean: clean-bin clean-results
 

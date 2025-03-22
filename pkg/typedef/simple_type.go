@@ -71,7 +71,7 @@ func (st SimpleType) LenValue() int {
 
 func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 	switch st {
-	case TYPE_INET:
+	case TypeInet:
 		builder.WriteRune('\'')
 		defer builder.WriteRune('\'')
 
@@ -87,7 +87,7 @@ func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 		}
 
 		return nil
-	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR, TYPE_DATE:
+	case TypeAscii, TypeText, TypeVarchar, TypeDate:
 		if v, ok := value.(string); ok {
 			builder.WriteRune('\'')
 			builder.WriteString(v)
@@ -96,7 +96,7 @@ func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 		}
 
 		return errors.Errorf("unexpected string value [%T]%+v", value, value)
-	case TYPE_BLOB:
+	case TypeBlob:
 		if v, ok := value.(string); ok {
 			if len(v) > 100 {
 				v = v[:100]
@@ -108,7 +108,7 @@ func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 		}
 
 		return errors.Errorf("unexpected blob value [%T]%+v", value, value)
-	case TYPE_BIGINT, TYPE_INT, TYPE_SMALLINT, TYPE_TINYINT:
+	case TypeBigint, TypeInt, TypeSmallint, TypeTinyint:
 		var i int64
 		switch v := value.(type) {
 		case int8:
@@ -132,7 +132,7 @@ func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 		builder.WriteString(strconv.FormatInt(i, 10))
 
 		return nil
-	case TYPE_DECIMAL, TYPE_DOUBLE, TYPE_FLOAT:
+	case TypeDecimal, TypeDouble, TypeFloat:
 		var f float64
 		switch v := value.(type) {
 		case float32:
@@ -149,7 +149,7 @@ func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 
 		builder.WriteString(strconv.FormatFloat(f, 'f', 2, 64))
 		return nil
-	case TYPE_BOOLEAN:
+	case TypeBoolean:
 		if v, ok := value.(bool); ok {
 			builder.WriteString(strconv.FormatBool(v))
 
@@ -157,7 +157,7 @@ func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 		}
 
 		return errors.Errorf("unexpected boolean value [%T]%+v", value, value)
-	case TYPE_TIME:
+	case TypeTime:
 		if v, ok := value.(int64); ok {
 			builder.WriteRune('\'')
 			// CQL supports only 3 digits microseconds:
@@ -169,7 +169,7 @@ func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 		}
 
 		return errors.Errorf("unexpected time value [%T]%+v", value, value)
-	case TYPE_TIMESTAMP:
+	case TypeTimestamp:
 		if v, ok := value.(int64); ok {
 			// CQL supports only 3 digits milliseconds:
 			// '1976-03-25T10:10:55.83275+0000': marshaling error: Milliseconds length exceeds expected (5)"
@@ -178,7 +178,7 @@ func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 		}
 
 		return errors.Errorf("unexpected timestamp value [%T]%+v", value, value)
-	case TYPE_DURATION, TYPE_TIMEUUID, TYPE_UUID:
+	case TypeDuration, TypeTimeuuid, TypeUuid:
 		switch v := value.(type) {
 		case string:
 			builder.WriteString(v)
@@ -190,7 +190,7 @@ func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 			return errors.Errorf("unexpected (duration|timeuuid|uuid) value [%T]%+v", value, value)
 		}
 		return nil
-	case TYPE_VARINT:
+	case TypeVarint:
 		if s, ok := value.(*big.Int); ok {
 			builder.WriteString(s.Text(10))
 			return nil
@@ -204,45 +204,45 @@ func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 
 func (st SimpleType) CQLType() gocql.TypeInfo {
 	switch st {
-	case TYPE_ASCII:
+	case TypeAscii:
 		return goCQLTypeMap[gocql.TypeAscii]
-	case TYPE_TEXT:
+	case TypeText:
 		return goCQLTypeMap[gocql.TypeText]
-	case TYPE_VARCHAR:
+	case TypeVarchar:
 		return goCQLTypeMap[gocql.TypeVarchar]
-	case TYPE_BLOB:
+	case TypeBlob:
 		return goCQLTypeMap[gocql.TypeBlob]
-	case TYPE_BIGINT:
+	case TypeBigint:
 		return goCQLTypeMap[gocql.TypeBigInt]
-	case TYPE_BOOLEAN:
+	case TypeBoolean:
 		return goCQLTypeMap[gocql.TypeBoolean]
-	case TYPE_DATE:
+	case TypeDate:
 		return goCQLTypeMap[gocql.TypeDate]
-	case TYPE_TIME:
+	case TypeTime:
 		return goCQLTypeMap[gocql.TypeTime]
-	case TYPE_TIMESTAMP:
+	case TypeTimestamp:
 		return goCQLTypeMap[gocql.TypeTimestamp]
-	case TYPE_DECIMAL:
+	case TypeDecimal:
 		return goCQLTypeMap[gocql.TypeDecimal]
-	case TYPE_DOUBLE:
+	case TypeDouble:
 		return goCQLTypeMap[gocql.TypeDouble]
-	case TYPE_DURATION:
+	case TypeDuration:
 		return goCQLTypeMap[gocql.TypeDuration]
-	case TYPE_FLOAT:
+	case TypeFloat:
 		return goCQLTypeMap[gocql.TypeFloat]
-	case TYPE_INET:
+	case TypeInet:
 		return goCQLTypeMap[gocql.TypeInet]
-	case TYPE_INT:
+	case TypeInt:
 		return goCQLTypeMap[gocql.TypeInt]
-	case TYPE_SMALLINT:
+	case TypeSmallint:
 		return goCQLTypeMap[gocql.TypeSmallInt]
-	case TYPE_TIMEUUID:
+	case TypeTimeuuid:
 		return goCQLTypeMap[gocql.TypeTimeUUID]
-	case TYPE_UUID:
+	case TypeUuid:
 		return goCQLTypeMap[gocql.TypeUUID]
-	case TYPE_TINYINT:
+	case TypeTinyint:
 		return goCQLTypeMap[gocql.TypeTinyInt]
-	case TYPE_VARINT:
+	case TypeVarint:
 		return goCQLTypeMap[gocql.TypeVarint]
 	default:
 		panic(fmt.Sprintf("gocql type not supported %s", st))
@@ -250,15 +250,15 @@ func (st SimpleType) CQLType() gocql.TypeInfo {
 }
 
 func (st SimpleType) Indexable() bool {
-	return st != TYPE_DURATION
+	return st != TypeDuration
 }
 
 func (st SimpleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	switch st {
-	case TYPE_BLOB:
+	case TypeBlob:
 		ln := r.IntN(p.MaxBlobLength) + p.MinBlobLength
 		return "0x" + hex.EncodeToString([]byte(utils.RandString(r, ln)))
-	case TYPE_TIME:
+	case TypeTime:
 		return time.Unix(0, utils.RandTime(r)).UTC().Format("15:04:05.000000000")
 	}
 	return st.genValue(r, p)
@@ -270,41 +270,41 @@ func (st SimpleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
 
 func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	switch st {
-	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
+	case TypeAscii, TypeText, TypeVarchar:
 		ln := r.IntN(p.MaxStringLength) + p.MinStringLength
 		return utils.RandString(r, ln)
-	case TYPE_BLOB:
+	case TypeBlob:
 		ln := r.IntN(p.MaxBlobLength) + p.MinBlobLength
 		return hex.EncodeToString([]byte(utils.RandString(r, ln)))
-	case TYPE_BIGINT:
+	case TypeBigint:
 		return r.Int64()
-	case TYPE_BOOLEAN:
+	case TypeBoolean:
 		return r.Int()%2 == 0
-	case TYPE_DATE:
+	case TypeDate:
 		return utils.RandDateStr(r)
-	case TYPE_TIME:
+	case TypeTime:
 		return utils.RandTime(r)
-	case TYPE_TIMESTAMP:
+	case TypeTimestamp:
 		return utils.RandTimestamp(r)
-	case TYPE_DECIMAL:
+	case TypeDecimal:
 		return inf.NewDec(r.Int64(), 3)
-	case TYPE_DOUBLE:
+	case TypeDouble:
 		return r.Float64()
-	case TYPE_DURATION:
+	case TypeDuration:
 		return (time.Minute * time.Duration(r.IntN(100))).String()
-	case TYPE_FLOAT:
+	case TypeFloat:
 		return r.Float32()
-	case TYPE_INET:
+	case TypeInet:
 		return net.ParseIP(utils.RandIPV4Address(r, r.IntN(255), 2)).String()
-	case TYPE_INT:
+	case TypeInt:
 		return r.Int32()
-	case TYPE_SMALLINT:
+	case TypeSmallint:
 		return int16(r.Uint64N(65536))
-	case TYPE_TIMEUUID, TYPE_UUID:
+	case TypeTimeuuid, TypeUuid:
 		return utils.UUIDFromTime(r)
-	case TYPE_TINYINT:
+	case TypeTinyint:
 		return int8(r.Uint64N(256))
-	case TYPE_VARINT:
+	case TypeVarint:
 		return big.NewInt(r.Int64())
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", st))
@@ -314,39 +314,39 @@ func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) any {
 // ValueVariationsNumber returns number of bytes generated value holds
 func (st SimpleType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
 	switch st {
-	case TYPE_ASCII, TYPE_TEXT, TYPE_VARCHAR:
+	case TypeAscii, TypeText, TypeVarchar:
 		return math.Pow(2, float64(p.MaxStringLength))
-	case TYPE_BLOB:
+	case TypeBlob:
 		return math.Pow(2, float64(p.MaxBlobLength))
-	case TYPE_BIGINT:
+	case TypeBigint:
 		return 2 ^ 64
-	case TYPE_BOOLEAN:
+	case TypeBoolean:
 		return 2
-	case TYPE_DATE:
+	case TypeDate:
 		return 10000*365 + 2000*4
-	case TYPE_TIME:
+	case TypeTime:
 		return 86400000000000
-	case TYPE_TIMESTAMP:
+	case TypeTimestamp:
 		return 2 ^ 64
-	case TYPE_DECIMAL:
+	case TypeDecimal:
 		return 2 ^ 64
-	case TYPE_DOUBLE:
+	case TypeDouble:
 		return 2 ^ 64
-	case TYPE_DURATION:
+	case TypeDuration:
 		return 2 ^ 64
-	case TYPE_FLOAT:
+	case TypeFloat:
 		return 2 ^ 64
-	case TYPE_INET:
+	case TypeInet:
 		return 2 ^ 32
-	case TYPE_INT:
+	case TypeInt:
 		return 2 ^ 32
-	case TYPE_SMALLINT:
+	case TypeSmallint:
 		return 2 ^ 16
-	case TYPE_TIMEUUID, TYPE_UUID:
+	case TypeTimeuuid, TypeUuid:
 		return 2 ^ 64
-	case TYPE_TINYINT:
+	case TypeTinyint:
 		return 2 ^ 8
-	case TYPE_VARINT:
+	case TypeVarint:
 		return 2 ^ 64
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", st))

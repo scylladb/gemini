@@ -89,7 +89,7 @@ func (t *TupleType) CQLPretty(builder *bytes.Buffer, value any) error {
 
 func (t *TupleType) Indexable() bool {
 	for _, t := range t.ValueTypes {
-		if t == TYPE_DURATION {
+		if t == TypeDuration {
 			return false
 		}
 	}
