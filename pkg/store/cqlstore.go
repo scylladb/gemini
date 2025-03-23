@@ -67,7 +67,7 @@ func (cs *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) (err error) 
 	return err
 }
 
-func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Time) error {
+func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, _ time.Time) error {
 	queryBody, _ := stmt.Query.ToCql()
 	query := cs.session.Query(queryBody, stmt.Values...).WithContext(ctx)
 	defer query.Release()
@@ -93,40 +93,41 @@ func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Ti
 	return nil
 }
 
-func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (result []Row, err error) {
+func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) ([]Row, error) {
 	cql, _ := stmt.Query.ToCql()
-	cs.stmtLogger.LogStmt(stmt)
+	if err := cs.stmtLogger.LogStmt(stmt); err != nil {
+		return nil, err
+	}
+
 	query := cs.session.Query(cql, stmt.Values...).WithContext(ctx)
 
 	iter := query.Iter()
 
 	defer func() {
 		metrics.CQLRequests.WithLabelValues(cs.system, opType(stmt)).Inc()
-		err = iter.Close()
+		_ = iter.Close()
 
 		query.Release()
 	}()
-
 
 	rows := make([]Row, 0, iter.NumRows())
 
 	for range iter.NumRows() {
 		row := make(Row, len(iter.Columns()))
 		if !iter.MapScan(row) {
-			return nil, errors.New("failed to scan row")
+			return nil, iter.Close()
 		}
 
 		rows = append(rows, row)
 	}
 
-	return rows, err
+	return rows, nil
 }
 
 func (cs *cqlStore) Close() error {
 	cs.session.Close()
 	return nil
 }
-
 
 func opType(stmt *typedef.Stmt) string {
 	switch stmt.Query.(type) {
@@ -144,7 +145,6 @@ func opType(stmt *typedef.Stmt) string {
 		return "unknown"
 	}
 }
-
 
 func ignore(err error) bool {
 	if err == nil {

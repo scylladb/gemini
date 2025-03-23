@@ -116,7 +116,7 @@ scylla-shutdown-cluster:
 
 .PHONY: test
 test:
-	@go test -covermode=atomic -tags testing -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | gotestfmt -showteststatus
+	@go test -covermode=atomic -tags testing -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | go tool gotestfmt -showteststatus
 
 .PHONY: pprof-profile
 pprof-profile:
@@ -176,7 +176,7 @@ integration-cluster-test:
 		--test-cluster="$(call get_scylla_ip,gemini-test-1),$(call get_scylla_ip,gemini-test-2),$(call get_scylla_ip,gemini-test-3)" \
 		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
 		$(GEMINI_FLAGS)
- 
+
 .PHONY: clean
 clean: clean-bin clean-results
 

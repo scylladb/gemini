@@ -10,10 +10,10 @@ run:
 output:
   print-issued-lines: true
   print-linter-name: true
-  uniq-by-line: true
   sort-results: true
 
 issues:
+  uniq-by-line: true
   max-same-issues: 1
   max-issues-per-linter: 10
   exclude:

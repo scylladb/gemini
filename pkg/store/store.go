@@ -16,14 +16,13 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
 	"sort"
 	"sync"
 	"time"
-
-	"errors"
 
 	"go.uber.org/zap"
 
@@ -33,7 +32,6 @@ import (
 	pkgerrors "github.com/pkg/errors"
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
-
 
 	"github.com/scylladb/go-set/strset"
 
@@ -73,7 +71,7 @@ type Config struct {
 }
 
 func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, logger *zap.Logger) (Store, error) {
-	oracleStore, err := getStore("oracle", schema, oracleCluster, cfg, cfg.OracleLogStatementsFile, cfg.LogStatementFileCompression,logger)
+	oracleStore, err := getStore("oracle", schema, oracleCluster, cfg, cfg.OracleLogStatementsFile, cfg.LogStatementFileCompression, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +101,9 @@ type delegatingStore struct {
 
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error {
 	if ds.statementLogger != nil {
-		ds.statementLogger.LogStmt(testBuilder)
+		if err := ds.statementLogger.LogStmt(testBuilder); err != nil {
+			return err
+		}
 	}
 
 	if ds.oracleStore != nil {
