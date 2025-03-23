@@ -15,11 +15,12 @@ COPY . .
 RUN apt-get update \
     && apt-get upgrade -y  \
     && apt-get install -y build-essential ca-certificates libc-dev \
-    && make build
+    && make build \
+    && ./bin/gemini --version
 
 FROM build AS debug
 
-ENV GODEBUG="default=go1.23,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0"
+ENV GODEBUG="default=go1.24,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0"
 ENV PATH="/gemini/bin:${PATH}"
 
 RUN apt-get install -y gdb gcc iputils-ping mlocate vim \
@@ -37,32 +38,32 @@ ENTRYPOINT [ \
     "/gemini/bin/gemini", "--" \
     ]
 
-FROM busybox AS production
+FROM debian:12-slim AS base-production
 
 WORKDIR /
 
-ENV GODEBUG="default=go1.23,cgocheck=0,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0"
-
-COPY --from=build /gemini/bin/gemini /usr/local/bin/gemini
-
+ENV DEBIAN_FRONTEND="noninteractive"
+ENV GODEBUG="default=go1.24,cgocheck=0,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0"
 ENV PATH="/usr/local/bin:${PATH}"
 
+RUN apt-get update && apt-get upgrade -y \
+	&& apt-get install -y ca-certificates \
+    && apt-get autoremove -y \
+    && apt-get clean \
+	&& rm -rf /var/lib/apt/lists/*
+
 EXPOSE 6060
-EXPOSE 2121
+EXPOSE 2112
 
 ENTRYPOINT ["gemini"]
 
-FROM busybox AS  production-goreleaser
+FROM base-production AS production
 
-ENV GODEBUG="default=go1.23,cgocheck=0,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0"
+COPY --from=build /gemini/bin/gemini /usr/local/bin/gemini
+COPY --from=build /gemini/version.json /version.json
 
-WORKDIR /
+FROM base-production AS production-goreleaser
 
 COPY gemini /usr/local/bin/gemini
 
-ENV PATH="/usr/local/bin:${PATH}"
-
-EXPOSE 6060
-EXPOSE 2121
-
-ENTRYPOINT ["gemini"]
+RUN gemini --version

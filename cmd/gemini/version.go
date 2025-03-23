@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -57,8 +58,9 @@ type (
 	}
 
 	versionOptions struct {
-		httpClient *http.Client
-		ctx        context.Context
+		httpClient        *http.Client
+		ctx               context.Context
+		outputVersionFile string
 	}
 
 	VersionOption func(*versionOptions)
@@ -76,31 +78,80 @@ func WithContext(ctx context.Context) VersionOption {
 	}
 }
 
+func WithOutputVersionFile(file string) VersionOption {
+	return func(opts *versionOptions) {
+		opts.outputVersionFile = file
+	}
+}
+
 func NewVersionInfo(options ...VersionOption) (VersionInfo, error) {
 	opts := &versionOptions{
 		httpClient: &http.Client{
 			Timeout:   githubTimeout,
 			Transport: http.DefaultTransport,
 		},
-		ctx: context.Background(),
+		ctx:               context.Background(),
+		outputVersionFile: "./version.json",
 	}
 
 	for _, opt := range options {
 		opt(opts)
 	}
 
-	client := github.NewClient(opts.httpClient)
+	f, err := os.OpenFile(opts.outputVersionFile, os.O_RDONLY, 0o644)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fetchAndSaveVersionInfo(opts.ctx, opts.httpClient, opts.outputVersionFile)
+		}
+
+		return VersionInfo{}, errors.Wrapf(err, "failed to open %s", opts.outputVersionFile)
+	}
+
+	var v VersionInfo
+
+	if err = json.NewDecoder(f).Decode(&v); err != nil {
+		return VersionInfo{}, errors.Wrapf(err, "failed to decode %s", opts.outputVersionFile)
+	}
+
+	if err = f.Close(); err != nil {
+		return VersionInfo{}, errors.Wrapf(err, "failed to close %s", opts.outputVersionFile)
+	}
+
+	return v, nil
+}
+
+func fetchAndSaveVersionInfo(ctx context.Context, httpClient *http.Client, filePath string) (VersionInfo, error) {
+	client := github.NewClient(httpClient)
 	client.UserAgent = userAgent
 
-	driverInfo, err := getDriverVersionInfo(opts.ctx, client)
+	driverInfo, err := getDriverVersionInfo(ctx, client)
 	if err != nil {
 		return VersionInfo{}, errors.Wrapf(err, "failed to get scylla-gocql-driver version info")
 	}
 
-	return VersionInfo{
+	v := VersionInfo{
 		Gemini: getMainBuildInfo(),
 		Driver: driverInfo,
-	}, nil
+	}
+
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return VersionInfo{}, err
+	}
+
+	if err = json.NewEncoder(f).Encode(v); err != nil {
+		return VersionInfo{}, err
+	}
+
+	if err = f.Sync(); err != nil {
+		return VersionInfo{}, err
+	}
+
+	if err = f.Close(); err != nil {
+		return VersionInfo{}, err
+	}
+
+	return v, nil
 }
 
 func getMainBuildInfo() ComponentInfo {
