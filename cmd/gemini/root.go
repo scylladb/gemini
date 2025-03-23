@@ -189,23 +189,8 @@ func run(cmd *cobra.Command, _ []string) error {
 		LogStatementFileCompression: stmtlogger.MustParseCompression(statementLogFileCompression),
 	}
 
-	var tracingFile *os.File
-	if tracingOutFile != "" {
-		switch tracingOutFile {
-		case "stderr":
-			tracingFile = os.Stderr
-		case "stdout":
-			tracingFile = os.Stdout
-		default:
-			tf, ioErr := createFile(tracingOutFile, os.Stdout)
-			if ioErr != nil {
-				return ioErr
-			}
-			tracingFile = tf
-			defer utils.IgnoreError(tracingFile.Sync)
-		}
-	}
-	st, err := store.New(schema, testCluster, oracleCluster, storeConfig, tracingFile, logger)
+
+	st, err := store.New(schema, testCluster, oracleCluster, storeConfig, logger)
 	if err != nil {
 		return err
 	}

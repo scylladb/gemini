@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -86,23 +85,4 @@ func lt(mi, mj map[string]any) bool {
 	default:
 		panic(fmt.Sprintf("unhandled type [%T][%v]\n", mis, mis))
 	}
-}
-
-func loadSet(query *gocql.Query) ([]Row, error) {
-	iter := query.Iter()
-	var err error
-	defer func() {
-		err = iter.Close()
-	}()
-
-	rows := make([]Row, 0, iter.NumRows())
-
-	for range iter.NumRows() {
-		row := make(Row, len(iter.Columns()))
-		if !iter.MapScan(row) {
-			return nil, errors.New("failed to scan row")
-		}
-	}
-
-	return rows, err
 }

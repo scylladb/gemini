@@ -17,21 +17,23 @@ package store
 import (
 	"context"
 	"fmt"
-	"io"
 	"math/big"
 	"reflect"
 	"sort"
 	"sync"
 	"time"
 
+	"errors"
+
 	"go.uber.org/zap"
 
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/pkg/errors"
+	pkgerrors "github.com/pkg/errors"
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
+
 
 	"github.com/scylladb/go-set/strset"
 
@@ -70,8 +72,8 @@ type Config struct {
 	UseServerSideTimestamps     bool
 }
 
-func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, traceOut io.Writer, logger *zap.Logger) (Store, error) {
-	oracleStore, err := getStore("oracle", schema, oracleCluster, cfg, cfg.OracleLogStatementsFile, cfg.LogStatementFileCompression, traceOut, logger)
+func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, logger *zap.Logger) (Store, error) {
+	oracleStore, err := getStore("oracle", schema, oracleCluster, cfg, cfg.OracleLogStatementsFile, cfg.LogStatementFileCompression,logger)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +82,7 @@ func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig
 		return nil, errors.New("test cluster is empty")
 	}
 
-	testStore, err := getStore("test", schema, testCluster, cfg, cfg.TestLogStatementsFile, cfg.LogStatementFileCompression, traceOut, logger)
+	testStore, err := getStore("test", schema, testCluster, cfg, cfg.TestLogStatementsFile, cfg.LogStatementFileCompression, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -100,31 +102,30 @@ type delegatingStore struct {
 }
 
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error {
-	if ds.oracleStore != nil {
-		if err := mutate(ctx, ds.oracleStore, oracleBuilder); err != nil {
-			return errors.Wrap(err, "oracle failed store creation")
-		}
-	}
-
-	if err := mutate(ctx, ds.testStore, testBuilder); err != nil {
-		return errors.Wrap(err, "test failed store creation")
-	}
-
 	if ds.statementLogger != nil {
-		if err := ds.statementLogger.LogStmt(testBuilder); err != nil {
-			return errors.Wrap(err, "failed to log test create statement")
+		ds.statementLogger.LogStmt(testBuilder)
+	}
+
+	if ds.oracleStore != nil {
+		if err := ds.oracleStore.mutate(ctx, oracleBuilder); err != nil {
+			return pkgerrors.Wrapf(err, "unable to apply mutations to the %s store", ds.testStore.name())
 		}
+	}
+
+	if err := ds.testStore.mutate(ctx, testBuilder); err != nil {
+		return pkgerrors.Wrapf(err, "unable to apply mutations to the %s store", ds.testStore.name())
 	}
 
 	return nil
 }
 
 func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error {
-	var oracleErr error
 	var wg sync.WaitGroup
 
 	doCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	var oracleErr error
 
 	if ds.oracleStore != nil {
 		wg.Add(1)
@@ -136,7 +137,6 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	}
 
 	if testErr := ds.testStore.mutate(doCtx, stmt); testErr != nil {
-		cancel()
 		// Test store failed, transition cannot take place
 		ds.logger.Info("test store failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(testErr))
 		return testErr
@@ -150,13 +150,6 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		return oracleErr
 	}
 
-	return nil
-}
-
-func mutate(ctx context.Context, s storeLoader, stmt *typedef.Stmt) error {
-	if err := s.mutate(ctx, stmt); err != nil {
-		return errors.Wrapf(err, "unable to apply mutations to the %s store", s.name())
-	}
 	return nil
 }
 
@@ -181,13 +174,13 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt 
 
 	if testErr != nil {
 		cancel()
-		return errors.Wrapf(testErr, "unable to load check data from the test store")
+		return pkgerrors.Wrapf(testErr, "unable to load check data from the test store")
 	}
 
 	wg.Wait()
 
 	if oracleErr != nil {
-		return errors.Wrapf(oracleErr, "unable to load check data from the oracle store")
+		return pkgerrors.Wrapf(oracleErr, "unable to load check data from the oracle store")
 	}
 
 	if ds.oracleStore == nil {
@@ -263,17 +256,17 @@ func getStore(
 	cfg Config,
 	stmtLogFile string,
 	compression stmtlogger.Compression,
-	traceOut io.Writer,
 	logger *zap.Logger,
 ) (out storeLoader, err error) {
 	if clusterConfig == nil {
 		return nil, nil
 	}
 
-	session, err := newSession(clusterConfig, traceOut)
+	session, err := clusterConfig.CreateSession()
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to connect to %s cluster", name)
+		return nil, pkgerrors.Wrapf(err, "failed to connect to %s cluster", name)
 	}
+
 	oracleFileLogger, err := stmtlogger.NewFileLogger(stmtLogFile, compression)
 	if err != nil {
 		return nil, err
