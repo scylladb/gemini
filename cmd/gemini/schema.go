@@ -17,11 +17,11 @@ package main
 import (
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/typedef"
-
-	"go.uber.org/zap"
 )
 
 func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {

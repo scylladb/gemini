@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -44,19 +45,24 @@ type GlobalStatus struct {
 
 func (gs *GlobalStatus) AddWriteError(err joberror.JobError) {
 	// TODO: https://github.com/scylladb/gemini/issues/302 - Move out and add logging
-	fmt.Printf("Error detected: %#v", err)
+	log.Printf("Error detected: %#v", err)
 	gs.Errors.AddError(err)
 	gs.WriteErrors.Add(1)
 }
 
 func (gs *GlobalStatus) AddReadError(err joberror.JobError) {
 	// TODO: https://github.com/scylladb/gemini/issues/302 - Move out and add logging
-	fmt.Printf("Error detected: %#v", err)
+	log.Printf("Error detected: %#v", err)
 	gs.Errors.AddError(err)
 	gs.ReadErrors.Add(1)
 }
 
-func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, version string, versionData any) error {
+func (gs *GlobalStatus) PrintResultAsJSON(
+	w io.Writer,
+	schema *typedef.Schema,
+	version string,
+	versionData any,
+) error {
 	result := map[string]any{
 		"result":         gs,
 		"gemini_version": version,
@@ -82,7 +88,13 @@ func (gs *GlobalStatus) HasErrors() bool {
 	return gs.WriteErrors.Load() > 0 || gs.ReadErrors.Load() > 0
 }
 
-func (gs *GlobalStatus) PrintResult(w io.Writer, schema *typedef.Schema, version string, versionData any) {
+//nolint:forbidigo
+func (gs *GlobalStatus) PrintResult(
+	w io.Writer,
+	schema *typedef.Schema,
+	version string,
+	versionData any,
+) {
 	if err := gs.PrintResultAsJSON(w, schema, version, versionData); err != nil {
 		// In case there has been it has been a long run we want to display it anyway...
 		fmt.Printf("Unable to print result as json, using plain text to stdout, error=%s\n", err)

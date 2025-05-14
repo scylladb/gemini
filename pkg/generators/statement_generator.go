@@ -16,6 +16,7 @@ package generators
 
 import (
 	"fmt"
+	"log"
 	"math/rand/v2"
 	"strings"
 
@@ -43,13 +44,25 @@ func GenSchema(sc typedef.SchemaConfig, seed uint64) *typedef.Schema {
 }
 
 func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.Table {
-	partitionKeys := make(typedef.Columns, utils.RandInt2(r, sc.GetMinPartitionKeys(), sc.GetMaxPartitionKeys()))
+	partitionKeys := make(
+		typedef.Columns,
+		utils.RandInt2(r, sc.GetMinPartitionKeys(), sc.GetMaxPartitionKeys()),
+	)
 	for i := 0; i < len(partitionKeys); i++ {
-		partitionKeys[i] = &typedef.ColumnDef{Name: GenColumnName("pk", i), Type: GenPartitionKeyColumnType(r)}
+		partitionKeys[i] = &typedef.ColumnDef{
+			Name: GenColumnName("pk", i),
+			Type: GenPartitionKeyColumnType(r),
+		}
 	}
-	clusteringKeys := make(typedef.Columns, utils.RandInt2(r, sc.GetMinClusteringKeys(), sc.GetMaxClusteringKeys()))
+	clusteringKeys := make(
+		typedef.Columns,
+		utils.RandInt2(r, sc.GetMinClusteringKeys(), sc.GetMaxClusteringKeys()),
+	)
 	for i := 0; i < len(clusteringKeys); i++ {
-		clusteringKeys[i] = &typedef.ColumnDef{Name: GenColumnName("ck", i), Type: GenPrimaryKeyColumnType(r)}
+		clusteringKeys[i] = &typedef.ColumnDef{
+			Name: GenColumnName("ck", i),
+			Type: GenPrimaryKeyColumnType(r),
+		}
 	}
 	table := typedef.Table{
 		Name:           tableName,
@@ -75,7 +88,10 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 	}
 	columns := make(typedef.Columns, utils.RandInt2(r, sc.GetMinColumns(), sc.GetMaxColumns()))
 	for i := 0; i < len(columns); i++ {
-		columns[i] = &typedef.ColumnDef{Name: GenColumnName("col", i), Type: GenColumnType(len(columns), &sc, r)}
+		columns[i] = &typedef.ColumnDef{
+			Name: GenColumnName("col", i),
+			Type: GenColumnType(len(columns), &sc, r),
+		}
 	}
 	table.Columns = columns
 
@@ -86,7 +102,9 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 	table.Indexes = indexes
 
 	var mvs []typedef.MaterializedView
-	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && sc.UseMaterializedViews && len(clusteringKeys) > 0 && columns.ValidColumnsForPrimaryKey().Len() != 0 {
+	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && sc.UseMaterializedViews &&
+		len(clusteringKeys) > 0 &&
+		columns.ValidColumnsForPrimaryKey().Len() != 0 {
 		mvs = CreateMaterializedViews(columns, table.Name, partitionKeys, clusteringKeys, r)
 	}
 
@@ -96,8 +114,16 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 }
 
 func GetCreateKeyspaces(s *typedef.Schema) (string, string) {
-	return fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = %s", s.Keyspace.Name, s.Keyspace.Replication.ToCQL()),
-		fmt.Sprintf("CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = %s", s.Keyspace.Name, s.Keyspace.OracleReplication.ToCQL())
+	return fmt.Sprintf(
+			"CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = %s",
+			s.Keyspace.Name,
+			s.Keyspace.Replication.ToCQL(),
+		),
+		fmt.Sprintf(
+			"CREATE KEYSPACE IF NOT EXISTS %s WITH REPLICATION = %s",
+			s.Keyspace.Name,
+			s.Keyspace.OracleReplication.ToCQL(),
+		)
 }
 
 func GetCreateSchema(s *typedef.Schema) []string {
@@ -109,7 +135,16 @@ func GetCreateSchema(s *typedef.Schema) []string {
 		createTable := GetCreateTable(t, s.Keyspace)
 		stmts = append(stmts, createTable)
 		for _, idef := range t.Indexes {
-			stmts = append(stmts, fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s.%s (%s)", idef.IndexName, s.Keyspace.Name, t.Name, idef.ColumnName))
+			stmts = append(
+				stmts,
+				fmt.Sprintf(
+					"CREATE INDEX IF NOT EXISTS %s ON %s.%s (%s)",
+					idef.IndexName,
+					s.Keyspace.Name,
+					t.Name,
+					idef.ColumnName,
+				),
+			)
 		}
 		for _, mv := range t.MaterializedViews {
 			var (
@@ -118,10 +153,16 @@ func GetCreateSchema(s *typedef.Schema) []string {
 			)
 			for _, pk := range mv.PartitionKeys {
 				mvPartitionKeys = append(mvPartitionKeys, pk.Name)
-				mvPrimaryKeysNotNull = append(mvPrimaryKeysNotNull, fmt.Sprintf("%s IS NOT NULL", pk.Name))
+				mvPrimaryKeysNotNull = append(
+					mvPrimaryKeysNotNull,
+					fmt.Sprintf("%s IS NOT NULL", pk.Name),
+				)
 			}
 			for _, ck := range mv.ClusteringKeys {
-				mvPrimaryKeysNotNull = append(mvPrimaryKeysNotNull, fmt.Sprintf("%s IS NOT NULL", ck.Name))
+				mvPrimaryKeysNotNull = append(
+					mvPrimaryKeysNotNull,
+					fmt.Sprintf("%s IS NOT NULL", ck.Name),
+				)
 			}
 			var createMaterializedView string
 			if len(mv.PartitionKeys) == 1 {
@@ -145,14 +186,19 @@ func GetDropKeyspace(s *typedef.Schema) []string {
 	}
 }
 
-func CreateMaterializedViews(c typedef.Columns, tableName string, partitionKeys, clusteringKeys typedef.Columns, r *rand.Rand) []typedef.MaterializedView {
+func CreateMaterializedViews(
+	c typedef.Columns,
+	tableName string,
+	partitionKeys, clusteringKeys typedef.Columns,
+	r *rand.Rand,
+) []typedef.MaterializedView {
 	validColumns := c.ValidColumnsForPrimaryKey()
 	var mvs []typedef.MaterializedView
 	numMvs := 1
 	for i := 0; i < numMvs; i++ {
 		col := validColumns.Random(r)
 		if col == nil {
-			fmt.Printf("unable to generate valid columns for materialized view")
+			log.Printf("unable to generate valid columns for materialized view")
 			continue
 		}
 

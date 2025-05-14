@@ -19,9 +19,8 @@ import (
 	"math/rand/v2"
 	"strings"
 
-	"github.com/pkg/errors"
-
 	"github.com/gocql/gocql"
+	"github.com/pkg/errors"
 )
 
 type TupleType struct {

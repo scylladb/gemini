@@ -67,9 +67,15 @@ func (r resultTokens) Diff(received resultTokens) string {
 		}
 
 		out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
-			expected.TokenValues, found.TokenValues, " error: value stmt.ValuesWithToken.Token expected and received are different:"))
+			expected.TokenValues,
+			found.TokenValues,
+			" error: value stmt.ValuesWithToken.Token expected and received are different:",
+		))
 		out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
-			expected.TokenValues, found.TokenValues, " error: value stmt.ValuesWithToken.Value expected and received are different:"))
+			expected.TokenValues,
+			found.TokenValues,
+			" error: value stmt.ValuesWithToken.Value expected and received are different:",
+		))
 	}
 	return strings.Join(out, "\n")
 }
@@ -105,17 +111,32 @@ func (r *result) Diff(received *result) string {
 	var out []string
 	out = testutils.AppendIfNotEmpty(out, r.TokenValues.Diff(received.TokenValues))
 	out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
-		r.Query, received.Query, " error: value stmt.Query.ToCql().stmt expected and received are different:"))
+		r.Query,
+		received.Query,
+		" error: value stmt.Query.ToCql().stmt expected and received are different:",
+	))
 	out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
-		r.Names, received.Names, " error: value stmt.Query.ToCql().Names expected and received are different:"))
+		r.Names,
+		received.Names,
+		" error: value stmt.Query.ToCql().Names expected and received are different:",
+	))
 	out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
-		r.Values, received.Values, " error: value stmt.Values expected and received are different:"))
+		r.Values,
+		received.Values,
+		" error: value stmt.Values expected and received are different:",
+	))
 	out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
 		r.Types, received.Types, " error: value stmt.Types expected and received are different:"))
 	out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
-		r.Values, received.Values, " error: value stmt.Values expected and received are different:"))
+		r.Values,
+		received.Values,
+		" error: value stmt.Values expected and received are different:",
+	))
 	out = testutils.AppendIfNotEmpty(out, testutils.GetErrorMsgIfDifferent(
-		r.QueryType, received.QueryType, " error: value stmt.QueryType expected and received are different:"))
+		r.QueryType,
+		received.QueryType,
+		" error: value stmt.QueryType expected and received are different:",
+	))
 	return strings.Join(out, "\n")
 }
 

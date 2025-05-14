@@ -24,16 +24,14 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	pkgerrors "github.com/pkg/errors"
-	"go.uber.org/multierr"
-	"gopkg.in/inf.v0"
-
 	"github.com/scylladb/go-set/strset"
+	"go.uber.org/multierr"
+	"go.uber.org/zap"
+	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -70,8 +68,21 @@ type Config struct {
 	UseServerSideTimestamps     bool
 }
 
-func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig, cfg Config, logger *zap.Logger) (Store, error) {
-	oracleStore, err := getStore("oracle", schema, oracleCluster, cfg, cfg.OracleLogStatementsFile, cfg.LogStatementFileCompression, logger)
+func New(
+	schema *typedef.Schema,
+	testCluster, oracleCluster *gocql.ClusterConfig,
+	cfg Config,
+	logger *zap.Logger,
+) (Store, error) {
+	oracleStore, err := getStore(
+		"oracle",
+		schema,
+		oracleCluster,
+		cfg,
+		cfg.OracleLogStatementsFile,
+		cfg.LogStatementFileCompression,
+		logger,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +91,15 @@ func New(schema *typedef.Schema, testCluster, oracleCluster *gocql.ClusterConfig
 		return nil, errors.New("test cluster is empty")
 	}
 
-	testStore, err := getStore("test", schema, testCluster, cfg, cfg.TestLogStatementsFile, cfg.LogStatementFileCompression, logger)
+	testStore, err := getStore(
+		"test",
+		schema,
+		testCluster,
+		cfg,
+		cfg.TestLogStatementsFile,
+		cfg.LogStatementFileCompression,
+		logger,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +118,10 @@ type delegatingStore struct {
 	logger          *zap.Logger
 }
 
-func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error {
+func (ds delegatingStore) Create(
+	ctx context.Context,
+	testBuilder, oracleBuilder *typedef.Stmt,
+) error {
 	if ds.statementLogger != nil {
 		if err := ds.statementLogger.LogStmt(testBuilder); err != nil {
 			return err
@@ -108,12 +130,20 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder
 
 	if ds.oracleStore != nil {
 		if err := ds.oracleStore.mutate(ctx, oracleBuilder); err != nil {
-			return pkgerrors.Wrapf(err, "unable to apply mutations to the %s store", ds.testStore.name())
+			return pkgerrors.Wrapf(
+				err,
+				"unable to apply mutations to the %s store",
+				ds.testStore.name(),
+			)
 		}
 	}
 
 	if err := ds.testStore.mutate(ctx, testBuilder); err != nil {
-		return pkgerrors.Wrapf(err, "unable to apply mutations to the %s store", ds.testStore.name())
+		return pkgerrors.Wrapf(
+			err,
+			"unable to apply mutations to the %s store",
+			ds.testStore.name(),
+		)
 	}
 
 	return nil
@@ -138,7 +168,10 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 
 	if testErr := ds.testStore.mutate(doCtx, stmt); testErr != nil {
 		// Test store failed, transition cannot take place
-		ds.logger.Info("test store failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(testErr))
+		ds.logger.Info(
+			"test store failed mutation, transition to next state impossible so continuing with next mutation",
+			zap.Error(testErr),
+		)
 		return testErr
 	}
 
@@ -146,14 +179,22 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 
 	if oracleErr != nil {
 		// Test store failed, transition cannot take place
-		ds.logger.Info("oracle store failed mutation, transition to next state impossible so continuing with next mutation", zap.Error(oracleErr))
+		ds.logger.Info(
+			"oracle store failed mutation, transition to next state impossible so continuing with next mutation",
+			zap.Error(oracleErr),
+		)
 		return oracleErr
 	}
 
 	return nil
 }
 
-func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, detailedDiff bool) error {
+func (ds delegatingStore) Check(
+	ctx context.Context,
+	table *typedef.Table,
+	stmt *typedef.Stmt,
+	detailedDiff bool,
+) error {
 	var oracleRows []Row
 	var oracleErr error
 	var wg sync.WaitGroup
@@ -193,20 +234,31 @@ func (ds delegatingStore) Check(ctx context.Context, table *typedef.Table, stmt 
 
 	if len(testRows) != len(oracleRows) {
 		if !detailedDiff {
-			return fmt.Errorf("rows count differ (test store rows %d, oracle store rows %d, detailed information will be at last attempt)", len(testRows), len(oracleRows))
+			return fmt.Errorf(
+				"rows count differ (test store rows %d, oracle store rows %d, detailed information will be at last attempt)",
+				len(testRows),
+				len(oracleRows),
+			)
 		}
 		testSet := strset.New(pks(table, testRows)...)
 		oracleSet := strset.New(pks(table, oracleRows)...)
 		missingInTest := strset.Difference(oracleSet, testSet).List()
 		missingInOracle := strset.Difference(testSet, oracleSet).List()
-		return fmt.Errorf("row count differ (test has %d rows, oracle has %d rows, test is missing rows: %s, oracle is missing rows: %s)",
-			len(testRows), len(oracleRows), missingInTest, missingInOracle)
+		return fmt.Errorf(
+			"row count differ (test has %d rows, oracle has %d rows, test is missing rows: %s, oracle is missing rows: %s)",
+			len(testRows),
+			len(oracleRows),
+			missingInTest,
+			missingInOracle,
+		)
 	}
 	if reflect.DeepEqual(testRows, oracleRows) {
 		return nil
 	}
 	if !detailedDiff {
-		return fmt.Errorf("test and oracle store have difference, detailed information will be at last attempt")
+		return fmt.Errorf(
+			"test and oracle store have difference, detailed information will be at last attempt",
+		)
 	}
 	sort.SliceStable(testRows, func(i, j int) bool {
 		return lt(testRows[i], testRows[j])

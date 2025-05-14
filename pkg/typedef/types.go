@@ -22,9 +22,8 @@ import (
 	"strconv"
 	"sync/atomic"
 
-	"github.com/pkg/errors"
-
 	"github.com/gocql/gocql"
+	"github.com/pkg/errors"
 
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -72,7 +71,15 @@ var (
 		TypeBlob:     {},
 		TypeDuration: {},
 	}
-	TypesForIndex     = SimpleTypes{TypeDecimal, TypeDouble, TypeFloat, TypeInt, TypeSmallint, TypeTinyint, TypeVarint}
+	TypesForIndex = SimpleTypes{
+		TypeDecimal,
+		TypeDouble,
+		TypeFloat,
+		TypeInt,
+		TypeSmallint,
+		TypeTinyint,
+		TypeVarint,
+	}
 	PartitionKeyTypes = SimpleTypes{
 		TypeAscii, TypeBigint, TypeDate, TypeDecimal, TypeDouble,
 		TypeFloat, TypeInet, TypeInt, TypeSmallint, TypeText, TypeTime, TypeTimestamp, TypeTimeuuid,
@@ -174,18 +181,34 @@ func (mt *MapType) CQLPretty(builder *bytes.Buffer, value any) error {
 
 func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	count := r.IntN(9) + 1
-	vals := reflect.MakeMap(reflect.MapOf(reflect.TypeOf(mt.KeyType.GenJSONValue(r, p)), reflect.TypeOf(mt.ValueType.GenJSONValue(r, p))))
+	vals := reflect.MakeMap(
+		reflect.MapOf(
+			reflect.TypeOf(mt.KeyType.GenJSONValue(r, p)),
+			reflect.TypeOf(mt.ValueType.GenJSONValue(r, p)),
+		),
+	)
 	for i := 0; i < count; i++ {
-		vals.SetMapIndex(reflect.ValueOf(mt.KeyType.GenJSONValue(r, p)), reflect.ValueOf(mt.ValueType.GenJSONValue(r, p)))
+		vals.SetMapIndex(
+			reflect.ValueOf(mt.KeyType.GenJSONValue(r, p)),
+			reflect.ValueOf(mt.ValueType.GenJSONValue(r, p)),
+		)
 	}
 	return vals.Interface()
 }
 
 func (mt *MapType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxMapSize+1)
-	vals := reflect.MakeMap(reflect.MapOf(reflect.TypeOf(mt.KeyType.GenValue(r, p)[0]), reflect.TypeOf(mt.ValueType.GenValue(r, p)[0])))
+	vals := reflect.MakeMap(
+		reflect.MapOf(
+			reflect.TypeOf(mt.KeyType.GenValue(r, p)[0]),
+			reflect.TypeOf(mt.ValueType.GenValue(r, p)[0]),
+		),
+	)
 	for i := 0; i < count; i++ {
-		vals.SetMapIndex(reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]), reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]))
+		vals.SetMapIndex(
+			reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]),
+			reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]),
+		)
 	}
 	return []any{vals.Interface()}
 }
@@ -207,7 +230,10 @@ func (mt *MapType) Indexable() bool {
 
 // ValueVariationsNumber returns number of bytes generated value holds
 func (mt *MapType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
-	return math.Pow(mt.KeyType.ValueVariationsNumber(p)*mt.ValueType.ValueVariationsNumber(p), maxMapSize)
+	return math.Pow(
+		mt.KeyType.ValueVariationsNumber(p)*mt.ValueType.ValueVariationsNumber(p),
+		maxMapSize,
+	)
 }
 
 type CounterType struct {

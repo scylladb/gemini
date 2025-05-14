@@ -140,7 +140,8 @@ func (fl *logger) LogStmt(stmt *typedef.Stmt, ts ...time.Time) error {
 
 	opType := stmt.QueryType.OpType()
 
-	if len(ts) > 0 && !ts[0].IsZero() && (opType == typedef.OpInsert || opType == typedef.OpUpdate || opType == typedef.OpDelete) {
+	if len(ts) > 0 && !ts[0].IsZero() &&
+		(opType == typedef.OpInsert || opType == typedef.OpUpdate || opType == typedef.OpDelete) {
 		_, _ = buffer.WriteString(" USING TIMESTAMP ")
 		_, _ = buffer.WriteString(strconv.FormatInt(ts[0].UnixMicro(), 10))
 	}

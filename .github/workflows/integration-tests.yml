@@ -2,16 +2,20 @@ name: Gemini Integrations Tests
 
 on:
   push:
-    branches: [master]
+    branches:
+      - master
   pull_request:
-    branches: [master]
+    branches:
+      - master
 
 jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - name:
+      - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -25,7 +29,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
   test:
-    cancel-timeout-minutes: 1
     timeout-minutes: 20
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}-${{ matrix.duration }}-${{ matrix.dataset-size }}-${{ matrix.test-scylla-version }}-${{ matrix.oracle-scylla-version }}
@@ -36,13 +39,16 @@ jobs:
       matrix:
         gemini-features: ["basic", "normal"]
         gemini-concurrency: [4]
-        duration: ["5m"]
+        duration: ["3m"]
+        warmup: ["0", "30s"]
         dataset-size: [large]
-        oracle-scylla-version: ["6.1"]
-        test-scylla-version: ["6.2"]
+        oracle-scylla-version: ["2025.1"]
+        test-scylla-version: ["2025.1"]
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
       - name: Start ScyllaDB
         id: scylla
@@ -63,7 +69,7 @@ jobs:
             CONCURRENCY=${{ matrix.gemini-concurrency }} \
             CQL_FEATURES=${{ matrix.gemini-features }} \
             DURATION=${{ matrix.duration }} \
-            WARMUP=30s \
+            WARMUP=${{ matrix.warmup }} \
             DATASET_SIZE=${{ matrix.dataset-size }}
       - name: Shutdown ScyllaDB
         shell: bash

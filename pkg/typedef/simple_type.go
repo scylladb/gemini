@@ -69,6 +69,7 @@ func (st SimpleType) LenValue() int {
 	return 1
 }
 
+//nolint:gocyclo
 func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 	switch st {
 	case TypeInet:
@@ -202,6 +203,7 @@ func (st SimpleType) CQLPretty(builder *bytes.Buffer, value any) error {
 	}
 }
 
+//nolint:gocyclo
 func (st SimpleType) CQLType() gocql.TypeInfo {
 	switch st {
 	case TypeAscii:

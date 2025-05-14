@@ -120,7 +120,11 @@ func NewVersionInfo(options ...VersionOption) (VersionInfo, error) {
 	return v, nil
 }
 
-func fetchAndSaveVersionInfo(ctx context.Context, httpClient *http.Client, filePath string) (VersionInfo, error) {
+func fetchAndSaveVersionInfo(
+	ctx context.Context,
+	httpClient *http.Client,
+	filePath string,
+) (VersionInfo, error) {
 	client := github.NewClient(httpClient)
 	client.UserAgent = userAgent
 
@@ -198,10 +202,19 @@ func extractRepoOwner(repoPath, defaultOwner string) string {
 	return defaultOwner
 }
 
-func extractReleaseInfo(ctx context.Context, client *github.Client, repoOwner, versionToCheck string) (string, string, error) {
-	releases, _, err := client.Repositories.ListReleases(ctx, repoOwner, "gocql", &github.ListOptions{
-		PerPage: 100,
-	})
+func extractReleaseInfo(
+	ctx context.Context,
+	client *github.Client,
+	repoOwner, versionToCheck string,
+) (string, string, error) {
+	releases, _, err := client.Repositories.ListReleases(
+		ctx,
+		repoOwner,
+		"gocql",
+		&github.ListOptions{
+			PerPage: 100,
+		},
+	)
 	if err != nil {
 		return "", "", errors.Wrapf(err, "failed to get release info for %s", versionToCheck)
 	}
@@ -256,7 +269,13 @@ func getDriverVersionInfo(ctx context.Context, client *github.Client) (Component
 		}
 
 		if shaPattern.MatchString(versionToCheck) {
-			gitCommit, _, err := client.Repositories.GetCommit(ctx, repoOwner, "gocql", versionToCheck, nil)
+			gitCommit, _, err := client.Repositories.GetCommit(
+				ctx,
+				repoOwner,
+				"gocql",
+				versionToCheck,
+				nil,
+			)
 			if err != nil {
 				return ComponentInfo{}, err
 			}

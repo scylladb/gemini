@@ -71,10 +71,19 @@ type Config struct {
 	PkUsedBufferSize           uint64
 }
 
-func NewGenerator(ctx context.Context, table *typedef.Table, config Config, logger *zap.Logger) *Generator {
+func NewGenerator(
+	ctx context.Context,
+	table *typedef.Table,
+	config Config,
+	logger *zap.Logger,
+) *Generator {
 	wakeUpSignal := make(chan struct{}, 1)
 	g := &Generator{
-		partitions:        NewPartitions(int(config.PartitionsCount), int(config.PkUsedBufferSize), wakeUpSignal),
+		partitions: NewPartitions(
+			int(config.PartitionsCount),
+			int(config.PkUsedBufferSize),
+			wakeUpSignal,
+		),
 		partitionCount:    config.PartitionsCount,
 		table:             table,
 		partitionsConfig:  config.PartitionsRangeConfig,

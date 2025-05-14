@@ -30,8 +30,22 @@ func TestNew(t *testing.T) {
 		maxSameValues int
 	}{
 		{dist: "zipf", seed: uint64(time.Now().UnixNano()), size: 10000, maxSameValues: 10},
-		{dist: "normal", seed: uint64(time.Now().UnixNano()), size: 10000, mu: stdDistMean, sigma: oneStdDev, maxSameValues: 70},
-		{dist: "uniform", seed: uint64(time.Now().UnixNano()), size: 10000, mu: stdDistMean, sigma: oneStdDev, maxSameValues: 10},
+		{
+			dist:          "normal",
+			seed:          uint64(time.Now().UnixNano()),
+			size:          10000,
+			mu:            stdDistMean,
+			sigma:         oneStdDev,
+			maxSameValues: 70,
+		},
+		{
+			dist:          "uniform",
+			seed:          uint64(time.Now().UnixNano()),
+			size:          10000,
+			mu:            stdDistMean,
+			sigma:         oneStdDev,
+			maxSameValues: 10,
+		},
 	}
 
 	for _, item := range data {
@@ -55,7 +69,10 @@ func TestNew(t *testing.T) {
 			}
 
 			if same > item.maxSameValues {
-				t.Errorf("too many calls to the distribution function returned the same value: %d", same)
+				t.Errorf(
+					"too many calls to the distribution function returned the same value: %d",
+					same,
+				)
 			}
 		})
 	}

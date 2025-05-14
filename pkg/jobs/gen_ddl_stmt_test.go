@@ -29,25 +29,35 @@ import (
 var ddlDataPath = "./test_expected_data/ddl/"
 
 func TestGenDropColumnStmt(t *testing.T) {
-	RunStmtTest[results](t, path.Join(ddlDataPath, "drop_column.json"), genDropColumnStmtCases, func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
-		schema, _, _ := testutils.GetAllForTestStmt(subT, caseName)
-		options := testutils.GetOptionsFromCaseName(caseName)
-		columnToDelete := getColumnToDeleteFromOptions(options, schema.Tables[0].Columns)
-		stmt, err := genDropColumnStmt(schema.Tables[0], schema.Keyspace.Name, columnToDelete)
-		validateStmt(subT, stmt, err)
-		expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
-	})
+	RunStmtTest[results](
+		t,
+		path.Join(ddlDataPath, "drop_column.json"),
+		genDropColumnStmtCases,
+		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, _, _ := testutils.GetAllForTestStmt(subT, caseName)
+			options := testutils.GetOptionsFromCaseName(caseName)
+			columnToDelete := getColumnToDeleteFromOptions(options, schema.Tables[0].Columns)
+			stmt, err := genDropColumnStmt(schema.Tables[0], schema.Keyspace.Name, columnToDelete)
+			validateStmt(subT, stmt, err)
+			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
+		},
+	)
 }
 
 func TestGenAddColumnStmt(t *testing.T) {
-	RunStmtTest[results](t, path.Join(ddlDataPath, "add_column.json"), genAddColumnStmtCases, func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
-		schema, _, _ := testutils.GetAllForTestStmt(subT, caseName)
-		options := testutils.GetOptionsFromCaseName(caseName)
-		columnToAdd := getColumnToAddFromOptions(options, len(schema.Tables[0].Columns))
-		stmt, err := genAddColumnStmt(schema.Tables[0], schema.Keyspace.Name, columnToAdd)
-		validateStmt(subT, stmt, err)
-		expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
-	})
+	RunStmtTest[results](
+		t,
+		path.Join(ddlDataPath, "add_column.json"),
+		genAddColumnStmtCases,
+		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, _, _ := testutils.GetAllForTestStmt(subT, caseName)
+			options := testutils.GetOptionsFromCaseName(caseName)
+			columnToAdd := getColumnToAddFromOptions(options, len(schema.Tables[0].Columns))
+			stmt, err := genAddColumnStmt(schema.Tables[0], schema.Keyspace.Name, columnToAdd)
+			validateStmt(subT, stmt, err)
+			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
+		},
+	)
 }
 
 func BenchmarkGenDropColumnStmt(t *testing.B) {
@@ -82,7 +92,10 @@ func BenchmarkGenAddColumnStmt(t *testing.B) {
 	}
 }
 
-func getColumnToDeleteFromOptions(options testutils.TestCaseOptions, columns typedef.Columns) *typedef.ColumnDef {
+func getColumnToDeleteFromOptions(
+	options testutils.TestCaseOptions,
+	columns typedef.Columns,
+) *typedef.ColumnDef {
 	optVal := options.GetString("del")
 	switch optVal {
 	case "delFist":
@@ -94,7 +107,10 @@ func getColumnToDeleteFromOptions(options testutils.TestCaseOptions, columns typ
 	}
 }
 
-func getColumnToAddFromOptions(options testutils.TestCaseOptions, columnsLen int) *typedef.ColumnDef {
+func getColumnToAddFromOptions(
+	options testutils.TestCaseOptions,
+	columnsLen int,
+) *typedef.ColumnDef {
 	optVal := options.GetString("addSt")
 	if optVal == "" || len(optVal) <= 5 {
 		panic(fmt.Sprintf("wrong addSt parameter '%s'", optVal))

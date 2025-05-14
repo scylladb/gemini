@@ -20,9 +20,8 @@ import (
 	"math/rand/v2"
 	"reflect"
 
-	"github.com/pkg/errors"
-
 	"github.com/gocql/gocql"
+	"github.com/pkg/errors"
 
 	"github.com/scylladb/gemini/pkg/utils"
 )

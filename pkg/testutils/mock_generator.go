@@ -15,7 +15,7 @@
 package testutils
 
 import (
-	"fmt"
+	"log"
 	"math/rand/v2"
 
 	"github.com/scylladb/gemini/pkg/routingkey"
@@ -35,14 +35,25 @@ func NewTestGenerator(
 	partitionsConfig *typedef.PartitionRangeConfig,
 	routingKeyCreator *routingkey.Creator,
 ) *MockGenerator {
-	return &MockGenerator{table: table, rand: rnd, partitionsConfig: partitionsConfig, routingKeyCreator: routingKeyCreator}
+	return &MockGenerator{
+		table:             table,
+		rand:              rnd,
+		partitionsConfig:  partitionsConfig,
+		routingKeyCreator: routingKeyCreator,
+	}
 }
 
 func (g *MockGenerator) Get() *typedef.ValueWithToken {
 	values := g.createPartitionKeyValues(g.rand)
 	token, err := g.routingKeyCreator.GetHash(g.table, values)
 	if err != nil {
-		fmt.Printf("Error on get hash for table:%s, values:%v\nPartitionColumns:%v\nError is: %s\n", g.table.Name, g.table.PartitionKeys, values, err)
+		log.Printf(
+			"Error on get hash for table:%s, values:%v\nPartitionColumns:%v\nError is: %s\n",
+			g.table.Name,
+			g.table.PartitionKeys,
+			values,
+			err,
+		)
 	}
 	return &typedef.ValueWithToken{Token: token, Value: values}
 }
@@ -51,7 +62,13 @@ func (g *MockGenerator) GetOld() *typedef.ValueWithToken {
 	values := g.createPartitionKeyValues(g.rand)
 	token, err := g.routingKeyCreator.GetHash(g.table, values)
 	if err != nil {
-		fmt.Printf("Error on get hash for table:%s, values:%v\nPartitionColumns:%v\nError is: %s\n", g.table.Name, g.table.PartitionKeys, values, err)
+		log.Printf(
+			"Error on get hash for table:%s, values:%v\nPartitionColumns:%v\nError is: %s\n",
+			g.table.Name,
+			g.table.PartitionKeys,
+			values,
+			err,
+		)
 	}
 	return &typedef.ValueWithToken{Token: token, Value: values}
 }

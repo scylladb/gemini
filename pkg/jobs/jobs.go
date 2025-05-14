@@ -132,7 +132,21 @@ func (l List) Run(
 				rnd := rand.New(rand.NewPCG(newSeed, newSeed))
 				generator := generators.Get(table)
 				g.Go(func() error {
-					return jobF(gCtx, schema, schemaConfig, table, s, rnd, &partitionRangeConfig, generator, globalStatus, logger, stopFlag, failFast, verbose)
+					return jobF(
+						gCtx,
+						schema,
+						schemaConfig,
+						table,
+						s,
+						rnd,
+						&partitionRangeConfig,
+						generator,
+						globalStatus,
+						logger,
+						stopFlag,
+						failFast,
+						verbose,
+					)
 				})
 			}
 		}
@@ -382,7 +396,7 @@ func ddl(
 	ddlStmts.PostStmtHook()
 	if verbose {
 		jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
-		fmt.Printf("New schema: %v\n", string(jsonSchema))
+		fmt.Printf("New schema: %v\n", string(jsonSchema)) //nolint:forbidigo
 	}
 	return nil
 }
@@ -494,7 +508,9 @@ func validation(
 
 		if err == nil {
 			if attempt > 1 {
-				logger.Info(fmt.Sprintf("Validation successfully completed on %d attempt.", attempt))
+				logger.Info(
+					fmt.Sprintf("Validation successfully completed on %d attempt.", attempt),
+				)
 			}
 			return nil
 		}
@@ -507,7 +523,13 @@ func validation(
 			break
 		}
 		if errors.Is(err, unWrapErr(lastErr)) {
-			logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error same as at attempt before. ", attempt, maxAttempts))
+			logger.Info(
+				fmt.Sprintf(
+					"Retring failed validation. %d attempt from %d attempts. Error same as at attempt before. ",
+					attempt,
+					maxAttempts,
+				),
+			)
 		} else {
 			logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
 		}
@@ -515,14 +537,27 @@ func validation(
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
-			logger.Info(fmt.Sprintf("Retring failed validation stoped by done context. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
+			logger.Info(
+				fmt.Sprintf(
+					"Retring failed validation stoped by done context. %d attempt from %d attempts. Error: %s",
+					attempt,
+					maxAttempts,
+					err,
+				),
+			)
 			return nil
 		}
 		attempt++
 	}
 
 	if attempt > 1 {
-		logger.Info(fmt.Sprintf("Retring failed validation stoped by reach of max attempts %d. Error: %s", maxAttempts, err))
+		logger.Info(
+			fmt.Sprintf(
+				"Retring failed validation stoped by reach of max attempts %d. Error: %s",
+				maxAttempts,
+				err,
+			),
+		)
 	} else {
 		logger.Info(fmt.Sprintf("Validation failed. Error: %s", err))
 	}

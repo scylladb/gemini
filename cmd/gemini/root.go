@@ -100,8 +100,14 @@ func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Sc
 	return schemaBuilder.Build(), nil
 }
 
+//nolint:gocyclo
 func run(cmd *cobra.Command, _ []string) error {
-	ctx, cancel := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, syscall.SIGABRT, syscall.SIGINT)
+	ctx, cancel := signal.NotifyContext(
+		cmd.Context(),
+		syscall.SIGTERM,
+		syscall.SIGABRT,
+		syscall.SIGINT,
+	)
 	defer cancel()
 
 	val, err := cmd.PersistentFlags().GetBool("version-json")
@@ -116,6 +122,7 @@ func run(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 
+		//nolint:forbidigo
 		fmt.Println(string(data))
 		return nil
 	}
@@ -179,7 +186,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
 
 	printSetup(intSeed, intSchemaSeed)
-	fmt.Printf("Schema: %v\n", string(jsonSchema))
+	fmt.Printf("Schema: %v\n", string(jsonSchema)) //nolint:forbidigo
 
 	storeConfig := store.Config{
 		MaxRetriesMutate:            maxRetriesMutate,
@@ -226,12 +233,30 @@ func run(cmd *cobra.Command, _ []string) error {
 	warmupStopFlag := stop.NewFlag("warmup")
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
 
-	distFunc, err := distributions.New(partitionKeyDistribution, partitionCount, intSeed, stdDistMean, oneStdDev)
+	distFunc, err := distributions.New(
+		partitionKeyDistribution,
+		partitionCount,
+		intSeed,
+		stdDistMean,
+		oneStdDev,
+	)
 	if err != nil {
-		return errors.Wrapf(err, "Faile to create distribution function: %s", partitionKeyDistribution)
+		return errors.Wrapf(
+			err,
+			"Faile to create distribution function: %s",
+			partitionKeyDistribution,
+		)
 	}
 
-	gens := generators.New(ctx, schema, distFunc, intSeed, partitionCount, pkBufferReuseSize, logger)
+	gens := generators.New(
+		ctx,
+		schema,
+		distFunc,
+		intSeed,
+		partitionCount,
+		pkBufferReuseSize,
+		logger,
+	)
 	defer utils.IgnoreError(gens.Close)
 
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
@@ -289,7 +314,9 @@ func createLogger(level string) *zap.Logger {
 	return logger
 }
 
-func createClusters(consistency, testSelectionPolicy, oracleSelectionPolicy string) (*gocql.ClusterConfig, *gocql.ClusterConfig, error) {
+func createClusters(
+	consistency, testSelectionPolicy, oracleSelectionPolicy string,
+) (*gocql.ClusterConfig, *gocql.ClusterConfig, error) {
 	for i := range len(testClusterHost) {
 		testClusterHost[i] = strings.TrimSpace(testClusterHost[i])
 	}
@@ -304,7 +331,10 @@ func createClusters(consistency, testSelectionPolicy, oracleSelectionPolicy stri
 		return nil, nil, err
 	}
 
-	oracleHostSelectionPolicy, err := getHostSelectionPolicy(oracleSelectionPolicy, oracleClusterHost)
+	oracleHostSelectionPolicy, err := getHostSelectionPolicy(
+		oracleSelectionPolicy,
+		oracleClusterHost,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -360,7 +390,11 @@ func createClusters(consistency, testSelectionPolicy, oracleSelectionPolicy stri
 	return testCluster, oracleCluster, nil
 }
 
-func getReplicationStrategy(rs string, fallback replication.Replication, logger *zap.Logger) replication.Replication {
+func getReplicationStrategy(
+	rs string,
+	fallback replication.Replication,
+	logger *zap.Logger,
+) replication.Replication {
 	switch rs {
 	case "network":
 		return replication.NewNetworkTopologyStrategy()
@@ -369,7 +403,11 @@ func getReplicationStrategy(rs string, fallback replication.Replication, logger 
 	default:
 		strategy := replication.Replication{}
 		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), &strategy); err != nil {
-			logger.Error("unable to parse replication strategy", zap.String("strategy", rs), zap.Error(err))
+			logger.Error(
+				"unable to parse replication strategy",
+				zap.String("strategy", rs),
+				zap.Error(err),
+			)
 			return fallback
 		}
 		return strategy
@@ -439,7 +477,10 @@ func seedFromString(seed string) uint64 {
 }
 
 // generateSchema generates schema, if schema seed is random and schema did not pass validation it regenerates it
-func generateSchema(sc typedef.SchemaConfig, schemaSeed string) (schema *typedef.Schema, intSchemaSeed uint64, err error) {
+func generateSchema(
+	sc typedef.SchemaConfig,
+	schemaSeed string,
+) (schema *typedef.Schema, intSchemaSeed uint64, err error) {
 	intSchemaSeed = seedFromString(schemaSeed)
 	schema = generators.GenSchema(sc, intSchemaSeed)
 	err = schema.Validate(partitionCount)
@@ -448,7 +489,10 @@ func generateSchema(sc typedef.SchemaConfig, schemaSeed string) (schema *typedef
 	}
 
 	if schemaSeed != "random" {
-		return nil, 0, errors.Wrap(err, "validation failed, running this test could end up in error or stale gemini")
+		return nil, 0, errors.Wrap(
+			err,
+			"validation failed, running this test could end up in error or stale gemini",
+		)
 	}
 
 	for err != nil {

@@ -17,16 +17,16 @@ package typedef_test
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/rand/v2"
 	"strings"
 	"testing"
-
-	"github.com/scylladb/gemini/pkg/replication"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -68,7 +68,11 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 				Name: simpleType.Name(),
 				Type: simpleType,
 			},
-			expected: fmt.Sprintf("{\"type\":\"%s\",\"name\":\"%s\"}", simpleType.Name(), simpleType.Name()),
+			expected: fmt.Sprintf(
+				"{\"type\":\"%s\",\"name\":\"%s\"}",
+				simpleType.Name(),
+				simpleType.Name(),
+			),
 		})
 	}
 	udtTypes := map[string]typedef.SimpleType{}
@@ -98,7 +102,7 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err.Error())
 			}
-			fmt.Println(tcase.expected)
+			log.Println(tcase.expected)
 
 			if diff := cmp.Diff(string(marshaledData), tcase.expected); diff != "" {
 				t.Errorf("Comparison failed: %s", diff)
@@ -231,7 +235,11 @@ func TestValidColumnsForDelete(t *testing.T) {
 
 	validColsToDelete := s1.Tables[0].ValidColumnsForDelete()
 	if fmt.Sprintf("%v", expected) != fmt.Sprintf("%v", validColsToDelete) {
-		t.Errorf("wrong valid columns for delete. Expected:%v .Received:%v", expected, validColsToDelete)
+		t.Errorf(
+			"wrong valid columns for delete. Expected:%v .Received:%v",
+			expected,
+			validColsToDelete,
+		)
 	}
 
 	s1.Tables[0].MaterializedViews[0].NonPrimaryKey = s1.Tables[0].Columns[4]
@@ -241,18 +249,32 @@ func TestValidColumnsForDelete(t *testing.T) {
 	}
 	validColsToDelete = s1.Tables[0].ValidColumnsForDelete()
 	if fmt.Sprintf("%v", expected) != fmt.Sprintf("%v", validColsToDelete) {
-		t.Errorf("wrong valid columns for delete. Expected:%v .Received:%v", expected, validColsToDelete)
+		t.Errorf(
+			"wrong valid columns for delete. Expected:%v .Received:%v",
+			expected,
+			validColsToDelete,
+		)
 	}
 
-	s1.Tables[0].MaterializedViews = append(s1.Tables[0].MaterializedViews, s1.Tables[0].MaterializedViews[0])
+	s1.Tables[0].MaterializedViews = append(
+		s1.Tables[0].MaterializedViews,
+		s1.Tables[0].MaterializedViews[0],
+	)
 	s1.Tables[0].MaterializedViews[1].NonPrimaryKey = s1.Tables[0].Columns[3]
-	s1.Tables[0].MaterializedViews = append(s1.Tables[0].MaterializedViews, s1.Tables[0].MaterializedViews[0])
+	s1.Tables[0].MaterializedViews = append(
+		s1.Tables[0].MaterializedViews,
+		s1.Tables[0].MaterializedViews[0],
+	)
 	s1.Tables[0].MaterializedViews[2].NonPrimaryKey = s1.Tables[0].Columns[2]
 
 	expected = typedef.Columns{}
 	validColsToDelete = s1.Tables[0].ValidColumnsForDelete()
 	if fmt.Sprintf("%v", expected) != fmt.Sprintf("%v", validColsToDelete) {
-		t.Errorf("wrong valid columns for delete. Expected:%v .Received:%v", expected, validColsToDelete)
+		t.Errorf(
+			"wrong valid columns for delete. Expected:%v .Received:%v",
+			expected,
+			validColsToDelete,
+		)
 	}
 }
 

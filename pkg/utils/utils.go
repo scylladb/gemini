@@ -26,9 +26,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pkg/errors"
-
 	"github.com/gocql/gocql"
+	"github.com/pkg/errors"
 )
 
 var maxDateMs = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC).UTC().UnixMilli()
@@ -37,7 +36,7 @@ var maxDateMs = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC).UTC().U
 // it is done in such way because we wanted to make JSON statement to work
 // but scylla supports only string representation of date in JSON format
 func RandDateStr(rnd *rand.Rand) string {
-	return time.UnixMilli(rnd.Int64N(maxDateMs)).UTC().Format("2006-01-02")
+	return time.UnixMilli(rnd.Int64N(maxDateMs)).UTC().Format(time.DateOnly)
 }
 
 // RandTimestamp generates timestamp in nanoseconds
@@ -62,10 +61,17 @@ func RandTime(rnd *rand.Rand) int64 {
 
 func RandIPV4Address(rnd *rand.Rand, v, pos int) string {
 	if pos < 0 || pos > 4 {
-		panic(fmt.Sprintf("invalid position for the desired value of the IP part %d, 0-3 supported", pos))
+		panic(
+			fmt.Sprintf(
+				"invalid position for the desired value of the IP part %d, 0-3 supported",
+				pos,
+			),
+		)
 	}
 	if v < 0 || v > 255 {
-		panic(fmt.Sprintf("invalid value for the desired position %d of the IP, 0-255 suppoerted", v))
+		panic(
+			fmt.Sprintf("invalid value for the desired position %d of the IP, 0-255 suppoerted", v),
+		)
 	}
 	var blocks []string
 	for i := 0; i < 4; i++ {

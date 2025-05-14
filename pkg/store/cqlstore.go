@@ -16,9 +16,8 @@ package store
 
 import (
 	"context"
-	"time"
-
 	errs "errors"
+	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
@@ -83,7 +82,11 @@ func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, _ time.Tim
 	if err := query.Exec(); err != nil {
 		if errs.Is(err, context.DeadlineExceeded) {
 			if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for mutation query"); w != nil {
-				w.Write(zap.String("system", cs.system), zap.String("query", queryBody), zap.Error(err))
+				w.Write(
+					zap.String("system", cs.system),
+					zap.String("query", queryBody),
+					zap.Error(err),
+				)
 			}
 		}
 		if !ignore(err) {

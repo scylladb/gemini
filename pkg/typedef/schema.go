@@ -58,7 +58,10 @@ func (s *Schema) Validate(distributionSize uint64) error {
 			// With low partition variations there is a chance that partition can become stale due to the
 			// murmur hash not hitting it
 			// To avoid this scenario we need to make sure that every given partition could hold at least 100 values
-			return errors.Errorf("pk size %d is less than --token-range-slices multiplied by 100", uint64(pkVariations))
+			return errors.Errorf(
+				"pk size %d is less than --token-range-slices multiplied by 100",
+				uint64(pkVariations),
+			)
 		}
 	}
 	return nil

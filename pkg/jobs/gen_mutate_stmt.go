@@ -26,7 +26,14 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func GenMutateStmt(s *typedef.Schema, t *typedef.Table, g generators.Interface, r *rand.Rand, p *typedef.PartitionRangeConfig, deletes bool) (*typedef.Stmt, error) {
+func GenMutateStmt(
+	s *typedef.Schema,
+	t *typedef.Table,
+	g generators.Interface,
+	r *rand.Rand,
+	p *typedef.PartitionRangeConfig,
+	deletes bool,
+) (*typedef.Stmt, error) {
 	t.RLock()
 	defer t.RUnlock()
 
@@ -34,10 +41,7 @@ func GenMutateStmt(s *typedef.Schema, t *typedef.Table, g generators.Interface, 
 	if valuesWithToken == nil {
 		return nil, nil
 	}
-	useLWT := false
-	if p.UseLWT && r.Uint32()%10 == 0 {
-		useLWT = true
-	}
+	useLWT := p.UseLWT && r.Uint32()%10 == 0
 
 	if !deletes {
 		return genInsertOrUpdateStmt(s, t, valuesWithToken, r, p, useLWT)
@@ -72,10 +76,20 @@ func genInsertOrUpdateStmt(
 	return genInsertStmt(s, t, valuesWithToken, r, p, useLWT)
 }
 
-func genUpdateStmt(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
+func genUpdateStmt(
+	_ *typedef.Schema,
+	t *typedef.Table,
+	valuesWithToken *typedef.ValueWithToken,
+	r *rand.Rand,
+	p *typedef.PartitionRangeConfig,
+) (*typedef.Stmt, error) {
 	stmtCache := t.GetQueryCache(typedef.CacheUpdate)
 	nonCounters := t.Columns.NonCounters()
-	values := make(typedef.Values, 0, t.PartitionKeys.LenValues()+t.ClusteringKeys.LenValues()+nonCounters.LenValues())
+	values := make(
+		typedef.Values,
+		0,
+		t.PartitionKeys.LenValues()+t.ClusteringKeys.LenValues()+nonCounters.LenValues(),
+	)
 	for _, cdef := range nonCounters {
 		values = appendValue(cdef.Type, r, p, values)
 	}
@@ -98,7 +112,11 @@ func genInsertStmt(
 	p *typedef.PartitionRangeConfig,
 	useLWT bool,
 ) (*typedef.Stmt, error) {
-	values := make(typedef.Values, 0, t.PartitionKeys.LenValues()+t.ClusteringKeys.LenValues()+t.Columns.LenValues())
+	values := make(
+		typedef.Values,
+		0,
+		t.PartitionKeys.LenValues()+t.ClusteringKeys.LenValues()+t.Columns.LenValues(),
+	)
 	values = values.CopyFrom(valuesWithToken.Value)
 	for _, ck := range t.ClusteringKeys {
 		values = append(values, ck.Type.GenValue(r, p)...)
@@ -165,7 +183,13 @@ func genInsertJSONStmt(
 	}, nil
 }
 
-func genDeleteRows(_ *typedef.Schema, t *typedef.Table, valuesWithToken *typedef.ValueWithToken, r *rand.Rand, p *typedef.PartitionRangeConfig) (*typedef.Stmt, error) {
+func genDeleteRows(
+	_ *typedef.Schema,
+	t *typedef.Table,
+	valuesWithToken *typedef.ValueWithToken,
+	r *rand.Rand,
+	p *typedef.PartitionRangeConfig,
+) (*typedef.Stmt, error) {
 	stmtCache := t.GetQueryCache(typedef.CacheDelete)
 	values := valuesWithToken.Value.Copy()
 	if len(t.ClusteringKeys) > 0 {

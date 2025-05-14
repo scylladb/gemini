@@ -101,7 +101,11 @@ func genInsertStmtCache(
 	s *typedef.Schema,
 	t *typedef.Table,
 ) *typedef.StmtCache {
-	allTypes := make([]typedef.Type, 0, t.PartitionKeys.Len()+t.ClusteringKeys.Len()+t.Columns.Len())
+	allTypes := make(
+		[]typedef.Type,
+		0,
+		t.PartitionKeys.Len()+t.ClusteringKeys.Len()+t.Columns.Len(),
+	)
 	builder := qb.Insert(s.Keyspace.Name + "." + t.Name)
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Columns(pk.Name)
@@ -137,7 +141,11 @@ func genInsertIfNotExistsStmtCache(
 }
 
 func genUpdateStmtCache(s *typedef.Schema, t *typedef.Table) *typedef.StmtCache {
-	allTypes := make([]typedef.Type, 0, t.PartitionKeys.Len()+t.ClusteringKeys.Len()+t.Columns.Len())
+	allTypes := make(
+		[]typedef.Type,
+		0,
+		t.PartitionKeys.Len()+t.ClusteringKeys.Len()+t.Columns.Len(),
+	)
 	builder := qb.Update(s.Keyspace.Name + "." + t.Name)
 
 	for _, cdef := range t.Columns {

@@ -109,7 +109,8 @@ func TestSchemaConfigValidate(t *testing.T) {
 
 // TestSchemaMarshalUnmarshalNotChanged main task of this test catch all possible changes in json representation of schema and notify QA about this.
 //
-// If any change was catch and if you sure that this changes really needed - you should notify QA about this changes by create new issue https://github.com/scylladb/scylla-cluster-tests/issues/new
+// If any change was catch and if you sure that this changes really needed - you should notify QA about this changes by create new issue
+// https://github.com/scylladb/scylla-cluster-tests/issues/new
 // Only then you can rewrite expected data file
 func TestSchemaMarshalUnmarshalNotChanged(t *testing.T) {
 	expectedFilePath := "./test_expected_data/full_schema.json"
@@ -126,8 +127,10 @@ func TestSchemaMarshalUnmarshalNotChanged(t *testing.T) {
 
 	if diff := cmp.Diff(fullSchemaExpected, fullSchemaMarshaled); diff != "" {
 		t.Errorf("schema not the same after marshal, diff=%s", diff)
-		t.Error("if you sure that this changes really needed - you should notify QA about this changes by create new issue https://github.com/scylladb/scylla-cluster-tests/issues/new\n" +
-			"Only then you can rewrite expected data file")
+		t.Error(
+			"if you sure that this changes really needed - you should notify QA about this changes by create new issue https://github.com/scylladb/scylla-cluster-tests/issues/new\n" +
+				"Only then you can rewrite expected data file",
+		)
 	}
 
 	fullSchemaExpectedUnmarshalled := Schema{}
@@ -145,8 +148,10 @@ func TestSchemaMarshalUnmarshalNotChanged(t *testing.T) {
 	fullSchema.Config = SchemaConfig{}
 	if diff := cmp.Diff(fullSchema, fullSchemaExpectedUnmarshalled, opts); diff != "" {
 		t.Errorf("schema not the same after unmarshal, diff=%s", diff)
-		t.Error("if you sure that this changes really needed - you should notify QA about this changes by create new issue https://github.com/scylladb/scylla-cluster-tests/issues/new\n" +
-			"Only then you can rewrite expected data file")
+		t.Error(
+			"if you sure that this changes really needed - you should notify QA about this changes by create new issue https://github.com/scylladb/scylla-cluster-tests/issues/new\n" +
+				"Only then you can rewrite expected data file",
+		)
 	}
 }
 
@@ -206,7 +211,13 @@ var fullSchema = Schema{
 			},
 			MaterializedViews: nil,
 			KnownIssues:       map[string]bool{KnownIssuesJSONWithTuples: true},
-			TableOptions:      []string{"compression = {'sstable_compression':'LZ4Compressor'}", "read_repair_chance = 1.0", "comment = 'Important records'", "cdc = {'enabled':'true','preimage':'true'}", "compaction = {'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}"},
+			TableOptions: []string{
+				"compression = {'sstable_compression':'LZ4Compressor'}",
+				"read_repair_chance = 1.0",
+				"comment = 'Important records'",
+				"cdc = {'enabled':'true','preimage':'true'}",
+				"compaction = {'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
+			},
 		}, {
 			Name: "tb1",
 			PartitionKeys: Columns{
@@ -304,8 +315,14 @@ var fullSchema = Schema{
 					},
 				},
 			},
-			KnownIssues:  map[string]bool{KnownIssuesJSONWithTuples: true},
-			TableOptions: []string{"compression = {'sstable_compression':'LZ4Compressor'}", "read_repair_chance = 1.0", "comment = 'Important records'", "cdc = {'enabled':'true','preimage':'true'}", "compaction = {'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}"},
+			KnownIssues: map[string]bool{KnownIssuesJSONWithTuples: true},
+			TableOptions: []string{
+				"compression = {'sstable_compression':'LZ4Compressor'}",
+				"read_repair_chance = 1.0",
+				"comment = 'Important records'",
+				"cdc = {'enabled':'true','preimage':'true'}",
+				"compaction = {'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
+			},
 		}, {
 			Name: "tb2",
 			PartitionKeys: Columns{
@@ -326,9 +343,13 @@ var fullSchema = Schema{
 			Columns: Columns{
 				{Name: "col0", Type: &UDTType{
 					ComplexType: "udt",
-					ValueTypes:  map[string]SimpleType{"udt_10.1": TypeBigint, "udt_10.2": TypeDate, "udt_10.3": TypeBlob},
-					TypeName:    "udt_10",
-					Frozen:      false,
+					ValueTypes: map[string]SimpleType{
+						"udt_10.1": TypeBigint,
+						"udt_10.2": TypeDate,
+						"udt_10.3": TypeBlob,
+					},
+					TypeName: "udt_10",
+					Frozen:   false,
 				}},
 				{Name: "col1", Type: &MapType{
 					ComplexType: "map",
@@ -378,8 +399,14 @@ var fullSchema = Schema{
 					},
 				},
 			},
-			KnownIssues:  map[string]bool{KnownIssuesJSONWithTuples: true},
-			TableOptions: []string{"compression = {'sstable_compression':'LZ4Compressor'}", "read_repair_chance = 1.0", "comment = 'Important records'", "cdc = {'enabled':'true','preimage':'true'}", "compaction = {'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}"},
+			KnownIssues: map[string]bool{KnownIssuesJSONWithTuples: true},
+			TableOptions: []string{
+				"compression = {'sstable_compression':'LZ4Compressor'}",
+				"read_repair_chance = 1.0",
+				"comment = 'Important records'",
+				"cdc = {'enabled':'true','preimage':'true'}",
+				"compaction = {'class':'LeveledCompactionStrategy','enabled':true,'sstable_size_in_mb':160,'tombstone_compaction_interval':86400,'tombstone_threshold':0.2}",
+			},
 		},
 	},
 	Config: SchemaConfig{

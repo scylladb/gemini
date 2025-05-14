@@ -25,44 +25,64 @@ import (
 var mutateDataPath = "./test_expected_data/mutate/"
 
 func TestGenInsertStmt(t *testing.T) {
-	RunStmtTest[results](t, path.Join(mutateDataPath, "insert.json"), genInsertStmtCases, func(t *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
-		schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
-		prc := schema.Config.GetPartitionRangeConfig()
-		useLWT := testutils.GetOptionsFromCaseName(caseName).GetBool("lwt")
-		stmt, err := genInsertStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc, useLWT)
-		validateStmt(t, stmt, err)
-		expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
-	})
+	RunStmtTest[results](
+		t,
+		path.Join(mutateDataPath, "insert.json"),
+		genInsertStmtCases,
+		func(t *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
+			prc := schema.Config.GetPartitionRangeConfig()
+			useLWT := testutils.GetOptionsFromCaseName(caseName).GetBool("lwt")
+			stmt, err := genInsertStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc, useLWT)
+			validateStmt(t, stmt, err)
+			expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
+		},
+	)
 }
 
 func TestGenInsertJSONStmt(t *testing.T) {
-	RunStmtTest[results](t, path.Join(mutateDataPath, "insert_j.json"), genInsertJSONStmtCases, func(t *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
-		schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
-		prc := schema.Config.GetPartitionRangeConfig()
-		stmt, err := genInsertJSONStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc)
-		validateStmt(t, stmt, err)
-		expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
-	})
+	RunStmtTest[results](
+		t,
+		path.Join(mutateDataPath, "insert_j.json"),
+		genInsertJSONStmtCases,
+		func(t *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
+			prc := schema.Config.GetPartitionRangeConfig()
+			stmt, err := genInsertJSONStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc)
+			validateStmt(t, stmt, err)
+			expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
+		},
+	)
 }
 
 func TestGenUpdateStmt(t *testing.T) {
-	RunStmtTest[results](t, path.Join(mutateDataPath, "update.json"), genUpdateStmtCases, func(t *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
-		schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
-		prc := schema.Config.GetPartitionRangeConfig()
-		stmt, err := genUpdateStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc)
-		validateStmt(t, stmt, err)
-		expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
-	})
+	RunStmtTest[results](
+		t,
+		path.Join(mutateDataPath, "update.json"),
+		genUpdateStmtCases,
+		func(t *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
+			prc := schema.Config.GetPartitionRangeConfig()
+			stmt, err := genUpdateStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc)
+			validateStmt(t, stmt, err)
+			expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
+		},
+	)
 }
 
 func TestGenDeleteRows(t *testing.T) {
-	RunStmtTest[results](t, path.Join(mutateDataPath, "delete.json"), genDeleteStmtCases, func(t *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
-		schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
-		prc := schema.Config.GetPartitionRangeConfig()
-		stmt, err := genDeleteRows(schema, schema.Tables[0], gen.Get(), rnd, &prc)
-		validateStmt(t, stmt, err)
-		expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
-	})
+	RunStmtTest[results](
+		t,
+		path.Join(mutateDataPath, "delete.json"),
+		genDeleteStmtCases,
+		func(t *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
+			schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
+			prc := schema.Config.GetPartitionRangeConfig()
+			stmt, err := genDeleteRows(schema, schema.Tables[0], gen.Get(), rnd, &prc)
+			validateStmt(t, stmt, err)
+			expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
+		},
+	)
 }
 
 func BenchmarkGenInsertStmt(t *testing.B) {

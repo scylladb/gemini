@@ -71,7 +71,7 @@ fieldalign:
 
 .PHONY: fmt
 fmt:
-	@go tool gofumpt -w -extra .
+	@go tool golangci-lint fmt
 
 .PHONY: build
 build:

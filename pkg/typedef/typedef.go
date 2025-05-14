@@ -150,7 +150,10 @@ func (st StatementType) String() string {
 
 func (st StatementType) OpType() OpType {
 	switch st {
-	case SelectStatementType, SelectRangeStatementType, SelectByIndexStatementType, SelectFromMaterializedViewStatementType:
+	case SelectStatementType,
+		SelectRangeStatementType,
+		SelectByIndexStatementType,
+		SelectFromMaterializedViewStatementType:
 		return OpSelect
 	case InsertStatementType, InsertJSONStatementType:
 		return OpInsert
@@ -248,7 +251,12 @@ func prettyCQL(builder *bytes.Buffer, q string, values Values, types []Type) err
 		var value any
 
 		if i >= len(types) {
-			return errors.Errorf("there are more(%d) ? in the query than types(%d), invalid Query: %s", len(types), i, q)
+			return errors.Errorf(
+				"there are more(%d) ? in the query than types(%d), invalid Query: %s",
+				len(types),
+				i,
+				q,
+			)
 		}
 
 		switch tt := types[i].(type) {
