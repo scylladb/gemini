@@ -205,7 +205,7 @@ require (
 	mvdan.cc/unparam v0.0.0-20240528143540-8a5130ca722f // indirect
 )
 
-replace github.com/gocql/gocql => github.com/scylladb/gocql v1.14.4
+replace github.com/gocql/gocql => github.com/scylladb/gocql v1.15.0
 
 tool (
 	github.com/golangci/golangci-lint/cmd/golangci-lint
