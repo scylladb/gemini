@@ -29,7 +29,6 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/pkg/errors"
-	"go.uber.org/multierr"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -38,18 +37,25 @@ const (
 	defaultChanSize   = 1024
 	defaultBufferSize = 2048
 	errorsOnFileLimit = 5
+
+	bufioWriterSize = 8192 * 4
 )
 
 type (
+	flusher interface {
+		io.Writer
+		Flush() error
+	}
+
 	StmtToFile interface {
 		LogStmt(stmt *typedef.Stmt, ts ...time.Time) error
 		Close() error
 	}
 
 	logger struct {
-		writer  *bufio.Writer
-		fd      io.Writer
-		channel chan *bytes.Buffer
+		writer  flusher
+		fd      io.Closer
+		channel chan []byte
 		cancel  context.CancelFunc
 		pool    sync.Pool
 		wg      sync.WaitGroup
@@ -73,7 +79,8 @@ func NewFileLogger(filename string, compression Compression) (StmtToFile, error)
 func NewLogger(w io.Writer, compression Compression) (StmtToFile, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	var writer *bufio.Writer
+	var writer flusher
+	var closer io.Closer
 	switch compression {
 	case ZSTDCompression:
 		zstdWriter, err := zstd.NewWriter(w,
@@ -85,7 +92,8 @@ func NewLogger(w io.Writer, compression Compression) (StmtToFile, error) {
 			return nil, err
 		}
 
-		writer = bufio.NewWriterSize(zstdWriter, 8192)
+		writer = bufio.NewWriterSize(zstdWriter, bufioWriterSize)
+		closer = zstdWriter
 	case GZIPCompression:
 		gzipWriter, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
 		if err != nil {
@@ -93,15 +101,19 @@ func NewLogger(w io.Writer, compression Compression) (StmtToFile, error) {
 			return nil, err
 		}
 
-		writer = bufio.NewWriterSize(gzipWriter, 8192)
+		writer = bufio.NewWriterSize(gzipWriter, bufioWriterSize)
+		closer = gzipWriter
 	default:
-		writer = bufio.NewWriterSize(w, 8192)
+		if c, ok := w.(io.Closer); ok {
+			closer = c
+		}
+		writer = bufio.NewWriterSize(w, bufioWriterSize)
 	}
 
 	out := &logger{
 		writer:  writer,
-		fd:      w,
-		channel: make(chan *bytes.Buffer, defaultChanSize),
+		fd:      closer,
+		channel: make(chan []byte, defaultChanSize),
 		cancel:  cancel,
 		pool: sync.Pool{
 			New: func() any {
@@ -117,6 +129,11 @@ func NewLogger(w io.Writer, compression Compression) (StmtToFile, error) {
 
 func (fl *logger) LogStmt(stmt *typedef.Stmt, ts ...time.Time) error {
 	buffer := fl.pool.Get().(*bytes.Buffer)
+	defer func() {
+		buffer.Reset()
+		fl.pool.Put(buffer)
+	}()
+
 	if err := stmt.PrettyCQLBuffered(buffer); err != nil {
 		return err
 	}
@@ -124,14 +141,17 @@ func (fl *logger) LogStmt(stmt *typedef.Stmt, ts ...time.Time) error {
 	opType := stmt.QueryType.OpType()
 
 	if len(ts) > 0 && !ts[0].IsZero() && (opType == typedef.OpInsert || opType == typedef.OpUpdate || opType == typedef.OpDelete) {
-		buffer.WriteString(" USING TIMESTAMP ")
-		buffer.WriteString(strconv.FormatInt(ts[0].UnixMicro(), 10))
+		_, _ = buffer.WriteString(" USING TIMESTAMP ")
+		_, _ = buffer.WriteString(strconv.FormatInt(ts[0].UnixMicro(), 10))
 	}
 
-	buffer.WriteString(";\n")
+	_, _ = buffer.WriteString(";\n")
+
+	data := make([]byte, buffer.Len())
+	copy(data, buffer.Bytes())
 
 	if fl.active.Load() {
-		fl.channel <- buffer
+		fl.channel <- data
 	}
 
 	return nil
@@ -145,13 +165,17 @@ func (fl *logger) Close() error {
 	// Wait for commiter to drain the channel
 	fl.wg.Wait()
 
-	err := multierr.Append(nil, fl.writer.Flush())
-
-	if closer, ok := fl.fd.(io.Closer); ok {
-		err = multierr.Append(err, closer.Close())
+	if err := fl.writer.Flush(); err != nil {
+		return err
 	}
 
-	return err
+	if fl.fd != nil {
+		if err := fl.fd.Close(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (fl *logger) committer(ctx context.Context) {
@@ -159,16 +183,12 @@ func (fl *logger) committer(ctx context.Context) {
 	defer fl.wg.Done()
 	errsAtRow := 0
 
-	drain := func(rec *bytes.Buffer) {
-		defer func() {
-			rec.Reset()
-			fl.pool.Put(rec)
-		}()
-
-		if _, err := rec.WriteTo(fl.writer); err != nil {
+	drain := func(rec []byte) {
+		if _, err := fl.writer.Write(rec); err != nil {
 			if errors.Is(err, os.ErrClosed) || errsAtRow > errorsOnFileLimit {
 				return
 			}
+
 			errsAtRow++
 			log.Printf("failed to write to writer %+v", err)
 		} else {
@@ -176,20 +196,29 @@ func (fl *logger) committer(ctx context.Context) {
 		}
 	}
 
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+outer:
 	for {
 		select {
 		case <-ctx.Done():
-			for rec := range fl.channel {
-				drain(rec)
-			}
-			return
+			break outer
 		case rec, ok := <-fl.channel:
 			if !ok {
-				return
+				break outer
 			}
 
 			drain(rec)
+		case <-ticker.C:
+			if err := fl.writer.Flush(); err != nil {
+				log.Printf("failed to write to writer %+v", err)
+			}
 		}
+	}
+
+	for rec := range fl.channel {
+		drain(rec)
 	}
 }
 
