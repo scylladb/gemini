@@ -22,9 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"gopkg.in/inf.v0"
-
 	"github.com/google/go-cmp/cmp"
+	"gopkg.in/inf.v0"
 )
 
 func TestValues(t *testing.T) {
@@ -52,7 +51,9 @@ func TestValues(t *testing.T) {
 var stmt = &Stmt{
 	StmtCache: &StmtCache{
 		//nolint:lll
-		Query:     SimpleQuery{`INSERT INTO tbl(col1, col2, col3, col4, col5, col6,col7,col8,col9,cold10,col11,col12,col13,col14,col15,col16,col17,col18,col19,col20) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);`},
+		Query: SimpleQuery{
+			`INSERT INTO tbl(col1, col2, col3, col4, col5, col6,col7,col8,col9,cold10,col11,col12,col13,col14,col15,col16,col17,col18,col19,col20) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);`,
+		},
 		QueryType: InsertStatementType,
 		Types: Types{
 			TypeAscii,
@@ -82,7 +83,7 @@ var stmt = &Stmt{
 		big.NewInt(10),
 		"a",
 		true,
-		millennium.Format("2006-01-02"),
+		millennium.Format(time.DateOnly),
 		inf.NewDec(1000, 0),
 		10.0,
 		10 * time.Minute,

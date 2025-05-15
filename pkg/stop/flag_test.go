@@ -121,7 +121,12 @@ func testSignals(
 	checkFuncName = strings.ReplaceAll(checkFuncName, ").", ".")
 
 	if workersDone.Load() != uint32(workers) {
-		t.Errorf("Error:%s or %s functions works not correctly %[2]s=%v", setFuncName, checkFuncName, checkFunc())
+		t.Errorf(
+			"Error:%s or %s functions works not correctly %[2]s=%v",
+			setFuncName,
+			checkFuncName,
+			checkFunc(),
+		)
 	}
 }
 
@@ -257,11 +262,27 @@ func (t *parentChildInfo) checkFlagState(flag *stop.Flag, expectedState uint32) 
 	flagName := flag.Name()
 	state := t.getFlagHandlerState(flagName)
 	if state != expectedState {
-		err = errors.Join(err, fmt.Errorf("flag %s handler has state %s while it is expected to be %s", flagName, stop.GetStateName(state), stop.GetStateName(expectedState)))
+		err = errors.Join(
+			err,
+			fmt.Errorf(
+				"flag %s handler has state %s while it is expected to be %s",
+				flagName,
+				stop.GetStateName(state),
+				stop.GetStateName(expectedState),
+			),
+		)
 	}
 	flagState := getFlagState(flag)
 	if stop.GetStateName(expectedState) != flagState {
-		err = errors.Join(err, fmt.Errorf("flag %s has state %s while it is expected to be %s", flagName, flagState, stop.GetStateName(expectedState)))
+		err = errors.Join(
+			err,
+			fmt.Errorf(
+				"flag %s has state %s while it is expected to be %s",
+				flagName,
+				flagState,
+				stop.GetStateName(expectedState),
+			),
+		)
 	}
 	return err
 }

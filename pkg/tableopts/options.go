@@ -47,7 +47,10 @@ func (o *MapOption) ToCQL() string {
 func FromCQL(cql string) (Option, error) {
 	parts := strings.Split(cql, "=")
 	if len(parts) != 2 {
-		return nil, errors.Errorf("invalid table option, exactly two parts separated by '=' is needed, input=%s", cql)
+		return nil, errors.Errorf(
+			"invalid table option, exactly two parts separated by '=' is needed, input=%s",
+			cql,
+		)
 	}
 
 	keyPart := strings.TrimSpace(parts[0])

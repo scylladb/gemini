@@ -66,7 +66,15 @@ func GenCheckStmt(
 				numQueryPKs = 1
 			}
 			maxClusteringRels := utils.RandInt2(rnd, 0, table.ClusteringKeys.Len())
-			return genMultiplePartitionClusteringRangeQuery(s, table, g, rnd, p, numQueryPKs, maxClusteringRels)
+			return genMultiplePartitionClusteringRangeQuery(
+				s,
+				table,
+				g,
+				rnd,
+				p,
+				numQueryPKs,
+				maxClusteringRels,
+			)
 		case 4:
 			// Reducing the probability to hit these since they often take a long time to run
 			switch rnd.IntN(5) {
@@ -102,7 +110,16 @@ func GenCheckStmt(
 			}
 			lenClusteringKeys := table.MaterializedViews[mvNum].ClusteringKeys.Len()
 			maxClusteringRels := utils.RandInt2(rnd, 0, lenClusteringKeys)
-			return genMultiplePartitionClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs, maxClusteringRels)
+			return genMultiplePartitionClusteringRangeQueryMv(
+				s,
+				table,
+				g,
+				rnd,
+				p,
+				mvNum,
+				numQueryPKs,
+				maxClusteringRels,
+			)
 		}
 	}
 

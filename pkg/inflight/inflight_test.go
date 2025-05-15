@@ -98,7 +98,10 @@ func TestAutoShrink(t *testing.T) {
 	}
 	time.Sleep(time.Second / 2)
 	if flight.deleted != 0 {
-		t.Fatal("expect that shrink is been executed and deleted dropped back to 0, but got ", flight.deleted)
+		t.Fatal(
+			"expect that shrink is been executed and deleted dropped back to 0, but got ",
+			flight.deleted,
+		)
 	}
 }
 

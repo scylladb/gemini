@@ -21,11 +21,10 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-	"go.uber.org/zap"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/zap"
 )
 
 var CQLRequests = promauto.NewCounterVec(

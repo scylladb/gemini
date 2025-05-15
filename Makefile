@@ -18,7 +18,7 @@ DURATION ?= 10m
 WARMUP ?= 0
 MODE ?= mixed
 DATASET_SIZE ?= large
-SEED ?= $(shell date +%s)
+GEMINI_SEED := $(shell echo $$((RANDOM % 100 + 1)))
 GEMINI_BINARY ?= $(PWD)/bin/gemini
 GEMINI_DOCKER_NETWORK ?= gemini
 
@@ -41,8 +41,8 @@ GEMINI_FLAGS ?= --fail-fast \
 	--oracle-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 	--concurrency=$(CONCURRENCY) \
 	--dataset-size=$(DATASET_SIZE) \
-	--seed=$(SEED) \
-	--schema-seed=$(SEED) \
+	--seed=$(GEMINI_SEED) \
+	--schema-seed=$(GEMINI_SEED) \
 	--cql-features=$(CQL_FEATURES) \
 	--duration=$(DURATION) \
 	--warmup=$(WARMUP) \
@@ -71,7 +71,7 @@ fieldalign:
 
 .PHONY: fmt
 fmt:
-	@go tool gofumpt -w -extra .
+	@go tool golangci-lint fmt
 
 .PHONY: build
 build:

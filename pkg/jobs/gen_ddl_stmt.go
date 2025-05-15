@@ -24,7 +24,13 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, _ *typedef.PartitionRangeConfig, sc *typedef.SchemaConfig) (*typedef.Stmts, error) {
+func GenDDLStmt(
+	s *typedef.Schema,
+	t *typedef.Table,
+	r *rand.Rand,
+	_ *typedef.PartitionRangeConfig,
+	sc *typedef.SchemaConfig,
+) (*typedef.Stmts, error) {
 	maxVariant := 1
 	validCols := t.ValidColumnsForDelete()
 	if validCols.Len() > 0 {
@@ -44,11 +50,20 @@ func GenDDLStmt(s *typedef.Schema, t *typedef.Table, r *rand.Rand, _ *typedef.Pa
 	}
 }
 
-func appendValue(columnType typedef.Type, r *rand.Rand, p *typedef.PartitionRangeConfig, values []any) []any {
+func appendValue(
+	columnType typedef.Type,
+	r *rand.Rand,
+	p *typedef.PartitionRangeConfig,
+	values []any,
+) []any {
 	return append(values, columnType.GenValue(r, p)...)
 }
 
-func genAddColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnDef) (*typedef.Stmts, error) {
+func genAddColumnStmt(
+	t *typedef.Table,
+	keyspace string,
+	column *typedef.ColumnDef,
+) (*typedef.Stmts, error) {
 	var stmts []*typedef.Stmt
 	if c, ok := column.Type.(*typedef.UDTType); ok {
 		createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s);"
@@ -83,7 +98,11 @@ func genAddColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnD
 	}, nil
 }
 
-func genDropColumnStmt(t *typedef.Table, keyspace string, column *typedef.ColumnDef) (*typedef.Stmts, error) {
+func genDropColumnStmt(
+	t *typedef.Table,
+	keyspace string,
+	column *typedef.ColumnDef,
+) (*typedef.Stmts, error) {
 	var stmts []*typedef.Stmt
 
 	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " DROP " + column.Name

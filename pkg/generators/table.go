@@ -43,7 +43,13 @@ func GetCreateTable(t *typedef.Table, ks typedef.Keyspace) string {
 
 	var stmt string
 	if len(clusteringKeys) == 0 {
-		stmt = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s)))", ks.Name, t.Name, strings.Join(columns, ","), strings.Join(partitionKeys, ","))
+		stmt = fmt.Sprintf(
+			"CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s)))",
+			ks.Name,
+			t.Name,
+			strings.Join(columns, ","),
+			strings.Join(partitionKeys, ","),
+		)
 	} else {
 		stmt = fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s.%s (%s, PRIMARY KEY ((%s), %s))", ks.Name, t.Name, strings.Join(columns, ","),
 			strings.Join(partitionKeys, ","), strings.Join(clusteringKeys, ","))
@@ -71,7 +77,10 @@ func GetCreateTypes(t *typedef.Table, keyspace typedef.Keyspace) []string {
 		for name, typ := range c.ValueTypes {
 			typs = append(typs, name+" "+typ.CQLDef())
 		}
-		stmts = append(stmts, fmt.Sprintf(createType, keyspace.Name, c.TypeName, strings.Join(typs, ",")))
+		stmts = append(
+			stmts,
+			fmt.Sprintf(createType, keyspace.Name, c.TypeName, strings.Join(typs, ",")),
+		)
 	}
 	return stmts
 }

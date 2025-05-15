@@ -59,7 +59,7 @@ var prettytests = []struct {
 	{
 		typ:      TypeDate,
 		query:    "SELECT * FROM tbl WHERE pk0=?",
-		values:   []any{millennium.Format("2006-01-02")},
+		values:   []any{millennium.Format(time.DateOnly)},
 		expected: "SELECT * FROM tbl WHERE pk0='1999-12-31'",
 	},
 	{
@@ -117,10 +117,12 @@ var prettytests = []struct {
 		expected: "SELECT * FROM tbl WHERE pk0='" + millennium.Format("15:04:05.999") + "'",
 	},
 	{
-		typ:      TypeTimestamp,
-		query:    "SELECT * FROM tbl WHERE pk0=?",
-		values:   []any{millennium.UnixMilli()},
-		expected: "SELECT * FROM tbl WHERE pk0='" + millennium.Format("2006-01-02T15:04:05.999-0700") + "'",
+		typ:    TypeTimestamp,
+		query:  "SELECT * FROM tbl WHERE pk0=?",
+		values: []any{millennium.UnixMilli()},
+		expected: "SELECT * FROM tbl WHERE pk0='" + millennium.Format(
+			"2006-01-02T15:04:05.999-0700",
+		) + "'",
 	},
 	{
 		typ:      TypeTimeuuid,
@@ -227,7 +229,13 @@ func TestCQLPretty(t *testing.T) {
 
 			result := builder.String()
 			if result != test.expected {
-				t.Errorf("expected '%s', got '%s' for values %v and type '%v'", test.expected, result, test.values, test.typ)
+				t.Errorf(
+					"expected '%s', got '%s' for values %v and type '%v'",
+					test.expected,
+					result,
+					test.values,
+					test.typ,
+				)
 			}
 		})
 	}

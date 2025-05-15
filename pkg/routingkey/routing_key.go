@@ -18,10 +18,10 @@ import (
 	"bytes"
 	"encoding/binary"
 
+	"github.com/gocql/gocql"
+
 	"github.com/scylladb/gemini/pkg/murmur"
 	"github.com/scylladb/gemini/pkg/typedef"
-
-	"github.com/gocql/gocql"
 )
 
 type Creator struct {

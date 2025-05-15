@@ -62,9 +62,15 @@ var (
 	}
 
 	columnsCases = map[string][]typedef.Type{
-		"col0":   {},
-		"col1":   {typedef.TypeDate},
-		"col5":   {typedef.TypeAscii, typedef.TypeDate, typedef.TypeBlob, typedef.TypeBigint, typedef.TypeFloat},
+		"col0": {},
+		"col1": {typedef.TypeDate},
+		"col5": {
+			typedef.TypeAscii,
+			typedef.TypeDate,
+			typedef.TypeBlob,
+			typedef.TypeBigint,
+			typedef.TypeFloat,
+		},
 		"col5c":  {typedef.TypeAscii, &mapType, typedef.TypeBlob, &tupleType, typedef.TypeFloat},
 		"col1cr": {&counterType},
 		"col3cr": {&counterType, &counterType, &counterType},
@@ -88,7 +94,10 @@ type testInterface interface {
 	Fatalf(format string, args ...any)
 }
 
-func GetAllForTestStmt(t testInterface, testCaseName string) (*typedef.Schema, *MockGenerator, *rand.Rand) {
+func GetAllForTestStmt(
+	t testInterface,
+	testCaseName string,
+) (*typedef.Schema, *MockGenerator, *rand.Rand) {
 	rnd := rand.New(NonRandSource(1))
 	table := GetTableFromName(t, testCaseName)
 	testSchema, testSchemaCfg, err := getTestSchema(table)
@@ -103,7 +112,11 @@ func GetAllForTestStmt(t testInterface, testCaseName string) (*typedef.Schema, *
 	return testSchema, testGenerator, rnd
 }
 
-func createMv(t testInterface, table *typedef.Table, haveNonPrimaryKey bool) *typedef.MaterializedView {
+func createMv(
+	t testInterface,
+	table *typedef.Table,
+	haveNonPrimaryKey bool,
+) *typedef.MaterializedView {
 	switch haveNonPrimaryKey {
 	case true:
 		var cols typedef.Columns
@@ -128,8 +141,10 @@ func createMv(t testInterface, table *typedef.Table, haveNonPrimaryKey bool) *ty
 }
 
 func getTestSchema(table *typedef.Table) (*typedef.Schema, *typedef.SchemaConfig, error) {
-	tableOpt := createTableOptions("compaction = {'class':'LeveledCompactionStrategy','enabled':true,'tombstone_threshold':0.2," +
-		"'tombstone_compaction_interval':86400,'sstable_size_in_mb':160}")
+	tableOpt := createTableOptions(
+		"compaction = {'class':'LeveledCompactionStrategy','enabled':true,'tombstone_threshold':0.2," +
+			"'tombstone_compaction_interval':86400,'sstable_size_in_mb':160}",
+	)
 	testSchemaConfig := typedef.SchemaConfig{
 		ReplicationStrategy:              replication.NewSimpleStrategy(),
 		OracleReplicationStrategy:        replication.NewSimpleStrategy(),
@@ -257,7 +272,10 @@ func GetOptionsFromCaseName(caseName string) TestCaseOptions {
 	return options
 }
 
-func createIndexForColumns(t testInterface, columns ...*typedef.ColumnDef) (indexes []typedef.IndexDef) {
+func createIndexForColumns(
+	t testInterface,
+	columns ...*typedef.ColumnDef,
+) (indexes []typedef.IndexDef) {
 	if len(columns) < 1 {
 		t.Fatalf("wrong IdxCount case definition")
 	}
@@ -272,7 +290,11 @@ func createIndexForColumns(t testInterface, columns ...*typedef.ColumnDef) (inde
 	return indexes
 }
 
-func genColumnsFromCase(t testInterface, typeCases map[string][]typedef.Type, caseName, prefix string) typedef.Columns {
+func genColumnsFromCase(
+	t testInterface,
+	typeCases map[string][]typedef.Type,
+	caseName, prefix string,
+) typedef.Columns {
 	typeCase, ok := typeCases[caseName]
 	if !ok {
 		t.Fatalf("Error caseName:%s, not found", caseName)

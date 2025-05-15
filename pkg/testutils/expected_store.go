@@ -100,7 +100,12 @@ func (f *ExpectedStore[T]) UpdateExpected(t *testing.T) {
 	}
 }
 
-func LoadExpectedFromFile[T ExpectedEntry[T]](t *testing.T, filePath string, cases []string, updateExpected bool) *ExpectedStore[T] {
+func LoadExpectedFromFile[T ExpectedEntry[T]](
+	t *testing.T,
+	filePath string,
+	cases []string,
+	updateExpected bool,
+) *ExpectedStore[T] {
 	t.Helper()
 	expected := make(expectedList[T])
 	if updateExpected {

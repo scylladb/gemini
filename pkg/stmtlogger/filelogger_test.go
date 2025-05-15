@@ -105,7 +105,10 @@ func TestOutputToFile(t *testing.T) {
 				t.Fatalf("Failed to initialize the logger %s", err)
 			}
 
-			stmt := typedef.SimpleStmt("INSERT INTO ks1.table1(pk1) VALUES(1)", typedef.InsertStatementType)
+			stmt := typedef.SimpleStmt(
+				"INSERT INTO ks1.table1(pk1) VALUES(1)",
+				typedef.InsertStatementType,
+			)
 
 			if err = logger.LogStmt(stmt); err != nil {
 				t.Fatalf("Failed to write log %s", err)
@@ -140,7 +143,10 @@ func BenchmarkLogger(b *testing.B) {
 			logger := Must(stmtlogger.NewFileLogger(file, compression))
 			rows := &atomic.Int64{}
 
-			stmt := typedef.SimpleStmt("SELECT * FROM ks1.table1 WHERE pk1 = data", typedef.SelectStatementType)
+			stmt := typedef.SimpleStmt(
+				"SELECT * FROM ks1.table1 WHERE pk1 = data",
+				typedef.SelectStatementType,
+			)
 			b.SetParallelism(100)
 
 			b.ResetTimer()

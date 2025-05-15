@@ -18,12 +18,11 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/scylladb/gemini/pkg/typedef"
-
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/routingkey"
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 func TestRoutingKey(t *testing.T) {
