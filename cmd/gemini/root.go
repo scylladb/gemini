@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/gocql/gocql/hostpolicy"
 	"github.com/hailocab/go-hostpool"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -391,7 +392,7 @@ func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionP
 	case "round-robin":
 		return gocql.RoundRobinHostPolicy(), nil
 	case "host-pool":
-		return gocql.HostPoolHostPolicy(hostpool.New(hosts)), nil
+		return hostpolicy.HostPool(hostpool.New(hosts)), nil
 	case "token-aware":
 		return gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy()), nil
 	default:
