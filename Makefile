@@ -18,7 +18,7 @@ DURATION ?= 10m
 WARMUP ?= 0
 MODE ?= mixed
 DATASET_SIZE ?= large
-GEMINI_SEED ?= $(shell echo $$((RANDOM % 101)))
+GEMINI_SEED := $(shell echo $$((RANDOM % 100 + 1)))
 GEMINI_BINARY ?= $(PWD)/bin/gemini
 GEMINI_DOCKER_NETWORK ?= gemini
 

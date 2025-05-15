@@ -31,7 +31,7 @@ jobs:
   test:
     timeout-minutes: 20
     concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}-${{ matrix.duration }}-${{ matrix.dataset-size }}-${{ matrix.test-scylla-version }}-${{ matrix.oracle-scylla-version }}
+      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}-${{ matrix.duration }}-${{ matrix.warmup }}-${{ matrix.dataset-size }}-${{ matrix.test-scylla-version }}-${{ matrix.oracle-scylla-version }}
     needs: [build]
     runs-on: ubuntu-24.04
     strategy:
@@ -42,8 +42,8 @@ jobs:
         duration: ["3m"]
         warmup: ["0", "30s"]
         dataset-size: [large]
-        oracle-scylla-version: ["2025.1"]
-        test-scylla-version: ["2025.1"]
+        oracle-scylla-version: ["6.2"]
+        test-scylla-version: ["6.2"]
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +65,10 @@ jobs:
       - name: Test
         shell: bash
         run: |
+          SEED=$(python3 -c "import random; print(random.randint(1, 100))")
+
           make integration-test \
+            GEMINI_SEED=$SEED \
             CONCURRENCY=${{ matrix.gemini-concurrency }} \
             CQL_FEATURES=${{ matrix.gemini-features }} \
             DURATION=${{ matrix.duration }} \
@@ -81,7 +84,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: results-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}-${{ matrix.duration }}-${{ matrix.dataset-size }}-${{ matrix.test-scylla-version }}-${{ matrix.oracle-scylla-version }}-${{ github.run_number }}
+          name: results-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}-${{ matrix.duration }}-${{ matrix.warmup }}-${{ matrix.dataset-size }}-${{ matrix.test-scylla-version }}-${{ matrix.oracle-scylla-version }}-${{ github.run_number }}
           path: ./results
           if-no-files-found: error
           retention-days: 1
