@@ -18,26 +18,252 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"os"
+	"runtime"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 )
 
-var CQLRequests = promauto.NewCounterVec(
-	prometheus.CounterOpts{
-		Name: "gemini_cql_requests",
-		Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
-	},
-	[]string{"system", "method"},
+var registerer = prometheus.NewRegistry()
+
+var (
+	executionTime = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "execution_time",
+			Help:    "Time taken to execute a task.",
+			Buckets: []float64{0.001, 0.01, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 30000},
+		},
+		[]string{"task"},
+	)
+
+	CQLRequests = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cql_requests",
+			Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
+		},
+		[]string{"system", "method"},
+	)
+
+	CQLQueryTimeouts = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cql_query_timeouts",
+		},
+		[]string{"cluster", "query_type"},
+	)
+
+	GoCQLConnections = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "cql_connections",
+		},
+		[]string{"cluster", "host"},
+	)
+
+	GoCQLConnectionsErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cql_connections_errors",
+		},
+		[]string{"cluster", "host", "error"},
+	)
+
+	GoCQLConnectTime = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "cql_connect_time",
+			Help:    "Time taken to establish a connection to the CQL server.",
+			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10},
+		},
+		[]string{"cluster", "host"},
+	)
+
+	GoCQLQueries = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cql_queries",
+		},
+		[]string{"cluster", "host", "query_type"},
+	)
+
+	GoCQLQueryTime = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "cql_query_time",
+			Help:    "Time taken to execute a CQL query.",
+			Buckets: []float64{0.001, 0.01, 0.1, 0.5, 1, 2, 5, 10, 20, 50, 100},
+		},
+		[]string{"cluster", "host", "query"},
+	)
+
+	GoCQLQueryErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cql_query_errors",
+			Help: "Number of CQL query errors.",
+		},
+		[]string{"cluster", "host", "query", "error"},
+	)
+
+	GoCQLBatchQueries = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cql_batched_queries",
+		},
+		[]string{"cluster", "host", "query_type"},
+	)
+
+	GoCQLBatches = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cql_batches",
+		},
+		[]string{"cluster", "host"},
+	)
+
+	GeneratorValueGenerationTime = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name: "generated_value_generation_time",
+		},
+		[]string{"table", "partition"},
+	)
+
+	GeneratorCreatedValues = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "generated_created_values",
+		},
+		[]string{"table", "partition"},
+	)
+
+	GeneratorEmittedValues = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "generated_emitted_values",
+		},
+		[]string{"table", "partition"},
+	)
+
+	GeneratorDroppedValues = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "generated_dropped_values",
+		},
+		[]string{"table", "type"},
+	)
+
+	GeneratorFilledPartitions = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "generated_filled_partitions",
+		},
+		[]string{"table"},
+	)
+
+	GeneratorPartitionSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "generated_partition_size",
+		},
+		[]string{"table"},
+	)
+
+	StalePartitions = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "stale_partitions",
+		},
+		[]string{"table"},
+	)
+
+	GeneratorBufferSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "generated_buffer_size",
+		},
+		[]string{"table"},
+	)
+
+	MemoryMetrics = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "memory_footprint",
+		},
+		[]string{"type", "context"},
+	)
+
+	FileSizeMetrics = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "file_size_bytes",
+		},
+		[]string{"file"},
+	)
 )
+
+func init() {
+	r := prometheus.WrapRegistererWithPrefix("gemini_", registerer)
+
+	r.MustRegister(channelMetrics, executionTime)
+
+	r.MustRegister(
+		CQLRequests,
+		CQLQueryTimeouts,
+		GoCQLConnections,
+		GoCQLConnectionsErrors,
+		GoCQLConnectTime,
+		GoCQLQueries,
+		GoCQLQueryTime,
+		GoCQLQueryErrors,
+		GoCQLBatchQueries,
+		GoCQLBatches,
+		GeneratorCreatedValues,
+		GeneratorEmittedValues,
+		GeneratorFilledPartitions,
+		GeneratorPartitionSize,
+		GeneratorDroppedValues,
+		GeneratorBufferSize,
+		GeneratorValueGenerationTime,
+		StalePartitions,
+		MemoryMetrics,
+		FileSizeMetrics,
+	)
+
+	r.MustRegister(
+		collectors.NewGoCollector(
+			collectors.WithGoCollectorRuntimeMetrics(),
+		),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+			PidFn: func() (int, error) {
+				return os.Getpid(), nil
+			},
+		}),
+		collectors.NewBuildInfoCollector(),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "go_goroutines_count",
+			Help: "Number of goroutines currently active.",
+		}, func() float64 {
+			return float64(runtime.NumGoroutine())
+		}),
+		prometheus.NewCounterFunc(prometheus.CounterOpts{
+			Name: "go_gc_total_count",
+			Help: "Total number of garbage collections.",
+		}, func() float64 {
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			return float64(m.NumGC)
+		}),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name: "go_last_gc_duration_microseconds",
+			Help: "Duration of the last GC cycle.",
+		}, func() float64 {
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			return float64(m.PauseNs[(m.NumGC+255)%256]) / 1e6
+		}),
+	)
+}
 
 func StartMetricsServer(ctx context.Context, bind string, logger *zap.Logger) {
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
+		registerer, promhttp.HandlerFor(registerer, promhttp.HandlerOpts{
+			EnableOpenMetrics: true,
+			Registry:          registerer,
+			OfferedCompressions: []promhttp.Compression{
+				promhttp.Zstd,
+				promhttp.Gzip,
+				promhttp.Identity,
+			},
+		}),
+	))
 
 	server := &http.Server{
 		BaseContext: func(_ net.Listener) context.Context {
@@ -53,4 +279,13 @@ func StartMetricsServer(ctx context.Context, bind string, logger *zap.Logger) {
 			logger.Error("Failed to start Metrics server", zap.String("bind", bind), zap.Error(err))
 		}
 	}()
+}
+
+func ExecutionTime(task string, callback func()) {
+	start := time.Now()
+
+	callback()
+	executionTime.
+		WithLabelValues(task).
+		Observe(float64(time.Since(start).Nanoseconds()) / 1e3)
 }

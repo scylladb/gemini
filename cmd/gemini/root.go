@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -37,7 +38,6 @@ import (
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"golang.org/x/net/context"
 
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/distributions"
@@ -110,6 +110,10 @@ func run(cmd *cobra.Command, _ []string) error {
 	)
 	defer cancel()
 
+	logger := createLogger(level)
+
+	metrics.StartMetricsServer(ctx, bind, logger.Named("metrics"))
+
 	val, err := cmd.PersistentFlags().GetBool("version-json")
 	if err != nil {
 		return err
@@ -127,11 +131,8 @@ func run(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	logger := createLogger(level)
 	globalStatus := status.NewGlobalStatus(maxErrorsToStore)
 	defer utils.IgnoreError(logger.Sync)
-
-	metrics.StartMetricsServer(ctx, bind, logger.Named("metrics"))
 
 	if err = validateSeed(seed); err != nil {
 		return errors.Wrapf(err, "failed to parse --seed argument")
@@ -168,10 +169,8 @@ func run(cmd *cobra.Command, _ []string) error {
 			return errors.Wrap(err, "cannot create schema")
 		}
 	} else {
-		schema, intSchemaSeed, err = generateSchema(schemaConfig, schemaSeed)
-		if err != nil {
-			return errors.Wrapf(err, "failed to create schema for seed %s", schemaSeed)
-		}
+		intSchemaSeed = seedFromString(schemaSeed)
+		schema = generators.GenSchema(schemaConfig, intSchemaSeed)
 	}
 
 	testCluster, oracleCluster, err := createClusters(
@@ -201,6 +200,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
 	defer utils.IgnoreError(st.Close)
 
 	if dropSchema && mode != jobs.ReadMode {
@@ -279,6 +279,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	if globalStatus.HasErrors() {
 		return errors.Errorf("gemini encountered errors, exiting with non zero status")
 	}
+
 	return nil
 }
 
@@ -352,9 +353,16 @@ func createClusters(
 		NumRetries: 5,
 	}
 
+	testClusterObserver := store.ClusterObserver{
+		ClusterName: "test_cluster",
+	}
+
 	testCluster.Consistency = c
 	testCluster.DefaultTimestamp = !useServerSideTimestamps
 	testCluster.PoolConfig.HostSelectionPolicy = testHostSelectionPolicy
+	testCluster.ConnectObserver = testClusterObserver
+	testCluster.QueryObserver = testClusterObserver
+	testCluster.BatchObserver = testClusterObserver
 
 	if testClusterUsername != "" && testClusterPassword != "" {
 		testCluster.Authenticator = gocql.PasswordAuthenticator{
@@ -367,6 +375,10 @@ func createClusters(
 		return testCluster, nil, nil
 	}
 
+	oracleClusterObserver := store.ClusterObserver{
+		ClusterName: "oracle_cluster",
+	}
+
 	oracleCluster := gocql.NewCluster(oracleClusterHost...)
 	oracleCluster.Timeout = requestTimeout
 	oracleCluster.ConnectTimeout = connectTimeout
@@ -375,7 +387,9 @@ func createClusters(
 		Max:        60 * time.Second,
 		NumRetries: 5,
 	}
-
+	oracleCluster.ConnectObserver = oracleClusterObserver
+	oracleCluster.QueryObserver = oracleClusterObserver
+	oracleCluster.BatchObserver = oracleClusterObserver
 	oracleCluster.Consistency = c
 	oracleCluster.DefaultTimestamp = !useServerSideTimestamps
 	oracleCluster.PoolConfig.HostSelectionPolicy = oracleHostSelectionPolicy
@@ -474,32 +488,4 @@ func seedFromString(seed string) uint64 {
 	}
 	val, _ := strconv.ParseUint(seed, 10, 64)
 	return val
-}
-
-// generateSchema generates schema, if schema seed is random and schema did not pass validation it regenerates it
-func generateSchema(
-	sc typedef.SchemaConfig,
-	schemaSeed string,
-) (schema *typedef.Schema, intSchemaSeed uint64, err error) {
-	intSchemaSeed = seedFromString(schemaSeed)
-	schema = generators.GenSchema(sc, intSchemaSeed)
-	err = schema.Validate(partitionCount)
-	if err == nil {
-		return schema, intSchemaSeed, nil
-	}
-
-	if schemaSeed != "random" {
-		return nil, 0, errors.Wrap(
-			err,
-			"validation failed, running this test could end up in error or stale gemini",
-		)
-	}
-
-	for err != nil {
-		intSchemaSeed = seedFromString(schemaSeed)
-		schema = generators.GenSchema(sc, intSchemaSeed)
-		err = schema.Validate(partitionCount)
-	}
-
-	return schema, intSchemaSeed, nil
 }

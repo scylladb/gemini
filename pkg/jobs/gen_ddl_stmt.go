@@ -73,8 +73,8 @@ func genAddColumnStmt(
 		}
 		stmt := fmt.Sprintf(createType, keyspace, c.TypeName, strings.Join(typs, ","))
 		stmts = append(stmts, &typedef.Stmt{
-			StmtCache: &typedef.StmtCache{
-				Query: &builders.AlterTableBuilder{
+			StmtCache: typedef.StmtCache{
+				Query: builders.AlterTableBuilder{
 					Stmt: stmt,
 				},
 			},
@@ -82,8 +82,8 @@ func genAddColumnStmt(
 	}
 	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " ADD " + column.Name + " " + column.Type.CQLDef()
 	stmts = append(stmts, &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
-			Query: &builders.AlterTableBuilder{
+		StmtCache: typedef.StmtCache{
+			Query: builders.AlterTableBuilder{
 				Stmt: stmt,
 			},
 		},
@@ -107,8 +107,8 @@ func genDropColumnStmt(
 
 	stmt := "ALTER TABLE " + keyspace + "." + t.Name + " DROP " + column.Name
 	stmts = append(stmts, &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
-			Query: &builders.AlterTableBuilder{
+		StmtCache: typedef.StmtCache{
+			Query: builders.AlterTableBuilder{
 				Stmt: stmt,
 			},
 			QueryType: typedef.DropColumnStatementType,

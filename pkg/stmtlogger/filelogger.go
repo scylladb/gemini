@@ -22,6 +22,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/pkg/errors"
 
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -53,11 +55,12 @@ type (
 	}
 
 	logger struct {
+		pool    sync.Pool
 		writer  flusher
-		fd      io.Closer
+		closer  io.Closer
 		channel chan []byte
 		cancel  context.CancelFunc
-		pool    sync.Pool
+		metrics metrics.ChannelMetrics
 		wg      sync.WaitGroup
 		active  atomic.Bool
 	}
@@ -73,10 +76,19 @@ func NewFileLogger(filename string, compression Compression) (StmtToFile, error)
 		return nil, err
 	}
 
-	return NewLogger(fd, compression)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	runtime.SetFinalizer(fd, func(f *os.File) {
+		cancel()
+		_ = f.Close()
+	})
+
+	go fileSizeReporter(ctx, fd)
+
+	return NewLogger(filename, fd, compression)
 }
 
-func NewLogger(w io.Writer, compression Compression) (StmtToFile, error) {
+func NewLogger(name string, w io.Writer, compression Compression) (StmtToFile, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	var writer flusher
@@ -112,7 +124,8 @@ func NewLogger(w io.Writer, compression Compression) (StmtToFile, error) {
 
 	out := &logger{
 		writer:  writer,
-		fd:      closer,
+		closer:  closer,
+		metrics: metrics.NewChannelMetrics[[]byte]("statement_logger", name, defaultChanSize),
 		channel: make(chan []byte, defaultChanSize),
 		cancel:  cancel,
 		pool: sync.Pool{
@@ -125,6 +138,27 @@ func NewLogger(w io.Writer, compression Compression) (StmtToFile, error) {
 
 	go out.committer(ctx)
 	return out, nil
+}
+
+func fileSizeReporter(ctx context.Context, f *os.File) {
+	timer := time.NewTicker(1 * time.Second)
+	defer timer.Stop()
+
+	name := f.Name()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			info, err := f.Stat()
+			if err != nil {
+				continue
+			}
+
+			metrics.FileSizeMetrics.WithLabelValues(name).Set(float64(info.Size()))
+		}
+	}
 }
 
 func (fl *logger) LogStmt(stmt *typedef.Stmt, ts ...time.Time) error {
@@ -153,6 +187,7 @@ func (fl *logger) LogStmt(stmt *typedef.Stmt, ts ...time.Time) error {
 
 	if fl.active.Load() {
 		fl.channel <- data
+		fl.metrics.Inc(data)
 	}
 
 	return nil
@@ -170,8 +205,8 @@ func (fl *logger) Close() error {
 		return err
 	}
 
-	if fl.fd != nil {
-		if err := fl.fd.Close(); err != nil {
+	if fl.closer != nil {
+		if err := fl.closer.Close(); err != nil {
 			return err
 		}
 	}
@@ -209,7 +244,7 @@ outer:
 			if !ok {
 				break outer
 			}
-
+			fl.metrics.Dec(rec)
 			drain(rec)
 		case <-ticker.C:
 			if err := fl.writer.Flush(); err != nil {

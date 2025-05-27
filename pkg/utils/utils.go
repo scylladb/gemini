@@ -19,16 +19,23 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math/big"
 	"math/rand/v2"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
+	"gopkg.in/inf.v0"
 )
+
+type MemoryFootprint interface {
+	MemoryFootprint() uint64
+}
 
 var maxDateMs = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC).UTC().UnixMilli()
 
@@ -95,7 +102,11 @@ func IgnoreError(fn func() error) {
 	_ = fn()
 }
 
-func RandString(rnd *rand.Rand, ln int) string {
+func RandBytes(rnd *rand.Rand, ln int) []byte {
+	if ln <= 0 {
+		return nil
+	}
+
 	length := ln
 	if length%4 != 0 {
 		length += 4 - (length % 4)
@@ -107,7 +118,12 @@ func RandString(rnd *rand.Rand, ln int) string {
 		binary.LittleEndian.PutUint32(binBuff[i:], rnd.Uint32())
 	}
 
-	return hex.EncodeToString(binBuff)[:ln]
+	return binBuff
+}
+
+func RandString(rnd *rand.Rand, ln int) string {
+	data := RandBytes(rnd, ln)
+	return hex.EncodeToString(data)[:ln]
 }
 
 func UUIDFromTime(rnd *rand.Rand) string {
@@ -141,5 +157,69 @@ func CreateFile(input string, def ...io.Writer) (io.Writer, error) {
 		})
 
 		return w, nil
+	}
+}
+
+func innerDataSize(v any) uint64 {
+	if v == nil {
+		return 0
+	}
+
+	switch val := v.(type) {
+	case MemoryFootprint:
+		return val.MemoryFootprint()
+	case string:
+		return uint64(len(val))
+	case []byte:
+		return uint64(len(val))
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64, bool, time.Duration:
+		return uint64(unsafe.Sizeof(v))
+	case *big.Int:
+		return uint64(val.BitLen()/8 + 1)
+	case *inf.Dec:
+		return uint64(val.UnscaledBig().BitLen()/8+1) + uint64(unsafe.Sizeof(int32(0)))
+	default:
+		return 16 // Assume pointer size for other types
+	}
+}
+
+func DataSize(v []any) uint64 {
+	if v == nil {
+		return 0
+	}
+
+	var size uint64
+	for _, value := range v {
+		switch val := value.(type) {
+		case MemoryFootprint:
+			return val.MemoryFootprint()
+		case []any:
+			for _, innerValue := range val {
+				size += innerDataSize(innerValue)
+			}
+		default:
+			size += innerDataSize(val)
+		}
+	}
+
+	return size
+}
+
+func Sizeof(v any) uint64 {
+	if v == nil {
+		return 0
+	}
+
+	switch val := v.(type) {
+	case []any:
+		return DataSize(val)
+	case []byte:
+		return uint64(len(val)) + uint64(unsafe.Sizeof(val))
+	case string:
+		return uint64(len(val)) + uint64(unsafe.Sizeof(val))
+	default:
+		return uint64(unsafe.Sizeof(v))
 	}
 }

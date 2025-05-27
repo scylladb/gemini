@@ -39,6 +39,12 @@ const (
 	DropKeyspaceStatementType
 	CreateKeyspaceStatementType
 	CreateSchemaStatementType
+	CreateIndexStatementType
+	DropIndexStatementType
+	CreateTypeStatementType
+	DropTypeStatementType
+	CreateTableStatementType
+	DropTableStatementType
 )
 
 const (

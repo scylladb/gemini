@@ -23,6 +23,7 @@ import (
 	"github.com/scylladb/gocqlx/v3/qb"
 
 	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type (
@@ -76,14 +77,14 @@ func (q SimpleQuery) ToCql() (stmt string, names []string) {
 }
 
 type Stmt struct {
-	*StmtCache
-	ValuesWithToken []*ValueWithToken
+	ValuesWithToken []ValueWithToken
 	Values          Values
+	StmtCache
 }
 
 func SimpleStmt(query string, queryType StatementType) *Stmt {
 	return &Stmt{
-		StmtCache: &StmtCache{
+		StmtCache: StmtCache{
 			Query:     SimpleQuery{query},
 			QueryType: queryType,
 		},
@@ -91,6 +92,10 @@ func SimpleStmt(query string, queryType StatementType) *Stmt {
 }
 
 func (s *Stmt) PrettyCQL() (string, error) {
+	if s == nil {
+		return "", nil
+	}
+
 	buffer := bytes.NewBuffer(nil)
 
 	if err := s.PrettyCQLBuffered(buffer); err != nil {
@@ -119,6 +124,90 @@ func (s *Stmt) Clone() *Stmt {
 
 type StatementType uint8
 
+//nolint:gocyclo
+func ParseStatementTypeFromQuery(query string) StatementType {
+	if strings.HasPrefix(query, "SELECT") {
+		if strings.Contains(query, "FROM") {
+			return SelectStatementType
+		}
+		if strings.Contains(query, "RANGE") {
+			return SelectRangeStatementType
+		}
+		if strings.Contains(query, "BY INDEX") {
+			return SelectByIndexStatementType
+		}
+		if strings.Contains(query, "FROM MATERIALIZED VIEW") {
+			return SelectFromMaterializedViewStatementType
+		}
+	}
+
+	if strings.HasPrefix(query, "INSERT") {
+		if strings.Contains(query, "JSON") {
+			return InsertJSONStatementType
+		}
+		return InsertStatementType
+	}
+
+	if strings.HasPrefix(query, "UPDATE") {
+		return UpdateStatementType
+	}
+
+	if strings.HasPrefix(query, "DELETE") {
+		return DeleteStatementType
+	}
+
+	if strings.HasPrefix(query, "ALTER COLUMN") {
+		return AlterColumnStatementType
+	}
+
+	if strings.HasPrefix(query, "DROP COLUMN") {
+		return DropColumnStatementType
+	}
+
+	if strings.HasPrefix(query, "ADD COLUMN") {
+		return AddColumnStatementType
+	}
+
+	if strings.HasPrefix(query, "CREATE KEYSPACE") {
+		return CreateKeyspaceStatementType
+	}
+
+	if strings.HasPrefix(query, "CREATE SCHEMA") {
+		return CreateSchemaStatementType
+	}
+
+	if strings.HasPrefix(query, "CREATE TABLE") {
+		return CreateTableStatementType
+	}
+
+	if strings.HasPrefix(query, "DROP TABLE") {
+		return DropTableStatementType
+	}
+
+	if strings.HasPrefix(query, "DROP KEYSPACE") {
+		return DropKeyspaceStatementType
+	}
+
+	if strings.HasPrefix(query, "CREATE INDEX") {
+		return CreateIndexStatementType
+	}
+
+	if strings.HasPrefix(query, "DROP INDEX") {
+		return DropIndexStatementType
+	}
+
+	if strings.HasPrefix(query, "CREATE TYPE") {
+		return CreateTypeStatementType
+	}
+
+	if strings.HasPrefix(query, "DROP TYPE") {
+		return DropTypeStatementType
+	}
+
+	panic(fmt.Sprintf("unknown statement type for query: %s", query))
+}
+
+//nolint:gocyclo
 func (st StatementType) String() string {
 	switch st {
 	case SelectStatementType:
@@ -143,6 +232,24 @@ func (st StatementType) String() string {
 		return "DropColumnStatement"
 	case AddColumnStatementType:
 		return "AddColumnStatement"
+	case DropKeyspaceStatementType:
+		return "DropKeyspaceStatement"
+	case CreateKeyspaceStatementType:
+		return "CreateKeyspaceStatement"
+	case CreateSchemaStatementType:
+		return "CreateSchemaStatement"
+	case CreateIndexStatementType:
+		return "CreateIndexStatement"
+	case DropIndexStatementType:
+		return "DropIndexStatement"
+	case CreateTypeStatementType:
+		return "CreateTypeStatement"
+	case DropTypeStatementType:
+		return "DropTypeStatement"
+	case CreateTableStatementType:
+		return "CreateTableStatement"
+	case DropTableStatementType:
+		return "DropTableStatement"
 	default:
 		panic(fmt.Sprintf("unknown statement type %d", st))
 	}
@@ -182,6 +289,14 @@ func (st StatementType) PossibleAsyncOperation() bool {
 }
 
 type Values []any
+
+func (v Values) MemoryFootprint() uint64 {
+	if v == nil {
+		return 0
+	}
+
+	return utils.DataSize(v)
+}
 
 func (v Values) Copy() Values {
 	values := make(Values, len(v))
@@ -278,4 +393,8 @@ func prettyCQL(builder *bytes.Buffer, q string, values Values, types []Type) err
 
 	builder.WriteString(q[idx:])
 	return nil
+}
+
+func (v ValueWithToken) MemoryFootprint() uint64 {
+	return utils.Sizeof(v) + v.Value.MemoryFootprint()
 }

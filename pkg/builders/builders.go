@@ -19,43 +19,36 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-type SchemaBuilder interface {
-	Config(config typedef.SchemaConfig) SchemaBuilder
-	Keyspace(typedef.Keyspace) SchemaBuilder
-	Table(*typedef.Table) SchemaBuilder
-	Build() *typedef.Schema
-}
-
 type AlterTableBuilder struct {
 	Stmt string
 }
 
-func (atb *AlterTableBuilder) ToCql() (string, []string) {
-	return atb.Stmt, nil
-}
-
-type schemaBuilder struct {
+type SchemaBuilder struct {
 	keyspace typedef.Keyspace
 	tables   []*typedef.Table
 	config   typedef.SchemaConfig
 }
 
-func (s *schemaBuilder) Keyspace(keyspace typedef.Keyspace) SchemaBuilder {
+func (atb AlterTableBuilder) ToCql() (string, []string) {
+	return atb.Stmt, nil
+}
+
+func (s *SchemaBuilder) Keyspace(keyspace typedef.Keyspace) *SchemaBuilder {
 	s.keyspace = keyspace
 	return s
 }
 
-func (s *schemaBuilder) Config(config typedef.SchemaConfig) SchemaBuilder {
+func (s *SchemaBuilder) Config(config typedef.SchemaConfig) *SchemaBuilder {
 	s.config = config
 	return s
 }
 
-func (s *schemaBuilder) Table(table *typedef.Table) SchemaBuilder {
+func (s *SchemaBuilder) Table(table *typedef.Table) *SchemaBuilder {
 	s.tables = append(s.tables, table)
 	return s
 }
 
-func (s *schemaBuilder) Build() *typedef.Schema {
+func (s *SchemaBuilder) Build() *typedef.Schema {
 	out := &typedef.Schema{Keyspace: s.keyspace, Tables: s.tables, Config: s.config}
 	for id := range s.tables {
 		s.tables[id].Init(out, querycache.New(out))
@@ -63,6 +56,6 @@ func (s *schemaBuilder) Build() *typedef.Schema {
 	return out
 }
 
-func NewSchemaBuilder() SchemaBuilder {
-	return &schemaBuilder{}
+func NewSchemaBuilder() *SchemaBuilder {
+	return &SchemaBuilder{}
 }

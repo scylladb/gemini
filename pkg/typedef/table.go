@@ -15,11 +15,12 @@
 package typedef
 
 import (
+	"slices"
 	"sync"
 )
 
 type QueryCache interface {
-	GetQuery(qct StatementCacheType) *StmtCache
+	GetQuery(qct StatementCacheType) StmtCache
 	Reset()
 	BindToTable(t *Table)
 }
@@ -74,7 +75,7 @@ func (t *Table) RUnlock() {
 	t.mu.RUnlock()
 }
 
-func (t *Table) GetQueryCache(st StatementCacheType) *StmtCache {
+func (t *Table) GetQueryCache(st StatementCacheType) StmtCache {
 	return t.queryCache.GetQuery(st)
 }
 
@@ -99,7 +100,7 @@ func (t *Table) ValidColumnsForDelete() Columns {
 		for _, idx := range t.Indexes {
 			for j := range validCols {
 				if validCols[j].Name == idx.ColumnName {
-					validCols = append(validCols[:j], validCols[j+1:]...)
+					validCols = slices.Delete(validCols, j, j+1)
 					break
 				}
 			}
@@ -110,7 +111,7 @@ func (t *Table) ValidColumnsForDelete() Columns {
 			if mv.HaveNonPrimaryKey() {
 				for j := range validCols {
 					if validCols[j].Name == mv.NonPrimaryKey.Name {
-						validCols = append(validCols[:j], validCols[j+1:]...)
+						validCols = slices.Delete(validCols, j, j+1)
 						break
 					}
 				}

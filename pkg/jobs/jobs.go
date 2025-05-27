@@ -27,6 +27,7 @@ import (
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -187,18 +188,21 @@ func mutationJob(
 			return nil
 		default:
 		}
-		ind := r.IntN(1000000)
-		if ind%100000 == 0 {
-			err := ddl(ctx, schema, schemaConfig, table, s, r, p, globalStatus, logger, verbose)
-			if err != nil {
-				return err
+
+		var err error
+
+		metrics.ExecutionTime("mutation_job", func() {
+			if r.IntN(1000000)%100000 == 0 {
+				err = ddl(ctx, schema, schemaConfig, table, s, r, p, globalStatus, logger, verbose)
+			} else {
+				err = mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, true, logger)
 			}
-		} else {
-			err := mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, true, logger)
-			if err != nil {
-				return err
-			}
+		})
+
+		if err != nil {
+			return err
 		}
+
 		if failFast && globalStatus.HasErrors() {
 			stopFlag.SetSoft(true)
 			return nil
@@ -238,17 +242,27 @@ func validationJob(
 			return nil
 		default:
 		}
-		stmt := GenCheckStmt(schema, table, g, r, p)
-		if stmt == nil {
-			logger.Info("Validation. No statement generated from GenCheckStmt.")
-			continue
-		}
-		err := validation(ctx, schemaConfig, table, s, stmt, logger)
-		if stmt.ValuesWithToken != nil {
-			for _, token := range stmt.ValuesWithToken {
-				g.ReleaseToken(token.Token)
+
+		var (
+			err  error
+			stmt *typedef.Stmt
+		)
+
+		metrics.ExecutionTime("validation_job", func() {
+			stmt = GenCheckStmt(schema, table, g, r, p)
+			if stmt == nil {
+				logger.Info("Validation. No statement generated from GenCheckStmt.")
+				return
 			}
-		}
+
+			err = validation(ctx, schemaConfig, table, s, stmt, logger)
+			if stmt.ValuesWithToken != nil {
+				for _, token := range stmt.ValuesWithToken {
+					g.ReleaseToken(token.Token)
+				}
+			}
+		})
+
 		switch {
 		case err == nil:
 			globalStatus.ReadOps.Add(1)
@@ -465,7 +479,7 @@ func mutation(
 	}
 
 	globalStatus.WriteOps.Add(1)
-	g.GiveOlds(mutateStmt.ValuesWithToken)
+	g.GiveOlds(mutateStmt.ValuesWithToken...)
 
 	return nil
 }
@@ -502,6 +516,7 @@ func validation(
 
 	var lastErr, err error
 	attempt := 1
+
 	for {
 		lastErr = err
 		err = s.Check(ctx, table, stmt, attempt == maxAttempts)

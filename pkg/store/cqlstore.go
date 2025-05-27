@@ -40,77 +40,77 @@ type cqlStore struct {
 	useServerSideTimestamps bool
 }
 
-func (cs *cqlStore) name() string {
-	return cs.system
+func (c *cqlStore) name() string {
+	return c.system
 }
 
-func (cs *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) (err error) {
+func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) (err error) {
 	var i int
-	for i = 0; i < cs.maxRetriesMutate; i++ {
+	for i = 0; i < c.maxRetriesMutate; i++ {
 		// retry with new timestamp as list modification with the same ts
 		// will produce duplicated values, see https://github.com/scylladb/scylladb/issues/7937
-		err = cs.doMutate(ctx, stmt, time.Now())
+		err = c.doMutate(ctx, stmt, time.Now())
 		if err == nil {
-			metrics.CQLRequests.WithLabelValues(cs.system, opType(stmt)).Inc()
+			metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
 			return nil
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(cs.maxRetriesMutateSleep):
+		case <-time.After(c.maxRetriesMutateSleep):
 		}
 	}
-	if w := cs.logger.Check(zap.ErrorLevel, "failed to apply mutation"); w != nil {
+	if w := c.logger.Check(zap.ErrorLevel, "failed to apply mutation"); w != nil {
 		w.Write(zap.Int("attempts", i), zap.Error(err))
 	}
 	return err
 }
 
-func (cs *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, _ time.Time) error {
+func (c *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Time) error {
 	queryBody, _ := stmt.Query.ToCql()
-	query := cs.session.Query(queryBody, stmt.Values...).WithContext(ctx)
+	query := c.session.Query(queryBody, stmt.Values...).WithContext(ctx)
 	defer query.Release()
 
-	// if cs.useServerSideTimestamps {
-	// 	query = query.DefaultTimestamp(false)
-	// 	cs.stmtLogger.LogStmt(stmt)
-	// } else {
-	// 	query = query.WithTimestamp(ts.UnixNano() / 1000)
-	// 	cs.stmtLogger.LogStmt(stmt, ts)
-	// }
+	if c.useServerSideTimestamps {
+		query.DefaultTimestamp(false)
+		_ = c.stmtLogger.LogStmt(stmt)
+	} else {
+		query.WithTimestamp(ts.UnixNano() / 1000)
+		_ = c.stmtLogger.LogStmt(stmt, ts)
+	}
 
 	if err := query.Exec(); err != nil {
 		if errs.Is(err, context.DeadlineExceeded) {
-			if w := cs.logger.Check(zap.DebugLevel, "deadline exceeded for mutation query"); w != nil {
+			if w := c.logger.Check(zap.DebugLevel, "deadline exceeded for mutation query"); w != nil {
 				w.Write(
-					zap.String("system", cs.system),
+					zap.String("system", c.system),
 					zap.String("query", queryBody),
 					zap.Error(err),
 				)
 			}
 		}
-		if !ignore(err) {
-			return errors.Wrapf(err, "[cluster = %s, query = '%s']", cs.system, queryBody)
+
+		if !c.ignore(err, opType(stmt)) {
+			return errors.Wrapf(err, "[cluster = %s, query = '%s']", c.system, queryBody)
 		}
 	}
 	return nil
 }
 
-func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) ([]Row, error) {
+func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) ([]Row, error) {
 	cql, _ := stmt.Query.ToCql()
-	if err := cs.stmtLogger.LogStmt(stmt); err != nil {
+	if err := c.stmtLogger.LogStmt(stmt); err != nil {
 		return nil, err
 	}
 
-	query := cs.session.Query(cql, stmt.Values...).WithContext(ctx)
+	query := c.session.Query(cql, stmt.Values...).WithContext(ctx)
+	defer query.Release()
 
 	iter := query.Iter()
 
 	defer func() {
-		metrics.CQLRequests.WithLabelValues(cs.system, opType(stmt)).Inc()
+		metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
 		_ = iter.Close()
-
-		query.Release()
 	}()
 
 	rows := make([]Row, 0, iter.NumRows())
@@ -127,8 +127,8 @@ func (cs *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) ([]Row, error)
 	return rows, nil
 }
 
-func (cs *cqlStore) Close() error {
-	cs.session.Close()
+func (c *cqlStore) Close() error {
+	c.session.Close()
 	return nil
 }
 
@@ -149,13 +149,14 @@ func opType(stmt *typedef.Stmt) string {
 	}
 }
 
-func ignore(err error) bool {
+func (c *cqlStore) ignore(err error, ty string) bool {
 	if err == nil {
 		return true
 	}
 	//nolint:errorlint
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		metrics.CQLQueryTimeouts.WithLabelValues(c.system, ty).Inc()
 		return true
 	default:
 		return false

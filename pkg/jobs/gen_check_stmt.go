@@ -134,25 +134,22 @@ func genSinglePartitionQuery(
 	t.RLock()
 	defer t.RUnlock()
 	valuesWithToken := g.GetOld()
-	if valuesWithToken == nil {
-		return nil
-	}
 	values := valuesWithToken.Value.Copy()
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
-	typs := make([]typedef.Type, 0, 10)
+	typs := make([]typedef.Type, 0, len(t.PartitionKeys))
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
 		typs = append(typs, pk.Type)
 	}
 
 	return &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
+		StmtCache: typedef.StmtCache{
 			Query:     builder,
 			Types:     typs,
 			QueryType: typedef.SelectStatementType,
 		},
 		Values:          values,
-		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
+		ValuesWithToken: []typedef.ValueWithToken{valuesWithToken},
 	}
 }
 
@@ -167,9 +164,6 @@ func genSinglePartitionQueryMv(
 	t.RLock()
 	defer t.RUnlock()
 	valuesWithToken := g.GetOld()
-	if valuesWithToken == nil {
-		return nil
-	}
 	mv := t.MaterializedViews[mvNum]
 	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
 	typs := make([]typedef.Type, 0, 10)
@@ -185,13 +179,13 @@ func genSinglePartitionQueryMv(
 		values = append(mvValues, values...)
 	}
 	return &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
+		StmtCache: typedef.StmtCache{
 			Query:     builder,
 			Types:     typs,
 			QueryType: typedef.SelectStatementType,
 		},
 		Values:          values,
-		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
+		ValuesWithToken: []typedef.ValueWithToken{valuesWithToken},
 	}
 }
 
@@ -207,12 +201,12 @@ func genMultiplePartitionQuery(
 	values := make([]any, numQueryPKs*t.PartitionKeys.Len())
 
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
-	tokens := make([]*typedef.ValueWithToken, 0, numQueryPKs)
+	tokens := make([]typedef.ValueWithToken, 0, numQueryPKs)
 
 	for j := 0; j < numQueryPKs; j++ {
 		vs := g.GetOld()
-		if vs == nil {
-			g.GiveOlds(tokens)
+		if vs.Token == 0 {
+			g.GiveOlds(tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
@@ -225,7 +219,7 @@ func genMultiplePartitionQuery(
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
 	}
 	return &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
+		StmtCache: typedef.StmtCache{
 			Query:     builder,
 			Types:     typs,
 			QueryType: typedef.SelectStatementType,
@@ -251,12 +245,12 @@ func genMultiplePartitionQueryMv(
 	values := make([]any, numQueryPKs*mv.PartitionKeys.Len())
 
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
-	tokens := make([]*typedef.ValueWithToken, 0, numQueryPKs)
+	tokens := make([]typedef.ValueWithToken, 0, numQueryPKs)
 
 	for j := 0; j < numQueryPKs; j++ {
 		vs := g.GetOld()
-		if vs == nil {
-			g.GiveOlds(tokens)
+		if vs.Token == 0 {
+			g.GiveOlds(tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
@@ -276,7 +270,7 @@ func genMultiplePartitionQueryMv(
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
 	}
 	return &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
+		StmtCache: typedef.StmtCache{
 			Query:     builder,
 			Types:     typs,
 			QueryType: typedef.SelectStatementType,
@@ -297,9 +291,6 @@ func genClusteringRangeQuery(
 	t.RLock()
 	defer t.RUnlock()
 	vs := g.GetOld()
-	if vs == nil {
-		return nil
-	}
 	allTypes := make([]typedef.Type, 0, len(t.PartitionKeys)+maxClusteringRels+1)
 	values := vs.Value.Copy()
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
@@ -323,13 +314,13 @@ func genClusteringRangeQuery(
 		allTypes = append(allTypes, ck.Type, ck.Type)
 	}
 	return &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
+		StmtCache: typedef.StmtCache{
 			Query:     builder,
 			QueryType: typedef.SelectRangeStatementType,
 			Types:     allTypes,
 		},
 		Values:          values,
-		ValuesWithToken: []*typedef.ValueWithToken{vs},
+		ValuesWithToken: []typedef.ValueWithToken{vs},
 	}
 }
 
@@ -344,9 +335,6 @@ func genClusteringRangeQueryMv(
 	t.RLock()
 	defer t.RUnlock()
 	vs := g.GetOld()
-	if vs == nil {
-		return nil
-	}
 	values := vs.Value.Copy()
 	mv := t.MaterializedViews[mvNum]
 	if mv.HaveNonPrimaryKey() {
@@ -376,13 +364,13 @@ func genClusteringRangeQueryMv(
 		allTypes = append(allTypes, ck.Type, ck.Type)
 	}
 	return &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
+		StmtCache: typedef.StmtCache{
 			Query:     builder,
 			QueryType: typedef.SelectRangeStatementType,
 			Types:     allTypes,
 		},
 		Values:          values,
-		ValuesWithToken: []*typedef.ValueWithToken{vs},
+		ValuesWithToken: []typedef.ValueWithToken{vs},
 	}
 }
 
@@ -403,7 +391,7 @@ func genMultiplePartitionClusteringRangeQuery(
 	values := make(typedef.Values, pkValues*numQueryPKs, valuesCount)
 	typs := make(typedef.Types, pkValues*numQueryPKs, valuesCount)
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
-	tokens := make([]*typedef.ValueWithToken, 0, numQueryPKs)
+	tokens := make([]typedef.ValueWithToken, 0, numQueryPKs)
 
 	for _, pk := range t.PartitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
@@ -411,8 +399,8 @@ func genMultiplePartitionClusteringRangeQuery(
 
 	for j := 0; j < numQueryPKs; j++ {
 		vs := g.GetOld()
-		if vs == nil {
-			g.GiveOlds(tokens)
+		if vs.Token == 0 {
+			g.GiveOlds(tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
@@ -437,7 +425,7 @@ func genMultiplePartitionClusteringRangeQuery(
 		typs = append(typs, ck.Type, ck.Type)
 	}
 	return &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
+		StmtCache: typedef.StmtCache{
 			Query:     builder,
 			Types:     typs,
 			QueryType: typedef.SelectRangeStatementType,
@@ -476,7 +464,7 @@ func genMultiplePartitionClusteringRangeQueryMv(
 	values := make(typedef.Values, pkValues*numQueryPKs, valuesCount)
 	typs := make(typedef.Types, pkValues*numQueryPKs, valuesCount)
 	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
-	tokens := make([]*typedef.ValueWithToken, 0, numQueryPKs)
+	tokens := make([]typedef.ValueWithToken, 0, numQueryPKs)
 
 	for _, pk := range mv.PartitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
@@ -492,8 +480,8 @@ func genMultiplePartitionClusteringRangeQueryMv(
 
 	for j := 0; j < numQueryPKs; j++ {
 		vs := g.GetOld()
-		if vs == nil {
-			g.GiveOlds(tokens)
+		if vs.Token == 0 {
+			g.GiveOlds(tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
@@ -518,7 +506,7 @@ func genMultiplePartitionClusteringRangeQueryMv(
 		typs = append(typs, ck.Type, ck.Type)
 	}
 	return &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
+		StmtCache: typedef.StmtCache{
 			Query:     builder,
 			Types:     typs,
 			QueryType: typedef.SelectFromMaterializedViewStatementType,
@@ -553,7 +541,7 @@ func genSingleIndexQuery(
 	}
 
 	return &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
+		StmtCache: typedef.StmtCache{
 			Query:     builder,
 			Types:     typs,
 			QueryType: typedef.SelectByIndexStatementType,

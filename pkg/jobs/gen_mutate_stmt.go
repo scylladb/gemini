@@ -38,9 +38,6 @@ func GenMutateStmt(
 	defer t.RUnlock()
 
 	valuesWithToken := g.Get()
-	if valuesWithToken == nil {
-		return nil, nil
-	}
 	useLWT := p.UseLWT && r.Uint32()%10 == 0
 
 	if !deletes {
@@ -65,7 +62,7 @@ func GenMutateStmt(
 func genInsertOrUpdateStmt(
 	s *typedef.Schema,
 	t *typedef.Table,
-	valuesWithToken *typedef.ValueWithToken,
+	valuesWithToken typedef.ValueWithToken,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	useLWT bool,
@@ -79,7 +76,7 @@ func genInsertOrUpdateStmt(
 func genUpdateStmt(
 	_ *typedef.Schema,
 	t *typedef.Table,
-	valuesWithToken *typedef.ValueWithToken,
+	valuesWithToken typedef.ValueWithToken,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 ) (*typedef.Stmt, error) {
@@ -99,7 +96,7 @@ func genUpdateStmt(
 	}
 	return &typedef.Stmt{
 		StmtCache:       stmtCache,
-		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
+		ValuesWithToken: []typedef.ValueWithToken{valuesWithToken},
 		Values:          values,
 	}, nil
 }
@@ -107,7 +104,7 @@ func genUpdateStmt(
 func genInsertStmt(
 	_ *typedef.Schema,
 	t *typedef.Table,
-	valuesWithToken *typedef.ValueWithToken,
+	valuesWithToken typedef.ValueWithToken,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 	useLWT bool,
@@ -131,7 +128,7 @@ func genInsertStmt(
 
 	return &typedef.Stmt{
 		StmtCache:       t.GetQueryCache(cacheType),
-		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
+		ValuesWithToken: []typedef.ValueWithToken{valuesWithToken},
 		Values:          values,
 	}, nil
 }
@@ -139,7 +136,7 @@ func genInsertStmt(
 func genInsertJSONStmt(
 	s *typedef.Schema,
 	table *typedef.Table,
-	valuesWithToken *typedef.ValueWithToken,
+	valuesWithToken typedef.ValueWithToken,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 ) (*typedef.Stmt, error) {
@@ -173,12 +170,12 @@ func genInsertJSONStmt(
 
 	builder := qb.Insert(s.Keyspace.Name + "." + table.Name).Json()
 	return &typedef.Stmt{
-		StmtCache: &typedef.StmtCache{
+		StmtCache: typedef.StmtCache{
 			Query:     builder,
 			Types:     []typedef.Type{typedef.TypeText},
 			QueryType: typedef.InsertJSONStatementType,
 		},
-		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
+		ValuesWithToken: []typedef.ValueWithToken{valuesWithToken},
 		Values:          []any{string(jsonString)},
 	}, nil
 }
@@ -186,7 +183,7 @@ func genInsertJSONStmt(
 func genDeleteRows(
 	_ *typedef.Schema,
 	t *typedef.Table,
-	valuesWithToken *typedef.ValueWithToken,
+	valuesWithToken typedef.ValueWithToken,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
 ) (*typedef.Stmt, error) {
@@ -199,7 +196,7 @@ func genDeleteRows(
 	}
 	return &typedef.Stmt{
 		StmtCache:       stmtCache,
-		ValuesWithToken: []*typedef.ValueWithToken{valuesWithToken},
+		ValuesWithToken: []typedef.ValueWithToken{valuesWithToken},
 		Values:          values,
 	}, nil
 }

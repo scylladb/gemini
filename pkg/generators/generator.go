@@ -17,11 +17,14 @@ package generators
 import (
 	"context"
 	"math/rand/v2"
+	"strconv"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/distributions"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
@@ -38,9 +41,9 @@ import (
 // approximate different token distributions from a sparse set of tokens.
 
 type Interface interface {
-	Get() *typedef.ValueWithToken
-	GetOld() *typedef.ValueWithToken
-	GiveOlds([]*typedef.ValueWithToken)
+	Get() typedef.ValueWithToken
+	GetOld() typedef.ValueWithToken
+	GiveOlds(...typedef.ValueWithToken)
 	ReleaseToken(_ uint64)
 }
 
@@ -51,12 +54,11 @@ type Generator struct {
 	r                 *rand.Rand
 	wakeUpSignal      <-chan struct{}
 	idxFunc           distributions.DistributionFunc
+	oldValuesMetrics  metrics.ChannelMetrics
+	valuesMetrics     metrics.ChannelMetrics
 	partitions        Partitions
 	partitionsConfig  typedef.PartitionRangeConfig
 	partitionCount    uint64
-
-	cntCreated uint64
-	cntEmitted uint64
 }
 
 func (g *Generator) PartitionCount() uint64 {
@@ -78,20 +80,21 @@ func NewGenerator(
 	logger *zap.Logger,
 ) *Generator {
 	wakeUpSignal := make(chan struct{}, 1)
+	metrics.GeneratorPartitionSize.WithLabelValues(table.Name).Set(float64(config.PartitionsCount))
+	metrics.GeneratorBufferSize.WithLabelValues(table.Name).Set(float64(config.PkUsedBufferSize))
+
 	g := &Generator{
-		partitions: NewPartitions(
-			int(config.PartitionsCount),
-			int(config.PkUsedBufferSize),
-			wakeUpSignal,
-		),
-		partitionCount:    config.PartitionsCount,
-		table:             table,
-		partitionsConfig:  config.PartitionsRangeConfig,
-		idxFunc:           config.PartitionsDistributionFunc,
 		logger:            logger,
-		wakeUpSignal:      wakeUpSignal,
+		table:             table,
 		routingKeyCreator: &routingkey.Creator{},
 		r:                 rand.New(rand.NewPCG(config.Seed, config.Seed)),
+		wakeUpSignal:      wakeUpSignal,
+		idxFunc:           config.PartitionsDistributionFunc,
+		partitions:        NewPartitions(config.PartitionsCount, config.PkUsedBufferSize, wakeUpSignal),
+		partitionsConfig:  config.PartitionsRangeConfig,
+		partitionCount:    config.PartitionsCount,
+		oldValuesMetrics:  metrics.NewChannelMetrics[typedef.ValueWithToken]("generator", table.Name+"_old_values", config.PkUsedBufferSize),
+		valuesMetrics:     metrics.NewChannelMetrics[typedef.ValueWithToken]("generator", table.Name+"_values", config.PkUsedBufferSize),
 	}
 
 	go g.Start(ctx)
@@ -99,13 +102,15 @@ func NewGenerator(
 	return g
 }
 
-func (g *Generator) Get() *typedef.ValueWithToken {
+func (g *Generator) Get() typedef.ValueWithToken {
 	targetPart := g.GetPartitionForToken(g.idxFunc())
 	for targetPart.Stale() {
 		targetPart = g.GetPartitionForToken(g.idxFunc())
 	}
-	out := targetPart.get()
-	return out
+
+	v := targetPart.get()
+	g.valuesMetrics.Dec(v)
+	return v
 }
 
 func (g *Generator) GetPartitionForToken(token distributions.TokenIndex) *Partition {
@@ -114,18 +119,24 @@ func (g *Generator) GetPartitionForToken(token distributions.TokenIndex) *Partit
 
 // GetOld returns a previously used value and token or a new if
 // the old queue is empty.
-func (g *Generator) GetOld() *typedef.ValueWithToken {
+func (g *Generator) GetOld() typedef.ValueWithToken {
 	targetPart := g.GetPartitionForToken(g.idxFunc())
 	for targetPart.Stale() {
 		targetPart = g.GetPartitionForToken(g.idxFunc())
 	}
-	return targetPart.getOld()
+	v := targetPart.getOld()
+	g.oldValuesMetrics.Dec(v)
+	return v
 }
 
 // GiveOlds returns the supplied values for later reuse unless
-func (g *Generator) GiveOlds(tokens []*typedef.ValueWithToken) {
+func (g *Generator) GiveOlds(tokens ...typedef.ValueWithToken) {
 	for _, token := range tokens {
-		g.GetPartitionForToken(distributions.TokenIndex(token.Token)).giveOld(token)
+		if g.GetPartitionForToken(distributions.TokenIndex(token.Token)).giveOld(token) {
+			g.oldValuesMetrics.Inc(token)
+		} else {
+			metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "old").Inc()
+		}
 	}
 }
 
@@ -141,9 +152,6 @@ func (g *Generator) Start(ctx context.Context) {
 		g.fillAllPartitions(ctx)
 		select {
 		case <-ctx.Done():
-			g.logger.Debug("stopping partition key generation loop",
-				zap.Uint64("keys_created", g.cntCreated),
-				zap.Uint64("keys_emitted", g.cntEmitted))
 			return
 		case <-g.wakeUpSignal:
 		}
@@ -177,6 +185,8 @@ func (g *Generator) FindAndMarkStalePartitions() {
 		zap.Int("stale_partitions", stalePartitions),
 		zap.Int("total_partitions", len(g.partitions)),
 	)
+
+	metrics.StalePartitions.WithLabelValues(g.table.Name).Set(float64(stalePartitions))
 }
 
 // fillAllPartitions guarantees that each partition was tested to be full
@@ -185,6 +195,7 @@ func (g *Generator) FindAndMarkStalePartitions() {
 func (g *Generator) fillAllPartitions(ctx context.Context) {
 	pFilled := make([]bool, len(g.partitions))
 	allFilled := func() bool {
+		filledCount := 0
 		for idx, filled := range pFilled {
 			if !filled {
 				if g.partitions[idx].Stale() {
@@ -192,7 +203,13 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 				}
 				return false
 			}
+
+			filledCount++
 		}
+
+		metrics.GeneratorFilledPartitions.
+			WithLabelValues(g.table.Name).
+			Set(float64(filledCount))
 		return true
 	}
 
@@ -202,28 +219,38 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 			return
 		default:
 		}
+		start := time.Now()
 
 		token, values, err := g.createPartitionKeyValues()
 		if err != nil {
 			g.logger.Panic("failed to get primary key hash", zap.Error(err))
 		}
-		g.cntCreated++
 
-		partition := g.partition(token)
+		idx := g.shardOf(token)
+		idxStr := strconv.FormatInt(int64(idx), 10)
+		partition := g.partitions[idx]
+
+		metrics.GeneratorValueGenerationTime.
+			WithLabelValues(g.table.Name, idxStr).
+			Observe(float64(time.Since(start).Nanoseconds()))
+
+		metrics.GeneratorCreatedValues.WithLabelValues(g.table.Name, idxStr).Inc()
 		if partition.Stale() || partition.inFlight.Has(token) {
 			continue
 		}
 
-		select {
-		case partition.values <- &typedef.ValueWithToken{Token: token, Value: values}:
-			g.cntEmitted++
-		default:
-			idx := g.shardOf(token)
-			if !pFilled[idx] {
-				pFilled[idx] = true
-				if allFilled() {
-					return
-				}
+		v := typedef.ValueWithToken{Token: token, Value: values}
+		if !partition.push(v).Full {
+			g.valuesMetrics.Inc(v)
+			metrics.GeneratorEmittedValues.WithLabelValues(g.table.Name, idxStr).Inc()
+		} else {
+			metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new").Inc()
+		}
+
+		if !pFilled[idx] {
+			pFilled[idx] = true
+			if allFilled() {
+				return
 			}
 		}
 	}
@@ -231,10 +258,6 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 
 func (g *Generator) shardOf(token uint64) int {
 	return int(token % g.partitionCount)
-}
-
-func (g *Generator) partition(token uint64) *Partition {
-	return g.partitions[g.shardOf(token)]
 }
 
 func (g *Generator) createPartitionKeyValues(r ...*rand.Rand) (uint64, []any, error) {

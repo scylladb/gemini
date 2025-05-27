@@ -24,29 +24,29 @@ import (
 )
 
 type Partition struct {
-	values       chan *typedef.ValueWithToken
-	oldValues    chan *typedef.ValueWithToken
+	values       chan typedef.ValueWithToken
+	oldValues    chan typedef.ValueWithToken
 	inFlight     inflight.InFlight
 	wakeUpSignal chan<- struct{} // wakes up generator
 	closed       atomic.Bool
 	isStale      atomic.Bool
 }
 
-func (s *Partition) MarkStale() error {
-	s.isStale.Store(true)
-	return s.Close()
+func (p *Partition) MarkStale() error {
+	p.isStale.Store(true)
+	return p.Close()
 }
 
-func (s *Partition) Stale() bool {
-	return s.isStale.Load()
+func (p *Partition) Stale() bool {
+	return p.isStale.Load()
 }
 
 // get returns a new value and ensures that it's corresponding token
 // is not already in-flight.
-func (s *Partition) get() *typedef.ValueWithToken {
+func (p *Partition) get() typedef.ValueWithToken {
 	for {
-		v := s.pick()
-		if v == nil || s.inFlight.AddIfNotPresent(v.Token) {
+		v := p.pick()
+		if p.inFlight.AddIfNotPresent(v.Token) {
 			return v
 		}
 	}
@@ -54,72 +54,83 @@ func (s *Partition) get() *typedef.ValueWithToken {
 
 // getOld returns a previously used value and token or a new if
 // the old queue is empty.
-func (s *Partition) getOld() *typedef.ValueWithToken {
+func (p *Partition) getOld() typedef.ValueWithToken {
 	select {
-	case v := <-s.oldValues:
+	case v := <-p.oldValues:
 		return v
 	default:
-		return s.get()
+		v := p.get()
+		return v
 	}
 }
 
 // giveOld returns the supplied value for later reuse unless the value
-// is empty in which case it removes the corresponding token from the
+// is empty, in which case it removes the corresponding token from the
 // in-flight tracking.
-func (s *Partition) giveOld(v *typedef.ValueWithToken) {
-	ch := s.safelyGetOldValuesChannel()
-	if ch == nil {
-		return
+func (p *Partition) giveOld(v typedef.ValueWithToken) bool {
+	if p.closed.Load() {
+		// Since only giveOld could have been potentially called after partition is closed
+		// we need to protect it against writing to closed channel
+		return false
 	}
+
 	select {
-	case ch <- v:
+	case p.oldValues <- v:
+		return true
 	default:
+		// clear(v.Value)
+		return false
 		// Old partition buffer is full, just drop the value
 	}
 }
 
-// releaseToken removes the corresponding token from the in-flight tracking.
-func (s *Partition) releaseToken(token uint64) {
-	s.inFlight.Delete(token)
-}
-
-func (s *Partition) wakeUp() {
-	select {
-	case s.wakeUpSignal <- struct{}{}:
-	default:
-	}
-}
-
-func (s *Partition) pick() *typedef.ValueWithToken {
-	select {
-	case val := <-s.values:
-		if len(s.values) <= cap(s.values)/4 {
-			s.wakeUp() // channel at 25% capacity, trigger generator
-		}
-		return val
-	default:
-		s.wakeUp() // channel empty, need to wait for new values
-		return <-s.values
-	}
-}
-
-func (s *Partition) safelyGetOldValuesChannel() chan *typedef.ValueWithToken {
-	if s.closed.Load() {
+func (p *Partition) push(v typedef.ValueWithToken) struct{ Full bool } {
+	if p.closed.Load() {
 		// Since only giveOld could have been potentially called after partition is closed
-		// we need to protect it against writing to closed channel
-		return nil
+		// we need to protect it against writing to a closed channel
+		return struct{ Full bool }{Full: true}
 	}
 
-	return s.oldValues
+	select {
+	case p.values <- v:
+		if cap(p.values) == len(p.values) {
+			return struct{ Full bool }{Full: true}
+		}
+
+		return struct{ Full bool }{Full: false}
+	default:
+		return struct{ Full bool }{Full: true}
+	}
 }
 
-func (s *Partition) Close() error {
-	for !s.closed.CompareAndSwap(false, true) { // nolint:revive
+// releaseToken removes the corresponding token from the in-flight tracking.
+func (p *Partition) releaseToken(token uint64) {
+	p.inFlight.Delete(token)
+}
+
+func (p *Partition) wakeUp() {
+	select {
+	case p.wakeUpSignal <- struct{}{}:
+	default:
+	}
+}
+
+func (p *Partition) pick() typedef.ValueWithToken {
+	if len(p.values) <= cap(p.values)/4 {
+		p.wakeUp() // channel at 25% capacity, trigger generator
+	}
+
+	val := <-p.values
+	return val
+}
+
+func (p *Partition) Close() error {
+	for !p.closed.CompareAndSwap(false, true) { // nolint:revive
 		// Wait until the partition is closed
 	}
 
-	close(s.values)
-	close(s.oldValues)
+	close(p.values)
+	close(p.oldValues)
 
 	return nil
 }
@@ -135,15 +146,20 @@ func (p Partitions) Close() error {
 	return err
 }
 
-func NewPartitions(count, pkBufferSize int, wakeUpSignal chan struct{}) Partitions {
+func NewPartitions(count, pkBufferSize uint64, wakeUpSignal chan struct{}) Partitions {
 	partitions := make(Partitions, count)
-	for i := 0; i < len(partitions); i++ {
+
+	for i := range len(partitions) {
+		values := make(chan typedef.ValueWithToken, pkBufferSize)
+		oldValues := make(chan typedef.ValueWithToken, pkBufferSize)
+
 		partitions[i] = &Partition{
-			values:       make(chan *typedef.ValueWithToken, pkBufferSize),
-			oldValues:    make(chan *typedef.ValueWithToken, pkBufferSize),
+			values:       values,
+			oldValues:    oldValues,
 			inFlight:     inflight.New(),
 			wakeUpSignal: wakeUpSignal,
 		}
 	}
+
 	return partitions
 }

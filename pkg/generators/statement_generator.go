@@ -48,7 +48,7 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 		typedef.Columns,
 		utils.RandInt2(r, sc.GetMinPartitionKeys(), sc.GetMaxPartitionKeys()),
 	)
-	for i := 0; i < len(partitionKeys); i++ {
+	for i := range len(partitionKeys) {
 		partitionKeys[i] = &typedef.ColumnDef{
 			Name: GenColumnName("pk", i),
 			Type: GenPartitionKeyColumnType(r),
@@ -58,7 +58,7 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 		typedef.Columns,
 		utils.RandInt2(r, sc.GetMinClusteringKeys(), sc.GetMaxClusteringKeys()),
 	)
-	for i := 0; i < len(clusteringKeys); i++ {
+	for i := range len(clusteringKeys) {
 		clusteringKeys[i] = &typedef.ColumnDef{
 			Name: GenColumnName("ck", i),
 			Type: GenPrimaryKeyColumnType(r),

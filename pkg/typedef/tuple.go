@@ -17,6 +17,7 @@ package typedef
 import (
 	"bytes"
 	"math/rand/v2"
+	"slices"
 	"strings"
 
 	"github.com/gocql/gocql"
@@ -87,12 +88,7 @@ func (t *TupleType) CQLPretty(builder *bytes.Buffer, value any) error {
 }
 
 func (t *TupleType) Indexable() bool {
-	for _, t := range t.ValueTypes {
-		if t == TypeDuration {
-			return false
-		}
-	}
-	return true
+	return !slices.Contains(t.ValueTypes, TypeDuration)
 }
 
 func (t *TupleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {

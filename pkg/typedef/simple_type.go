@@ -261,7 +261,10 @@ func (st SimpleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 		ln := r.IntN(p.MaxBlobLength) + p.MinBlobLength
 		return "0x" + hex.EncodeToString([]byte(utils.RandString(r, ln)))
 	case TypeTime:
-		return time.Unix(0, utils.RandTime(r)).UTC().Format("15:04:05.000000000")
+		return time.
+			Unix(0, utils.RandTime(r)).
+			UTC().
+			Format("15:04:05.000000000")
 	}
 	return st.genValue(r, p)
 }

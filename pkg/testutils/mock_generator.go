@@ -43,7 +43,7 @@ func NewTestGenerator(
 	}
 }
 
-func (g *MockGenerator) Get() *typedef.ValueWithToken {
+func (g *MockGenerator) Get() typedef.ValueWithToken {
 	values := g.createPartitionKeyValues(g.rand)
 	token, err := g.routingKeyCreator.GetHash(g.table, values)
 	if err != nil {
@@ -55,10 +55,10 @@ func (g *MockGenerator) Get() *typedef.ValueWithToken {
 			err,
 		)
 	}
-	return &typedef.ValueWithToken{Token: token, Value: values}
+	return typedef.ValueWithToken{Token: token, Value: values}
 }
 
-func (g *MockGenerator) GetOld() *typedef.ValueWithToken {
+func (g *MockGenerator) GetOld() typedef.ValueWithToken {
 	values := g.createPartitionKeyValues(g.rand)
 	token, err := g.routingKeyCreator.GetHash(g.table, values)
 	if err != nil {
@@ -70,12 +70,12 @@ func (g *MockGenerator) GetOld() *typedef.ValueWithToken {
 			err,
 		)
 	}
-	return &typedef.ValueWithToken{Token: token, Value: values}
+	return typedef.ValueWithToken{Token: token, Value: values}
 }
 
-func (g *MockGenerator) GiveOld(_ *typedef.ValueWithToken) {}
+func (g *MockGenerator) GiveOld(_ typedef.ValueWithToken) {}
 
-func (g *MockGenerator) GiveOlds(_ []*typedef.ValueWithToken) {}
+func (g *MockGenerator) GiveOlds(_ ...typedef.ValueWithToken) {}
 
 func (g *MockGenerator) ReleaseToken(_ uint64) {
 }
