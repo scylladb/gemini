@@ -29,7 +29,7 @@ func TestFullRandom(t *testing.T) {
 	t.Parallel()
 
 	rnd := Normal{
-		Src:   rand.NewPCG(100, 100),
+		Src:   rand.New(rand.NewPCG(100, 100)),
 		Mu:    stdDistMean,
 		Sigma: oneStdDev,
 	}

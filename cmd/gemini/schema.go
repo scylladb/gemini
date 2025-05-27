@@ -24,6 +24,15 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
+const (
+	MaxBlobLength   = 512
+	MinBlobLength   = 0
+	MaxStringLength = 256
+	MinStringLength = 0
+	MaxTupleParts   = 5
+	MaxUDTParts     = 5
+)
+
 func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 	defaultConfig := createDefaultSchemaConfig(logger)
 	switch strings.ToLower(datasetSize) {
@@ -56,14 +65,7 @@ func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 }
 
 func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
-	const (
-		MaxBlobLength   = 1e4
-		MinBlobLength   = 0
-		MaxStringLength = 1000
-		MinStringLength = 0
-		MaxTupleParts   = 20
-		MaxUDTParts     = 20
-	)
+
 	rs := getReplicationStrategy(replicationStrategy, replication.NewSimpleStrategy(), logger)
 	ors := getReplicationStrategy(oracleReplicationStrategy, rs, logger)
 	return typedef.SchemaConfig{

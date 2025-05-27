@@ -91,7 +91,7 @@ func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Sc
 		return nil, err
 	}
 
-	schemaBuilder := builders.NewSchemaBuilder()
+	schemaBuilder := builders.SchemaBuilder{}
 	schemaBuilder.Keyspace(shm.Keyspace).Config(schemaConfig)
 	for t, tbl := range shm.Tables {
 		shm.Tables[t].LinkIndexAndColumns()
@@ -206,7 +206,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	if dropSchema && mode != jobs.ReadMode {
 		for _, stmt := range generators.GetDropKeyspace(schema) {
 			logger.Debug(stmt)
-			if err = st.Mutate(context.Background(), typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
+			if err = st.Mutate(ctx, typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
 				return errors.Wrap(err, "unable to drop schema")
 			}
 		}
@@ -233,7 +233,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	warmupStopFlag := stop.NewFlag("warmup")
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
 
-	distFunc, err := distributions.New(
+	randSrc, distFunc, err := distributions.New(
 		partitionKeyDistribution,
 		partitionCount,
 		intSeed,
@@ -256,12 +256,13 @@ func run(cmd *cobra.Command, _ []string) error {
 		partitionCount,
 		pkBufferReuseSize,
 		logger,
+		randSrc,
 	)
 	defer utils.IgnoreError(gens.Close)
 
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, intSeed, warmupStopFlag, failFast, verbose); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, warmupStopFlag, failFast, verbose, randSrc); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
 			stopFlag.SetHard(true)
 		}
@@ -269,7 +270,7 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	if !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(mode, duration, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, intSeed, stopFlag.CreateChild("workload"), failFast, verbose); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, stopFlag.CreateChild("workload"), failFast, verbose, randSrc); err != nil {
 			logger.Debug("error detected", zap.Error(err))
 		}
 	}

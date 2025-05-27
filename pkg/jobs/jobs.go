@@ -102,26 +102,21 @@ func ListFromMode(mode string, duration time.Duration, workers uint64) List {
 }
 
 func (l List) Run(
-	ctx context.Context,
+	base context.Context,
 	schema *typedef.Schema,
 	schemaConfig typedef.SchemaConfig,
 	s store.Store,
 	generators *generators.Generators,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
-	seed uint64,
 	stopFlag *stop.Flag,
 	failFast, verbose bool,
+	src rand.Source,
 ) error {
+	ctx, cancel := context.WithTimeout(base, l.duration)
+	defer cancel()
 	logger = logger.Named(l.name)
-	ctx = stopFlag.CancelContextOnSignal(ctx, stop.SignalHardStop)
 	g, gCtx := errgroup.WithContext(ctx)
-	time.AfterFunc(l.duration, func() {
-		logger.Info("jobs time is up, begins jobs completion")
-		stopFlag.SetSoft(true)
-	})
-
-	r := rand.New(rand.NewPCG(seed, seed))
 
 	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 	logger.Info("start jobs")
@@ -129,8 +124,7 @@ func (l List) Run(
 		for range l.workers {
 			for idx := range l.jobs {
 				jobF := l.jobs[idx].function
-				newSeed := r.Uint64N(seed)
-				rnd := rand.New(rand.NewPCG(newSeed, newSeed))
+				rnd := rand.New(src)
 				generator := generators.Get(table)
 				g.Go(func() error {
 					return jobF(
@@ -179,11 +173,8 @@ func mutationJob(
 		logger.Info("ending mutation loop")
 	}()
 	for {
-		if stopFlag.IsHardOrSoft() {
-			return nil
-		}
 		select {
-		case <-stopFlag.SignalChannel():
+		case <-ctx.Done():
 			logger.Debug("mutation job terminated")
 			return nil
 		default:
@@ -234,11 +225,8 @@ func validationJob(
 	}()
 
 	for {
-		if stopFlag.IsHardOrSoft() {
-			return nil
-		}
 		select {
-		case <-stopFlag.SignalChannel():
+		case <-ctx.Done():
 			return nil
 		default:
 		}
@@ -316,11 +304,12 @@ func warmupJob(
 		logger.Info("ending warmup loop")
 	}()
 	for {
-		if stopFlag.IsHardOrSoft() {
-			logger.Debug("warmup job terminated")
+		select {
+		case <-ctx.Done():
 			return nil
+		default:
 		}
-		// Do we care about errors during warmup?
+
 		err := mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
 		if err != nil {
 			return err

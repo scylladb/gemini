@@ -19,7 +19,7 @@ import (
 )
 
 type Normal struct {
-	Src   rand.Source
+	Src   *rand.Rand
 	Mu    float64
 	Sigma float64
 }
@@ -33,7 +33,7 @@ func (n Normal) Rand() float64 {
 	if n.Src == nil {
 		rnd = rand.NormFloat64()
 	} else {
-		rnd = rand.New(n.Src).NormFloat64()
+		rnd = n.Src.NormFloat64()
 	}
 	return rnd*n.Sigma + n.Mu
 }

@@ -52,7 +52,7 @@ func TestNew(t *testing.T) {
 		t.Run("test-"+item.dist, func(t *testing.T) {
 			t.Parallel()
 
-			distFunc, err := New(item.dist, item.size, item.seed, stdDistMean, oneStdDev)
+			_, distFunc, err := New(item.dist, item.size, item.seed, stdDistMean, oneStdDev)
 			if err != nil {
 				t.Errorf("failed to create distribution function: %s", item.dist)
 			}

@@ -27,7 +27,7 @@ import (
 
 func GenSchema(sc typedef.SchemaConfig, seed uint64) *typedef.Schema {
 	r := rand.New(rand.NewPCG(seed, seed))
-	builder := builders.NewSchemaBuilder()
+	builder := builders.SchemaBuilder{}
 	builder.Config(sc)
 	keyspace := typedef.Keyspace{
 		Name:              "ks1",
@@ -134,18 +134,18 @@ func GetCreateSchema(s *typedef.Schema) []string {
 		stmts = append(stmts, createTypes...)
 		createTable := GetCreateTable(t, s.Keyspace)
 		stmts = append(stmts, createTable)
-		for _, idef := range t.Indexes {
-			stmts = append(
-				stmts,
-				fmt.Sprintf(
-					"CREATE INDEX IF NOT EXISTS %s ON %s.%s (%s)",
-					idef.IndexName,
-					s.Keyspace.Name,
-					t.Name,
-					idef.ColumnName,
-				),
-			)
-		}
+		// for _, idef := range t.Indexes {
+		// 	stmts = append(
+		// 		stmts,
+		// 		fmt.Sprintf(
+		// 			"CREATE INDEX IF NOT EXISTS %s ON %s.%s (%s)",
+		// 			idef.IndexName,
+		// 			s.Keyspace.Name,
+		// 			t.Name,
+		// 			idef.ColumnName,
+		// 		),
+		// 	)
+		// }
 		for _, mv := range t.MaterializedViews {
 			var (
 				mvPartitionKeys      []string

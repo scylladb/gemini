@@ -190,7 +190,7 @@ func createTableOptions(cql string) []tableopts.Option {
 }
 
 func genTestSchema(sc typedef.SchemaConfig, table *typedef.Table) *typedef.Schema {
-	builder := builders.NewSchemaBuilder()
+	builder := builders.SchemaBuilder{}
 	builder.Config(sc)
 	keyspace := typedef.Keyspace{
 		Name:              "ks1",

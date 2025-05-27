@@ -55,7 +55,3 @@ func (s *SchemaBuilder) Build() *typedef.Schema {
 	}
 	return out
 }
-
-func NewSchemaBuilder() *SchemaBuilder {
-	return &SchemaBuilder{}
-}

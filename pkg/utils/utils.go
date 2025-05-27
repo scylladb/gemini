@@ -160,7 +160,7 @@ func CreateFile(input string, def ...io.Writer) (io.Writer, error) {
 	}
 }
 
-func innerDataSize(v any) uint64 {
+func Sizeof(v any) uint64 {
 	if v == nil {
 		return 0
 	}
@@ -168,10 +168,16 @@ func innerDataSize(v any) uint64 {
 	switch val := v.(type) {
 	case MemoryFootprint:
 		return val.MemoryFootprint()
+	case []any:
+		var size uint64
+		for _, value := range val {
+			size += Sizeof(value)
+		}
+		return size
 	case string:
-		return uint64(len(val))
+		return uint64(len(val)) + uint64(unsafe.Sizeof(""))
 	case []byte:
-		return uint64(len(val))
+		return uint64(len(val)) + uint64(unsafe.Sizeof([]byte{}))
 	case int, int8, int16, int32, int64,
 		uint, uint8, uint16, uint32, uint64,
 		float32, float64, bool, time.Duration:
@@ -180,45 +186,6 @@ func innerDataSize(v any) uint64 {
 		return uint64(val.BitLen()/8 + 1)
 	case *inf.Dec:
 		return uint64(val.UnscaledBig().BitLen()/8+1) + uint64(unsafe.Sizeof(int32(0)))
-	default:
-		return 16 // Assume pointer size for other types
-	}
-}
-
-func DataSize(v []any) uint64 {
-	if v == nil {
-		return 0
-	}
-
-	var size uint64
-	for _, value := range v {
-		switch val := value.(type) {
-		case MemoryFootprint:
-			return val.MemoryFootprint()
-		case []any:
-			for _, innerValue := range val {
-				size += innerDataSize(innerValue)
-			}
-		default:
-			size += innerDataSize(val)
-		}
-	}
-
-	return size
-}
-
-func Sizeof(v any) uint64 {
-	if v == nil {
-		return 0
-	}
-
-	switch val := v.(type) {
-	case []any:
-		return DataSize(val)
-	case []byte:
-		return uint64(len(val)) + uint64(unsafe.Sizeof(val))
-	case string:
-		return uint64(len(val)) + uint64(unsafe.Sizeof(val))
 	default:
 		return uint64(unsafe.Sizeof(v))
 	}

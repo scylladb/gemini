@@ -24,12 +24,11 @@ import (
 )
 
 type Partition struct {
-	values       chan typedef.ValueWithToken
-	oldValues    chan typedef.ValueWithToken
-	inFlight     inflight.InFlight
-	wakeUpSignal chan<- struct{} // wakes up generator
-	closed       atomic.Bool
-	isStale      atomic.Bool
+	values    chan typedef.ValueWithToken
+	oldValues chan typedef.ValueWithToken
+	inFlight  inflight.InFlight
+	closed    atomic.Bool
+	isStale   atomic.Bool
 }
 
 func (p *Partition) MarkStale() error {
@@ -46,7 +45,7 @@ func (p *Partition) Stale() bool {
 func (p *Partition) get() typedef.ValueWithToken {
 	for {
 		v := p.pick()
-		if p.inFlight.AddIfNotPresent(v.Token) {
+		if v.Token == 0 || p.inFlight.AddIfNotPresent(v.Token) {
 			return v
 		}
 	}
@@ -54,13 +53,12 @@ func (p *Partition) get() typedef.ValueWithToken {
 
 // getOld returns a previously used value and token or a new if
 // the old queue is empty.
-func (p *Partition) getOld() typedef.ValueWithToken {
+func (p *Partition) getOld() (typedef.ValueWithToken, bool) {
 	select {
 	case v := <-p.oldValues:
-		return v
+		return v, true
 	default:
-		v := p.get()
-		return v
+		return p.get(), false
 	}
 }
 
@@ -78,7 +76,7 @@ func (p *Partition) giveOld(v typedef.ValueWithToken) bool {
 	case p.oldValues <- v:
 		return true
 	default:
-		// clear(v.Value)
+		clear(v.Value)
 		return false
 		// Old partition buffer is full, just drop the value
 	}
@@ -108,56 +106,41 @@ func (p *Partition) releaseToken(token uint64) {
 	p.inFlight.Delete(token)
 }
 
-func (p *Partition) wakeUp() {
-	select {
-	case p.wakeUpSignal <- struct{}{}:
-	default:
-	}
-}
-
 func (p *Partition) pick() typedef.ValueWithToken {
-	if len(p.values) <= cap(p.values)/4 {
-		p.wakeUp() // channel at 25% capacity, trigger generator
-	}
-
-	val := <-p.values
-	return val
+	return <-p.values
 }
 
 func (p *Partition) Close() error {
-	for !p.closed.CompareAndSwap(false, true) { // nolint:revive
-		// Wait until the partition is closed
-	}
-
+	p.closed.Store(true)
 	close(p.values)
 	close(p.oldValues)
 
 	return nil
 }
 
-type Partitions []*Partition
+type Partitions []Partition
 
 func (p Partitions) Close() error {
 	var err error
-	for _, part := range p {
-		err = multierr.Append(err, part.Close())
+
+	for i := range len(p) {
+		err = multierr.Append(err, p[i].Close())
 	}
 
 	return err
 }
 
-func NewPartitions(count, pkBufferSize uint64, wakeUpSignal chan struct{}) Partitions {
+func NewPartitions(count, pkBufferSize uint64) Partitions {
 	partitions := make(Partitions, count)
 
 	for i := range len(partitions) {
 		values := make(chan typedef.ValueWithToken, pkBufferSize)
 		oldValues := make(chan typedef.ValueWithToken, pkBufferSize)
 
-		partitions[i] = &Partition{
-			values:       values,
-			oldValues:    oldValues,
-			inFlight:     inflight.New(),
-			wakeUpSignal: wakeUpSignal,
+		partitions[i] = Partition{
+			values:    values,
+			oldValues: oldValues,
+			inFlight:  inflight.New(),
 		}
 	}
 

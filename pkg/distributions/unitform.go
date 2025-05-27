@@ -19,7 +19,7 @@ import (
 )
 
 type Uniform struct {
-	Src rand.Source
+	Src *rand.Rand
 	Min float64
 	Max float64
 }
@@ -29,7 +29,7 @@ func (u Uniform) Rand() float64 {
 	if u.Src == nil {
 		rnd = rand.Float64()
 	} else {
-		rnd = rand.New(u.Src).Float64()
+		rnd = u.Src.Float64()
 	}
 
 	return rnd*(u.Max-u.Min) + u.Min

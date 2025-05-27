@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"unsafe"
 
 	"github.com/pkg/errors"
 	"github.com/scylladb/gocqlx/v3/qb"
@@ -295,7 +296,7 @@ func (v Values) MemoryFootprint() uint64 {
 		return 0
 	}
 
-	return utils.DataSize(v)
+	return utils.Sizeof([]any(v))
 }
 
 func (v Values) Copy() Values {
@@ -396,5 +397,5 @@ func prettyCQL(builder *bytes.Buffer, q string, values Values, types []Type) err
 }
 
 func (v ValueWithToken) MemoryFootprint() uint64 {
-	return utils.Sizeof(v) + v.Value.MemoryFootprint()
+	return uint64(unsafe.Sizeof(v)) + v.Value.MemoryFootprint()
 }

@@ -22,7 +22,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -67,25 +66,26 @@ type (
 )
 
 func NewFileLogger(filename string, compression Compression) (StmtToFile, error) {
-	if filename == "" {
-		return &nopFileLogger{}, nil
-	}
+	return &nopFileLogger{}, nil
+	// if filename == "" {
+	// 	return &nopFileLogger{}, nil
+	// }
 
-	fd, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-	if err != nil {
-		return nil, err
-	}
+	// fd, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// ctx, cancel := context.WithCancel(context.Background())
 
-	runtime.SetFinalizer(fd, func(f *os.File) {
-		cancel()
-		_ = f.Close()
-	})
+	// runtime.SetFinalizer(fd, func(f *os.File) {
+	// 	cancel()
+	// 	_ = f.Close()
+	// })
 
-	go fileSizeReporter(ctx, fd)
+	// go fileSizeReporter(ctx, fd)
 
-	return NewLogger(filename, fd, compression)
+	// return NewLogger(filename, fd, compression)
 }
 
 func NewLogger(name string, w io.Writer, compression Compression) (StmtToFile, error) {

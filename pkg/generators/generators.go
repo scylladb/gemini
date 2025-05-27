@@ -17,6 +17,7 @@ package generators
 import (
 	"context"
 	"math"
+	"math/rand/v2"
 
 	"go.uber.org/zap"
 
@@ -35,6 +36,7 @@ func New(
 	distFunc distributions.DistributionFunc,
 	seed, distributionSize, pkBufferReuseSize uint64,
 	logger *zap.Logger,
+	source rand.Source,
 ) *Generators {
 	base, cancel := context.WithCancel(ctx)
 
@@ -53,7 +55,7 @@ func New(
 
 	partitionRangeConfig := schema.Config.GetPartitionRangeConfig()
 	for _, table := range schema.Tables {
-		g := NewGenerator(base, table, cfg, logger.Named("generators-"+table.Name))
+		g := NewGenerator(base, table, cfg, logger.Named("generators-"+table.Name), source)
 
 		if table.PartitionKeys.ValueVariationsNumber(&partitionRangeConfig) < math.MaxUint32 {
 			// Low partition key variation can lead to having staled partitions
@@ -79,6 +81,10 @@ func (g *Generators) Get(table *typedef.Table) *Generator {
 
 func (g *Generators) Close() error {
 	g.cancel()
+
+	for _, gen := range g.Gens {
+		_ = gen.Close()
+	}
 
 	return nil
 }
