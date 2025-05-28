@@ -220,6 +220,7 @@ func (fl *logger) committer(ctx context.Context) {
 	errsAtRow := 0
 
 	drain := func(rec []byte) {
+		fl.metrics.Dec(rec)
 		if _, err := fl.writer.Write(rec); err != nil {
 			if errors.Is(err, os.ErrClosed) || errsAtRow > errorsOnFileLimit {
 				return
@@ -235,26 +236,31 @@ func (fl *logger) committer(ctx context.Context) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
-outer:
+	fl.wg.Add(1)
+	go func() {
+		defer fl.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := fl.writer.Flush(); err != nil {
+					log.Printf("failed to write to writer %+v", err)
+				}
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
-			break outer
-		case rec, ok := <-fl.channel:
-			if !ok {
-				break outer
+			for rec := range fl.channel {
+				drain(rec)
 			}
-			fl.metrics.Dec(rec)
+			return
+		case rec := <-fl.channel:
 			drain(rec)
-		case <-ticker.C:
-			if err := fl.writer.Flush(); err != nil {
-				log.Printf("failed to write to writer %+v", err)
-			}
 		}
-	}
-
-	for rec := range fl.channel {
-		drain(rec)
 	}
 }
 

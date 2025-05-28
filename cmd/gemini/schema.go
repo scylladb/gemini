@@ -25,9 +25,9 @@ import (
 )
 
 const (
-	MaxBlobLength   = 512
+	MaxBlobLength   = 256
 	MinBlobLength   = 0
-	MaxStringLength = 256
+	MaxStringLength = 128
 	MinStringLength = 0
 	MaxTupleParts   = 5
 	MaxUDTParts     = 5

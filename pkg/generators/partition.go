@@ -130,6 +130,24 @@ func (p Partitions) Close() error {
 	return err
 }
 
+func (p Partitions) FullValues() int {
+	c := cap(p[0].values)
+	percentageFull := c / 10
+
+	full := 0
+	for i := range len(p) {
+		l := len(p[i].values)
+
+		if c-l > percentageFull {
+			// If there is more than 10% of free space in the partition
+			// we consider it not full.
+			full++
+		}
+	}
+
+	return full
+}
+
 func NewPartitions(count, pkBufferSize uint64) Partitions {
 	partitions := make(Partitions, count)
 

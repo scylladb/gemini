@@ -32,6 +32,7 @@ import (
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 const (
@@ -172,12 +173,18 @@ func mutationJob(
 	defer func() {
 		logger.Info("ending mutation loop")
 	}()
+	executionCount := 0
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Debug("mutation job terminated")
 			return nil
 		default:
+		}
+
+		if executionCount > 10000 {
+			executionCount = 0
+			time.Sleep(time.Duration(utils.RandInt2(r, 5, 50)) * time.Millisecond)
 		}
 
 		var err error
@@ -189,6 +196,8 @@ func mutationJob(
 				err = mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, true, logger)
 			}
 		})
+
+		executionCount++
 
 		if err != nil {
 			return err

@@ -16,7 +16,6 @@ package typedef
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"math"
 	"math/big"
@@ -259,7 +258,7 @@ func (st SimpleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	switch st {
 	case TypeBlob:
 		ln := r.IntN(p.MaxBlobLength) + p.MinBlobLength
-		return "0x" + hex.EncodeToString([]byte(utils.RandString(r, ln)))
+		return "0x" + utils.RandString(r, ln)
 	case TypeTime:
 		return time.
 			Unix(0, utils.RandTime(r)).
@@ -275,12 +274,9 @@ func (st SimpleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
 
 func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	switch st {
-	case TypeAscii, TypeText, TypeVarchar:
+	case TypeAscii, TypeText, TypeVarchar, TypeBlob:
 		ln := r.IntN(p.MaxStringLength) + p.MinStringLength
 		return utils.RandString(r, ln)
-	case TypeBlob:
-		ln := r.IntN(p.MaxBlobLength) + p.MinBlobLength
-		return hex.EncodeToString([]byte(utils.RandString(r, ln)))
 	case TypeBigint:
 		return r.Int64()
 	case TypeBoolean:

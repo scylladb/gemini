@@ -117,13 +117,6 @@ var (
 		[]string{"cluster", "host"},
 	)
 
-	GeneratorValueGenerationTime = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name: "generated_value_generation_time",
-		},
-		[]string{"table", "partition"},
-	)
-
 	GeneratorCreatedValues = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "generated_created_values",
@@ -210,7 +203,6 @@ func init() {
 		GeneratorPartitionSize,
 		GeneratorDroppedValues,
 		GeneratorBufferSize,
-		GeneratorValueGenerationTime,
 		StalePartitions,
 		MemoryMetrics,
 		FileSizeMetrics,

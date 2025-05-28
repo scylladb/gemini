@@ -147,8 +147,14 @@ func run(cmd *cobra.Command, _ []string) error {
 	if profilingPort != 0 {
 		go func() {
 			mux := http.NewServeMux()
-			mux.HandleFunc("/profile", pprof.Profile)
-			log.Fatal(http.ListenAndServe(":"+strconv.Itoa(profilingPort), mux))
+
+			mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+			mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+			mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+			mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+			mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+
+			log.Fatal(http.ListenAndServe("0.0.0.0:"+strconv.Itoa(profilingPort), mux))
 		}()
 	}
 

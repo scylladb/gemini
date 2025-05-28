@@ -68,16 +68,8 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) (err error) {
 
 func (c *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Time) error {
 	queryBody, _ := stmt.Query.ToCql()
-	query := c.session.Query(queryBody, stmt.Values...).WithContext(ctx)
+	query := c.session.Query(queryBody, stmt.Values...)
 	defer query.Release()
-
-	if c.useServerSideTimestamps {
-		query.DefaultTimestamp(false)
-		_ = c.stmtLogger.LogStmt(stmt)
-	} else {
-		query.WithTimestamp(ts.UnixNano() / 1000)
-		_ = c.stmtLogger.LogStmt(stmt, ts)
-	}
 
 	if err := query.Exec(); err != nil {
 		if errs.Is(err, context.DeadlineExceeded) {
@@ -94,16 +86,22 @@ func (c *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Tim
 			return errors.Wrapf(err, "[cluster = %s, query = '%s']", c.system, queryBody)
 		}
 	}
+
+	if c.useServerSideTimestamps {
+		query.DefaultTimestamp(false)
+		_ = c.stmtLogger.LogStmt(stmt)
+	} else {
+		query.WithTimestamp(ts.UnixNano() / 1000)
+		_ = c.stmtLogger.LogStmt(stmt, ts)
+	}
+
 	return nil
 }
 
 func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) ([]Row, error) {
 	cql, _ := stmt.Query.ToCql()
-	if err := c.stmtLogger.LogStmt(stmt); err != nil {
-		return nil, err
-	}
 
-	query := c.session.Query(cql, stmt.Values...).WithContext(ctx)
+	query := c.session.Query(cql, stmt.Values...)
 	defer query.Release()
 
 	iter := query.Iter()
@@ -122,6 +120,10 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) ([]Row, error) 
 		}
 
 		rows = append(rows, row)
+	}
+
+	if err := c.stmtLogger.LogStmt(stmt); err != nil {
+		return nil, err
 	}
 
 	return rows, nil

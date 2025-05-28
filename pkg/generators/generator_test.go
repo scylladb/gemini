@@ -15,6 +15,7 @@
 package generators_test
 
 import (
+	"math/rand/v2"
 	"sync/atomic"
 	"testing"
 
@@ -39,14 +40,14 @@ func TestGenerator(t *testing.T) {
 			MaxBlobLength:   10,
 			MinBlobLength:   0,
 		},
-		PkUsedBufferSize: 10000,
-		PartitionsCount:  1000,
+		PkUsedBufferSize: 100,
+		PartitionsCount:  10000,
 		PartitionsDistributionFunc: func() distributions.TokenIndex {
 			return distributions.TokenIndex(atomic.LoadUint64(&current))
 		},
 	}
 	logger, _ := zap.NewDevelopment()
-	generator := generators.NewGenerator(t.Context(), table, cfg, logger)
+	generator := generators.NewGenerator(t.Context(), table, cfg, logger, rand.NewPCG(10, 10))
 	for i := uint64(0); i < cfg.PartitionsCount; i++ {
 		atomic.StoreUint64(&current, i)
 		v := generator.Get()

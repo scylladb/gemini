@@ -195,9 +195,11 @@ func (ds delegatingStore) Check(
 	stmt *typedef.Stmt,
 	detailedDiff bool,
 ) error {
-	var oracleRows []Row
-	var oracleErr error
-	var wg sync.WaitGroup
+	var (
+		oracleRows []Row
+		oracleErr  error
+		wg         sync.WaitGroup
+	)
 
 	doCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

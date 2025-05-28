@@ -2,8 +2,12 @@
   <configuration default="false" name="Run Gemini Mixed" type="GoApplicationRunConfiguration" factoryName="Go Application">
     <module name="gemini" />
     <working_directory value="$PROJECT_DIR$" />
-    <go_parameters value="-gcflags &quot;all=-N -l&quot;" />
-    <parameters value="--mode mixed --token-range-slices=10000 --partition-key-buffer-reuse-size=256 --seed=29 --schema-seed=29 --dataset-size=large --cql-features normal --warmup 2m --duration 30m --drop-schema true --fail-fast --level=info --test-host-selection-policy token-aware --oracle-host-selection-policy token-aware --test-cluster=192.168.100.3,192.168.100.4,192.168.100.5 --oracle-cluster=192.168.100.2 --request-timeout 5s --connect-timeout 120s --use-server-timestamps false --async-objects-stabilization-attempts 10 --async-objects-stabilization-backoff 10ms --replication-strategy &quot;{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}&quot; --oracle-replication-strategy &quot;{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}&quot; --max-mutation-retries 5 --max-mutation-retries-backoff 10ms --concurrency=12 --profiling-port 6060 --statement-log-file-compression=zstd --oracle-statement-log-file=./results/oracle-statements.log.zst --test-statement-log-file=./results/test-statements.log.zst --partition-key-distribution=uniform" />
+    <parameters value="--mode=mixed --token-range-slices=10000 --partition-key-buffer-reuse-size=100 --seed=59 --schema-seed=59 --dataset-size=large --cql-features=normal --warmup=2m --duration=30m --drop-schema=true --fail-fast --level=info --test-host-selection-policy=token-aware --oracle-host-selection-policy=token-aware --test-cluster=192.168.100.3,192.168.100.4,192.168.100.5 --oracle-cluster=192.168.100.2 --request-timeout=5s --connect-timeout=120s --use-server-timestamps=false --async-objects-stabilization-attempts=10 --async-objects-stabilization-backoff=10ms --replication-strategy=&quot;{'class': 'NetworkTopologyStrategy', 'replication_factor': '3'}&quot; --oracle-replication-strategy=&quot;{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}&quot; --max-mutation-retries=5 --max-mutation-retries-backoff=10ms --concurrency=6 --profiling-port=6060 --statement-log-file-compression=zstd --partition-key-distribution=uniform" />
+    <envs>
+      <env name="CGO_ENABLED" value="0" />
+      <env name="GODEBUG" value="default=go1.24,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0," />
+      <env name="GOGC" value="95" />
+    </envs>
     <kind value="PACKAGE" />
     <package value="github.com/scylladb/gemini/cmd/gemini" />
     <directory value="$PROJECT_DIR$" />

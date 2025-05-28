@@ -13,7 +13,7 @@ BUILD_DATE ?= $(shell git log -1 --format=%cd --date=format:%Y-%m-%dT%H:%M:%SZ 2
 LDFLAGS_VERSION := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(BUILD_DATE)
 
 CQL_FEATURES ?= normal
-CONCURRENCY ?= 16
+CONCURRENCY ?= 25
 DURATION ?= 10m
 WARMUP ?= 2m
 MODE ?= mixed
@@ -37,7 +37,7 @@ GEMINI_FLAGS ?= --fail-fast \
 	--use-server-timestamps=true \
 	--async-objects-stabilization-attempts=10 \
 	--max-mutation-retries=10 \
-	--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
+	--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '3'}" \
 	--oracle-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 	--concurrency=$(CONCURRENCY) \
 	--dataset-size=$(DATASET_SIZE) \
@@ -127,7 +127,7 @@ pprof-profile:
 
 .PHONY: pprof-heap
 pprof-heap:
-	@go tool pprof -http=:8081 http://localhost:6060/debug/pprof/heap
+	@go tool pprof -http=:8085 http://localhost:6060/debug/pprof/heap
 
 .PHONY: pprof-goroutine
 pprof-goroutine:
@@ -165,7 +165,7 @@ integration-test:
 	@mkdir -p $(PWD)/results
 	@touch $(PWD)/results/gemini_seed
 	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
-	$(GEMINI_BINARY) \
+	GODEBUG="default=go1.24,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0" GOGC="95" $(GEMINI_BINARY) \
 		--test-cluster="$(call get_scylla_ip,gemini-test)" \
 		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
 		$(GEMINI_FLAGS)
@@ -175,6 +175,7 @@ integration-cluster-test:
 	@mkdir -p $(PWD)/results
 	@touch $(PWD)/results/gemini_seed
 	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
+	GODEBUG="default=go1.24,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0" GOGC="95" \
 	$(GEMINI_BINARY) \
 		--test-cluster="$(call get_scylla_ip,gemini-test-1),$(call get_scylla_ip,gemini-test-2),$(call get_scylla_ip,gemini-test-3)" \
 		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \

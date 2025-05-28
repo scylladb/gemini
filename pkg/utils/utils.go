@@ -15,8 +15,6 @@
 package utils
 
 import (
-	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"math/big"
@@ -100,30 +98,6 @@ func RandInt2(rnd *rand.Rand, minimum, maximum int) int {
 
 func IgnoreError(fn func() error) {
 	_ = fn()
-}
-
-func RandBytes(rnd *rand.Rand, ln int) []byte {
-	if ln <= 0 {
-		return nil
-	}
-
-	length := ln
-	if length%4 != 0 {
-		length += 4 - (length % 4)
-	}
-
-	binBuff := make([]byte, length)
-
-	for i := 0; i < len(binBuff); i += 4 {
-		binary.LittleEndian.PutUint32(binBuff[i:], rnd.Uint32())
-	}
-
-	return binBuff
-}
-
-func RandString(rnd *rand.Rand, ln int) string {
-	data := RandBytes(rnd, ln)
-	return hex.EncodeToString(data)[:ln]
 }
 
 func UUIDFromTime(rnd *rand.Rand) string {

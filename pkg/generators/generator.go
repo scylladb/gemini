@@ -191,6 +191,8 @@ func (g *Generator) FindAndMarkStalePartitions() {
 	metrics.StalePartitions.WithLabelValues(g.table.Name).Set(float64(stalePartitions))
 }
 
+const sleepTime = 20 * time.Millisecond
+
 // fillAllPartitions guarantees that each partition was tested to be full
 // at least once since the function started and before it ended.
 // In other words no partition will be starved.
@@ -203,8 +205,6 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 		}
 
 		metrics.ExecutionTime("value_generation", func() {
-			start := time.Now()
-
 			token, values, err := g.createPartitionKeyValues()
 			if err != nil {
 				g.logger.Panic("failed to get primary key hash", zap.Error(err))
@@ -213,10 +213,6 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 
 			idx := g.shardOf(token)
 			idxStr := strconv.FormatInt(int64(idx), 10)
-
-			metrics.GeneratorValueGenerationTime.
-				WithLabelValues(g.table.Name, idxStr).
-				Observe(float64(time.Since(start).Nanoseconds()))
 
 			metrics.GeneratorCreatedValues.WithLabelValues(g.table.Name, idxStr).Inc()
 
@@ -232,6 +228,12 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 			}
 
 			metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new").Inc()
+			fullPartitions := g.partitions.FullValues()
+
+			metrics.GeneratorFilledPartitions.WithLabelValues(g.table.Name).Set(float64(fullPartitions))
+			if fullPartitions > len(g.partitions)-len(g.partitions)/10 {
+				time.Sleep(sleepTime)
+			}
 		})
 	}
 }
