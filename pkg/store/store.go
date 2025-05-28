@@ -69,12 +69,14 @@ type Config struct {
 }
 
 func New(
+	ctx context.Context,
 	schema *typedef.Schema,
 	testCluster, oracleCluster *gocql.ClusterConfig,
 	cfg Config,
 	logger *zap.Logger,
 ) (Store, error) {
 	oracleStore, err := getStore(
+		ctx,
 		"oracle",
 		schema,
 		oracleCluster,
@@ -92,6 +94,7 @@ func New(
 	}
 
 	testStore, err := getStore(
+		ctx,
 		"test",
 		schema,
 		testCluster,
@@ -304,6 +307,7 @@ func (ds delegatingStore) Close() error {
 }
 
 func getStore(
+	ctx context.Context,
 	name string,
 	schema *typedef.Schema,
 	clusterConfig *gocql.ClusterConfig,
@@ -321,7 +325,7 @@ func getStore(
 		return nil, pkgerrors.Wrapf(err, "failed to connect to %s cluster", name)
 	}
 
-	oracleFileLogger, err := stmtlogger.NewFileLogger(stmtLogFile, compression)
+	oracleFileLogger, err := stmtlogger.NewFileLogger(ctx, stmtLogFile, compression)
 	if err != nil {
 		return nil, err
 	}

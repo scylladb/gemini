@@ -202,7 +202,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		LogStatementFileCompression: stmtlogger.MustParseCompression(statementLogFileCompression),
 	}
 
-	st, err := store.New(schema, testCluster, oracleCluster, storeConfig, logger)
+	st, err := store.New(ctx, schema, testCluster, oracleCluster, storeConfig, logger)
 	if err != nil {
 		return err
 	}

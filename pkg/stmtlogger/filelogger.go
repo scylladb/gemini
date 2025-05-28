@@ -55,42 +55,28 @@ type (
 
 	logger struct {
 		pool    sync.Pool
-		writer  flusher
 		closer  io.Closer
 		channel chan []byte
-		cancel  context.CancelFunc
 		metrics metrics.ChannelMetrics
-		wg      sync.WaitGroup
+		wg      *sync.WaitGroup
 		active  atomic.Bool
 	}
 )
 
-func NewFileLogger(filename string, compression Compression) (StmtToFile, error) {
-	return &nopFileLogger{}, nil
-	// if filename == "" {
-	// 	return &nopFileLogger{}, nil
-	// }
+func NewFileLogger(ctx context.Context, filename string, compression Compression) (StmtToFile, error) {
+	if filename == "" {
+		return &nopFileLogger{}, nil
+	}
 
-	// fd, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-	// if err != nil {
-	// 	return nil, err
-	// }
+	fd, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, err
+	}
 
-	// ctx, cancel := context.WithCancel(context.Background())
-
-	// runtime.SetFinalizer(fd, func(f *os.File) {
-	// 	cancel()
-	// 	_ = f.Close()
-	// })
-
-	// go fileSizeReporter(ctx, fd)
-
-	// return NewLogger(filename, fd, compression)
+	return NewLogger(ctx, filename, fd, compression)
 }
 
-func NewLogger(name string, w io.Writer, compression Compression) (StmtToFile, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-
+func NewLogger(ctx context.Context, name string, w io.Writer, compression Compression) (StmtToFile, error) {
 	var writer flusher
 	var closer io.Closer
 	switch compression {
@@ -100,7 +86,6 @@ func NewLogger(name string, w io.Writer, compression Compression) (StmtToFile, e
 			zstd.WithAllLitEntropyCompression(true),
 		)
 		if err != nil {
-			cancel()
 			return nil, err
 		}
 
@@ -109,7 +94,6 @@ func NewLogger(name string, w io.Writer, compression Compression) (StmtToFile, e
 	case GZIPCompression:
 		gzipWriter, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
 		if err != nil {
-			cancel()
 			return nil, err
 		}
 
@@ -122,12 +106,15 @@ func NewLogger(name string, w io.Writer, compression Compression) (StmtToFile, e
 		writer = bufio.NewWriterSize(w, bufioWriterSize)
 	}
 
+	chMetrics := metrics.NewChannelMetrics[[]byte]("statement_logger", name, defaultChanSize)
+	ch := make(chan []byte, defaultChanSize)
+	wg := &sync.WaitGroup{}
+
 	out := &logger{
-		writer:  writer,
 		closer:  closer,
-		metrics: metrics.NewChannelMetrics[[]byte]("statement_logger", name, defaultChanSize),
-		channel: make(chan []byte, defaultChanSize),
-		cancel:  cancel,
+		metrics: chMetrics,
+		channel: ch,
+		wg:      wg,
 		pool: sync.Pool{
 			New: func() any {
 				return bytes.NewBuffer(make([]byte, 0, defaultBufferSize))
@@ -136,7 +123,13 @@ func NewLogger(name string, w io.Writer, compression Compression) (StmtToFile, e
 	}
 	out.active.Store(true)
 
-	go out.committer(ctx)
+	wg.Add(1)
+
+	go committer(ch, wg, writer, chMetrics)
+	if f, ok := w.(*os.File); ok {
+		go fileSizeReporter(ctx, f)
+	}
+
 	return out, nil
 }
 
@@ -194,16 +187,11 @@ func (fl *logger) LogStmt(stmt *typedef.Stmt, ts ...time.Time) error {
 }
 
 func (fl *logger) Close() error {
-	fl.cancel()
 	fl.active.Swap(false)
 	close(fl.channel)
 
 	// Wait for commiter to drain the channel
 	fl.wg.Wait()
-
-	if err := fl.writer.Flush(); err != nil {
-		return err
-	}
 
 	if fl.closer != nil {
 		if err := fl.closer.Close(); err != nil {
@@ -214,14 +202,13 @@ func (fl *logger) Close() error {
 	return nil
 }
 
-func (fl *logger) committer(ctx context.Context) {
-	fl.wg.Add(1)
-	defer fl.wg.Done()
+func committer(ch <-chan []byte, wg *sync.WaitGroup, writer io.Writer, chMetrics metrics.ChannelMetrics) {
+	defer wg.Done()
 	errsAtRow := 0
 
 	drain := func(rec []byte) {
-		fl.metrics.Dec(rec)
-		if _, err := fl.writer.Write(rec); err != nil {
+		chMetrics.Dec(rec)
+		if _, err := writer.Write(rec); err != nil {
 			if errors.Is(err, os.ErrClosed) || errsAtRow > errorsOnFileLimit {
 				return
 			}
@@ -233,34 +220,15 @@ func (fl *logger) committer(ctx context.Context) {
 		}
 	}
 
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	fl.wg.Add(1)
-	go func() {
-		defer fl.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if err := fl.writer.Flush(); err != nil {
-					log.Printf("failed to write to writer %+v", err)
-				}
+	counter := 0
+	for rec := range ch {
+		drain(rec)
+		if counter%1000 == 0 {
+			if err := writer.(flusher).Flush(); err != nil {
+				log.Printf("failed to flush writer %+v", err)
 			}
 		}
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			for rec := range fl.channel {
-				drain(rec)
-			}
-			return
-		case rec := <-fl.channel:
-			drain(rec)
-		}
+		counter++
 	}
 }
 

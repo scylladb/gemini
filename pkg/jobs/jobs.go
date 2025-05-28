@@ -184,7 +184,7 @@ func mutationJob(
 
 		if executionCount > 10000 {
 			executionCount = 0
-			time.Sleep(time.Duration(utils.RandInt2(r, 5, 50)) * time.Millisecond)
+			time.Sleep(time.Duration(utils.RandInt2(r, 1, 10)) * time.Millisecond)
 		}
 
 		var err error
