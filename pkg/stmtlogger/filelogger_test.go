@@ -100,7 +100,7 @@ func TestOutputToFile(t *testing.T) {
 			dir := t.TempDir()
 			file := filepath.Join(dir, "test.log")
 
-			logger, err := stmtlogger.NewFileLogger(t.Context(), file, item.Compression)
+			logger, err := stmtlogger.NewFileLogger(file, item.Compression)
 			if err != nil {
 				t.Fatalf("Failed to initialize the logger %s", err)
 			}
@@ -140,7 +140,7 @@ func BenchmarkLogger(b *testing.B) {
 		b.Run(compression.String(), func(b *testing.B) {
 			b.ReportAllocs()
 			file := filepath.Join(b.TempDir(), "test.log")
-			logger := Must(stmtlogger.NewFileLogger(b.Context(), file, compression))
+			logger := Must(stmtlogger.NewFileLogger(file, compression))
 			rows := &atomic.Int64{}
 
 			stmt := typedef.SimpleStmt(

@@ -116,19 +116,11 @@ var (
 		},
 		[]string{"cluster", "host"},
 	)
-
-	GeneratorCreatedValues = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "generated_created_values",
-		},
-		[]string{"table", "partition"},
-	)
-
 	GeneratorEmittedValues = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "generated_emitted_values",
 		},
-		[]string{"table", "partition"},
+		[]string{"table"},
 	)
 
 	GeneratorDroppedValues = prometheus.NewCounterVec(
@@ -197,7 +189,6 @@ func init() {
 		GoCQLQueryErrors,
 		GoCQLBatchQueries,
 		GoCQLBatches,
-		GeneratorCreatedValues,
 		GeneratorEmittedValues,
 		GeneratorFilledPartitions,
 		GeneratorPartitionSize,
@@ -271,6 +262,24 @@ func StartMetricsServer(ctx context.Context, bind string, logger *zap.Logger) {
 			logger.Error("Failed to start Metrics server", zap.String("bind", bind), zap.Error(err))
 		}
 	}()
+}
+
+type RunningTime struct {
+	start time.Time
+	task  string
+}
+
+func ExecutionTimeStart(task string) RunningTime {
+	return RunningTime{
+		start: time.Now(),
+		task:  task,
+	}
+}
+
+func (r RunningTime) Record() {
+	executionTime.
+		WithLabelValues(r.task).
+		Observe(float64(time.Since(r.start).Microseconds()))
 }
 
 func ExecutionTime(task string, callback func()) {

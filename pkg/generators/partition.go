@@ -45,7 +45,7 @@ func (p *Partition) Stale() bool {
 func (p *Partition) get() typedef.ValueWithToken {
 	for {
 		v := p.pick()
-		if v.Token == 0 || p.inFlight.AddIfNotPresent(v.Token) {
+		if v.Token != 0 || p.inFlight.AddIfNotPresent(v.Token) {
 			return v
 		}
 	}
@@ -130,17 +130,12 @@ func (p Partitions) Close() error {
 	return err
 }
 
-func (p Partitions) FullValues() int {
+func (p Partitions) FullValues() uint64 {
 	c := cap(p[0].values)
-	percentageFull := c / 10
 
-	full := 0
+	full := uint64(0)
 	for i := range len(p) {
-		l := len(p[i].values)
-
-		if c-l > percentageFull {
-			// If there is more than 10% of free space in the partition
-			// we consider it not full.
+		if c-len(p[i].values) <= 0 {
 			full++
 		}
 	}

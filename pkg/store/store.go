@@ -325,7 +325,7 @@ func getStore(
 		return nil, pkgerrors.Wrapf(err, "failed to connect to %s cluster", name)
 	}
 
-	oracleFileLogger, err := stmtlogger.NewFileLogger(ctx, stmtLogFile, compression)
+	oracleFileLogger, err := stmtlogger.NewFileLogger(stmtLogFile, compression)
 	if err != nil {
 		return nil, err
 	}

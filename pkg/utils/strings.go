@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"golang.org/x/exp/constraints"
 	"math/rand/v2"
+	"strconv"
 	"unsafe"
 )
 
@@ -24,4 +26,11 @@ func RandString(rnd *rand.Rand, ln int) string {
 	}
 
 	return unsafe.String(unsafe.SliceData(binBuff), length)[:ln]
+}
+
+func FormatString[T constraints.Integer](dst []byte, integer T) string {
+	dst = dst[:0]
+	conv := strconv.AppendInt(dst, int64(integer), 10)
+
+	return unsafe.String(unsafe.SliceData(conv), len(conv))
 }

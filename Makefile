@@ -13,7 +13,7 @@ BUILD_DATE ?= $(shell git log -1 --format=%cd --date=format:%Y-%m-%dT%H:%M:%SZ 2
 LDFLAGS_VERSION := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(BUILD_DATE)
 
 CQL_FEATURES ?= normal
-CONCURRENCY ?= 25
+CONCURRENCY ?= 8
 DURATION ?= 10m
 WARMUP ?= 2m
 MODE ?= mixed
