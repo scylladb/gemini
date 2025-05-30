@@ -116,19 +116,11 @@ var (
 		},
 		[]string{"cluster", "host"},
 	)
-
-	GeneratorCreatedValues = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "generated_created_values",
-		},
-		[]string{"table", "partition"},
-	)
-
 	GeneratorEmittedValues = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "generated_emitted_values",
 		},
-		[]string{"table", "partition"},
+		[]string{"table"},
 	)
 
 	GeneratorDroppedValues = prometheus.NewCounterVec(
@@ -197,7 +189,6 @@ func init() {
 		GoCQLQueryErrors,
 		GoCQLBatchQueries,
 		GoCQLBatches,
-		GeneratorCreatedValues,
 		GeneratorEmittedValues,
 		GeneratorFilledPartitions,
 		GeneratorPartitionSize,

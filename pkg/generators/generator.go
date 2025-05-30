@@ -210,10 +210,7 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 			g.logger.Panic("failed to get primary key hash", zap.Error(err))
 		}
 
-		idx := g.shardOf(token)
-
-
-		partition := &g.partitions[idx]
+		partition := &g.partitions[g.shardOf(token)]
 		if partition.Stale() || partition.inFlight.Has(token) {
 			return
 		}
@@ -224,11 +221,13 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 
 		if pushed {
 			g.valuesMetrics.Inc(v)
-		} else {
-			metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new").Inc()
+			continue
+		}
+
+		if dropped%g.partitionCount == 0 {
 			fullPartitions := g.partitions.FullValues()
-			metrics.GeneratorFilledPartitions.WithLabelValues(g.table.Name).Set(float64(fullPartitions))
-			if fullPartitions-g.partitionCount <= 0 && dropped%g.partitionCount == 0 {
+			if fullPartitions-g.partitionCount <= 0 {
+				metrics.GeneratorFilledPartitions.WithLabelValues(g.table.Name).Set(float64(fullPartitions))
 				time.Sleep(sleepTime)
 			}
 		}
