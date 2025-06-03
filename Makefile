@@ -37,7 +37,6 @@ GEMINI_FLAGS ?= --fail-fast \
 	--use-server-timestamps=true \
 	--async-objects-stabilization-attempts=10 \
 	--max-mutation-retries=10 \
-	--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '3'}" \
 	--oracle-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 	--concurrency=$(CONCURRENCY) \
 	--dataset-size=$(DATASET_SIZE) \
@@ -158,6 +157,7 @@ docker-integration-test:
 		scylladb/gemini:$(DOCKER_VERSION) \
 			--test-cluster=gemini-test \
 			--oracle-cluster=gemini-oracle \
+			--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 			$(GEMINI_FLAGS)
 
 .PHONY: integration-test
@@ -168,6 +168,7 @@ integration-test:
 	GODEBUG="default=go1.24,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0" GOGC="95" $(GEMINI_BINARY) \
 		--test-cluster="$(call get_scylla_ip,gemini-test)" \
 		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
+		--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 		$(GEMINI_FLAGS)
 
 .PHONY: integration-cluster-test
@@ -179,6 +180,7 @@ integration-cluster-test:
 	$(GEMINI_BINARY) \
 		--test-cluster="$(call get_scylla_ip,gemini-test-1),$(call get_scylla_ip,gemini-test-2),$(call get_scylla_ip,gemini-test-3)" \
 		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
+		--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '3'}" \
 		$(GEMINI_FLAGS)
 
 .PHONY: clean
