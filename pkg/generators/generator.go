@@ -52,13 +52,13 @@ type Generator struct {
 	routingKeyCreator *routingkey.Creator
 	r                 *rand.Rand
 	idxFunc           distributions.DistributionFunc
+	cancel            context.CancelFunc
 	oldValuesMetrics  metrics.ChannelMetrics
 	valuesMetrics     metrics.ChannelMetrics
 	partitions        Partitions
 	partitionsConfig  typedef.PartitionRangeConfig
-	partitionCount    uint64
-	cancel            context.CancelFunc
 	wg                sync.WaitGroup
+	partitionCount    uint64
 }
 
 func (g *Generator) PartitionCount() uint64 {

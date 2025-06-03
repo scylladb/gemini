@@ -66,7 +66,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) (err error) {
 	return err
 }
 
-func (c *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Time) error {
+func (c *cqlStore) doMutate(_ context.Context, stmt *typedef.Stmt, ts time.Time) error {
 	queryBody, _ := stmt.Query.ToCql()
 	query := c.session.Query(queryBody, stmt.Values...)
 	defer query.Release()
@@ -98,7 +98,7 @@ func (c *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, ts time.Tim
 	return nil
 }
 
-func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) ([]Row, error) {
+func (c *cqlStore) load(_ context.Context, stmt *typedef.Stmt) ([]Row, error) {
 	cql, _ := stmt.Query.ToCql()
 
 	query := c.session.Query(cql, stmt.Values...)

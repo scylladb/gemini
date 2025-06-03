@@ -65,7 +65,6 @@ func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 }
 
 func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
-
 	rs := getReplicationStrategy(replicationStrategy, replication.NewSimpleStrategy(), logger)
 	ors := getReplicationStrategy(oracleReplicationStrategy, rs, logger)
 	return typedef.SchemaConfig{

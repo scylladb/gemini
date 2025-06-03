@@ -61,8 +61,8 @@ type (
 		pool    sync.Pool
 		closer  io.Closer
 		channel chan []byte
-		metrics metrics.ChannelMetrics
 		wg      *sync.WaitGroup
+		metrics metrics.ChannelMetrics
 		active  atomic.Bool
 	}
 )

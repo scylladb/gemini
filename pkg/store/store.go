@@ -307,7 +307,7 @@ func (ds delegatingStore) Close() error {
 }
 
 func getStore(
-	ctx context.Context,
+	_ context.Context,
 	name string,
 	schema *typedef.Schema,
 	clusterConfig *gocql.ClusterConfig,
