@@ -122,10 +122,10 @@ func (l List) Run(
 	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 	logger.Info("start jobs")
 	for _, table := range schema.Tables {
+		rnd := rand.New(src)
 		for range l.workers {
 			for idx := range l.jobs {
 				jobF := l.jobs[idx].function
-				rnd := rand.New(src)
 				generator := generators.Get(table)
 				g.Go(func() error {
 					return jobF(
