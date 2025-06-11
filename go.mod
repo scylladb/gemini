@@ -15,12 +15,12 @@ require (
 	github.com/prometheus/client_golang v1.22.0
 	github.com/samber/mo v1.14.0
 	github.com/scylladb/go-set v1.0.2
-	github.com/scylladb/gocqlx/v3 v3.0.1
+	github.com/scylladb/gocqlx/v3 v3.0.2
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/exp v0.0.0-20250506013437-ce4c2cf36ca6
+	golang.org/x/exp v0.0.0-20250606033433-dcc06ee1d476
 	golang.org/x/sync v0.15.0
 	gopkg.in/inf.v0 v0.9.1
 )
@@ -253,7 +253,7 @@ require (
 	golang.org/x/mod v0.25.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/text v0.26.0 // indirect
-	golang.org/x/tools v0.33.0 // indirect
+	golang.org/x/tools v0.34.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
