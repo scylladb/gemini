@@ -25,8 +25,7 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
-func GenSchema(sc typedef.SchemaConfig, seed uint64) *typedef.Schema {
-	r := rand.New(rand.NewPCG(seed, seed))
+func GenSchema(sc typedef.SchemaConfig, seed rand.Source) *typedef.Schema {
 	builder := builders.SchemaBuilder{}
 	builder.Config(sc)
 	keyspace := typedef.Keyspace{
@@ -35,8 +34,9 @@ func GenSchema(sc typedef.SchemaConfig, seed uint64) *typedef.Schema {
 		OracleReplication: sc.OracleReplicationStrategy,
 	}
 	builder.Keyspace(keyspace)
-	numTables := utils.RandInt2(r, 1, sc.GetMaxTables())
-	for i := 0; i < numTables; i++ {
+	r := rand.New(seed)
+	numTables := r.IntN(sc.GetMaxTables()) + 1
+	for i := range numTables {
 		table := genTable(sc, fmt.Sprintf("table%d", i+1), r)
 		builder.Table(table)
 	}
@@ -87,7 +87,7 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 		return &table
 	}
 	columns := make(typedef.Columns, utils.RandInt2(r, sc.GetMinColumns(), sc.GetMaxColumns()))
-	for i := 0; i < len(columns); i++ {
+	for i := range len(columns) {
 		columns[i] = &typedef.ColumnDef{
 			Name: GenColumnName("col", i),
 			Type: GenColumnType(len(columns), &sc, r),
@@ -134,18 +134,18 @@ func GetCreateSchema(s *typedef.Schema) []string {
 		stmts = append(stmts, createTypes...)
 		createTable := GetCreateTable(t, s.Keyspace)
 		stmts = append(stmts, createTable)
-		// for _, idef := range t.Indexes {
-		// 	stmts = append(
-		// 		stmts,
-		// 		fmt.Sprintf(
-		// 			"CREATE INDEX IF NOT EXISTS %s ON %s.%s (%s)",
-		// 			idef.IndexName,
-		// 			s.Keyspace.Name,
-		// 			t.Name,
-		// 			idef.ColumnName,
-		// 		),
-		// 	)
-		// }
+		for _, idef := range t.Indexes {
+			stmts = append(
+				stmts,
+				fmt.Sprintf(
+					"CREATE INDEX IF NOT EXISTS %s ON %s.%s (%s)",
+					idef.IndexName,
+					s.Keyspace.Name,
+					t.Name,
+					idef.ColumnName,
+				),
+			)
+		}
 		for _, mv := range t.MaterializedViews {
 			var (
 				mvPartitionKeys      []string

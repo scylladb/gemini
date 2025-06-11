@@ -15,14 +15,16 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
-	"github.com/scylladb/gemini/pkg/generators"
+	"math/rand/v2"
 	"strings"
 
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
+	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -39,9 +41,8 @@ const (
 
 func getSchema(seed uint64, logger *zap.Logger) (*typedef.Schema, typedef.SchemaConfig, error) {
 	var (
-		err           error
-		schema        *typedef.Schema
-		intSchemaSeed uint64
+		err    error
+		schema *typedef.Schema
 	)
 
 	schemaConfig := createSchemaConfig(logger)
@@ -55,13 +56,13 @@ func getSchema(seed uint64, logger *zap.Logger) (*typedef.Schema, typedef.Schema
 			return nil, typedef.SchemaConfig{}, errors.Wrap(err, "cannot create schema")
 		}
 	} else {
-		intSchemaSeed = seedFromString(schemaSeed)
-		schema = generators.GenSchema(schemaConfig, intSchemaSeed)
+		src := rand.NewChaCha8(sha256.Sum256([]byte(schemaSeed)))
+		schema = generators.GenSchema(schemaConfig, src)
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
 
-	printSetup(seed, intSchemaSeed)
+	printSetup(seed, seedFromString(schemaSeed))
 	fmt.Printf("Schema: %v\n", string(jsonSchema)) //nolint:forbidigo
 
 	return schema, schemaConfig, nil

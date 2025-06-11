@@ -171,6 +171,22 @@ func run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	randSrc, distFunc, err := distributions.New(
+		partitionKeyDistribution,
+		partitionCount,
+		intSeed,
+		stdDistMean,
+		oneStdDev,
+	)
+	if err != nil {
+		return errors.Wrapf(
+			err,
+			"Faile to create distribution function: %s",
+			partitionKeyDistribution,
+		)
+	}
+
+
 	schema, schemaConfig, err := getSchema(intSeed, logger)
 	if err != nil {
 		return errors.Wrap(err, "failed to get schema")
@@ -201,6 +217,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+
 	testKeyspace, oracleKeyspace := generators.GetCreateKeyspaces(schema)
 	if err = st.Create(
 		ctx,
@@ -221,21 +238,6 @@ func run(cmd *cobra.Command, _ []string) error {
 	stopFlag := stop.NewFlag("main")
 	warmupStopFlag := stop.NewFlag("warmup")
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
-
-	randSrc, distFunc, err := distributions.New(
-		partitionKeyDistribution,
-		partitionCount,
-		intSeed,
-		stdDistMean,
-		oneStdDev,
-	)
-	if err != nil {
-		return errors.Wrapf(
-			err,
-			"Faile to create distribution function: %s",
-			partitionKeyDistribution,
-		)
-	}
 
 	gens := generators.New(
 		ctx,
@@ -267,7 +269,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	logger.Info("test finished")
 	globalStatus.PrintResult(outFile, schema, version, versionInfo)
 	if globalStatus.HasErrors() {
-		return errors.Errorf("gemini encountered errors, exiting with non zero status")
+		return errors.New("gemini encountered errors, exiting with non zero status")
 	}
 
 	return nil
