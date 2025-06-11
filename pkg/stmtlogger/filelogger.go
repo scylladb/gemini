@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"github.com/samber/mo"
 	"io"
 	"log"
 	"os"
@@ -39,6 +40,8 @@ const (
 	errorsOnFileLimit = 5
 
 	bufioWriterSize = 8192
+
+	FlushRate = 10_000
 )
 
 type (
@@ -53,7 +56,7 @@ type (
 	}
 
 	StmtToFile interface {
-		LogStmt(stmt *typedef.Stmt, ts ...time.Time) error
+		LogStmt(stmt *typedef.Stmt, ts mo.Option[time.Time]) error
 		Close() error
 	}
 
@@ -153,29 +156,27 @@ func fileSizeReporter(f stater) {
 	}
 }
 
-func (fl *logger) LogStmt(stmt *typedef.Stmt, ts ...time.Time) error {
+func (fl *logger) LogStmt(stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
 	buffer := fl.pool.Get().(*bytes.Buffer)
-	defer func() {
-		buffer.Reset()
-		fl.pool.Put(buffer)
-	}()
+	buffer.Reset()
 
 	if err := stmt.PrettyCQLBuffered(buffer); err != nil {
+		fl.pool.Put(buffer)
 		return err
 	}
 
-	opType := stmt.QueryType.OpType()
-
-	if len(ts) > 0 && !ts[0].IsZero() &&
-		(opType == typedef.OpInsert || opType == typedef.OpUpdate || opType == typedef.OpDelete) {
-		_, _ = buffer.WriteString(" USING TIMESTAMP ")
-		_, _ = buffer.WriteString(strconv.FormatInt(ts[0].UnixMicro(), 10))
+	if ts.IsPresent() {
+		opType := stmt.QueryType.OpType()
+		if opType == typedef.OpInsert || opType == typedef.OpUpdate || opType == typedef.OpDelete {
+			_, _ = buffer.WriteString(" USING TIMESTAMP ")
+			_, _ = buffer.WriteString(strconv.FormatInt(ts.MustGet().UnixMicro(), 10))
+		}
 	}
-
 	_, _ = buffer.WriteString(";\n")
 
 	data := make([]byte, buffer.Len())
 	copy(data, buffer.Bytes())
+	fl.pool.Put(buffer)
 
 	if fl.active.Load() {
 		fl.channel <- data
@@ -219,7 +220,7 @@ func committer(ch <-chan []byte, wg *sync.WaitGroup, writer io.Writer, chMetrics
 			errsAtRow = 0
 		}
 
-		if counter%1000 == 0 {
+		if counter%FlushRate == 0 {
 			if err := writer.(flusher).Flush(); err != nil {
 				log.Printf("failed to flush writer %+v", err)
 			}
@@ -230,6 +231,6 @@ func committer(ch <-chan []byte, wg *sync.WaitGroup, writer io.Writer, chMetrics
 
 type nopFileLogger struct{}
 
-func (n *nopFileLogger) LogStmt(_ *typedef.Stmt, _ ...time.Time) error { return nil }
+func (n *nopFileLogger) LogStmt(_ *typedef.Stmt, _ mo.Option[time.Time]) error { return nil }
 
 func (n *nopFileLogger) Close() error { return nil }

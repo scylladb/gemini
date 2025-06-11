@@ -15,6 +15,10 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"github.com/pkg/errors"
+	"github.com/scylladb/gemini/pkg/generators"
 	"strings"
 
 	"go.uber.org/zap"
@@ -32,6 +36,36 @@ const (
 	MaxTupleParts   = 5
 	MaxUDTParts     = 5
 )
+
+func getSchema(seed uint64, logger *zap.Logger) (*typedef.Schema, typedef.SchemaConfig, error) {
+	var (
+		err           error
+		schema        *typedef.Schema
+		intSchemaSeed uint64
+	)
+
+	schemaConfig := createSchemaConfig(logger)
+	if err = schemaConfig.Valid(); err != nil {
+		return nil, typedef.SchemaConfig{}, errors.Wrap(err, "invalid schema configuration")
+	}
+
+	if len(schemaFile) > 0 {
+		schema, err = readSchema(schemaFile, schemaConfig)
+		if err != nil {
+			return nil, typedef.SchemaConfig{}, errors.Wrap(err, "cannot create schema")
+		}
+	} else {
+		intSchemaSeed = seedFromString(schemaSeed)
+		schema = generators.GenSchema(schemaConfig, intSchemaSeed)
+	}
+
+	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
+
+	printSetup(seed, intSchemaSeed)
+	fmt.Printf("Schema: %v\n", string(jsonSchema)) //nolint:forbidigo
+
+	return schema, schemaConfig, nil
+}
 
 func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 	defaultConfig := createDefaultSchemaConfig(logger)

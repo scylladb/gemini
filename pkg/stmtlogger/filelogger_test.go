@@ -16,6 +16,7 @@ package stmtlogger_test
 
 import (
 	"compress/gzip"
+	"github.com/samber/mo"
 	"io"
 	"os"
 	"path/filepath"
@@ -110,7 +111,7 @@ func TestOutputToFile(t *testing.T) {
 				typedef.InsertStatementType,
 			)
 
-			if err = logger.LogStmt(stmt); err != nil {
+			if err = logger.LogStmt(stmt, mo.None[time.Time]()); err != nil {
 				t.Fatalf("Failed to write log %s", err)
 			}
 
@@ -152,7 +153,7 @@ func BenchmarkLogger(b *testing.B) {
 			b.ResetTimer()
 			b.RunParallel(func(p *testing.PB) {
 				for p.Next() {
-					if err := logger.LogStmt(stmt); err != nil {
+					if err := logger.LogStmt(stmt, mo.None[time.Time]()); err != nil {
 						b.Fatalf("Failed to write to log file: %s", err)
 					}
 

@@ -142,8 +142,6 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	intSeed := seedFromString(seed)
-	intSchemaSeed := seedFromString(schemaSeed)
-
 	if profilingPort != 0 {
 		go func() {
 			mux := http.NewServeMux()
@@ -164,21 +162,6 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 	defer utils.IgnoreError(outFile.Sync)
 
-	schemaConfig := createSchemaConfig(logger)
-	if err = schemaConfig.Valid(); err != nil {
-		return errors.Wrap(err, "invalid schema configuration")
-	}
-	var schema *typedef.Schema
-	if len(schemaFile) > 0 {
-		schema, err = readSchema(schemaFile, schemaConfig)
-		if err != nil {
-			return errors.Wrap(err, "cannot create schema")
-		}
-	} else {
-		intSchemaSeed = seedFromString(schemaSeed)
-		schema = generators.GenSchema(schemaConfig, intSchemaSeed)
-	}
-
 	testCluster, oracleCluster, err := createClusters(
 		consistency,
 		testClusterHostSelectionPolicy,
@@ -188,10 +171,10 @@ func run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
-
-	printSetup(intSeed, intSchemaSeed)
-	fmt.Printf("Schema: %v\n", string(jsonSchema)) //nolint:forbidigo
+	schema, schemaConfig, err := getSchema(intSeed, logger)
+	if err != nil {
+		return errors.Wrap(err, "failed to get schema")
+	}
 
 	storeConfig := store.Config{
 		MaxRetriesMutate:            maxRetriesMutate,

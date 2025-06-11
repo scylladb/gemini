@@ -177,14 +177,12 @@ func mutationJob(
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Debug("mutation job terminated")
 			return nil
 		default:
 		}
 
-		if executionCount > 10000 {
-			executionCount = 0
-			time.Sleep(time.Duration(utils.RandInt2(r, 1, 10)) * time.Millisecond)
+		if executionCount%10000 == 0 {
+			time.Sleep(time.Duration(utils.RandInt2(r, 0, 10)) * time.Millisecond)
 		}
 
 		var err error
@@ -226,12 +224,20 @@ func validationJob(
 	stopFlag *stop.Flag,
 	failFast, _ bool,
 ) error {
-	schemaConfig := &schemaCfg
 	logger = logger.Named("validation_job")
 	logger.Info("starting validation loop")
 	defer func() {
 		logger.Info("ending validation loop")
 	}()
+
+	maxAttempts := schemaCfg.AsyncObjectStabilizationAttempts
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	delay := schemaCfg.AsyncObjectStabilizationDelay
+	if delay < 0 {
+		delay = 10 * time.Millisecond
+	}
 
 	for {
 		select {
@@ -252,7 +258,7 @@ func validationJob(
 				return
 			}
 
-			err = validation(ctx, schemaConfig, table, s, stmt, logger)
+			err = validation(ctx, table, s, stmt, logger, maxAttempts, delay)
 			if stmt.ValuesWithToken != nil {
 				for _, token := range stmt.ValuesWithToken {
 					g.ReleaseToken(token.Token)
@@ -361,25 +367,11 @@ func ddl(
 	}
 
 	if ddlStmts == nil {
-		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
-			w.Write(zap.String("job", "ddl"))
-		}
+		logger.Debug("no statement generated", zap.String("job", "ddl"))
 		return nil
 	}
 
 	for _, ddlStmt := range ddlStmts.List {
-		if w := logger.Check(zap.DebugLevel, "ddl statement"); w != nil {
-			prettyCQL, prettyCQLErr := ddlStmt.PrettyCQL()
-			if prettyCQLErr != nil {
-				return PrettyCQLError{
-					PrettyCQL: prettyCQLErr,
-					Stmt:      ddlStmt,
-				}
-			}
-
-			w.Write(zap.String("pretty_cql", prettyCQL))
-		}
-
 		if err = s.Mutate(ctx, ddlStmt); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return nil
@@ -433,26 +425,12 @@ func mutation(
 		return err
 	}
 	if mutateStmt == nil {
-		if w := logger.Check(zap.DebugLevel, "no statement generated"); w != nil {
-			w.Write(zap.String("job", "mutation"))
-		}
+		logger.Debug("no statement generated", zap.String("job", "mutation"))
 		return err
 	}
 
-	if w := logger.Check(zap.DebugLevel, "mutation statement"); w != nil {
-		prettyCQL, prettyCQLErr := mutateStmt.PrettyCQL()
-		if prettyCQLErr != nil {
-			return PrettyCQLError{
-				PrettyCQL: prettyCQLErr,
-				Stmt:      mutateStmt,
-				Err:       err,
-			}
-		}
-
-		w.Write(zap.String("pretty_cql", prettyCQL))
-	}
 	if err = s.Mutate(ctx, mutateStmt); err != nil {
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil
 		}
 
@@ -484,45 +462,24 @@ func mutation(
 
 func validation(
 	ctx context.Context,
-	sc *typedef.SchemaConfig,
 	table *typedef.Table,
 	s store.Store,
 	stmt *typedef.Stmt,
 	logger *zap.Logger,
+	maxAttempts int,
+	delay time.Duration,
 ) error {
-	if w := logger.Check(zap.DebugLevel, "validation statement"); w != nil {
-		prettyCQL, prettyCQLErr := stmt.PrettyCQL()
-		if prettyCQLErr != nil {
-			return PrettyCQLError{
-				PrettyCQL: prettyCQLErr,
-				Stmt:      stmt,
-			}
-		}
-
-		w.Write(zap.String("pretty_cql", prettyCQL))
-	}
-
-	maxAttempts := 1
-	delay := 10 * time.Millisecond
-	if stmt.QueryType.PossibleAsyncOperation() {
-		maxAttempts = sc.AsyncObjectStabilizationAttempts
-		if maxAttempts < 1 {
-			maxAttempts = 1
-		}
-		delay = sc.AsyncObjectStabilizationDelay
-	}
-
 	var lastErr, err error
-	attempt := 1
 
-	for {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		lastErr = err
 		err = s.Check(ctx, table, stmt, attempt == maxAttempts)
 
 		if err == nil {
 			if attempt > 1 {
 				logger.Info(
-					fmt.Sprintf("Validation successfully completed on %d attempt.", attempt),
+					"Validation successfully completed",
+					zap.Int("attempt", attempt),
 				)
 			}
 			return nil
@@ -532,48 +489,37 @@ func validation(
 			// to skip logging part it is returned here
 			return err
 		}
-		if attempt == maxAttempts {
-			break
-		}
+
 		if errors.Is(err, unWrapErr(lastErr)) {
-			logger.Info(
-				fmt.Sprintf(
-					"Retring failed validation. %d attempt from %d attempts. Error same as at attempt before. ",
-					attempt,
-					maxAttempts,
-				),
+			logger.Warn(
+				"Retrying failed validation. Error same as at attempt before.",
+				zap.Int("attempt", attempt),
+				zap.Int("max_attempts", maxAttempts),
 			)
 		} else {
-			logger.Info(fmt.Sprintf("Retring failed validation. %d attempt from %d attempts. Error: %s", attempt, maxAttempts, err))
+			logger.Warn("Retrying failed validation.",
+				zap.Int("attempt", attempt),
+				zap.Int("max_attempts", maxAttempts),
+				zap.Error(err),
+			)
 		}
 
 		select {
-		case <-time.After(delay):
 		case <-ctx.Done():
 			logger.Info(
-				fmt.Sprintf(
-					"Retring failed validation stoped by done context. %d attempt from %d attempts. Error: %s",
-					attempt,
-					maxAttempts,
-					err,
-				),
+				"Retrying failed validation stoped by done context",
+				zap.Int("attempt", attempt),
+				zap.Int("max_attempts", maxAttempts),
+				zap.Error(err),
 			)
 			return nil
+		default:
+			time.Sleep(delay)
+			attempt++
 		}
-		attempt++
 	}
 
-	if attempt > 1 {
-		logger.Info(
-			fmt.Sprintf(
-				"Retring failed validation stoped by reach of max attempts %d. Error: %s",
-				maxAttempts,
-				err,
-			),
-		)
-	} else {
-		logger.Info(fmt.Sprintf("Validation failed. Error: %s", err))
-	}
+	logger.Error("Validation failed. Error: %s", zap.Error(err))
 
 	return err
 }

@@ -15,74 +15,93 @@
 package store
 
 import (
-	"bytes"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/scylladb/go-set/strset"
+	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-type Row map[string]any
+func formatRows(sb *strings.Builder, key string, value any) string {
+	sb.Reset()
+	sb.WriteString(key)
+	sb.WriteByte('=')
 
-func pks(t *typedef.Table, rows []Row) []string {
-	keySet := make([]string, 0, len(rows))
+	switch v := value.(type) {
+	case float32:
+		sb.WriteString(strconv.FormatFloat(float64(v), 'G', -1, 32))
+	case float64:
+		sb.WriteString(strconv.FormatFloat(v, 'G', -1, 64))
+	case int8:
+		sb.WriteString(strconv.FormatInt(int64(v), 10))
+	case int16:
+		sb.WriteString(strconv.FormatInt(int64(v), 10))
+	case uint:
+		sb.WriteString(strconv.FormatUint(uint64(v), 10))
+	case uint8:
+		sb.WriteString(strconv.FormatUint(uint64(v), 10))
+	case uint16:
+		sb.WriteString(strconv.FormatUint(uint64(v), 10))
+	case uint32:
+		sb.WriteString(strconv.FormatUint(uint64(v), 10))
+	case uint64:
+		sb.WriteString(strconv.FormatUint(v, 10))
+	case gocql.UUID:
+		sb.WriteString(v.String())
+	case time.Time:
+		sb.WriteString(v.Format(time.DateTime))
+	case *big.Int:
+		sb.WriteString(v.String())
+	case *inf.Dec:
+		sb.WriteString(v.String())
+	case nil:
+	case []byte:
+		sb.Grow(len(v))
+		sb.Write(v)
+	case string:
+		sb.Grow(len(v))
+		sb.WriteString(v)
+	case int:
+		sb.Grow(16)
+		sb.WriteString(strconv.FormatInt(int64(v), 10))
+	case int32:
+		sb.Grow(16)
+		sb.WriteString(strconv.FormatInt(int64(v), 10))
+	case int64:
+		sb.Grow(64)
+		sb.WriteString(strconv.FormatInt(v, 10))
+	default:
+		_, _ = fmt.Fprintf(sb, "%v", v)
+	}
+
+	return sb.String()
+}
+
+func pks(t *typedef.Table, rows Rows) *strset.Set {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	keySet := strset.NewWithSize(len(rows) * (len(t.PartitionKeys) + len(t.ClusteringKeys)))
+
+	var sb strings.Builder
+	sb.Grow(64)
 
 	for _, row := range rows {
-		keys := make([]string, 0, len(t.PartitionKeys)+len(t.ClusteringKeys))
-		keys = extractRowValues(keys, t.PartitionKeys, row)
-		keys = extractRowValues(keys, t.ClusteringKeys, row)
-		keySet = append(keySet, strings.Join(keys, ", 	"))
+		for _, pk := range t.PartitionKeys {
+			keySet.Add(formatRows(&sb, pk.Name, row[pk.Name]))
+		}
+
+		for _, ck := range t.ClusteringKeys {
+			keySet.Add(formatRows(&sb, ck.Name, row[ck.Name]))
+		}
 	}
 
 	return keySet
-}
-
-func extractRowValues(values []string, columns typedef.Columns, row map[string]any) []string {
-	for _, pk := range columns {
-		values = append(values, fmt.Sprintf(pk.Name+"=%v", row[pk.Name]))
-	}
-	return values
-}
-
-func lt(mi, mj map[string]any) bool {
-	switch mis := mi["pk0"].(type) {
-	case []byte:
-		mjs, _ := mj["pk0"].([]byte)
-		return bytes.Compare(mis, mjs) < 0
-	case string:
-		mjs, _ := mj["pk0"].(string)
-		return mis < mjs
-	case int:
-		mjs, _ := mj["pk0"].(int)
-		return mis < mjs
-	case int8:
-		mjs, _ := mj["pk0"].(int8)
-		return mis < mjs
-	case int16:
-		mjs, _ := mj["pk0"].(int16)
-		return mis < mjs
-	case int32:
-		mjs, _ := mj["pk0"].(int32)
-		return mis < mjs
-	case int64:
-		mjs, _ := mj["pk0"].(int64)
-		return mis < mjs
-	case gocql.UUID:
-		mjs, _ := mj["pk0"].(gocql.UUID)
-		return bytes.Compare(mis[:], mjs[:]) < 0
-	case time.Time:
-		mjs, _ := mj["pk0"].(time.Time)
-		return mis.UnixNano() < mjs.UnixNano()
-	case *big.Int:
-		mjs, _ := mj["pk0"].(*big.Int)
-		return mis.Cmp(mjs) < 0
-	case nil:
-		return true
-	default:
-		panic(fmt.Sprintf("unhandled type [%T][%v]\n", mis, mis))
-	}
 }

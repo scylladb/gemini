@@ -17,28 +17,40 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
+	"github.com/samber/mo"
+	"gopkg.in/inf.v0"
+	"io"
 	"math/big"
 	"reflect"
-	"sort"
-	"sync"
+	"slices"
 	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	pkgerrors "github.com/pkg/errors"
-	"github.com/scylladb/go-set/strset"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
-	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/go-set/strset"
 )
 
+var comparers = []cmp.Option{
+	cmp.AllowUnexported(),
+	cmpopts.SortMaps(func(x, y *inf.Dec) bool {
+		return x.Cmp(y) < 0
+	}),
+	cmp.Comparer(func(x, y *inf.Dec) bool {
+		return x.Cmp(y) == 0
+	}), cmp.Comparer(func(x, y *big.Int) bool {
+		return x.Cmp(y) == 0
+	}),
+}
+
 type loader interface {
-	load(context.Context, *typedef.Stmt) ([]Row, error)
+	load(context.Context, *typedef.Stmt) (Rows, error)
 }
 
 type storer interface {
@@ -53,10 +65,11 @@ type storeLoader interface {
 }
 
 type Store interface {
+	io.Closer
+
 	Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
 	Mutate(context.Context, *typedef.Stmt) error
 	Check(context.Context, *typedef.Table, *typedef.Stmt, bool) error
-	Close() error
 }
 
 type Config struct {
@@ -69,14 +82,17 @@ type Config struct {
 }
 
 func New(
-	ctx context.Context,
+	_ context.Context,
 	schema *typedef.Schema,
 	testCluster, oracleCluster *gocql.ClusterConfig,
 	cfg Config,
 	logger *zap.Logger,
 ) (Store, error) {
+	if testCluster == nil {
+		return nil, errors.New("test cluster is empty")
+	}
+
 	oracleStore, err := getStore(
-		ctx,
 		"oracle",
 		schema,
 		oracleCluster,
@@ -89,12 +105,7 @@ func New(
 		return nil, err
 	}
 
-	if testCluster == nil {
-		return nil, errors.New("test cluster is empty")
-	}
-
 	testStore, err := getStore(
-		ctx,
 		"test",
 		schema,
 		testCluster,
@@ -108,6 +119,7 @@ func New(
 	}
 
 	return &delegatingStore{
+		workers:     newWorkers(1024),
 		testStore:   testStore,
 		oracleStore: oracleStore,
 		logger:      logger.Named("delegating_store"),
@@ -115,20 +127,19 @@ func New(
 }
 
 type delegatingStore struct {
-	oracleStore     storeLoader
-	testStore       storeLoader
-	statementLogger stmtlogger.StmtToFile
-	logger          *zap.Logger
+	workers     *workers
+	oracleStore storeLoader
+	testStore   storeLoader
+	logger      *zap.Logger
 }
 
-func (ds delegatingStore) Create(
-	ctx context.Context,
-	testBuilder, oracleBuilder *typedef.Stmt,
-) error {
-	if ds.statementLogger != nil {
-		if err := ds.statementLogger.LogStmt(testBuilder); err != nil {
-			return err
-		}
+func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error {
+	if err := ds.testStore.mutate(ctx, testBuilder); err != nil {
+		return pkgerrors.Wrapf(
+			err,
+			"unable to apply mutations to the %s store",
+			ds.testStore.name(),
+		)
 	}
 
 	if ds.oracleStore != nil {
@@ -141,52 +152,44 @@ func (ds delegatingStore) Create(
 		}
 	}
 
-	if err := ds.testStore.mutate(ctx, testBuilder); err != nil {
-		return pkgerrors.Wrapf(
-			err,
-			"unable to apply mutations to the %s store",
-			ds.testStore.name(),
-		)
-	}
-
 	return nil
 }
 
 func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error {
-	var wg sync.WaitGroup
-
 	doCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var oracleErr error
+	var ch chan mo.Result[Rows]
 
 	if ds.oracleStore != nil {
-		wg.Add(1)
+		ch = ds.workers.Send(doCtx, func(ctx context.Context) (Rows, error) {
+			return nil, ds.oracleStore.mutate(ctx, stmt)
+		})
 
-		go func() {
-			defer wg.Done()
-			oracleErr = ds.oracleStore.mutate(doCtx, stmt)
-		}()
+		defer ds.workers.Release(ch)
 	}
 
 	if testErr := ds.testStore.mutate(doCtx, stmt); testErr != nil {
 		// Test store failed, transition cannot take place
-		ds.logger.Info(
+		ds.logger.Error(
 			"test store failed mutation, transition to next state impossible so continuing with next mutation",
 			zap.Error(testErr),
 		)
+
 		return testErr
 	}
 
-	wg.Wait()
+	if ch != nil {
+		result := <-ch
+		if result.IsError() {
+			// Test store failed, transition cannot take place
+			ds.logger.Error(
+				"oracle store failed mutation, transition to next state impossible so continuing with next mutation",
+				zap.Error(result.Error()),
+			)
 
-	if oracleErr != nil {
-		// Test store failed, transition cannot take place
-		ds.logger.Info(
-			"oracle store failed mutation, transition to next state impossible so continuing with next mutation",
-			zap.Error(oracleErr),
-		)
-		return oracleErr
+			return result.Error()
+		}
 	}
 
 	return nil
@@ -198,40 +201,36 @@ func (ds delegatingStore) Check(
 	stmt *typedef.Stmt,
 	detailedDiff bool,
 ) error {
-	var (
-		oracleRows []Row
-		oracleErr  error
-		wg         sync.WaitGroup
-	)
-
 	doCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	if ds.oracleStore != nil {
-		wg.Add(1)
+	var ch chan mo.Result[Rows]
 
-		go func() {
-			defer wg.Done()
-			oracleRows, oracleErr = ds.oracleStore.load(doCtx, stmt)
-		}()
+	if ds.oracleStore != nil {
+		ch = ds.workers.Send(doCtx, func(ctx context.Context) (Rows, error) {
+			return ds.oracleStore.load(ctx, stmt)
+		})
 	}
 
 	testRows, testErr := ds.testStore.load(doCtx, stmt)
 
 	if testErr != nil {
-		cancel()
-		return pkgerrors.Wrapf(testErr, "unable to load check data from the test store")
+		ds.workers.Release(ch)
+		return pkgerrors.Wrap(testErr, "unable to load check data from the test store")
 	}
 
-	wg.Wait()
-
-	if oracleErr != nil {
-		return pkgerrors.Wrapf(oracleErr, "unable to load check data from the oracle store")
-	}
-
-	if ds.oracleStore == nil {
+	if ch == nil {
 		return nil
 	}
+
+	result := <-ch
+	ds.workers.Release(ch)
+
+	if result.IsError() {
+		return pkgerrors.Wrap(result.Error(), "unable to load check data from the oracle store")
+	}
+
+	oracleRows := result.MustGet()
 
 	if len(testRows) == 0 && len(oracleRows) == 0 {
 		return nil
@@ -239,75 +238,62 @@ func (ds delegatingStore) Check(
 
 	if len(testRows) != len(oracleRows) {
 		if !detailedDiff {
-			return fmt.Errorf(
-				"rows count differ (test store rows %d, oracle store rows %d, detailed information will be at last attempt)",
-				len(testRows),
-				len(oracleRows),
-			)
+			return ErrorRowDifference{
+				TestRows:   len(testRows),
+				OracleRows: len(oracleRows),
+			}
 		}
-		testSet := strset.New(pks(table, testRows)...)
-		oracleSet := strset.New(pks(table, oracleRows)...)
+		testSet := pks(table, testRows)
+		oracleSet := pks(table, oracleRows)
 		missingInTest := strset.Difference(oracleSet, testSet).List()
 		missingInOracle := strset.Difference(testSet, oracleSet).List()
-		return fmt.Errorf(
-			"row count differ (test has %d rows, oracle has %d rows, test is missing rows: %s, oracle is missing rows: %s)",
-			len(testRows),
-			len(oracleRows),
-			missingInTest,
-			missingInOracle,
-		)
+
+		return ErrorRowDifference{
+			TestRows:        len(testRows),
+			OracleRows:      len(oracleRows),
+			MissingInTest:   missingInTest,
+			MissingInOracle: missingInOracle,
+		}
 	}
+
 	if reflect.DeepEqual(testRows, oracleRows) {
 		return nil
 	}
+
 	if !detailedDiff {
-		return fmt.Errorf(
-			"test and oracle store have difference, detailed information will be at last attempt",
-		)
-	}
-	sort.SliceStable(testRows, func(i, j int) bool {
-		return lt(testRows[i], testRows[j])
-	})
-	sort.SliceStable(oracleRows, func(i, j int) bool {
-		return lt(oracleRows[i], oracleRows[j])
-	})
-	for i, oracleRow := range oracleRows {
-		testRow := testRows[i]
-		cmp.AllowUnexported()
-		diff := cmp.Diff(oracleRow, testRow,
-			cmpopts.SortMaps(func(x, y *inf.Dec) bool {
-				return x.Cmp(y) < 0
-			}),
-			cmp.Comparer(func(x, y *inf.Dec) bool {
-				return x.Cmp(y) == 0
-			}), cmp.Comparer(func(x, y *big.Int) bool {
-				return x.Cmp(y) == 0
-			}))
-		if diff != "" {
-			return fmt.Errorf("rows differ (-%v +%v): %v", oracleRow, testRow, diff)
+		return ErrorRowDifference{
+			TestRows:   len(testRows),
+			OracleRows: len(oracleRows),
 		}
 	}
+
+	slices.SortStableFunc(testRows, rowsCmp)
+	slices.SortStableFunc(oracleRows, rowsCmp)
+
+	for i, oracleRow := range oracleRows {
+		if diff := cmp.Diff(oracleRow, testRows[i], comparers...); diff != "" {
+			return ErrorRowDifference{
+				Diff:      diff,
+				OracleRow: oracleRow,
+				TestRow:   testRows[i],
+			}
+		}
+	}
+
 	return nil
 }
 
 func (ds delegatingStore) Close() error {
-	var err error
-
-	err = multierr.Append(err, ds.testStore.Close())
+	err := multierr.Append(ds.workers.Close(), ds.testStore.Close())
 
 	if ds.oracleStore != nil {
 		err = multierr.Append(err, ds.oracleStore.Close())
-	}
-
-	if ds.statementLogger != nil {
-		err = multierr.Append(err, ds.statementLogger.Close())
 	}
 
 	return err
 }
 
 func getStore(
-	_ context.Context,
 	name string,
 	schema *typedef.Schema,
 	clusterConfig *gocql.ClusterConfig,
@@ -315,7 +301,7 @@ func getStore(
 	stmtLogFile string,
 	compression stmtlogger.Compression,
 	logger *zap.Logger,
-) (out storeLoader, err error) {
+) (storeLoader, error) {
 	if clusterConfig == nil {
 		return nil, nil
 	}
@@ -325,7 +311,7 @@ func getStore(
 		return nil, pkgerrors.Wrapf(err, "failed to connect to %s cluster", name)
 	}
 
-	oracleFileLogger, err := stmtlogger.NewFileLogger(stmtLogFile, compression)
+	stmtLogger, err := stmtlogger.NewFileLogger(stmtLogFile, compression)
 	if err != nil {
 		return nil, err
 	}
@@ -338,6 +324,6 @@ func getStore(
 		maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
 		useServerSideTimestamps: cfg.UseServerSideTimestamps,
 		logger:                  logger.Named(name),
-		stmtLogger:              oracleFileLogger,
+		stmtLogger:              stmtLogger,
 	}, nil
 }

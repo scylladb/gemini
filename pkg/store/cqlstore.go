@@ -17,6 +17,7 @@ package store
 import (
 	"context"
 	errs "errors"
+	"github.com/samber/mo"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -44,42 +45,53 @@ func (c *cqlStore) name() string {
 	return c.system
 }
 
-func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) (err error) {
-	var i int
-	for i = 0; i < c.maxRetriesMutate; i++ {
-		// retry with new timestamp as list modification with the same ts
-		// will produce duplicated values, see https://github.com/scylladb/scylladb/issues/7937
-		err = c.doMutate(ctx, stmt, time.Now())
+func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) error {
+	var err error
+
+	for i := range c.maxRetriesMutate {
+		err = c.doMutate(ctx, stmt)
+
 		if err == nil {
 			metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
 			return nil
 		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(c.maxRetriesMutateSleep):
+		default:
+			c.logger.Error(
+				"failed to apply mutation",
+				zap.Int("attempt", i),
+				zap.Error(err),
+			)
+			time.Sleep(c.maxRetriesMutateSleep)
 		}
 	}
-	if w := c.logger.Check(zap.ErrorLevel, "failed to apply mutation"); w != nil {
-		w.Write(zap.Int("attempts", i), zap.Error(err))
-	}
+
 	return err
 }
 
-func (c *cqlStore) doMutate(_ context.Context, stmt *typedef.Stmt, ts time.Time) error {
+func (c *cqlStore) doMutate(_ context.Context, stmt *typedef.Stmt) error {
 	queryBody, _ := stmt.Query.ToCql()
 	query := c.session.Query(queryBody, stmt.Values...)
 	defer query.Release()
 
+	ts := mo.None[time.Time]()
+
+	if !c.useServerSideTimestamps {
+		t := time.Now()
+		ts = mo.Some(t)
+		query.WithTimestamp(t.UnixMicro())
+	}
+
 	if err := query.Exec(); err != nil {
-		if errs.Is(err, context.DeadlineExceeded) {
-			if w := c.logger.Check(zap.DebugLevel, "deadline exceeded for mutation query"); w != nil {
-				w.Write(
-					zap.String("system", c.system),
-					zap.String("query", queryBody),
-					zap.Error(err),
-				)
-			}
+		if errs.Is(err, context.DeadlineExceeded) || errs.Is(err, context.Canceled) {
+			c.logger.Debug("deadline exceeded for mutation query",
+				zap.String("system", c.system),
+				zap.String("query", queryBody),
+				zap.Any("values", stmt.Values),
+			)
 		}
 
 		if !c.ignore(err, opType(stmt)) {
@@ -87,42 +99,33 @@ func (c *cqlStore) doMutate(_ context.Context, stmt *typedef.Stmt, ts time.Time)
 		}
 	}
 
-	if c.useServerSideTimestamps {
-		query.DefaultTimestamp(false)
-		_ = c.stmtLogger.LogStmt(stmt)
-	} else {
-		query.WithTimestamp(ts.UnixNano() / 1000)
-		_ = c.stmtLogger.LogStmt(stmt, ts)
-	}
-
-	return nil
+	return c.stmtLogger.LogStmt(stmt, ts)
 }
 
-func (c *cqlStore) load(_ context.Context, stmt *typedef.Stmt) ([]Row, error) {
+func (c *cqlStore) load(_ context.Context, stmt *typedef.Stmt) (Rows, error) {
 	cql, _ := stmt.Query.ToCql()
 
 	query := c.session.Query(cql, stmt.Values...)
-	defer query.Release()
-
 	iter := query.Iter()
 
 	defer func() {
+		query.Release()
 		metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
 		_ = iter.Close()
 	}()
 
-	rows := make([]Row, 0, iter.NumRows())
+	rows := make(Rows, iter.NumRows())
 
-	for range iter.NumRows() {
+	for i := range iter.NumRows() {
 		row := make(Row, len(iter.Columns()))
 		if !iter.MapScan(row) {
 			return nil, iter.Close()
 		}
 
-		rows = append(rows, row)
+		rows[i] = row
 	}
 
-	if err := c.stmtLogger.LogStmt(stmt); err != nil {
+	if err := c.stmtLogger.LogStmt(stmt, mo.None[time.Time]()); err != nil {
 		return nil, err
 	}
 

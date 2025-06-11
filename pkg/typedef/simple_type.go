@@ -296,15 +296,15 @@ func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	case TypeFloat:
 		return r.Float32()
 	case TypeInet:
-		return net.ParseIP(utils.RandIPV4Address(r, r.IntN(255), 2)).String()
+		return net.ParseIP(utils.RandIPV4Address(r, r.IntN(math.MaxUint8), 2)).String()
 	case TypeInt:
 		return r.Int32()
 	case TypeSmallint:
-		return int16(r.Uint64N(65536))
+		return int16(r.Uint64N(math.MaxUint16))
 	case TypeTimeuuid, TypeUuid:
 		return utils.UUIDFromTime(r)
 	case TypeTinyint:
-		return int8(r.Uint64N(256))
+		return int8(r.Uint64N(math.MaxUint8))
 	case TypeVarint:
 		return big.NewInt(r.Int64())
 	default:
