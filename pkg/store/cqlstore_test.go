@@ -18,6 +18,7 @@ func (m *mockStmtLogger) LogStmt(stmt *typedef.Stmt, ts mo.Option[time.Time]) er
 	args := m.Called(stmt, ts)
 	return args.Error(0)
 }
+
 func (m *mockStmtLogger) Close() error {
 	args := m.Called()
 	return args.Error(0)
@@ -173,7 +174,6 @@ func TestCqlStore_doMutate_TimestampBehavior(t *testing.T) {
 	t.Parallel()
 
 	t.Cleanup(func() {
-
 	})
 
 	//t.Run("client side timestamps set correctly", func(t *testing.T) {

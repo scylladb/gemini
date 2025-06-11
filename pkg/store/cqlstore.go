@@ -17,11 +17,11 @@ package store
 import (
 	"context"
 	errs "errors"
-	"github.com/samber/mo"
 	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
+	"github.com/samber/mo"
 	"github.com/scylladb/gocqlx/v3/qb"
 	"go.uber.org/zap"
 

@@ -15,8 +15,10 @@
 package generators_test
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"math/rand/v2"
+	"strconv"
 	"testing"
 	"time"
 
@@ -190,6 +192,8 @@ func TestGetCreateSchema(t *testing.T) {
 }
 
 func TestGenSchema(t *testing.T) {
+	t.Parallel()
+
 	seeds := [10]uint64{
 		uint64(10 + rand.IntN(10)),
 		uint64(100 + rand.IntN(100)),
@@ -203,8 +207,11 @@ func TestGenSchema(t *testing.T) {
 		uint64(time.Now().Nanosecond()),
 	}
 
-	for idx := range seeds {
-		testSchema := generators.GenSchema(testSchemaConfig, seeds[idx])
+	for _, seed := range seeds {
+		testSchema := generators.GenSchema(
+			testSchemaConfig,
+			rand.NewChaCha8(sha256.Sum256([]byte(strconv.FormatInt(int64(seed), 10)))),
+		)
 		testSchema.Config = typedef.SchemaConfig{}
 		transformAndDiff(t, testSchema)
 	}
@@ -234,7 +241,7 @@ func transformAndDiff(t *testing.T, testSchema *typedef.Schema) {
 
 func createColumns(cnt int, prefix string) typedef.Columns {
 	var cols typedef.Columns
-	for i := 0; i < cnt; i++ {
+	for i := range cnt {
 		cols = append(cols, &typedef.ColumnDef{
 			Name: generators.GenColumnName(prefix, i),
 			Type: typedef.TypeText,

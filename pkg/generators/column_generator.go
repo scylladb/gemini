@@ -48,12 +48,9 @@ func GenSimpleType(_ *typedef.SchemaConfig, r *rand.Rand) typedef.SimpleType {
 }
 
 func GenTupleType(sc *typedef.SchemaConfig, r *rand.Rand) typedef.Type {
-	n := r.IntN(sc.MaxTupleParts)
-	if n < 2 {
-		n = 2
-	}
+	n := max(r.IntN(sc.MaxTupleParts), 2)
 	typeList := make([]typedef.SimpleType, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		typeList[i] = GenSimpleType(sc, r)
 	}
 	return &typedef.TupleType{
@@ -68,7 +65,7 @@ func GenUDTType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.UDTType {
 	typeName := fmt.Sprintf("udt_%d", udtNum)
 	ts := make(map[string]typedef.SimpleType)
 
-	for i := 0; i < r.IntN(sc.MaxUDTParts)+1; i++ {
+	for i := range r.IntN(sc.MaxUDTParts)+1 {
 		ts[typeName+fmt.Sprintf("_%d", i)] = GenSimpleType(sc, r)
 	}
 

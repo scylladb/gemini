@@ -15,25 +15,27 @@
 package store
 
 import (
-	"github.com/gocql/gocql"
-	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/go-set/strset"
-	"github.com/stretchr/testify/assert"
-	"gopkg.in/inf.v0"
 	"math/big"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gocql/gocql"
+	"github.com/scylladb/go-set/strset"
+	"github.com/stretchr/testify/assert"
+	"gopkg.in/inf.v0"
+
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 func TestPks(t *testing.T) {
 	// Define test cases
 	tests := []struct {
-		name     string
 		table    *typedef.Table
-		rows     Rows
 		expected *strset.Set
+		name     string
+		rows     Rows
 	}{
 		{
 			name: "empty rows",
@@ -359,9 +361,9 @@ func TestFormatRows(t *testing.T) {
 			expected: "float32=3.14",
 		},
 		{
-			name:     "gocql.UUID value",
-			key:      "uuid",
-			value:    func() gocql.UUID {
+			name: "gocql.UUID value",
+			key:  "uuid",
+			value: func() gocql.UUID {
 				uuid, _ := gocql.ParseUUID("550e8400-e29b-41d4-a716-446655440000")
 				return uuid
 			}(),
@@ -380,9 +382,9 @@ func TestFormatRows(t *testing.T) {
 			expected: "bigint=9223372036854775807",
 		},
 		{
-			name:     "*inf.Dec value",
-			key:      "decimal",
-			value:    func() *inf.Dec {
+			name: "*inf.Dec value",
+			key:  "decimal",
+			value: func() *inf.Dec {
 				d := new(inf.Dec)
 				d.SetString("123456.789")
 				return d

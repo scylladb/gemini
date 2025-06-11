@@ -17,8 +17,6 @@ package store
 import (
 	"context"
 	"errors"
-	"github.com/samber/mo"
-	"gopkg.in/inf.v0"
 	"io"
 	"math/big"
 	"reflect"
@@ -29,12 +27,14 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	pkgerrors "github.com/pkg/errors"
+	"github.com/samber/mo"
+	"github.com/scylladb/go-set/strset"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/go-set/strset"
 )
 
 var comparers = []cmp.Option{
@@ -156,31 +156,34 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder
 }
 
 func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error {
-	doCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	var ch chan mo.Result[Rows]
+	var oracleCh chan mo.Result[Rows]
 
 	if ds.oracleStore != nil {
-		ch = ds.workers.Send(doCtx, func(ctx context.Context) (Rows, error) {
+		oracleCh = ds.workers.Send(ctx, func(ctx context.Context) (Rows, error) {
 			return nil, ds.oracleStore.mutate(ctx, stmt)
 		})
-
-		defer ds.workers.Release(ch)
 	}
 
-	if testErr := ds.testStore.mutate(doCtx, stmt); testErr != nil {
+	testCh := ds.workers.Send(ctx, func(ctx context.Context) (Rows, error) {
+		return nil, ds.testStore.mutate(ctx, stmt);
+	})
+
+	result := <-testCh
+	ds.workers.Release(testCh)
+	if result.IsError() {
 		// Test store failed, transition cannot take place
 		ds.logger.Error(
 			"test store failed mutation, transition to next state impossible so continuing with next mutation",
-			zap.Error(testErr),
+			zap.Error(result.Error()),
 		)
 
-		return testErr
+		return result.Error()
 	}
 
-	if ch != nil {
-		result := <-ch
+
+	if oracleCh != nil {
+		result := <-oracleCh
+		ds.workers.Release(oracleCh)
 		if result.IsError() {
 			// Test store failed, transition cannot take place
 			ds.logger.Error(

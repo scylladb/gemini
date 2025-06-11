@@ -44,7 +44,7 @@ func (r Rows) Less(i, j int) bool {
 	return rowsCmp(r[i], r[j]) < 0
 }
 
-func rowsCmp(i Row, j Row) int {
+func rowsCmp(i, j Row) int {
 	switch mis := i["pk0"].(type) {
 	case []byte:
 		mjs, _ := j["pk0"].([]byte)

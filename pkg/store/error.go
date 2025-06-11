@@ -17,14 +17,13 @@ package store
 import "fmt"
 
 type ErrorRowDifference struct {
-	TestRows        int
-	OracleRows      int
+	OracleRow       Row
+	TestRow         Row
+	Diff            string
 	MissingInTest   []string
 	MissingInOracle []string
-
-	Diff      string
-	OracleRow Row
-	TestRow   Row
+	TestRows        int
+	OracleRows      int
 }
 
 func (e ErrorRowDifference) Error() string {

@@ -18,7 +18,6 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
-	"github.com/samber/mo"
 	"io"
 	"log"
 	"os"
@@ -29,6 +28,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/pkg/errors"
+	"github.com/samber/mo"
 
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"

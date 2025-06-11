@@ -17,7 +17,6 @@ import (
 func TestDelegatingStore_Mutate(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
 	logger := zap.NewNop()
 
 	// Create a sample statement for testing
@@ -34,16 +33,18 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 			logger:      logger,
 		}
 
+		ctx := t.Context()
+
 		testStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+			On("mutate", ctx, stmt).
 			Once().
 			Return(nil)
 		oracleStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+			On("mutate", ctx, stmt).
 			Once().
 			Return(nil)
 
-		err := ds.Mutate(ctx, stmt)
+		err := ds.Mutate(t.Context(), stmt)
 
 		assert.NoError(t, err)
 		testStore.AssertExpectations(t)
@@ -60,7 +61,9 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 			logger:      logger,
 		}
 
-		testStore.On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).Return(nil)
+		ctx := t.Context()
+
+		testStore.On("mutate", ctx, stmt).Return(nil)
 
 		err := ds.Mutate(ctx, stmt)
 
@@ -81,12 +84,14 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 
 		testErr := errors.New("test store mutation failed")
 
+		ctx := t.Context()
+
 		testStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+			On("mutate", ctx, stmt).
 			Once().
 			Return(testErr)
 		oracleStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+			On("mutate", ctx, stmt).
 			Once().
 			Return(nil)
 
@@ -110,13 +115,14 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		}
 
 		oracleErr := errors.New("oracle store mutation failed")
+		ctx := t.Context()
 
 		testStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+			On("mutate", ctx, stmt).
 			Once().
 			Return(nil)
 		oracleStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+			On("mutate", ctx, stmt).
 			Once().
 			Return(oracleErr)
 
@@ -141,11 +147,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 
 		testErr := errors.New("test store mutation failed")
 		oracleErr := errors.New("oracle store mutation failed")
+		ctx := t.Context()
 
-		testStore.On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+		testStore.On("mutate", ctx, stmt).
 			Once().
 			Return(testErr)
-		oracleStore.On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+		oracleStore.On("mutate", ctx, stmt).
 			Once().
 			Return(oracleErr)
 
@@ -167,14 +174,15 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 			oracleStore: oracleStore,
 			logger:      logger,
 		}
+		ctx := t.Context()
 
 		cancelCtx, cancel := context.WithCancel(ctx)
 		cancel()
 
-		testStore.On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+		testStore.On("mutate", cancelCtx, stmt).
 			Once().
 			Return(context.Canceled)
-		oracleStore.On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+		oracleStore.On("mutate", cancelCtx, stmt).
 			Once().
 			Return(context.Canceled)
 
@@ -198,9 +206,10 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 
 		var testStartTime, oracleStartTime time.Time
 		var mu sync.Mutex
+		ctx := t.Context()
 
 		testStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+			On("mutate", ctx, stmt).
 			Return(nil).
 			Run(func(args mock.Arguments) {
 				mu.Lock()
@@ -210,7 +219,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 			})
 
 		oracleStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+			On("mutate", ctx, stmt).
 			Return(nil).
 			Run(func(args mock.Arguments) {
 				mu.Lock()
@@ -254,14 +263,15 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		}
 
 		testErr := errors.New("test store mutation failed")
+		ctx := t.Context()
 
 		// Setup expectations
 		testStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+			On("mutate", ctx, stmt).
 			Once().
 			Return(testErr)
 		oracleStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), stmt).
+			On("mutate", ctx, stmt).
 			Once().
 			Return(nil).
 			Run(func(args mock.Arguments) {
@@ -287,13 +297,14 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 			oracleStore: oracleStore,
 			logger:      logger,
 		}
+		ctx := t.Context()
 
 		testStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), (*typedef.Stmt)(nil)).
+			On("mutate", ctx, (*typedef.Stmt)(nil)).
 			Once().
 			Return(nil)
 		oracleStore.
-			On("mutate", mock.AnythingOfType("*context.cancelCtx"), (*typedef.Stmt)(nil)).
+			On("mutate", ctx, (*typedef.Stmt)(nil)).
 			Once().
 			Return(nil)
 

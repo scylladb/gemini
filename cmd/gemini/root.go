@@ -186,7 +186,6 @@ func run(cmd *cobra.Command, _ []string) error {
 		)
 	}
 
-
 	schema, schemaConfig, err := getSchema(intSeed, logger)
 	if err != nil {
 		return errors.Wrap(err, "failed to get schema")
@@ -216,7 +215,6 @@ func run(cmd *cobra.Command, _ []string) error {
 			}
 		}
 	}
-
 
 	testKeyspace, oracleKeyspace := generators.GetCreateKeyspaces(schema)
 	if err = st.Create(

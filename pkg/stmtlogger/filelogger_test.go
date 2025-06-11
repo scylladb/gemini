@@ -16,7 +16,6 @@ package stmtlogger_test
 
 import (
 	"compress/gzip"
-	"github.com/samber/mo"
 	"io"
 	"os"
 	"path/filepath"
@@ -25,6 +24,7 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/samber/mo"
 
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
