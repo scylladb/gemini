@@ -108,8 +108,7 @@ func (s *Stmt) PrettyCQL() (string, error) {
 
 func (s *Stmt) PrettyCQLBuffered(buffer *bytes.Buffer) error {
 	query, _ := s.Query.ToCql()
-	values := s.Values.Copy()
-	return prettyCQL(buffer, query, values, s.Types)
+	return prettyCQL(buffer, query, s.Values, s.Types)
 }
 
 func (s *Stmt) ToCql() (string, []string) {

@@ -99,7 +99,8 @@ func (c *cqlStore) doMutate(_ context.Context, stmt *typedef.Stmt) error {
 		}
 	}
 
-	return c.stmtLogger.LogStmt(stmt, ts)
+	_ = c.stmtLogger.LogStmt(stmt, ts)
+	return nil
 }
 
 func (c *cqlStore) load(_ context.Context, stmt *typedef.Stmt) (Rows, error) {
@@ -125,9 +126,7 @@ func (c *cqlStore) load(_ context.Context, stmt *typedef.Stmt) (Rows, error) {
 		rows[i] = row
 	}
 
-	if err := c.stmtLogger.LogStmt(stmt, mo.None[time.Time]()); err != nil {
-		return nil, err
-	}
+	_ = c.stmtLogger.LogStmt(stmt, mo.None[time.Time]())
 
 	return rows, nil
 }
