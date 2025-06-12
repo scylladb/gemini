@@ -54,7 +54,7 @@ type loader interface {
 }
 
 type storer interface {
-	mutate(context.Context, *typedef.Stmt) error
+	mutate(context.Context, *typedef.Stmt, mo.Option[time.Time]) error
 }
 
 type storeLoader interface {
@@ -134,7 +134,7 @@ type delegatingStore struct {
 }
 
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error {
-	if err := ds.testStore.mutate(ctx, testBuilder); err != nil {
+	if err := ds.testStore.mutate(ctx, testBuilder, mo.None[time.Time]()); err != nil {
 		return pkgerrors.Wrapf(
 			err,
 			"unable to apply mutations to the %s store",
@@ -143,7 +143,7 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder
 	}
 
 	if ds.oracleStore != nil {
-		if err := ds.oracleStore.mutate(ctx, oracleBuilder); err != nil {
+		if err := ds.oracleStore.mutate(ctx, oracleBuilder, mo.None[time.Time]()); err != nil {
 			return pkgerrors.Wrapf(
 				err,
 				"unable to apply mutations to the %s store",
@@ -160,12 +160,12 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 
 	if ds.oracleStore != nil {
 		oracleCh = ds.workers.Send(ctx, func(ctx context.Context) (Rows, error) {
-			return nil, ds.oracleStore.mutate(ctx, stmt)
+			return nil, ds.oracleStore.mutate(ctx, stmt, mo.None[time.Time]())
 		})
 	}
 
 	testCh := ds.workers.Send(ctx, func(ctx context.Context) (Rows, error) {
-		return nil, ds.testStore.mutate(ctx, stmt)
+		return nil, ds.testStore.mutate(ctx, stmt, mo.None[time.Time]())
 	})
 
 	result := <-testCh
@@ -206,33 +206,37 @@ func (ds delegatingStore) Check(
 	doCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var ch chan mo.Result[Rows]
+	var oracleCh chan mo.Result[Rows]
 
 	if ds.oracleStore != nil {
-		ch = ds.workers.Send(doCtx, func(ctx context.Context) (Rows, error) {
+		oracleCh = ds.workers.Send(doCtx, func(ctx context.Context) (Rows, error) {
 			return ds.oracleStore.load(ctx, stmt)
 		})
 	}
 
-	testRows, testErr := ds.testStore.load(doCtx, stmt)
+	testCh := ds.workers.Send(doCtx, func(ctx context.Context) (Rows, error) {
+		return ds.testStore.load(ctx, stmt)
+	})
 
-	if testErr != nil {
-		ds.workers.Release(ch)
-		return pkgerrors.Wrap(testErr, "unable to load check data from the test store")
+	testResult := <-testCh
+	if testResult.IsError() {
+		ds.workers.Release(oracleCh)
+		return pkgerrors.Wrap(testResult.Error(), "unable to load check data from the test store")
 	}
 
-	if ch == nil {
+	if oracleCh == nil {
 		return nil
 	}
 
-	result := <-ch
-	ds.workers.Release(ch)
+	oracleResult := <-oracleCh
+	ds.workers.Release(oracleCh)
 
-	if result.IsError() {
-		return pkgerrors.Wrap(result.Error(), "unable to load check data from the oracle store")
+	if oracleResult.IsError() {
+		return pkgerrors.Wrap(oracleResult.Error(), "unable to load check data from the oracle store")
 	}
 
-	oracleRows := result.MustGet()
+	oracleRows := oracleResult.MustGet()
+	testRows := testResult.MustGet()
 
 	if len(testRows) == 0 && len(oracleRows) == 0 {
 		return nil

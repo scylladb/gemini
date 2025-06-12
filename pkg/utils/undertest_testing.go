@@ -21,9 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gocql/gocql"
-
 	dockernetwork "github.com/docker/docker/api/types/network"
+	"github.com/gocql/gocql"
 	"github.com/testcontainers/testcontainers-go/modules/scylladb"
 	"github.com/testcontainers/testcontainers-go/network"
 )
@@ -34,7 +33,7 @@ func IsUnderTest() bool {
 	return true
 }
 
-func TestContainers(tb testing.TB) (*gocql.Session, *gocql.Session) {
+func TestContainers(tb testing.TB, timeouts ...time.Duration) (*gocql.Session, *gocql.Session) {
 	tb.Helper()
 
 	oracleVersion, exists := os.LookupEnv("GEMINI_SCYLLA_ORACLE")
@@ -75,7 +74,6 @@ func TestContainers(tb testing.TB) (*gocql.Session, *gocql.Session) {
 		scylladb.WithShardAwareness(),
 		network.WithNetwork([]string{ContainerNetworkName}, sharedNetwork),
 	)
-
 	if err != nil {
 		tb.Fatalf("failed to start oracle ScyllaDB container: %v", err)
 	}
@@ -90,7 +88,6 @@ func TestContainers(tb testing.TB) (*gocql.Session, *gocql.Session) {
 		scylladb.WithShardAwareness(),
 		network.WithNetwork([]string{ContainerNetworkName}, sharedNetwork),
 	)
-
 	if err != nil {
 		tb.Fatalf("failed to start oracle ScyllaDB container: %v", err)
 	}
@@ -99,26 +96,42 @@ func TestContainers(tb testing.TB) (*gocql.Session, *gocql.Session) {
 		_ = test.Terminate(tb.Context())
 	})
 
-	oracleCluster := gocql.NewCluster(Must(oracle.ContainerIP(tb.Context())))
-	oracleCluster.Timeout = 10 * time.Second
-	oracleCluster.ConnectTimeout = 10 * time.Second
-	oracleCluster.RetryPolicy = &gocql.SimpleRetryPolicy{NumRetries: 0}
-	oracleCluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy())
-	oracleCluster.Consistency = gocql.Quorum
-	oracleCluster.DefaultTimestamp = false
-	if err = oracleCluster.Validate(); err != nil {
-		tb.Fatalf("failed to validate oracle ScyllaDB cluster: %v", err)
-	}
-
 	testCluster := gocql.NewCluster(Must(test.ContainerIP(tb.Context())))
-	testCluster.Timeout = 10 * time.Second
+	if len(timeouts) > 0 {
+		testCluster.Timeout = timeouts[0]
+	} else {
+		testCluster.Timeout = 10 * time.Second
+	}
 	testCluster.ConnectTimeout = 10 * time.Second
-	testCluster.RetryPolicy = &gocql.SimpleRetryPolicy{NumRetries: 0}
+	testCluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
+		Min:        20 * time.Microsecond,
+		Max:        50 * time.Millisecond,
+		NumRetries: 10,
+	}
 	testCluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy())
 	testCluster.Consistency = gocql.Quorum
 	testCluster.DefaultTimestamp = false
 	if err = testCluster.Validate(); err != nil {
 		tb.Fatalf("failed to validate test ScyllaDB cluster: %v", err)
+	}
+
+	oracleCluster := gocql.NewCluster(Must(oracle.ContainerIP(tb.Context())))
+	if len(timeouts) > 1 {
+		oracleCluster.Timeout = timeouts[1]
+	} else {
+		oracleCluster.Timeout = 10 * time.Second
+	}
+	oracleCluster.ConnectTimeout = 10 * time.Second
+	oracleCluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
+		Min:        20 * time.Microsecond,
+		Max:        50 * time.Millisecond,
+		NumRetries: 10,
+	}
+	oracleCluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy())
+	oracleCluster.Consistency = gocql.Quorum
+	oracleCluster.DefaultTimestamp = false
+	if err = oracleCluster.Validate(); err != nil {
+		tb.Fatalf("failed to validate oracle ScyllaDB cluster: %v", err)
 	}
 
 	oracleSession, err := oracleCluster.CreateSession()

@@ -45,11 +45,11 @@ func (c *cqlStore) name() string {
 	return c.system
 }
 
-func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) error {
+func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
 	var err error
 
 	for i := range c.maxRetriesMutate {
-		err = c.doMutate(ctx, stmt)
+		err = c.doMutate(ctx, stmt, ts)
 
 		if err == nil {
 			metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
@@ -72,17 +72,16 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt) error {
 	return err
 }
 
-func (c *cqlStore) doMutate(_ context.Context, stmt *typedef.Stmt) error {
+func (c *cqlStore) doMutate(_ context.Context, stmt *typedef.Stmt, timestamp mo.Option[time.Time]) error {
 	queryBody, _ := stmt.Query.ToCql()
 	query := c.session.Query(queryBody, stmt.Values...)
 	defer query.Release()
 
-	ts := mo.None[time.Time]()
-
 	if !c.useServerSideTimestamps {
-		t := time.Now()
-		ts = mo.Some(t)
-		query.WithTimestamp(t.UnixMicro())
+		timestamp = timestamp.MapNone(func() (time.Time, bool) {
+			return time.Now(), true
+		})
+		query.WithTimestamp(timestamp.MustGet().UnixMicro())
 	}
 
 	if err := query.Exec(); err != nil {
@@ -99,7 +98,9 @@ func (c *cqlStore) doMutate(_ context.Context, stmt *typedef.Stmt) error {
 		}
 	}
 
-	_ = c.stmtLogger.LogStmt(stmt, ts)
+	if c.stmtLogger != nil {
+		_ = c.stmtLogger.LogStmt(stmt, timestamp)
+	}
 	return nil
 }
 
@@ -126,7 +127,9 @@ func (c *cqlStore) load(_ context.Context, stmt *typedef.Stmt) (Rows, error) {
 		rows[i] = row
 	}
 
-	_ = c.stmtLogger.LogStmt(stmt, mo.None[time.Time]())
+	if c.stmtLogger != nil {
+		_ = c.stmtLogger.LogStmt(stmt, mo.None[time.Time]())
+	}
 
 	return rows, nil
 }
