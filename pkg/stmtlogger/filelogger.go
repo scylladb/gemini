@@ -50,7 +50,7 @@ type (
 )
 
 func NewFileLogger(ch <-chan Item, filename string, compression Compression, logger *zap.Logger) (*IOWriterLogger, error) {
-	w, err := utils.CreateFile(filename)
+	w, err := utils.CreateFile(filename, false)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create file %q", filename)
 	}

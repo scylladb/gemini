@@ -111,7 +111,7 @@ func (l List) Run(
 	logger *zap.Logger,
 	stopFlag *stop.Flag,
 	failFast, verbose bool,
-	src rand.Source,
+	src *rand.ChaCha8,
 ) error {
 	ctx, cancel := context.WithTimeout(base, l.duration)
 	defer cancel()
@@ -121,7 +121,9 @@ func (l List) Run(
 	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 	logger.Info("start jobs")
 	for _, table := range schema.Tables {
-		rnd := rand.New(src)
+		newSrc := [32]byte{}
+		_, _ = src.Read(newSrc[:])
+		rnd := rand.New(rand.NewChaCha8(newSrc))
 		for range l.workers {
 			for idx := range l.jobs {
 				jobF := l.jobs[idx].function

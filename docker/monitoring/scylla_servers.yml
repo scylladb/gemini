@@ -11,6 +11,6 @@
     cluster: test
     dc: dc2
 - targets:
-    - localhost:2112
+    - 127.0.0.1:2112
   labels:
     app: gemini

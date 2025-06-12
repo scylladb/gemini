@@ -319,36 +319,21 @@ func (st SimpleType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
 		return math.Pow(2, float64(p.MaxStringLength))
 	case TypeBlob:
 		return math.Pow(2, float64(p.MaxBlobLength))
-	case TypeBigint:
-		return 2 ^ 64
 	case TypeBoolean:
 		return 2
 	case TypeDate:
 		return 10000*365 + 2000*4
 	case TypeTime:
 		return 86400000000000
-	case TypeTimestamp:
+	case TypeVarint, TypeTimeuuid, TypeUuid, TypeBigint, TypeTimestamp, TypeDecimal,
+		TypeDouble, TypeDuration:
 		return 2 ^ 64
-	case TypeDecimal:
-		return 2 ^ 64
-	case TypeDouble:
-		return 2 ^ 64
-	case TypeDuration:
-		return 2 ^ 64
-	case TypeFloat:
-		return 2 ^ 64
-	case TypeInet:
-		return 2 ^ 32
-	case TypeInt:
+	case TypeInet, TypeInt, TypeFloat:
 		return 2 ^ 32
 	case TypeSmallint:
 		return 2 ^ 16
-	case TypeTimeuuid, TypeUuid:
-		return 2 ^ 64
 	case TypeTinyint:
 		return 2 ^ 8
-	case TypeVarint:
-		return 2 ^ 64
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", st))
 	}

@@ -105,7 +105,7 @@ func TestOutputToFile(t *testing.T) {
 			data := Item{
 				ID:        gocql.TimeUUID(),
 				Statement: "INSERT INTO ks1.table1(pk1) VALUES(?)",
-				Values:    mo.Left[typedef.Values, string]([]any{1}),
+				Values:    mo.Left[typedef.Values, []byte]([]any{1}),
 				Error:     mo.Left[error, string](nil),
 				Duration:  Duration{Duration: 10 * time.Second},
 				Host:      "test_host",
@@ -150,7 +150,7 @@ func BenchmarkLogger(b *testing.B) {
 			data := Item{
 				ID:        gocql.TimeUUID(),
 				Statement: "INSERT INTO ks1.table1(pk1) VALUES(?)",
-				Values:    mo.Left[typedef.Values, string]([]any{1}),
+				Values:    mo.Left[typedef.Values, []byte]([]any{1}),
 				Error:     mo.Left[error, string](nil),
 				Duration:  Duration{Duration: 10 * time.Second},
 				Host:      "test_host",
