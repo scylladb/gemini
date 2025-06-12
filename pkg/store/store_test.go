@@ -1,3 +1,17 @@
+// Copyright 2025 ScyllaDB
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package store
 
 import (
@@ -23,6 +37,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 	stmt := typedef.SimpleStmt("INSERT INTO test_table (id, name) VALUES (?, ?)", typedef.InsertStatementType)
 
 	t.Run("successful mutation with both stores", func(t *testing.T) {
+		t.Parallel()
+
 		testStore := &mockStoreLoader{}
 		oracleStore := &mockStoreLoader{}
 
@@ -52,6 +68,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 	})
 
 	t.Run("successful mutation with only test store (no oracle)", func(t *testing.T) {
+		t.Parallel()
+
 		testStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
@@ -72,6 +90,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 	})
 
 	t.Run("test store fails", func(t *testing.T) {
+		t.Parallel()
+
 		testStore := &mockStoreLoader{}
 		oracleStore := &mockStoreLoader{}
 
@@ -104,6 +124,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 	})
 
 	t.Run("oracle store fails", func(t *testing.T) {
+		t.Parallel()
+
 		testStore := &mockStoreLoader{}
 		oracleStore := &mockStoreLoader{}
 
@@ -135,6 +157,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 	})
 
 	t.Run("both stores fail", func(t *testing.T) {
+		t.Parallel()
+
 		testStore := &mockStoreLoader{}
 		oracleStore := &mockStoreLoader{}
 
@@ -165,6 +189,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 	})
 
 	t.Run("context cancellation", func(t *testing.T) {
+		t.Parallel()
+
 		testStore := &mockStoreLoader{}
 		oracleStore := &mockStoreLoader{}
 
@@ -194,6 +220,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore.AssertExpectations(t)
 	})
 	t.Run("concurrent execution timing", func(t *testing.T) {
+		t.Parallel()
+
 		testStore := &mockStoreLoader{}
 		oracleStore := &mockStoreLoader{}
 
@@ -211,7 +239,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		testStore.
 			On("mutate", ctx, stmt).
 			Return(nil).
-			Run(func(args mock.Arguments) {
+			Run(func(_ mock.Arguments) {
 				mu.Lock()
 				testStartTime = time.Now()
 				mu.Unlock()
@@ -221,7 +249,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore.
 			On("mutate", ctx, stmt).
 			Return(nil).
-			Run(func(args mock.Arguments) {
+			Run(func(_ mock.Arguments) {
 				mu.Lock()
 				oracleStartTime = time.Now()
 				mu.Unlock()
@@ -252,6 +280,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 	})
 
 	t.Run("oracle store slow but test store fails", func(t *testing.T) {
+		t.Parallel()
+
 		testStore := &mockStoreLoader{}
 		oracleStore := &mockStoreLoader{}
 
@@ -274,7 +304,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 			On("mutate", ctx, stmt).
 			Once().
 			Return(nil).
-			Run(func(args mock.Arguments) {
+			Run(func(_ mock.Arguments) {
 				time.Sleep(100 * time.Millisecond)
 			})
 
@@ -288,6 +318,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 	})
 
 	t.Run("nil statement", func(t *testing.T) {
+		t.Parallel()
+
 		testStore := &mockStoreLoader{}
 		oracleStore := &mockStoreLoader{}
 
