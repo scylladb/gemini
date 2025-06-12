@@ -36,7 +36,9 @@ func TestNewWorkers(t *testing.T) {
 
 		for _, count := range counts {
 			w := newWorkers(count)
-			defer w.Close()
+			t.Cleanup(func() {
+				_ = w.Close()
+			})
 
 			// Verify channel buffer size
 			assert.Equal(t, count*2, cap(w.ch))
@@ -46,10 +48,10 @@ func TestNewWorkers(t *testing.T) {
 			var wg sync.WaitGroup
 			wg.Add(count)
 
-			for i := 0; i < count; i++ {
+			for i := range count {
 				go func(i int) {
 					defer wg.Done()
-					ch := w.Send(t.Context(), func(ctx context.Context) (Rows, error) {
+					ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
 						return Rows{Row{"test": i}}, nil
 					})
 					res := <-ch
@@ -91,11 +93,13 @@ func TestWorkersSend(t *testing.T) {
 		t.Parallel()
 
 		w := newWorkers(1)
-		defer w.Close()
+		t.Cleanup(func() {
+			_ = w.Close()
+		})
 
 		expectedRows := Rows{Row{"id": 1, "name": "test"}}
 
-		ch := w.Send(t.Context(), func(ctx context.Context) (Rows, error) {
+		ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
 			return expectedRows, nil
 		})
 
@@ -113,11 +117,13 @@ func TestWorkersSend(t *testing.T) {
 	t.Run("task execution with error", func(t *testing.T) {
 		t.Parallel()
 		w := newWorkers(1)
-		defer w.Close()
+		t.Cleanup(func() {
+			_ = w.Close()
+		})
 
 		expectedErr := errors.New("test error")
 
-		ch := w.Send(t.Context(), func(ctx context.Context) (Rows, error) {
+		ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
 			return nil, expectedErr
 		})
 
@@ -135,12 +141,15 @@ func TestWorkersSend(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		t.Parallel()
 		w := newWorkers(1)
-		defer w.Close()
+		t.Cleanup(func() {
+			_ = w.Close()
+		})
+
 		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
+		cancel() // Cancel immediately
 
 		ch := w.Send(ctx, func(ctx context.Context) (Rows, error) {
-			// This should see the cancelled context
+			// This should see the canceled context
 			return nil, ctx.Err()
 		})
 
@@ -160,7 +169,9 @@ func TestWorkersSend(t *testing.T) {
 		workerCount := 5
 		taskCount := 20
 		w := newWorkers(workerCount)
-		defer w.Close()
+		t.Cleanup(func() {
+			_ = w.Close()
+		})
 
 		// Create a WaitGroup to wait for all tasks to complete
 		var wg sync.WaitGroup
@@ -174,7 +185,7 @@ func TestWorkersSend(t *testing.T) {
 			go func(taskID int) {
 				defer wg.Done()
 
-				ch := w.Send(t.Context(), func(ctx context.Context) (Rows, error) {
+				ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
 					// Sleep to simulate work
 					time.Sleep(50 * time.Millisecond)
 					return Rows{Row{"taskID": taskID}}, nil
@@ -210,10 +221,12 @@ func TestWorkersSend(t *testing.T) {
 	t.Run("channel reuse from pool", func(t *testing.T) {
 		t.Parallel()
 		w := newWorkers(1)
-		defer w.Close()
+		t.Cleanup(func() {
+			_ = w.Close()
+		})
 
 		// Get a channel from the pool
-		ch1 := w.Send(t.Context(), func(ctx context.Context) (Rows, error) {
+		ch1 := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
 			return Rows{Row{"test": 1}}, nil
 		})
 
@@ -224,7 +237,7 @@ func TestWorkersSend(t *testing.T) {
 		w.Release(ch1)
 
 		// Get another channel - should be the same one from the pool
-		ch2 := w.Send(t.Context(), func(ctx context.Context) (Rows, error) {
+		ch2 := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
 			return Rows{Row{"test": 2}}, nil
 		})
 
@@ -244,11 +257,13 @@ func TestWorkersRelease(t *testing.T) {
 	t.Run("release channel to pool", func(t *testing.T) {
 		t.Parallel()
 		w := newWorkers(1)
-		defer w.Close()
+		t.Cleanup(func() {
+			_ = w.Close()
+		})
 
-		// Create and use multiple channels in sequence
-		for i := 0; i < 10; i++ {
-			ch := w.Send(t.Context(), func(ctx context.Context) (Rows, error) {
+		// Create and use multiple channels in a sequence
+		for i := range 100 {
+			ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
 				return Rows{Row{"value": i}}, nil
 			})
 
@@ -266,7 +281,9 @@ func TestWorkersRelease(t *testing.T) {
 	t.Run("attempt to release nil channel", func(t *testing.T) {
 		t.Parallel()
 		w := newWorkers(1)
-		defer w.Close()
+		t.Cleanup(func() {
+			_ = w.Close()
+		})
 
 		// This should not panic
 		defer func() {
@@ -288,7 +305,7 @@ func TestWorkersClose(t *testing.T) {
 		err := w.Close()
 		assert.NoError(t, err)
 
-		// Verify channel is closed
+		// Verify the channel is closed
 		_, open := <-w.ch
 		assert.False(t, open, "Channel should be closed")
 	})
@@ -305,7 +322,7 @@ func TestWorkersClose(t *testing.T) {
 			assert.NotNil(t, r, "Expected panic when sending to closed channel")
 		}()
 
-		_ = w.Send(t.Context(), func(ctx context.Context) (Rows, error) {
+		_ = w.Send(t.Context(), func(_ context.Context) (Rows, error) {
 			return nil, nil
 		})
 		t.Fatal("Should not reach this point")
@@ -315,11 +332,11 @@ func TestWorkersClose(t *testing.T) {
 		t.Parallel()
 		w := newWorkers(2)
 
-		// First close should succeed
+		// First, close should succeed
 		err := w.Close()
 		assert.NoError(t, err)
 
-		// Second close should panic, but we recover
+		// Second, close should panic, but we recover
 		defer func() {
 			r := recover()
 			assert.NotNil(t, r, "Expected panic when closing already closed channel")
@@ -336,7 +353,9 @@ func TestWorkersEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		w := newWorkers(1)
-		defer w.Close()
+		t.Cleanup(func() {
+			_ = w.Close()
+		})
 
 		assert.Panics(t, func() {
 			_ = w.Send(t.Context(), nil)
@@ -347,10 +366,12 @@ func TestWorkersEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		w := newWorkers(1)
-		defer w.Close()
+		t.Cleanup(func() {
+			_ = w.Close()
+		})
 
 		// Using nil context is technically valid but not recommended
-		ch := w.Send(nil, func(ctx context.Context) (Rows, error) {
+		ch := w.Send(nil, func(ctx context.Context) (Rows, error) { // nolint:staticcheck
 			// Context should be nil
 			if ctx != nil {
 				return nil, errors.New("expected nil context")
@@ -373,7 +394,9 @@ func TestWorkersEdgeCases(t *testing.T) {
 
 		// Test with many tasks (more than buffer size)
 		w := newWorkers(1)
-		defer w.Close()
+		t.Cleanup(func() {
+			_ = w.Close()
+		})
 
 		// Create tasks that fill the buffer and then some
 		taskCount := 1100 // More than the 1024 buffer
@@ -385,11 +408,11 @@ func TestWorkersEdgeCases(t *testing.T) {
 		go func() {
 			for i := range taskCount {
 				finalI := i // Capture the value for the closure
-				ch := w.Send(t.Context(), func(ctx context.Context) (Rows, error) {
+				ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
 					return Rows{Row{"id": finalI}}, nil
 				})
 
-				go func(ch chan mo.Result[Rows], taskID int) {
+				go func(ch chan mo.Result[Rows], _ int) {
 					res := <-ch
 					if res.IsOk() {
 						rows, _ := res.Get()
@@ -427,11 +450,13 @@ func TestWorkersEdgeCases(t *testing.T) {
 func BenchmarkWorkers(b *testing.B) {
 	b.Run("single worker", func(b *testing.B) {
 		w := newWorkers(1)
-		defer w.Close()
+		b.Cleanup(func() {
+			_ = w.Close()
+		})
 
 		b.ResetTimer()
 		for b.Loop() {
-			ch := w.Send(b.Context(), func(ctx context.Context) (Rows, error) {
+			ch := w.Send(b.Context(), func(_ context.Context) (Rows, error) {
 				return Rows{Row{"id": 1}}, nil
 			})
 			<-ch
@@ -441,11 +466,13 @@ func BenchmarkWorkers(b *testing.B) {
 
 	b.Run("multiple workers", func(b *testing.B) {
 		w := newWorkers(10)
-		defer w.Close()
+		b.Cleanup(func() {
+			_ = w.Close()
+		})
 
 		b.ResetTimer()
 		for b.Loop() {
-			ch := w.Send(b.Context(), func(ctx context.Context) (Rows, error) {
+			ch := w.Send(b.Context(), func(_ context.Context) (Rows, error) {
 				return Rows{Row{"id": 1}}, nil
 			})
 			<-ch
@@ -455,12 +482,14 @@ func BenchmarkWorkers(b *testing.B) {
 
 	b.Run("concurrent load", func(b *testing.B) {
 		w := newWorkers(4)
-		defer w.Close()
+		b.Cleanup(func() {
+			_ = w.Close()
+		})
 
 		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				ch := w.Send(b.Context(), func(ctx context.Context) (Rows, error) {
+				ch := w.Send(b.Context(), func(_ context.Context) (Rows, error) {
 					return Rows{Row{"id": 1}}, nil
 				})
 				<-ch

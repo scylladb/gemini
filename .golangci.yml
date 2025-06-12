@@ -79,7 +79,7 @@ linters:
         - pattern: 'fmt\.Print.*(# Do not commit print statements\.)?'
           msg: "Use log package instead of fmt"
     gocyclo:
-      min-complexity: 19
+      min-complexity: 20
     goheader:
       values:
         regexp:

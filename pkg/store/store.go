@@ -165,7 +165,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	}
 
 	testCh := ds.workers.Send(ctx, func(ctx context.Context) (Rows, error) {
-		return nil, ds.testStore.mutate(ctx, stmt);
+		return nil, ds.testStore.mutate(ctx, stmt)
 	})
 
 	result := <-testCh
@@ -180,9 +180,8 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		return result.Error()
 	}
 
-
 	if oracleCh != nil {
-		result := <-oracleCh
+		result = <-oracleCh
 		ds.workers.Release(oracleCh)
 		if result.IsError() {
 			// Test store failed, transition cannot take place

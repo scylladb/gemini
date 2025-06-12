@@ -52,7 +52,7 @@ func TestGenSinglePartitionQueryMv(t *testing.T) {
 				gen,
 				rnd,
 				&prc,
-				len(schema.Tables[0].MaterializedViews)-1,
+				&schema.Tables[0].MaterializedViews[len(schema.Tables[0].MaterializedViews)-1],
 			)
 			validateStmt(subT, stmt, nil)
 			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
@@ -138,7 +138,7 @@ func TestGenClusteringRangeQueryMv(t *testing.T) {
 				gen,
 				rnd,
 				&prc,
-				len(schema.Tables[0].MaterializedViews)-1,
+				&schema.Tables[0].MaterializedViews[len(schema.Tables[0].MaterializedViews)-1],
 				GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
 			validateStmt(subT, stmt, nil)
 			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
@@ -180,11 +180,10 @@ func TestGenMultiplePartitionClusteringRangeQueryMv(t *testing.T) {
 			prc := schema.Config.GetPartitionRangeConfig()
 			stmt := genMultiplePartitionClusteringRangeQueryMv(
 				schema,
-				schema.Tables[0],
 				gen,
 				rnd,
 				&prc,
-				len(schema.Tables[0].MaterializedViews)-1,
+				&schema.Tables[0].MaterializedViews[len(schema.Tables[0].MaterializedViews)-1],
 				GetPkCountFromOptions(options, len(schema.Tables[0].PartitionKeys)),
 				GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
 			validateStmt(subT, stmt, nil)
@@ -240,7 +239,7 @@ func BenchmarkGenSinglePartitionQueryMv(t *testing.B) {
 						gen,
 						rnd,
 						&prc,
-						len(schema.Tables[0].MaterializedViews)-1,
+						&schema.Tables[0].MaterializedViews[len(schema.Tables[0].MaterializedViews)-1],
 					)
 				}
 			})
@@ -283,7 +282,7 @@ func BenchmarkGenMultiplePartitionQueryMv(t *testing.B) {
 						gen,
 						rnd,
 						&prc,
-						len(schema.Tables[0].MaterializedViews)-1,
+						&schema.Tables[0].MaterializedViews[len(schema.Tables[0].MaterializedViews)-1],
 						GetPkCountFromOptions(options, len(schema.Tables[0].PartitionKeys)))
 				}
 			})
@@ -329,7 +328,7 @@ func BenchmarkGenClusteringRangeQueryMv(t *testing.B) {
 						gen,
 						rnd,
 						&prc,
-						len(schema.Tables[0].MaterializedViews)-1,
+						&schema.Tables[0].MaterializedViews[len(schema.Tables[0].MaterializedViews)-1],
 						GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
 				}
 			})
@@ -368,14 +367,13 @@ func BenchmarkGenMultiplePartitionClusteringRangeQueryMv(t *testing.B) {
 				schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
 				prc := schema.Config.GetPartitionRangeConfig()
 				subT.ResetTimer()
-				for x := 0; x < subT.N; x++ {
+				for subT.Loop() {
 					_ = genMultiplePartitionClusteringRangeQueryMv(
 						schema,
-						schema.Tables[0],
 						gen,
 						rnd,
 						&prc,
-						len(schema.Tables[0].MaterializedViews)-1,
+						&schema.Tables[0].MaterializedViews[len(schema.Tables[0].MaterializedViews)-1],
 						GetPkCountFromOptions(options, len(schema.Tables[0].PartitionKeys)),
 						GetCkCountFromOptions(options, len(schema.Tables[0].ClusteringKeys)-1))
 				}

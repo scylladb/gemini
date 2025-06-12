@@ -27,7 +27,7 @@ import (
 )
 
 func genCheckStmtForMv(
-	mvNum int,
+	mv *typedef.MaterializedView,
 	s *typedef.Schema,
 	table *typedef.Table,
 	g generators.Interface,
@@ -36,38 +36,35 @@ func genCheckStmtForMv(
 ) *typedef.Stmt {
 	switch val := rnd.IntN(4); val {
 	case 0:
-		return genSinglePartitionQueryMv(s, table, g, rnd, p, mvNum)
+		return genSinglePartitionQueryMv(s, table, g, rnd, p, mv)
 	case 1:
-		lenPartitionKeys := table.MaterializedViews[mvNum].PartitionKeys.Len()
+		lenPartitionKeys := mv.PartitionKeys.Len()
 		numQueryPKs := utils.RandInt2(rnd, 1, lenPartitionKeys)
 		multiplier := int(math.Pow(float64(numQueryPKs), float64(lenPartitionKeys)))
 		if multiplier > 100 {
 			numQueryPKs = 1
 		}
-		return genMultiplePartitionQueryMv(s, table, g, rnd, p, mvNum, numQueryPKs)
+
+		return genMultiplePartitionQueryMv(s, table, g, rnd, p, mv, numQueryPKs)
 	case 2:
-		lenClusteringKeys := table.MaterializedViews[mvNum].ClusteringKeys.Len()
+		lenClusteringKeys := mv.ClusteringKeys.Len()
 		maxClusteringRels := utils.RandInt2(rnd, 0, lenClusteringKeys)
-		return genClusteringRangeQueryMv(s, table, g, rnd, p, mvNum, maxClusteringRels)
+
+		return genClusteringRangeQueryMv(s, table, g, rnd, p, mv, maxClusteringRels)
 	case 3:
-		lenPartitionKeys := table.MaterializedViews[mvNum].PartitionKeys.Len()
+		lenPartitionKeys := mv.PartitionKeys.Len()
 		numQueryPKs := utils.RandInt2(rnd, 1, lenPartitionKeys)
 		multiplier := int(math.Pow(float64(numQueryPKs), float64(lenPartitionKeys)))
 		if multiplier > 100 {
 			numQueryPKs = 1
 		}
-		lenClusteringKeys := table.MaterializedViews[mvNum].ClusteringKeys.Len()
+
+		lenClusteringKeys := mv.ClusteringKeys.Len()
 		maxClusteringRels := utils.RandInt2(rnd, 0, lenClusteringKeys)
-		return genMultiplePartitionClusteringRangeQueryMv(
-			s,
-			table,
-			g,
-			rnd,
-			p,
-			mvNum,
-			numQueryPKs,
-			maxClusteringRels,
-		)
+		table.RLock()
+		defer table.RUnlock()
+
+		return genMultiplePartitionClusteringRangeQueryMv(s, g, rnd, p, mv, numQueryPKs, maxClusteringRels)
 	default:
 		panic(fmt.Sprintf("unexpected case in genCheckStmtForMv, random value: %d", val))
 	}
@@ -94,7 +91,7 @@ func GenCheckStmt(
 	}
 
 	if mvNum > -1 {
-		return genCheckStmtForMv(mvNum, s, table, g, rnd, p)
+		return genCheckStmtForMv(&table.MaterializedViews[mvNum], s, table, g, rnd, p)
 	}
 
 	var n int
@@ -179,12 +176,11 @@ func genSinglePartitionQueryMv(
 	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
-	mvNum int,
+	mv *typedef.MaterializedView,
 ) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
 	valuesWithToken := g.GetOld()
-	mv := t.MaterializedViews[mvNum]
 	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
 	typs := make([]typedef.Type, 0, 10)
 	for _, pk := range mv.PartitionKeys {
@@ -255,12 +251,12 @@ func genMultiplePartitionQueryMv(
 	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
-	mvNum, numQueryPKs int,
+	mv *typedef.MaterializedView,
+	numQueryPKs int,
 ) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
 
-	mv := t.MaterializedViews[mvNum]
 	typs := make([]typedef.Type, numQueryPKs*mv.PartitionKeys.Len())
 	values := make([]any, numQueryPKs*mv.PartitionKeys.Len())
 
@@ -350,13 +346,13 @@ func genClusteringRangeQueryMv(
 	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
-	mvNum, maxClusteringRels int,
+	mv *typedef.MaterializedView,
+	maxClusteringRels int,
 ) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
 	vs := g.GetOld()
 	values := vs.Value.Copy()
-	mv := t.MaterializedViews[mvNum]
 	if mv.HaveNonPrimaryKey() {
 		mvValues := append([]any{}, mv.NonPrimaryKey.Type.GenValue(r, p)...)
 		values = append(mvValues, values...)
@@ -457,16 +453,12 @@ func genMultiplePartitionClusteringRangeQuery(
 
 func genMultiplePartitionClusteringRangeQueryMv(
 	s *typedef.Schema,
-	t *typedef.Table,
 	g generators.Interface,
 	r *rand.Rand,
 	p *typedef.PartitionRangeConfig,
-	mvNum, numQueryPKs, maxClusteringRels int,
+	mv *typedef.MaterializedView,
+	numQueryPKs, maxClusteringRels int,
 ) *typedef.Stmt {
-	t.RLock()
-	defer t.RUnlock()
-
-	mv := t.MaterializedViews[mvNum]
 	clusteringKeys := mv.ClusteringKeys
 	pkValues := mv.PartitionKeysLenValues()
 	valuesCount := pkValues*numQueryPKs + clusteringKeys[:maxClusteringRels].LenValues() + clusteringKeys[maxClusteringRels].Type.LenValue()*2

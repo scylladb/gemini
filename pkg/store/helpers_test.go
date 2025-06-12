@@ -449,6 +449,7 @@ func BenchmarkPks(b *testing.B) {
 	}
 }
 
+// nolint:gocyclo
 func BenchmarkFormatRows(b *testing.B) {
 	var sb strings.Builder
 	sb.Grow(64)

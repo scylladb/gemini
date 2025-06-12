@@ -65,7 +65,7 @@ func GenUDTType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.UDTType {
 	typeName := fmt.Sprintf("udt_%d", udtNum)
 	ts := make(map[string]typedef.SimpleType)
 
-	for i := range r.IntN(sc.MaxUDTParts)+1 {
+	for i := range r.IntN(sc.MaxUDTParts) + 1 {
 		ts[typeName+fmt.Sprintf("_%d", i)] = GenSimpleType(sc, r)
 	}
 
