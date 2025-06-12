@@ -34,8 +34,8 @@ type JobError struct {
 func (j *JobError) Error() string {
 	return fmt.Sprintf(
 		"JobError(err=%v): %s (stmt-type=%s, query=%s) time=%s",
-		j.Message,
 		j.Err,
+		j.Message,
 		j.StmtType,
 		j.Query,
 		j.Timestamp.Format(time.RFC3339Nano),
