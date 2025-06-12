@@ -58,14 +58,10 @@ func (el *ErrorList) AddError(err JobError) {
 }
 
 func (el *ErrorList) Errors() []JobError {
-	el.mu.Lock()
-	l := len(el.errors)
-	el.mu.Unlock()
-
-	out := make([]JobError, l)
+	out := make([]JobError, el.limit)
 
 	el.mu.Lock()
-	copy(out, el.errors[:l])
+	copy(out, el.errors[:len(el.errors)])
 	el.mu.Unlock()
 
 	return out
