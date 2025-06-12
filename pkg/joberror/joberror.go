@@ -61,10 +61,10 @@ func (el *ErrorList) Errors() []JobError {
 	out := make([]JobError, el.limit)
 
 	el.mu.Lock()
-	copy(out, el.errors[:len(el.errors)])
+	n := copy(out, el.errors[:len(el.errors)])
 	el.mu.Unlock()
 
-	return out
+	return out[:n]
 }
 
 func (el *ErrorList) MarshalJSON() ([]byte, error) {
