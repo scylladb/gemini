@@ -17,13 +17,15 @@ package store
 import (
 	"context"
 	"errors"
-	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"go.uber.org/zap"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"go.uber.org/zap"
+
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 func TestDelegatingStore_Mutate(t *testing.T) {

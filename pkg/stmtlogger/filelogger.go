@@ -72,7 +72,7 @@ type (
 
 func NewFileLogger(filename string, compression Compression) (StmtToFile, error) {
 	if filename == "" {
-		return &nopFileLogger{}, nil
+		return nil, nil
 	}
 
 	fd, err := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
@@ -228,9 +228,3 @@ func committer(ch <-chan []byte, wg *sync.WaitGroup, writer io.Writer, chMetrics
 		counter++
 	}
 }
-
-type nopFileLogger struct{}
-
-func (n *nopFileLogger) LogStmt(_ *typedef.Stmt, _ mo.Option[time.Time]) error { return nil }
-
-func (n *nopFileLogger) Close() error { return nil }
