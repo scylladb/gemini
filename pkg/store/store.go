@@ -182,7 +182,12 @@ func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionP
 	case "host-pool":
 		return hostpolicy.HostPool(hostpool.New(hosts)), nil
 	case "token-aware":
-		return gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy()), nil
+		p := gocql.TokenAwareHostPolicy(
+			gocql.RoundRobinHostPolicy(),
+			gocql.ShuffleReplicas(),
+			gocql.AvoidSlowReplicas(2000),
+		)
+		return p, nil
 	default:
 		return nil, fmt.Errorf("unknown host selection policy \"%s\"", policy)
 	}

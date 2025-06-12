@@ -131,7 +131,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		}()
 	}
 
-	outFile, err := utils.CreateFile(outFileArg, os.Stdout)
+	outFile, err := utils.CreateFile(outFileArg, true, os.Stdout)
 	if err != nil {
 		return err
 	}
@@ -303,7 +303,7 @@ func createLogger(level string) *zap.Logger {
 		lvl.SetLevel(zap.InfoLevel)
 	}
 
-	file, err := utils.CreateFile("gemini.log", os.Stdout)
+	file, err := utils.CreateFile("gemini.log", false, os.Stdout)
 	if err != nil {
 		log.Fatalf("failed to create log file: %v", err)
 	}

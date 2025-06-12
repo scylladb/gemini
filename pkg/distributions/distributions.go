@@ -33,7 +33,7 @@ type (
 	}
 )
 
-func New(distribution string, partitionCount, seed uint64, mu, sigma float64) (rand.Source, DistributionFunc, error) {
+func New(distribution string, partitionCount, seed uint64, mu, sigma float64) (*rand.ChaCha8, DistributionFunc, error) {
 	var rnd generator
 
 	hash := sha256.Sum256(

@@ -34,7 +34,6 @@ import (
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gemini/pkg/workpool"
 )
 
@@ -207,24 +206,24 @@ func (s *ScyllaLogger) commiter(insert string, partitionKeysCount int) {
 				}
 			}
 
-			var err string
+			var itemErr string
 			if item.Error.IsLeft() {
 				if errVal := item.Error.MustLeft(); errVal != nil {
-					err = errVal.Error()
+					itemErr = errVal.Error()
 				}
 			} else {
-				err = item.Error.MustRight()
+				itemErr = item.Error.MustRight()
 			}
 
 			values = append(values,
 				item.Start.Time,
-				item.Type,
+				string(item.Type),
 				item.Statement,
 				prepareValues(item.Values),
 				item.Host,
 				item.Attempt,
 				item.GeminiAttempt,
-				err,
+				itemErr,
 				item.Duration.Duration,
 			)
 			query := s.session.Query(insert, values...)
@@ -237,10 +236,10 @@ func (s *ScyllaLogger) commiter(insert string, partitionKeysCount int) {
 	}
 }
 
-func prepareValues(values mo.Either[typedef.Values, string]) string {
+func prepareValues(values mo.Either[typedef.Values, []byte]) []byte {
 	if values.IsLeft() {
 		data, _ := json.Marshal([]any(values.MustLeft()))
-		return utils.UnsafeString(data)
+		return data
 	}
 
 	return values.MustRight()
@@ -268,7 +267,7 @@ func buildCreateTableQuery(
 		builder.WriteRune(',')
 	}
 
-	builder.WriteString("ddl boolean, ts timestamp, ty text, statement text, values text, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, ")
+	builder.WriteString("ddl boolean, ts timestamp, ty text, statement text, values blob, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, ")
 	builder.WriteString("PRIMARY KEY ((")
 	builder.WriteString(partitions)
 	builder.WriteString(", ty), ddl, ts)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'}")
@@ -349,7 +348,7 @@ func (s *ScyllaLogger) fetchData(ch chan<- Item, ty Type, statement string, valu
 			Statement:     m["statement"].(string),
 			Host:          m["host"].(string),
 			Type:          ty,
-			Values:        mo.Right[typedef.Values, string](m["values"].(string)),
+			Values:        mo.Right[typedef.Values, []byte](m["values"].([]byte)),
 			Duration:      Duration{Duration: time.Duration(m["dur"].(gocql.Duration).Nanoseconds)},
 			Attempt:       int(m["attempt"].(int16)),
 			GeminiAttempt: int(m["gemini_attempt"].(int16)),

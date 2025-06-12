@@ -47,11 +47,11 @@ type (
 
 	Item struct {
 		Start         Time                              `json:"s"`
-		Values        mo.Either[typedef.Values, string] `json:"v"`
 		Error         mo.Either[error, string]          `json:"e,omitempty"`
 		Statement     string                            `json:"q"`
 		Host          string                            `json:"h"`
 		Type          Type                              `json:"-"`
+		Values        mo.Either[typedef.Values, []byte] `json:"v"`
 		Duration      Duration                          `json:"d"`
 		Attempt       int                               `json:"d_a"`
 		GeminiAttempt int                               `json:"g_a"`
@@ -189,7 +189,7 @@ func (l *Logger) init(ch chan<- Item, logger mo.Either[*ScyllaLogger, *IOWriterL
 }
 
 func (l *Logger) LogStmt(item Item) error {
-	item.Values = mo.Left[typedef.Values, string](item.Values.MustLeft().Copy())
+	item.Values = mo.Left[typedef.Values, []byte](item.Values.MustLeft().Copy())
 
 	if ch := l.channel.Load(); ch != nil {
 		*ch <- item
@@ -204,6 +204,48 @@ func (l *Logger) Close() error {
 	close(*old)
 
 	return l.closer.Close()
+}
+
+type itemMarshal struct {
+	Start         string `json:"time"`
+	Values        any    `json:"values"`
+	Error         string `json:"e,omitempty"`
+	Statement     string `json:"query"`
+	Host          string `json:"host"`
+	Duration      string `json:"duration"`
+	Attempt       int    `json:"driver_attempt"`
+	GeminiAttempt int    `json:"gemini_attempt"`
+}
+
+func (i Item) MarshalJSON() ([]byte, error) {
+	var errorString string
+
+	if i.Error.IsLeft() {
+		if i.Error.MustLeft() != nil {
+			errorString = i.Error.MustLeft().Error()
+		}
+	} else {
+		errorString = i.Error.MustRight()
+	}
+
+	var values any
+
+	if i.Values.IsLeft() {
+		values = i.Values.MustLeft()
+	} else {
+		values = utils.UnsafeString(i.Values.MustRight())
+	}
+
+	return json.Marshal(itemMarshal{
+		Start:         i.Start.Time.Format(time.RFC3339Nano),
+		Values:        values,
+		Error:         errorString,
+		Statement:     i.Statement,
+		Host:          i.Host,
+		Duration:      i.Duration.Duration.String(),
+		Attempt:       i.Attempt,
+		GeminiAttempt: i.GeminiAttempt,
+	})
 }
 
 func (t Time) MarshalJSON() ([]byte, error) {

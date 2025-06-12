@@ -13,9 +13,9 @@ BUILD_DATE ?= $(shell git log -1 --format=%cd --date=format:%Y-%m-%dT%H:%M:%SZ 2
 LDFLAGS_VERSION := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(BUILD_DATE)
 
 CQL_FEATURES ?= normal
-CONCURRENCY ?= 25
+CONCURRENCY ?= 4
 DURATION ?= 10m
-WARMUP ?= 0
+WARMUP ?= 30s
 MODE ?= mixed
 DATASET_SIZE ?= large
 GEMINI_SEED := $(shell echo $$((RANDOM % 100 + 1)))
@@ -50,9 +50,8 @@ GEMINI_FLAGS ?= --fail-fast \
 	--token-range-slices=10000 \
 	--partition-key-buffer-reuse-size=100 \
 	--partition-key-distribution=uniform \
-	--oracle-statement-log-file=$(PWD)/results/oracle-statements.log.zst \
-	--test-statement-log-file=$(PWD)/results/test-statements.log.zst \
-	--statement-log-file-compression=zstd
+	--oracle-statement-log-file=$(PWD)/results/oracle-statements.json \
+	--test-statement-log-file=$(PWD)/results/test-statements.json
 
 .PHONY: tidy
 tidy:
@@ -103,9 +102,36 @@ scylla-setup:
 scylla-shutdown:
 	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml down --volumes
 
+.PHONY: stop-scylla-monitoring
+stop-scylla-monitoring:
+	cd scylla-monitoring && ./kill-all.sh
+
+SCYLLA_MONITORING_VERSION ?= 4.10.0
+SCYLLA_TEST_VERSION ?= 2025.1
+SCYLLA_ORACLE_VERSION ?= 2025.1
+
+.PHONY: scylla-monitoring
+scylla-monitoring:
+	@if [ ! -d "scylla-monitoring" ]; then \
+		wget -c "https://github.com/scylladb/scylla-monitoring/archive/refs/tags/$(SCYLLA_MONITORING_VERSION).zip"; \
+		unzip $(SCYLLA_MONITORING_VERSION).zip; \
+		mv scylla-monitoring-$(SCYLLA_MONITORING_VERSION) scylla-monitoring; \
+		rm -f $(SCYLLA_MONITORING_VERSION).zip; \
+		cp docker/monitoring/scylla_servers.yml scylla-monitoring/prometheus/scylla_servers.yml; \
+		mkdir -p scylla-monitoring/grafana/ver_$(SCYLLA_TEST_VERSION); \
+		cp docker/monitoring/Gemini.json scylla-monitoring/grafana/build/ver_$(SCYLLA_TEST_VERSION)/gemini.json; \
+	fi;
+
+	cd scylla-monitoring \
+		&& ./start-all.sh -v 2025.1 -l \
+		--no-loki \
+		--no-alertmanager \
+		--auto-restart \
+		--enable-protobuf
+
 .PHONY: scylla-setup-cluster
-scylla-setup-cluster:
-	@docker compose -f docker/docker-compose-scylla-cluster.yml up -d --wait
+scylla-setup-cluster: scylla-monitoring
+	SCYLLA_ORACLE_VERSION=$(SCYLLA_ORACLE_VERSION) SCYLLA_TEST_VERSION=$(SCYLLA_TEST_VERSION) docker compose -f docker/docker-compose-scylla-cluster.yml up -d --wait
 
 	until docker logs gemini-oracle 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
 	until docker logs gemini-test-1 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
@@ -113,7 +139,7 @@ scylla-setup-cluster:
 	until docker logs gemini-test-3 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
 
 .PHONY: scylla-shutdown-cluster
-scylla-shutdown-cluster:
+scylla-shutdown-cluster: stop-scylla-monitoring
 	@docker compose -f docker/docker-compose-scylla-cluster.yml down --volumes
 
 .PHONY: test

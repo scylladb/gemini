@@ -47,7 +47,7 @@ func TestGenerator(t *testing.T) {
 		},
 	}
 	logger, _ := zap.NewDevelopment()
-	generator := generators.NewGenerator(table, cfg, logger, rand.NewPCG(10, 10))
+	generator := generators.NewGenerator(table, cfg, logger, rand.NewChaCha8([32]byte{}))
 	for i := uint64(0); i < cfg.PartitionsCount; i++ {
 		atomic.StoreUint64(&current, i)
 		v := generator.Get(t.Context())

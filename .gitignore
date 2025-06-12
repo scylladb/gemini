@@ -6,3 +6,5 @@ coverage.txt
 dist/
 version.json
 .qodo
+scylla-monitoring/
+gemini.log
