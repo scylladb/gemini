@@ -17,6 +17,8 @@
 package utils
 
 import (
+	"fmt"
+	"math/rand/v2"
 	"os"
 	"testing"
 	"time"
@@ -46,6 +48,8 @@ func TestContainers(tb testing.TB, timeouts ...time.Duration) (*gocql.Session, *
 		testVersion = "2025.1"
 	}
 
+	ipPart := rand.IntN(155) + 100
+
 	sharedNetwork, err := network.New(
 		tb.Context(),
 		network.WithDriver("bridge"),
@@ -54,8 +58,8 @@ func TestContainers(tb testing.TB, timeouts ...time.Duration) (*gocql.Session, *
 			Driver: "default",
 			Config: []dockernetwork.IPAMConfig{
 				{
-					Subnet:  "192.168.105.0/24",
-					Gateway: "192.168.105.1",
+					Subnet:  fmt.Sprintf("192.168.%d.0/24", ipPart),
+					Gateway: fmt.Sprintf("192.168.%d.1", ipPart),
 				},
 			},
 		}),
