@@ -82,6 +82,10 @@ func (w *workers) Send(ctx context.Context, cb func(context.Context) (Rows, erro
 }
 
 func (w *workers) Release(ch chan mo.Result[Rows]) {
+	if ch == nil {
+		return
+	}
+
 	select {
 	case <-ch:
 	default:

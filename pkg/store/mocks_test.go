@@ -16,7 +16,9 @@ package store
 
 import (
 	"context"
+	"time"
 
+	"github.com/samber/mo"
 	"github.com/stretchr/testify/mock"
 
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -27,7 +29,7 @@ type mockStoreLoader struct {
 	mock.Mock
 }
 
-func (m *mockStoreLoader) mutate(ctx context.Context, stmt *typedef.Stmt) error {
+func (m *mockStoreLoader) mutate(ctx context.Context, stmt *typedef.Stmt, _ mo.Option[time.Time]) error {
 	args := m.Called(ctx, stmt)
 	return args.Error(0)
 }
