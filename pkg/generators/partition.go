@@ -97,6 +97,7 @@ func (p *Partition) push(v typedef.ValueWithToken) struct{ Full bool } {
 
 		return struct{ Full bool }{Full: false}
 	default:
+		clear(v.Value)
 		return struct{ Full bool }{Full: true}
 	}
 }
