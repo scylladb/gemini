@@ -1,10 +1,10 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2025 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,28 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package distributions
+package utils
 
-import (
-	"math/rand/v2"
+import "sync"
+
+var (
+	finalizers   []func()
+	finalizersMu sync.Mutex
 )
 
-type Normal struct {
-	Src   *rand.Rand
-	Mu    float64
-	Sigma float64
+func AddFinalizer(f func()) {
+	finalizersMu.Lock()
+	defer finalizersMu.Unlock()
+
+	finalizers = append(finalizers, sync.OnceFunc(f))
 }
 
-func (n Normal) Uint64() uint64 {
-	return uint64(n.Rand())
-}
+func ExecuteFinalizers() {
+	finalizersMu.Lock()
+	defer finalizersMu.Unlock()
 
-func (n Normal) Rand() float64 {
-	var rnd float64
-	if n.Src == nil {
-		rnd = rand.NormFloat64()
-	} else {
-		rnd = n.Src.NormFloat64()
+	for _, f := range finalizers {
+		f()
 	}
-	return rnd*n.Sigma + n.Mu
 }

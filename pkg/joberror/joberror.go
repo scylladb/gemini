@@ -21,14 +21,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 type JobError struct {
-	Timestamp time.Time `json:"timestamp"`
-	Err       error     `json:"err"`
-	Message   string    `json:"message"`
-	Query     string    `json:"query"`
-	StmtType  string    `json:"stmt-type"`
+	Timestamp     time.Time      `json:"timestamp"`
+	Err           error          `json:"err"`
+	Message       string         `json:"message"`
+	Query         string         `json:"query"`
+	StmtType      string         `json:"stmt-type"`
+	PartitionKeys typedef.Values `json:"partition-keys,omitempty"`
 }
 
 func (j *JobError) Error() string {

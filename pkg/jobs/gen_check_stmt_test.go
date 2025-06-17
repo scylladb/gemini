@@ -31,7 +31,7 @@ func TestGenSinglePartitionQuery(t *testing.T) {
 		genSinglePartitionQueryCases,
 		func(subT *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
 			schema, gen, _ := testutils.GetAllForTestStmt(subT, caseName)
-			stmt := genSinglePartitionQuery(schema, schema.Tables[0], gen)
+			stmt := genSinglePartitionQuery(t.Context(), schema, schema.Tables[0], gen)
 			validateStmt(subT, stmt, nil)
 			expected.CompareOrStore(subT, caseName, convertStmtsToResults(stmt))
 		},
@@ -47,6 +47,7 @@ func TestGenSinglePartitionQueryMv(t *testing.T) {
 			schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
 			prc := schema.Config.GetPartitionRangeConfig()
 			stmt := genSinglePartitionQueryMv(
+				t.Context(),
 				schema,
 				schema.Tables[0],
 				gen,
@@ -69,6 +70,7 @@ func TestGenMultiplePartitionQuery(t *testing.T) {
 			schema, gen, _ := testutils.GetAllForTestStmt(subT, caseName)
 			options := testutils.GetOptionsFromCaseName(caseName)
 			stmt := genMultiplePartitionQuery(
+				t.Context(),
 				schema,
 				schema.Tables[0],
 				gen,
@@ -89,6 +91,7 @@ func TestGenMultiplePartitionQueryMv(t *testing.T) {
 			options := testutils.GetOptionsFromCaseName(caseName)
 			schema, gen, _ := testutils.GetAllForTestStmt(subT, caseName)
 			stmt := genMultiplePartitionQuery(
+				t.Context(),
 				schema,
 				schema.Tables[0],
 				gen,
@@ -110,6 +113,7 @@ func TestGenClusteringRangeQuery(t *testing.T) {
 			options := testutils.GetOptionsFromCaseName(caseName)
 			prc := schema.Config.GetPartitionRangeConfig()
 			stmt := genClusteringRangeQuery(
+				t.Context(),
 				schema,
 				schema.Tables[0],
 				gen,
@@ -133,6 +137,7 @@ func TestGenClusteringRangeQueryMv(t *testing.T) {
 			options := testutils.GetOptionsFromCaseName(caseName)
 			prc := schema.Config.GetPartitionRangeConfig()
 			stmt := genClusteringRangeQueryMv(
+				t.Context(),
 				schema,
 				schema.Tables[0],
 				gen,
@@ -156,6 +161,7 @@ func TestGenMultiplePartitionClusteringRangeQuery(t *testing.T) {
 			options := testutils.GetOptionsFromCaseName(caseName)
 			prc := schema.Config.GetPartitionRangeConfig()
 			stmt := genMultiplePartitionClusteringRangeQuery(
+				t.Context(),
 				schema,
 				schema.Tables[0],
 				gen,
@@ -179,6 +185,7 @@ func TestGenMultiplePartitionClusteringRangeQueryMv(t *testing.T) {
 			schema, gen, rnd := testutils.GetAllForTestStmt(subT, caseName)
 			prc := schema.Config.GetPartitionRangeConfig()
 			stmt := genMultiplePartitionClusteringRangeQueryMv(
+				t.Context(),
 				schema,
 				gen,
 				rnd,
@@ -218,7 +225,7 @@ func BenchmarkGenSinglePartitionQuery(t *testing.B) {
 				schema, gen, _ := testutils.GetAllForTestStmt(subT, caseName)
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
-					_ = genSinglePartitionQuery(schema, schema.Tables[0], gen)
+					_ = genSinglePartitionQuery(t.Context(), schema, schema.Tables[0], gen)
 				}
 			})
 	}
@@ -234,6 +241,7 @@ func BenchmarkGenSinglePartitionQueryMv(t *testing.B) {
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
 					_ = genSinglePartitionQueryMv(
+						t.Context(),
 						schema,
 						schema.Tables[0],
 						gen,
@@ -256,6 +264,7 @@ func BenchmarkGenMultiplePartitionQuery(t *testing.B) {
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
 					_ = genMultiplePartitionQuery(
+						t.Context(),
 						schema,
 						schema.Tables[0],
 						gen,
@@ -277,6 +286,7 @@ func BenchmarkGenMultiplePartitionQueryMv(t *testing.B) {
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
 					_ = genMultiplePartitionQueryMv(
+						t.Context(),
 						schema,
 						schema.Tables[0],
 						gen,
@@ -300,6 +310,7 @@ func BenchmarkGenClusteringRangeQuery(t *testing.B) {
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
 					_ = genClusteringRangeQuery(
+						t.Context(),
 						schema,
 						schema.Tables[0],
 						gen,
@@ -323,6 +334,7 @@ func BenchmarkGenClusteringRangeQueryMv(t *testing.B) {
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
 					_ = genClusteringRangeQueryMv(
+						t.Context(),
 						schema,
 						schema.Tables[0],
 						gen,
@@ -346,6 +358,7 @@ func BenchmarkGenMultiplePartitionClusteringRangeQuery(t *testing.B) {
 				subT.ResetTimer()
 				for x := 0; x < subT.N; x++ {
 					_ = genMultiplePartitionClusteringRangeQuery(
+						t.Context(),
 						schema,
 						schema.Tables[0],
 						gen,
@@ -369,6 +382,7 @@ func BenchmarkGenMultiplePartitionClusteringRangeQueryMv(t *testing.B) {
 				subT.ResetTimer()
 				for subT.Loop() {
 					_ = genMultiplePartitionClusteringRangeQueryMv(
+						t.Context(),
 						schema,
 						gen,
 						rnd,

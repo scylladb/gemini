@@ -62,19 +62,14 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 		sb.WriteString(v.String())
 	case nil:
 	case []byte:
-		sb.Grow(len(v))
 		sb.Write(v)
 	case string:
-		sb.Grow(len(v))
 		sb.WriteString(v)
 	case int:
-		sb.Grow(16)
 		sb.WriteString(strconv.FormatInt(int64(v), 10))
 	case int32:
-		sb.Grow(16)
 		sb.WriteString(strconv.FormatInt(int64(v), 10))
 	case int64:
-		sb.Grow(64)
 		sb.WriteString(strconv.FormatInt(v, 10))
 	default:
 		_, _ = fmt.Fprintf(sb, "%v", v)

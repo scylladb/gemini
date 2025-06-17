@@ -113,7 +113,7 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		StringVarP(&bind, "bind", "b", "0.0.0.0:2112", "Specify the interface and port which to bind prometheus metrics on. Default is ':2112'")
 	cmd.Flags().
-		DurationVarP(&warmup, "warmup", "", 30*time.Second, "Specify the warmup perid as a duration for example 30s or 10h")
+		DurationVarP(&warmup, "warmup", "", 0, "Specify the warmup period as a duration for example 30s or 10h")
 	cmd.Flags().StringVarP(
 		&replicationStrategy, "replication-strategy", "", "simple",
 		"Specify the desired replication strategy as either the coded short hand simple|network to get the default for each type or provide "+

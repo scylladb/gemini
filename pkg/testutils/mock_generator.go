@@ -15,12 +15,16 @@
 package testutils
 
 import (
+	"context"
 	"log"
 	"math/rand/v2"
 
+	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
+
+var _ generators.Interface = (*MockGenerator)(nil)
 
 type MockGenerator struct {
 	table             *typedef.Table
@@ -43,7 +47,7 @@ func NewTestGenerator(
 	}
 }
 
-func (g *MockGenerator) Get() typedef.ValueWithToken {
+func (g *MockGenerator) Get(_ context.Context) typedef.ValueWithToken {
 	values := g.createPartitionKeyValues(g.rand)
 	token, err := g.routingKeyCreator.GetHash(g.table, values)
 	if err != nil {
@@ -58,7 +62,7 @@ func (g *MockGenerator) Get() typedef.ValueWithToken {
 	return typedef.ValueWithToken{Token: token, Value: values}
 }
 
-func (g *MockGenerator) GetOld() typedef.ValueWithToken {
+func (g *MockGenerator) GetOld(_ context.Context) typedef.ValueWithToken {
 	values := g.createPartitionKeyValues(g.rand)
 	token, err := g.routingKeyCreator.GetHash(g.table, values)
 	if err != nil {
@@ -73,9 +77,9 @@ func (g *MockGenerator) GetOld() typedef.ValueWithToken {
 	return typedef.ValueWithToken{Token: token, Value: values}
 }
 
-func (g *MockGenerator) GiveOld(_ typedef.ValueWithToken) {}
+func (g *MockGenerator) GiveOld(_ context.Context, _ typedef.ValueWithToken) {}
 
-func (g *MockGenerator) GiveOlds(_ ...typedef.ValueWithToken) {}
+func (g *MockGenerator) GiveOlds(_ context.Context, _ ...typedef.ValueWithToken) {}
 
 func (g *MockGenerator) ReleaseToken(_ uint64) {
 }

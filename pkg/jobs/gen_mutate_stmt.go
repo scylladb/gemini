@@ -15,6 +15,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
@@ -27,6 +28,7 @@ import (
 )
 
 func GenMutateStmt(
+	ctx context.Context,
 	s *typedef.Schema,
 	t *typedef.Table,
 	g generators.Interface,
@@ -37,7 +39,7 @@ func GenMutateStmt(
 	t.RLock()
 	defer t.RUnlock()
 
-	valuesWithToken := g.Get()
+	valuesWithToken := g.Get(ctx)
 	useLWT := p.UseLWT && r.Uint32()%10 == 0
 
 	if !deletes {

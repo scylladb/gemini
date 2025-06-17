@@ -23,15 +23,15 @@ import (
 	"github.com/pkg/errors"
 	"github.com/samber/mo"
 	"github.com/scylladb/gocqlx/v3/qb"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/metrics"
-	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type cqlStore struct {
-	stmtLogger              stmtlogger.StmtToFile
 	session                 *gocql.Session
 	schema                  *typedef.Schema
 	logger                  *zap.Logger
@@ -47,34 +47,33 @@ func (c *cqlStore) name() string {
 
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
 	var err error
-
 	for i := range c.maxRetriesMutate {
-		err = c.doMutate(ctx, stmt, ts)
+		defer metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
+		mutateErr := c.doMutate(context.WithValue(ctx, utils.GeminiAttempt, i), stmt, ts)
 
-		if err == nil {
-			metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
+		if mutateErr == nil {
 			return nil
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			c.logger.Error(
-				"failed to apply mutation",
-				zap.Int("attempt", i),
-				zap.Error(err),
-			)
-			time.Sleep(c.maxRetriesMutateSleep)
+		if errors.Is(mutateErr, context.Canceled) || errors.Is(mutateErr, context.DeadlineExceeded) {
+			return mutateErr
 		}
+
+		err = multierr.Append(err, mutateErr)
+		c.logger.Error(
+			"failed to apply mutation",
+			zap.Int("attempt", i),
+			zap.Error(err),
+		)
+		time.Sleep(c.maxRetriesMutateSleep)
 	}
 
 	return err
 }
 
-func (c *cqlStore) doMutate(_ context.Context, stmt *typedef.Stmt, timestamp mo.Option[time.Time]) error {
+func (c *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, timestamp mo.Option[time.Time]) error {
 	queryBody, _ := stmt.Query.ToCql()
-	query := c.session.Query(queryBody, stmt.Values...)
+	query := c.session.Query(queryBody, stmt.Values...).WithContext(ctx)
 	defer query.Release()
 
 	if !c.useServerSideTimestamps {
@@ -98,16 +97,13 @@ func (c *cqlStore) doMutate(_ context.Context, stmt *typedef.Stmt, timestamp mo.
 		}
 	}
 
-	if c.stmtLogger != nil {
-		_ = c.stmtLogger.LogStmt(stmt, timestamp)
-	}
 	return nil
 }
 
-func (c *cqlStore) load(_ context.Context, stmt *typedef.Stmt) (Rows, error) {
+func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	cql, _ := stmt.Query.ToCql()
 
-	query := c.session.Query(cql, stmt.Values...)
+	query := c.session.Query(cql, stmt.Values...).WithContext(ctx)
 	iter := query.Iter()
 
 	defer func() {
@@ -125,10 +121,6 @@ func (c *cqlStore) load(_ context.Context, stmt *typedef.Stmt) (Rows, error) {
 		}
 
 		rows[i] = row
-	}
-
-	if c.stmtLogger != nil {
-		_ = c.stmtLogger.LogStmt(stmt, mo.None[time.Time]())
 	}
 
 	return rows, nil

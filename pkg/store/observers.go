@@ -18,46 +18,112 @@ import (
 	"context"
 
 	"github.com/gocql/gocql"
+	"github.com/samber/mo"
+	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/metrics"
+	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type ClusterObserver struct {
-	ClusterName string
+	Logger      *stmtlogger.Logger
+	AppLogger   *zap.Logger
+	ClusterName stmtlogger.Type
 }
 
-func (c ClusterObserver) ObserveBatch(_ context.Context, batch gocql.ObservedBatch) {
+func (c ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedBatch) {
 	instance := batch.Host.ConnectAddressAndPort()
 
-	for _, query := range batch.Statements {
-		stType := typedef.ParseStatementTypeFromQuery(query).String()
+	for i, query := range batch.Statements {
+		stType := typedef.ParseStatementTypeFromQuery(query)
+		op := stType.OpType()
+
+		if c.Logger != nil && op != typedef.OpSelect {
+			geminiAttempt, ok := ctx.Value(utils.GeminiAttempt).(int)
+			if !ok {
+				geminiAttempt = 1
+			}
+
+			queryID, ok := ctx.Value(utils.QueryID).(gocql.UUID)
+			if !ok {
+				queryID = gocql.UUIDFromTime(batch.Start)
+			}
+
+			err := c.Logger.LogStmt(stmtlogger.Item{
+				ID:            queryID,
+				Error:         mo.Left[error, string](batch.Err),
+				Statement:     query,
+				Values:        mo.Left[typedef.Values, string](batch.Values[i]),
+				Start:         stmtlogger.Time{Time: batch.Start},
+				Duration:      stmtlogger.Duration{Duration: batch.End.Sub(batch.Start)},
+				Host:          batch.Host.HostID(),
+				Attempt:       batch.Attempt,
+				GeminiAttempt: geminiAttempt,
+				Type:          c.ClusterName,
+				StatementType: op,
+			})
+			if err != nil {
+				c.AppLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("batch", batch))
+			}
+		}
+
 		metrics.GoCQLBatchQueries.
-			WithLabelValues(c.ClusterName, instance, stType).
+			WithLabelValues(string(c.ClusterName), instance, stType.String()).
 			Inc()
 	}
 
-	metrics.GoCQLBatches.WithLabelValues(c.ClusterName, instance).Inc()
+	metrics.GoCQLBatches.WithLabelValues(string(c.ClusterName), instance).Inc()
 }
 
-func (c ClusterObserver) ObserveQuery(_ context.Context, query gocql.ObservedQuery) {
+func (c ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQuery) {
 	instance := query.Host.ConnectAddressAndPort()
 
 	if query.Err != nil {
 		metrics.GoCQLQueryErrors.
-			WithLabelValues(c.ClusterName, instance, query.Statement, query.Err.Error()).
+			WithLabelValues(string(c.ClusterName), instance, query.Statement, query.Err.Error()).
 			Inc()
-		return
 	}
 
-	stType := typedef.ParseStatementTypeFromQuery(query.Statement).String()
+	stType := typedef.ParseStatementTypeFromQuery(query.Statement)
+	op := stType.OpType()
+
+	if c.Logger != nil && op != typedef.OpSelect {
+		geminiAttempt, ok := ctx.Value(utils.GeminiAttempt).(int)
+		if !ok {
+			geminiAttempt = 1
+		}
+
+		queryID, ok := ctx.Value(utils.QueryID).(gocql.UUID)
+		if !ok {
+			queryID = gocql.UUIDFromTime(query.Start)
+		}
+
+		err := c.Logger.LogStmt(stmtlogger.Item{
+			ID:            queryID,
+			Error:         mo.Left[error, string](query.Err),
+			Statement:     query.Statement,
+			Values:        mo.Left[typedef.Values, string](query.Values),
+			Start:         stmtlogger.Time{Time: query.Start},
+			Duration:      stmtlogger.Duration{Duration: query.End.Sub(query.Start)},
+			Host:          query.Host.HostID(),
+			Attempt:       query.Attempt,
+			GeminiAttempt: geminiAttempt,
+			Type:          c.ClusterName,
+			StatementType: op,
+		})
+		if err != nil {
+			c.AppLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("query", query))
+		}
+	}
 
 	metrics.GoCQLQueries.
-		WithLabelValues(c.ClusterName, instance, stType).
+		WithLabelValues(string(c.ClusterName), instance, stType.String()).
 		Inc()
 
 	metrics.GoCQLQueryTime.
-		WithLabelValues(c.ClusterName, instance, stType).
+		WithLabelValues(string(c.ClusterName), instance, stType.String()).
 		Observe(float64(query.End.Sub(query.Start) / 1e3))
 }
 
@@ -66,18 +132,18 @@ func (c ClusterObserver) ObserveConnect(connect gocql.ObservedConnect) {
 
 	if connect.Err != nil {
 		metrics.GoCQLConnectionsErrors.WithLabelValues(
-			c.ClusterName,
+			string(c.ClusterName),
 			instance,
 			connect.Err.Error(),
 		).Inc()
-		metrics.GoCQLConnections.WithLabelValues(c.ClusterName, instance).Dec()
+		metrics.GoCQLConnections.WithLabelValues(string(c.ClusterName), instance).Dec()
 		return
 	}
 
-	metrics.GoCQLConnections.WithLabelValues(c.ClusterName, instance).
+	metrics.GoCQLConnections.WithLabelValues(string(c.ClusterName), instance).
 		Inc()
 
 	metrics.GoCQLConnectTime.
-		WithLabelValues(c.ClusterName, instance).
+		WithLabelValues(string(c.ClusterName), instance).
 		Observe(float64(connect.End.Sub(connect.Start) / 1e3))
 }

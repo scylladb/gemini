@@ -47,11 +47,11 @@ func TestGenerator(t *testing.T) {
 		},
 	}
 	logger, _ := zap.NewDevelopment()
-	generator := generators.NewGenerator(t.Context(), table, cfg, logger, rand.NewPCG(10, 10))
+	generator := generators.NewGenerator(table, cfg, logger, rand.NewPCG(10, 10))
 	for i := uint64(0); i < cfg.PartitionsCount; i++ {
 		atomic.StoreUint64(&current, i)
-		v := generator.Get()
-		n := generator.Get()
+		v := generator.Get(t.Context())
+		n := generator.Get(t.Context())
 		if v.Token%generator.PartitionCount() != n.Token%generator.PartitionCount() {
 			t.Errorf("expected %v, got %v", v, n)
 		}

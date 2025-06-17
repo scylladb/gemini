@@ -16,27 +16,24 @@ package stmtlogger_test
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gocql/gocql"
 	"github.com/klauspost/compress/zstd"
 	"github.com/samber/mo"
+	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
-
-func Must[T any](data T, err error) T {
-	if err != nil {
-		panic(err)
-	}
-
-	return data
-}
 
 func TestOutputToFile(t *testing.T) {
 	t.Parallel()
@@ -101,17 +98,23 @@ func TestOutputToFile(t *testing.T) {
 			dir := t.TempDir()
 			file := filepath.Join(dir, "test.log")
 
-			logger, err := stmtlogger.NewFileLogger(file, item.Compression)
+			logger, err := stmtlogger.NewLogger(stmtlogger.WithFileLogger(file, item.Compression, zap.NewNop()))
 			if err != nil {
 				t.Fatalf("Failed to initialize the logger %s", err)
 			}
 
-			stmt := typedef.SimpleStmt(
-				"INSERT INTO ks1.table1(pk1) VALUES(1)",
-				typedef.InsertStatementType,
-			)
+			data := stmtlogger.Item{
+				ID:        gocql.TimeUUID(),
+				Statement: "INSERT INTO ks1.table1(pk1) VALUES(?)",
+				Values:    mo.Left[typedef.Values, string]([]any{1}),
+				Error:     mo.Left[error, string](nil),
+				Duration:  stmtlogger.Duration{Duration: 10 * time.Second},
+				Host:      "test_host",
+				Start:     stmtlogger.Time{Time: time.Now()},
+				Type:      stmtlogger.TypeTest,
+			}
 
-			if err = logger.LogStmt(stmt, mo.None[time.Time]()); err != nil {
+			if err = logger.LogStmt(data); err != nil {
 				t.Fatalf("Failed to write log %s", err)
 			}
 
@@ -121,10 +124,11 @@ func TestOutputToFile(t *testing.T) {
 				t.Fatalf("Failed to close logger %s", err)
 			}
 
-			toCompare := item.ReadData(t, Must(os.Open(file)))
+			toCompare := strings.Trim(item.ReadData(t, utils.Must(os.Open(file))), "\n")
 
-			if toCompare != "INSERT INTO ks1.table1(pk1) VALUES(1);\n" {
-				t.Fatalf("Query not expected: %s", toCompare)
+			expected := string(utils.Must(json.Marshal(data)))
+			if toCompare != expected {
+				t.Fatalf("Query not expected\nExpected: %s\nActual: %s\n", toCompare, expected)
 			}
 		})
 	}
@@ -140,20 +144,27 @@ func BenchmarkLogger(b *testing.B) {
 	for _, compression := range runs {
 		b.Run(compression.String(), func(b *testing.B) {
 			b.ReportAllocs()
-			file := filepath.Join(b.TempDir(), "test.log")
-			logger := Must(stmtlogger.NewFileLogger(file, compression))
+			file := filepath.Join(b.TempDir(), "test.json")
+			logger := utils.Must(stmtlogger.NewLogger(stmtlogger.WithFileLogger(file, compression, zap.NewNop())))
 			rows := &atomic.Int64{}
 
-			stmt := typedef.SimpleStmt(
-				"SELECT * FROM ks1.table1 WHERE pk1 = data",
-				typedef.SelectStatementType,
-			)
+			data := stmtlogger.Item{
+				ID:        gocql.TimeUUID(),
+				Statement: "INSERT INTO ks1.table1(pk1) VALUES(?)",
+				Values:    mo.Left[typedef.Values, string]([]any{1}),
+				Error:     mo.Left[error, string](nil),
+				Duration:  stmtlogger.Duration{Duration: 10 * time.Second},
+				Host:      "test_host",
+				Start:     stmtlogger.Time{Time: time.Now()},
+				Type:      stmtlogger.TypeTest,
+			}
+
 			b.SetParallelism(100)
 
 			b.ResetTimer()
 			b.RunParallel(func(p *testing.PB) {
 				for p.Next() {
-					if err := logger.LogStmt(stmt, mo.None[time.Time]()); err != nil {
+					if err := logger.LogStmt(data); err != nil {
 						b.Fatalf("Failed to write to log file: %s", err)
 					}
 

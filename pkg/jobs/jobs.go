@@ -32,7 +32,6 @@ import (
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 const (
@@ -167,35 +166,21 @@ func mutationJob(
 	stopFlag *stop.Flag,
 	failFast, verbose bool,
 ) error {
-	schemaConfig := &schemaCfg
 	logger = logger.Named("mutation_job")
 	logger.Info("starting mutation loop")
-	defer func() {
-		logger.Info("ending mutation loop")
-	}()
-	executionCount := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
+	defer logger.Info("ending mutation loop")
 
-		if executionCount%10000 == 0 {
-			time.Sleep(time.Duration(utils.RandInt2(r, 0, 10)) * time.Millisecond)
-		}
-
+	for !stopFlag.IsHardOrSoft() {
 		var err error
 
 		metrics.ExecutionTime("mutation_job", func() {
-			if r.IntN(1000000)%100000 == 0 {
-				err = ddl(ctx, schema, schemaConfig, table, s, r, p, globalStatus, logger, verbose)
-			} else {
-				err = mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, true, logger)
+			if schemaCfg.CQLFeature == typedef.CQL_FEATURE_ALL && r.IntN(1000000)%100000 == 0 {
+				err = ddl(ctx, schema, schemaCfg, table, s, r, p, globalStatus, logger, verbose)
+				return
 			}
-		})
 
-		executionCount++
+			err = mutation(ctx, schema, table, s, r, p, g, globalStatus, true, logger)
+		})
 
 		if err != nil {
 			return err
@@ -206,6 +191,8 @@ func mutationJob(
 			return nil
 		}
 	}
+
+	return nil
 }
 
 // validationJob continuously applies validations against the database
@@ -226,9 +213,7 @@ func validationJob(
 ) error {
 	logger = logger.Named("validation_job")
 	logger.Info("starting validation loop")
-	defer func() {
-		logger.Info("ending validation loop")
-	}()
+	defer logger.Info("ending validation loop")
 
 	maxAttempts := schemaCfg.AsyncObjectStabilizationAttempts
 	if maxAttempts < 1 {
@@ -239,22 +224,15 @@ func validationJob(
 		delay = 10 * time.Millisecond
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
+	for !stopFlag.IsHardOrSoft() {
 		var (
 			err  error
 			stmt *typedef.Stmt
 		)
 
 		metrics.ExecutionTime("validation_job", func() {
-			stmt = GenCheckStmt(schema, table, g, r, p)
+			stmt = GenCheckStmt(ctx, schema, table, g, r, p)
 			if stmt == nil {
-				logger.Info("Validation. No statement generated from GenCheckStmt.")
 				return
 			}
 
@@ -266,34 +244,34 @@ func validationJob(
 			}
 		})
 
-		switch {
-		case err == nil:
-			globalStatus.ReadOps.Add(1)
-		case errors.Is(err, context.Canceled):
-			return nil
-		default:
-			query, prettyErr := stmt.PrettyCQL()
-			if prettyErr != nil {
-				return PrettyCQLError{
-					PrettyCQL: prettyErr,
-					Stmt:      stmt,
-					Err:       err,
-				}
-			}
+		if stmt == nil {
+			time.Sleep(2 * delay)
+		}
+
+		if err != nil {
+			cql, _ := stmt.Query.ToCql()
 
 			globalStatus.AddReadError(joberror.JobError{
-				Timestamp: time.Now(),
-				StmtType:  stmt.QueryType.String(),
-				Message:   "Validation failed: " + err.Error(),
-				Query:     query,
+				Timestamp:     time.Now(),
+				Err:           err,
+				StmtType:      stmt.QueryType.String(),
+				Message:       "Validation failed",
+				Query:         cql,
+				PartitionKeys: stmt.Values.Copy(),
 			})
+
+			return err
 		}
+
+		globalStatus.ReadOps.Add(1)
 
 		if failFast && globalStatus.HasErrors() {
 			stopFlag.SetSoft(true)
 			return nil
 		}
 	}
+
+	return nil
 }
 
 // warmupJob continuously applies mutations against the database
@@ -301,7 +279,7 @@ func validationJob(
 func warmupJob(
 	ctx context.Context,
 	schema *typedef.Schema,
-	schemaCfg typedef.SchemaConfig,
+	_ typedef.SchemaConfig,
 	table *typedef.Table,
 	s store.Store,
 	r *rand.Rand,
@@ -312,20 +290,11 @@ func warmupJob(
 	stopFlag *stop.Flag,
 	failFast, _ bool,
 ) error {
-	schemaConfig := &schemaCfg
 	logger = logger.Named("warmup")
 	logger.Info("starting warmup loop")
-	defer func() {
-		logger.Info("ending warmup loop")
-	}()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
-		err := mutation(ctx, schema, schemaConfig, table, s, r, p, g, globalStatus, false, logger)
+	defer logger.Info("ending warmup loop")
+	for !stopFlag.IsHardOrSoft() {
+		err := mutation(ctx, schema, table, s, r, p, g, globalStatus, false, logger)
 		if err != nil {
 			return err
 		}
@@ -335,12 +304,14 @@ func warmupJob(
 			return nil
 		}
 	}
+
+	return nil
 }
 
 func ddl(
 	ctx context.Context,
 	schema *typedef.Schema,
-	sc *typedef.SchemaConfig,
+	sc typedef.SchemaConfig,
 	table *typedef.Table,
 	s store.Store,
 	r *rand.Rand,
@@ -349,10 +320,6 @@ func ddl(
 	logger *zap.Logger,
 	verbose bool,
 ) error {
-	if sc.CQLFeature != typedef.CQL_FEATURE_ALL {
-		logger.Debug("ddl statements disabled")
-		return nil
-	}
 	if len(table.MaterializedViews) > 0 {
 		// Scylla does not allow changing the DDL of a table with materialized views.
 		return nil
@@ -373,24 +340,17 @@ func ddl(
 
 	for _, ddlStmt := range ddlStmts.List {
 		if err = s.Mutate(ctx, ddlStmt); err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil
 			}
 
-			prettyCQL, prettyCQLErr := ddlStmt.PrettyCQL()
-			if prettyCQLErr != nil {
-				return PrettyCQLError{
-					PrettyCQL: prettyCQLErr,
-					Stmt:      ddlStmt,
-					Err:       err,
-				}
-			}
+			cql, _ := ddlStmt.Query.ToCql()
 
 			globalStatus.AddWriteError(joberror.JobError{
 				Timestamp: time.Now(),
 				StmtType:  ddlStmts.QueryType.String(),
 				Message:   "DDL failed: " + err.Error(),
-				Query:     prettyCQL,
+				Query:     cql,
 			})
 
 			return err
@@ -408,7 +368,6 @@ func ddl(
 func mutation(
 	ctx context.Context,
 	schema *typedef.Schema,
-	_ *typedef.SchemaConfig,
 	table *typedef.Table,
 	s store.Store,
 	r *rand.Rand,
@@ -418,12 +377,13 @@ func mutation(
 	deletes bool,
 	logger *zap.Logger,
 ) error {
-	mutateStmt, err := GenMutateStmt(schema, table, g, r, p, deletes)
+	mutateStmt, err := GenMutateStmt(ctx, schema, table, g, r, p, deletes)
 	if err != nil {
 		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
 		globalStatus.WriteErrors.Add(1)
 		return err
 	}
+
 	if mutateStmt == nil {
 		logger.Debug("no statement generated", zap.String("job", "mutation"))
 		return err
@@ -434,28 +394,21 @@ func mutation(
 			return nil
 		}
 
-		prettyCQL, prettyCQLErr := mutateStmt.PrettyCQL()
-		if prettyCQLErr != nil {
-			return PrettyCQLError{
-				PrettyCQL: prettyCQLErr,
-				Stmt:      mutateStmt,
-				Err:       err,
-			}
-		}
+		cql, _ := mutateStmt.Query.ToCql()
 
 		globalStatus.AddWriteError(joberror.JobError{
 			Timestamp: time.Now(),
 			StmtType:  mutateStmt.QueryType.String(),
 			Err:       err,
-			Message:   "Mutation failed: ",
-			Query:     prettyCQL,
+			Message:   "Mutation failed",
+			Query:     cql,
 		})
 
 		return err
 	}
 
 	globalStatus.WriteOps.Add(1)
-	g.GiveOlds(mutateStmt.ValuesWithToken...)
+	g.GiveOlds(ctx, mutateStmt.ValuesWithToken...)
 
 	return nil
 }
@@ -484,10 +437,10 @@ func validation(
 			}
 			return nil
 		}
-		if errors.Is(err, context.Canceled) {
-			// When context is canceled it means that test was commanded to stop
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// When context is canceled, it means that the test was commanded to stop
 			// to skip logging part it is returned here
-			return err
+			return nil
 		}
 
 		if errors.Is(err, unWrapErr(lastErr)) {
@@ -504,22 +457,11 @@ func validation(
 			)
 		}
 
-		select {
-		case <-ctx.Done():
-			logger.Info(
-				"Retrying failed validation stoped by done context",
-				zap.Int("attempt", attempt),
-				zap.Int("max_attempts", maxAttempts),
-				zap.Error(err),
-			)
-			return nil
-		default:
-			time.Sleep(delay)
-			attempt++
-		}
+		attempt++
+		time.Sleep(delay)
 	}
 
-	logger.Error("Validation failed. Error: %s", zap.Error(err))
+	logger.Error("Validation failed", zap.Error(err))
 
 	return err
 }

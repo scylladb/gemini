@@ -14,14 +14,21 @@
 package main
 
 import (
-	_ "embed"
 	"log"
 	"runtime/debug"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 func main() {
+	defer func() {
+		log.Println("Executing finalizers...")
+		utils.ExecuteFinalizers()
+		log.Println("Finalizers executed. Exiting...")
+	}()
+
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatalln(err)
+		log.Panicln(err)
 	}
 }
 

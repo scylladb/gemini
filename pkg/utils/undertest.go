@@ -27,6 +27,12 @@ func IsUnderTest() bool {
 	return false
 }
 
+func SingleScylla(tb testing.TB, _ ...time.Duration) *gocql.Session {
+	tb.Helper()
+	tb.Fatal("TestContainers is not supported outside of testing build tag")
+	return nil
+}
+
 func TestContainers(tb testing.TB, _ ...time.Duration) (*gocql.Session, *gocql.Session) {
 	tb.Helper()
 	tb.Fatal("TestContainers is not supported outside of testing build tag")

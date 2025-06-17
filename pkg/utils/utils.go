@@ -20,7 +20,6 @@ import (
 	"math/big"
 	"math/rand/v2"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +28,13 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"gopkg.in/inf.v0"
+)
+
+type QueryContextKey string
+
+const (
+	QueryID       QueryContextKey = "query_id"
+	GeminiAttempt QueryContextKey = "gemini_attempt"
 )
 
 type MemoryFootprint interface {
@@ -125,13 +131,25 @@ func CreateFile(input string, def ...io.Writer) (io.Writer, error) {
 			return nil, errors.Wrapf(err, "failed to open file %s", input)
 		}
 
-		runtime.SetFinalizer(w, func(f *os.File) {
-			IgnoreError(f.Sync)
-			IgnoreError(f.Close)
+		AddFinalizer(func() {
+			IgnoreError(w.Sync)
+			IgnoreError(w.Close)
 		})
 
 		return w, nil
 	}
+}
+
+//nolint:gosec
+/*#nosec G103*/
+func UnsafeBytes(s string) []byte {
+	return unsafe.Slice(unsafe.StringData(s), len(s))
+}
+
+//nolint:gosec
+/*#nosec G103*/
+func UnsafeString(b []byte) string {
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
 func Sizeof(v any) uint64 {
