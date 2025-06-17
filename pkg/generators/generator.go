@@ -160,7 +160,6 @@ func (g *Generator) start(ctx context.Context) {
 }
 
 func (g *Generator) FindAndMarkStalePartitions() {
-	stalePartitions := 0
 	nonStale := make([]bool, g.partitionCount)
 	for range g.partitionCount * 100 {
 		token, _, err := g.createPartitionKeyValues()
@@ -171,6 +170,7 @@ func (g *Generator) FindAndMarkStalePartitions() {
 		nonStale[g.shardOf(token)] = true
 	}
 
+	stalePartitions := 0
 	for idx, v := range nonStale {
 		if !v {
 			stalePartitions++
@@ -192,7 +192,7 @@ const sleepTime = 5 * time.Millisecond
 
 // fillAllPartitions guarantees that each partition was tested to be full
 // at least once since the function started and before it ended.
-// In other words no partition will be starved.
+// In other words, no partition will be starved.
 func (g *Generator) fillAllPartitions(ctx context.Context) {
 	var dropped uint64
 
@@ -212,7 +212,8 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 
 		partition := &g.partitions[g.shardOf(token)]
 		if partition.Stale() || partition.inFlight.Has(token) {
-			return
+			running.Record()
+			continue
 		}
 
 		v := typedef.ValueWithToken{Token: token, Value: values}
@@ -224,10 +225,14 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 			continue
 		}
 
+		dropped++
 		if dropped%g.partitionCount == 0 {
 			fullPartitions := g.partitions.FullValues()
+			metrics.GeneratorFilledPartitions.WithLabelValues(g.table.Name).Set(float64(fullPartitions))
+			metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new").Add(float64(dropped))
+			dropped = 0
+
 			if fullPartitions-g.partitionCount <= 0 {
-				metrics.GeneratorFilledPartitions.WithLabelValues(g.table.Name).Set(float64(fullPartitions))
 				time.Sleep(sleepTime)
 			}
 		}
@@ -263,6 +268,5 @@ func (g *Generator) Close() error {
 	g.cancel()
 	g.wg.Wait()
 
-	_ = g.partitions.Close()
-	return nil
+	return g.partitions.Close()
 }
