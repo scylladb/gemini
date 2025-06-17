@@ -40,9 +40,9 @@ import (
 // approximate different token distributions from a sparse set of tokens.
 
 type Interface interface {
-	Get() typedef.ValueWithToken
-	GetOld() typedef.ValueWithToken
-	GiveOlds(...typedef.ValueWithToken)
+	Get(context.Context) typedef.ValueWithToken
+	GetOld(context.Context) typedef.ValueWithToken
+	GiveOlds(context.Context, ...typedef.ValueWithToken)
 	ReleaseToken(uint64)
 }
 
@@ -74,13 +74,12 @@ type Config struct {
 }
 
 func NewGenerator(
-	base context.Context,
 	table *typedef.Table,
 	config Config,
 	logger *zap.Logger,
 	source rand.Source,
 ) *Generator {
-	ctx, cancel := context.WithCancel(base)
+	ctx, cancel := context.WithCancel(context.Background())
 
 	metrics.GeneratorPartitionSize.WithLabelValues(table.Name).Set(float64(config.PartitionsCount))
 	metrics.GeneratorBufferSize.WithLabelValues(table.Name).Set(float64(config.PkUsedBufferSize))
@@ -104,13 +103,13 @@ func NewGenerator(
 	return g
 }
 
-func (g *Generator) Get() typedef.ValueWithToken {
+func (g *Generator) Get(ctx context.Context) typedef.ValueWithToken {
 	targetPart := g.GetPartitionForToken(uint64(g.idxFunc()))
 	for targetPart.Stale() {
 		targetPart = g.GetPartitionForToken(uint64(g.idxFunc()))
 	}
 
-	v := targetPart.get()
+	v := targetPart.get(ctx)
 	g.valuesMetrics.Dec(v)
 	return v
 }
@@ -121,24 +120,23 @@ func (g *Generator) GetPartitionForToken(token uint64) *Partition {
 
 // GetOld returns a previously used value and token or a new if
 // the old queue is empty.
-func (g *Generator) GetOld() typedef.ValueWithToken {
+func (g *Generator) GetOld(ctx context.Context) typedef.ValueWithToken {
 	targetPart := g.GetPartitionForToken(uint64(g.idxFunc()))
 	for targetPart.Stale() {
 		targetPart = g.GetPartitionForToken(uint64(g.idxFunc()))
 	}
-	v, old := targetPart.getOld()
-	if old {
+	v, exists := targetPart.getOld(ctx)
+	if exists {
 		g.oldValuesMetrics.Dec(v)
-	} else {
-		g.valuesMetrics.Dec(v)
 	}
+
 	return v
 }
 
 // GiveOlds returns the supplied values for later reuse unless
-func (g *Generator) GiveOlds(tokens ...typedef.ValueWithToken) {
+func (g *Generator) GiveOlds(ctx context.Context, tokens ...typedef.ValueWithToken) {
 	for _, token := range tokens {
-		if g.GetPartitionForToken(token.Token).giveOld(token) {
+		if g.GetPartitionForToken(token.Token).giveOld(ctx, token) {
 			g.oldValuesMetrics.Inc(token)
 		} else {
 			metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "old").Inc()
@@ -188,13 +186,17 @@ func (g *Generator) FindAndMarkStalePartitions() {
 	metrics.StalePartitions.WithLabelValues(g.table.Name).Set(float64(stalePartitions))
 }
 
-const sleepTime = 5 * time.Millisecond
+const sleepTime = 1 * time.Second
 
 // fillAllPartitions guarantees that each partition was tested to be full
 // at least once since the function started and before it ended.
 // In other words, no partition will be starved.
 func (g *Generator) fillAllPartitions(ctx context.Context) {
 	var dropped uint64
+
+	// 3% of partitions are allowed to be full at the same time.
+	// This is to avoid starvation of partitions.
+	threePrecent := uint64(float64(g.partitionCount) * 0.97)
 
 	for {
 		select {
@@ -217,7 +219,7 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 		}
 
 		v := typedef.ValueWithToken{Token: token, Value: values}
-		pushed := !partition.push(v).Full
+		pushed := partition.push(v)
 		running.Record()
 
 		if pushed {
@@ -232,7 +234,7 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 			metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new").Add(float64(dropped))
 			dropped = 0
 
-			if fullPartitions-g.partitionCount <= 0 {
+			if fullPartitions-g.partitionCount <= threePrecent {
 				time.Sleep(sleepTime)
 			}
 		}
@@ -240,6 +242,10 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 }
 
 func (g *Generator) shardOf(token uint64) int {
+	if token < g.partitionCount {
+		return int(token)
+	}
+
 	return int(token % g.partitionCount)
 }
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package store
+package workpool
 
 import (
 	"context"
@@ -35,13 +35,13 @@ func TestNewWorkers(t *testing.T) {
 		counts := []int{1, 5, 10}
 
 		for _, count := range counts {
-			w := newWorkers(count)
+			w := New(count)
 			t.Cleanup(func() {
 				_ = w.Close()
 			})
 
 			// Verify channel buffer size
-			assert.Equal(t, count*2, cap(w.ch))
+			assert.Equal(t, count*ChannelSizeMultiplier, cap(w.ch))
 
 			// Verify workers can handle count number of concurrent tasks
 			// by sending count tasks and ensuring they all complete
@@ -51,13 +51,13 @@ func TestNewWorkers(t *testing.T) {
 			for i := range count {
 				go func(i int) {
 					defer wg.Done()
-					ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
-						return Rows{Row{"test": i}}, nil
+					ch := w.Send(t.Context(), func(_ context.Context) (any, error) {
+						return i, nil
 					})
 					res := <-ch
 					assert.True(t, res.IsOk())
-					rows, _ := res.Get()
-					assert.Equal(t, i, rows[0]["test"])
+					data, _ := res.Get()
+					assert.Equal(t, i, data.(int))
 					w.Release(ch)
 				}(i)
 			}
@@ -81,7 +81,7 @@ func TestNewWorkers(t *testing.T) {
 	t.Run("zero workers", func(t *testing.T) {
 		t.Parallel()
 		assert.Panics(t, func() {
-			_ = newWorkers(0)
+			_ = New(0)
 		})
 	})
 }
@@ -92,14 +92,14 @@ func TestWorkersSend(t *testing.T) {
 	t.Run("successful task execution", func(t *testing.T) {
 		t.Parallel()
 
-		w := newWorkers(1)
+		w := New(1)
 		t.Cleanup(func() {
 			_ = w.Close()
 		})
 
-		expectedRows := Rows{Row{"id": 1, "name": "test"}}
+		expectedRows := 1
 
-		ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
+		ch := w.Send(t.Context(), func(_ context.Context) (any, error) {
 			return expectedRows, nil
 		})
 
@@ -116,14 +116,14 @@ func TestWorkersSend(t *testing.T) {
 
 	t.Run("task execution with error", func(t *testing.T) {
 		t.Parallel()
-		w := newWorkers(1)
+		w := New(1)
 		t.Cleanup(func() {
 			_ = w.Close()
 		})
 
 		expectedErr := errors.New("test error")
 
-		ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
+		ch := w.Send(t.Context(), func(_ context.Context) (any, error) {
 			return nil, expectedErr
 		})
 
@@ -140,7 +140,7 @@ func TestWorkersSend(t *testing.T) {
 
 	t.Run("context cancellation", func(t *testing.T) {
 		t.Parallel()
-		w := newWorkers(1)
+		w := New(1)
 		t.Cleanup(func() {
 			_ = w.Close()
 		})
@@ -148,7 +148,7 @@ func TestWorkersSend(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // Cancel immediately
 
-		ch := w.Send(ctx, func(ctx context.Context) (Rows, error) {
+		ch := w.Send(ctx, func(ctx context.Context) (any, error) {
 			// This should see the canceled context
 			return nil, ctx.Err()
 		})
@@ -168,7 +168,7 @@ func TestWorkersSend(t *testing.T) {
 		t.Parallel()
 		workerCount := 5
 		taskCount := 20
-		w := newWorkers(workerCount)
+		w := New(workerCount)
 		t.Cleanup(func() {
 			_ = w.Close()
 		})
@@ -185,17 +185,17 @@ func TestWorkersSend(t *testing.T) {
 			go func(taskID int) {
 				defer wg.Done()
 
-				ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
+				ch := w.Send(t.Context(), func(_ context.Context) (any, error) {
 					// Sleep to simulate work
 					time.Sleep(50 * time.Millisecond)
-					return Rows{Row{"taskID": taskID}}, nil
+					return taskID, nil
 				})
 
 				// Get the result
 				res := <-ch
 				assert.True(t, res.IsOk())
 				rows, _ := res.Get()
-				assert.Equal(t, taskID, rows[0]["taskID"])
+				assert.Equal(t, taskID, rows.(int))
 
 				completed.Add(1)
 				w.Release(ch)
@@ -220,14 +220,14 @@ func TestWorkersSend(t *testing.T) {
 
 	t.Run("channel reuse from pool", func(t *testing.T) {
 		t.Parallel()
-		w := newWorkers(1)
+		w := New(1)
 		t.Cleanup(func() {
 			_ = w.Close()
 		})
 
 		// Get a channel from the pool
-		ch1 := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
-			return Rows{Row{"test": 1}}, nil
+		ch1 := w.Send(t.Context(), func(_ context.Context) (any, error) {
+			return 1, nil
 		})
 
 		// Receive the result
@@ -237,8 +237,8 @@ func TestWorkersSend(t *testing.T) {
 		w.Release(ch1)
 
 		// Get another channel - should be the same one from the pool
-		ch2 := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
-			return Rows{Row{"test": 2}}, nil
+		ch2 := w.Send(t.Context(), func(_ context.Context) (any, error) {
+			return 2, nil
 		})
 
 		// Implementation detail: since sync.Pool is used, we can't guarantee
@@ -246,7 +246,7 @@ func TestWorkersSend(t *testing.T) {
 		res := <-ch2
 		assert.True(t, res.IsOk())
 		rows, _ := res.Get()
-		assert.Equal(t, 2, rows[0]["test"])
+		assert.Equal(t, 2, rows.(int))
 
 		w.Release(ch2)
 	})
@@ -256,15 +256,15 @@ func TestWorkersRelease(t *testing.T) {
 	t.Parallel()
 	t.Run("release channel to pool", func(t *testing.T) {
 		t.Parallel()
-		w := newWorkers(1)
+		w := New(1)
 		t.Cleanup(func() {
 			_ = w.Close()
 		})
 
 		// Create and use multiple channels in a sequence
 		for i := range 100 {
-			ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
-				return Rows{Row{"value": i}}, nil
+			ch := w.Send(t.Context(), func(_ context.Context) (any, error) {
+				return i, nil
 			})
 
 			// Get result
@@ -280,7 +280,7 @@ func TestWorkersRelease(t *testing.T) {
 
 	t.Run("attempt to release nil channel", func(t *testing.T) {
 		t.Parallel()
-		w := newWorkers(1)
+		w := New(1)
 		t.Cleanup(func() {
 			_ = w.Close()
 		})
@@ -299,7 +299,7 @@ func TestWorkersRelease(t *testing.T) {
 func TestWorkersClose(t *testing.T) {
 	t.Parallel()
 	t.Run("close workers", func(t *testing.T) {
-		w := newWorkers(2)
+		w := New(2)
 
 		// Close should not panic
 		err := w.Close()
@@ -312,7 +312,7 @@ func TestWorkersClose(t *testing.T) {
 
 	t.Run("send after close", func(t *testing.T) {
 		t.Parallel()
-		w := newWorkers(2)
+		w := New(2)
 		err := w.Close()
 		assert.NoError(t, err)
 
@@ -322,7 +322,7 @@ func TestWorkersClose(t *testing.T) {
 			assert.NotNil(t, r, "Expected panic when sending to closed channel")
 		}()
 
-		_ = w.Send(t.Context(), func(_ context.Context) (Rows, error) {
+		_ = w.Send(t.Context(), func(_ context.Context) (any, error) {
 			return nil, nil
 		})
 		t.Fatal("Should not reach this point")
@@ -330,7 +330,7 @@ func TestWorkersClose(t *testing.T) {
 
 	t.Run("double close", func(t *testing.T) {
 		t.Parallel()
-		w := newWorkers(2)
+		w := New(2)
 
 		// First, close should succeed
 		err := w.Close()
@@ -352,7 +352,7 @@ func TestWorkersEdgeCases(t *testing.T) {
 	t.Run("nil callback", func(t *testing.T) {
 		t.Parallel()
 
-		w := newWorkers(1)
+		w := New(1)
 		t.Cleanup(func() {
 			_ = w.Close()
 		})
@@ -365,18 +365,18 @@ func TestWorkersEdgeCases(t *testing.T) {
 	t.Run("nil context", func(t *testing.T) {
 		t.Parallel()
 
-		w := newWorkers(1)
+		w := New(1)
 		t.Cleanup(func() {
 			_ = w.Close()
 		})
 
 		// Using nil context is technically valid but not recommended
-		ch := w.Send(nil, func(ctx context.Context) (Rows, error) { // nolint:staticcheck
+		ch := w.Send(nil, func(ctx context.Context) (any, error) { // nolint:staticcheck
 			// Context should be nil
 			if ctx != nil {
 				return nil, errors.New("expected nil context")
 			}
-			return Rows{Row{"test": true}}, nil
+			return true, nil
 		})
 
 		res := <-ch
@@ -384,7 +384,7 @@ func TestWorkersEdgeCases(t *testing.T) {
 
 		rows, err := res.Get()
 		assert.NoError(t, err)
-		assert.Equal(t, true, rows[0]["test"])
+		assert.Equal(t, true, rows.(bool))
 
 		w.Release(ch)
 	})
@@ -393,7 +393,7 @@ func TestWorkersEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		// Test with many tasks (more than buffer size)
-		w := newWorkers(1)
+		w := New(1)
 		t.Cleanup(func() {
 			_ = w.Close()
 		})
@@ -407,19 +407,18 @@ func TestWorkersEdgeCases(t *testing.T) {
 		// Launch tasks in a separate goroutine to avoid blocking
 		go func() {
 			for i := range taskCount {
-				finalI := i // Capture the value for the closure
-				ch := w.Send(t.Context(), func(_ context.Context) (Rows, error) {
-					return Rows{Row{"id": finalI}}, nil
+				ch := w.Send(t.Context(), func(_ context.Context) (any, error) {
+					return i, nil
 				})
 
-				go func(ch chan mo.Result[Rows], _ int) {
+				go func(ch chan mo.Result[any], _ int) {
 					res := <-ch
 					if res.IsOk() {
 						rows, _ := res.Get()
-						resultCh <- rows[0]["id"].(int)
+						resultCh <- rows.(int)
 					}
 					w.Release(ch)
-				}(ch, finalI)
+				}(ch, i)
 			}
 		}()
 
@@ -449,15 +448,15 @@ func TestWorkersEdgeCases(t *testing.T) {
 
 func BenchmarkWorkers(b *testing.B) {
 	b.Run("single worker", func(b *testing.B) {
-		w := newWorkers(1)
+		w := New(1)
 		b.Cleanup(func() {
 			_ = w.Close()
 		})
 
 		b.ResetTimer()
 		for b.Loop() {
-			ch := w.Send(b.Context(), func(_ context.Context) (Rows, error) {
-				return Rows{Row{"id": 1}}, nil
+			ch := w.Send(b.Context(), func(_ context.Context) (any, error) {
+				return 1, nil
 			})
 			<-ch
 			w.Release(ch)
@@ -465,15 +464,15 @@ func BenchmarkWorkers(b *testing.B) {
 	})
 
 	b.Run("multiple workers", func(b *testing.B) {
-		w := newWorkers(10)
+		w := New(10)
 		b.Cleanup(func() {
 			_ = w.Close()
 		})
 
 		b.ResetTimer()
 		for b.Loop() {
-			ch := w.Send(b.Context(), func(_ context.Context) (Rows, error) {
-				return Rows{Row{"id": 1}}, nil
+			ch := w.Send(b.Context(), func(_ context.Context) (any, error) {
+				return 1, nil
 			})
 			<-ch
 			w.Release(ch)
@@ -481,7 +480,7 @@ func BenchmarkWorkers(b *testing.B) {
 	})
 
 	b.Run("concurrent load", func(b *testing.B) {
-		w := newWorkers(4)
+		w := New(256)
 		b.Cleanup(func() {
 			_ = w.Close()
 		})
@@ -489,8 +488,8 @@ func BenchmarkWorkers(b *testing.B) {
 		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				ch := w.Send(b.Context(), func(_ context.Context) (Rows, error) {
-					return Rows{Row{"id": 1}}, nil
+				ch := w.Send(b.Context(), func(_ context.Context) (any, error) {
+					return 1, nil
 				})
 				<-ch
 				w.Release(ch)

@@ -33,7 +33,7 @@ func TestGenInsertStmt(t *testing.T) {
 			schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
 			prc := schema.Config.GetPartitionRangeConfig()
 			useLWT := testutils.GetOptionsFromCaseName(caseName).GetBool("lwt")
-			stmt, err := genInsertStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc, useLWT)
+			stmt, err := genInsertStmt(schema, schema.Tables[0], gen.Get(t.Context()), rnd, &prc, useLWT)
 			validateStmt(t, stmt, err)
 			expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
 		},
@@ -48,7 +48,7 @@ func TestGenInsertJSONStmt(t *testing.T) {
 		func(t *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
 			schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
 			prc := schema.Config.GetPartitionRangeConfig()
-			stmt, err := genInsertJSONStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc)
+			stmt, err := genInsertJSONStmt(schema, schema.Tables[0], gen.Get(t.Context()), rnd, &prc)
 			validateStmt(t, stmt, err)
 			expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
 		},
@@ -63,7 +63,7 @@ func TestGenUpdateStmt(t *testing.T) {
 		func(t *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
 			schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
 			prc := schema.Config.GetPartitionRangeConfig()
-			stmt, err := genUpdateStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc)
+			stmt, err := genUpdateStmt(schema, schema.Tables[0], gen.Get(t.Context()), rnd, &prc)
 			validateStmt(t, stmt, err)
 			expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
 		},
@@ -78,7 +78,7 @@ func TestGenDeleteRows(t *testing.T) {
 		func(t *testing.T, caseName string, expected *testutils.ExpectedStore[results]) {
 			schema, gen, rnd := testutils.GetAllForTestStmt(t, caseName)
 			prc := schema.Config.GetPartitionRangeConfig()
-			stmt, err := genDeleteRows(schema, schema.Tables[0], gen.Get(), rnd, &prc)
+			stmt, err := genDeleteRows(schema, schema.Tables[0], gen.Get(t.Context()), rnd, &prc)
 			validateStmt(t, stmt, err)
 			expected.CompareOrStore(t, caseName, convertStmtsToResults(stmt))
 		},
@@ -95,7 +95,7 @@ func BenchmarkGenInsertStmt(t *testing.B) {
 				useLWT := testutils.GetOptionsFromCaseName(caseName).GetBool("lwt")
 				t.ResetTimer()
 				for x := 0; x < t.N; x++ {
-					_, _ = genInsertStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc, useLWT)
+					_, _ = genInsertStmt(schema, schema.Tables[0], gen.Get(t.Context()), rnd, &prc, useLWT)
 				}
 			})
 	}
@@ -110,7 +110,7 @@ func BenchmarkGenInsertJSONStmt(t *testing.B) {
 				prc := schema.Config.GetPartitionRangeConfig()
 				t.ResetTimer()
 				for x := 0; x < t.N; x++ {
-					_, _ = genInsertJSONStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc)
+					_, _ = genInsertJSONStmt(schema, schema.Tables[0], gen.Get(t.Context()), rnd, &prc)
 				}
 			})
 	}
@@ -125,7 +125,7 @@ func BenchmarkGenUpdateStmt(t *testing.B) {
 				prc := schema.Config.GetPartitionRangeConfig()
 				t.ResetTimer()
 				for x := 0; x < t.N; x++ {
-					_, _ = genUpdateStmt(schema, schema.Tables[0], gen.Get(), rnd, &prc)
+					_, _ = genUpdateStmt(schema, schema.Tables[0], gen.Get(t.Context()), rnd, &prc)
 				}
 			})
 	}
@@ -140,7 +140,7 @@ func BenchmarkGenDeleteRows(t *testing.B) {
 				prc := schema.Config.GetPartitionRangeConfig()
 				t.ResetTimer()
 				for x := 0; x < t.N; x++ {
-					_, _ = genDeleteRows(schema, schema.Tables[0], gen.Get(), rnd, &prc)
+					_, _ = genDeleteRows(schema, schema.Tables[0], gen.Get(t.Context()), rnd, &prc)
 				}
 			})
 	}

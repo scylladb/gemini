@@ -93,7 +93,7 @@ func (m CacheBuilderFnMap) ToList() [typedef.CacheArrayLen]CacheBuilderFn {
 	}
 	for idx := range out {
 		if out[idx] == nil {
-			panic(fmt.Sprintf("no builder for %s", typedef.StatementCacheType(idx).ToString()))
+			panic(fmt.Sprintf("no builder for %s", typedef.StatementCacheType(idx)))
 		}
 	}
 	return out

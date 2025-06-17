@@ -32,7 +32,7 @@ func TestToCQL(t *testing.T) {
 		},
 		"network": {
 			rs:   replication.NewNetworkTopologyStrategy(),
-			want: "{'class':'NetworkTopologyStrategy','datacenter1':1}",
+			want: "{'class':'NetworkTopologyStrategy','datacenter1':1,'replication_factor':1}",
 		},
 	}
 	for name := range tests {

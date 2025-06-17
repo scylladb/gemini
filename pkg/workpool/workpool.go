@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package store
+package workpool
 
 import (
 	"context"
@@ -21,42 +21,47 @@ import (
 	"github.com/samber/mo"
 )
 
+const ChannelSizeMultiplier = 4
+
 type (
 	item struct {
 		ctx context.Context
-		ch  chan<- mo.Result[Rows]
-		cb  func(context.Context) (Rows, error)
+		ch  chan<- mo.Result[any]
+		cb  func(context.Context) (any, error)
 	}
-
-	workers struct {
+	Pool struct {
 		chPool sync.Pool
 		ch     chan item
 	}
 )
 
-func newWorkers(count int) *workers {
+func New(count int) *Pool {
 	if count < 1 {
 		panic("count must be greater than 0")
 	}
 
-	w := &workers{
+	w := &Pool{
 		chPool: sync.Pool{
 			New: func() any {
-				return make(chan mo.Result[Rows], 1)
+				return make(chan mo.Result[any], 1)
 			},
 		},
-		ch: make(chan item, count*2),
+		ch: make(chan item, count*ChannelSizeMultiplier),
 	}
 
 	for range count {
 		go func() {
 			for it := range w.ch {
-				rows, err := it.cb(it.ctx)
+				i, err := it.cb(it.ctx)
+
+				if it.ch == nil {
+					continue
+				}
 
 				if err != nil {
-					it.ch <- mo.Err[Rows](err)
+					it.ch <- mo.Err[any](err)
 				} else {
-					it.ch <- mo.Ok[Rows](rows)
+					it.ch <- mo.Ok[any](i)
 				}
 			}
 		}()
@@ -65,12 +70,26 @@ func newWorkers(count int) *workers {
 	return w
 }
 
-func (w *workers) Send(ctx context.Context, cb func(context.Context) (Rows, error)) chan mo.Result[Rows] {
+func (w *Pool) SendWithoutResult(ctx context.Context, cb func(context.Context)) {
 	if cb == nil {
 		panic("cb must not be nil")
 	}
 
-	ch := w.chPool.Get().(chan mo.Result[Rows])
+	w.ch <- item{
+		cb: func(ctx context.Context) (any, error) {
+			cb(ctx)
+			return nil, nil
+		},
+		ctx: ctx,
+	}
+}
+
+func (w *Pool) Send(ctx context.Context, cb func(context.Context) (any, error)) chan mo.Result[any] {
+	if cb == nil {
+		panic("cb must not be nil")
+	}
+
+	ch := w.chPool.Get().(chan mo.Result[any])
 
 	w.ch <- item{
 		ch:  ch,
@@ -81,7 +100,7 @@ func (w *workers) Send(ctx context.Context, cb func(context.Context) (Rows, erro
 	return ch
 }
 
-func (w *workers) Release(ch chan mo.Result[Rows]) {
+func (w *Pool) Release(ch chan mo.Result[any]) {
 	if ch == nil {
 		return
 	}
@@ -94,7 +113,7 @@ func (w *workers) Release(ch chan mo.Result[Rows]) {
 	w.chPool.Put(ch)
 }
 
-func (w *workers) Close() error {
+func (w *Pool) Close() error {
 	close(w.ch)
 	return nil
 }

@@ -19,11 +19,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"strings"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
+	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/tableopts"
@@ -38,6 +40,28 @@ const (
 	MaxTupleParts   = 5
 	MaxUDTParts     = 5
 )
+
+func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Schema, error) {
+	byteValue, err := os.ReadFile(confFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var shm typedef.Schema
+
+	err = json.Unmarshal(byteValue, &shm)
+	if err != nil {
+		return nil, err
+	}
+
+	schemaBuilder := builders.SchemaBuilder{}
+	schemaBuilder.Keyspace(shm.Keyspace).Config(schemaConfig)
+	for t, tbl := range shm.Tables {
+		shm.Tables[t].LinkIndexAndColumns()
+		schemaBuilder.Table(tbl)
+	}
+	return schemaBuilder.Build(), nil
+}
 
 func getSchema(seed uint64, logger *zap.Logger) (*typedef.Schema, typedef.SchemaConfig, error) {
 	var (
@@ -99,8 +123,32 @@ func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 	}
 }
 
+func getReplicationStrategy(
+	rs string,
+	fallback replication.Replication,
+	logger *zap.Logger,
+) replication.Replication {
+	switch rs {
+	case "network":
+		return replication.NewNetworkTopologyStrategy()
+	case "simple":
+		return replication.NewSimpleStrategy()
+	default:
+		strategy := replication.Replication{}
+		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), &strategy); err != nil {
+			logger.Error(
+				"unable to parse replication strategy",
+				zap.String("strategy", rs),
+				zap.Error(err),
+			)
+			return fallback
+		}
+		return strategy
+	}
+}
+
 func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
-	rs := getReplicationStrategy(replicationStrategy, replication.NewSimpleStrategy(), logger)
+	rs := getReplicationStrategy(replicationStrategy, replication.NewNetworkTopologyStrategy(), logger)
 	ors := getReplicationStrategy(oracleReplicationStrategy, rs, logger)
 	return typedef.SchemaConfig{
 		ReplicationStrategy:              rs,

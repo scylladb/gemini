@@ -23,14 +23,20 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          check-latest: true
       - name: Set up gotestfmt
         uses: GoTestTools/gotestfmt-action@v2
         with:
           repo: gotestfmt
           version: v2.2.0
-      - name: Unit Tests
-        run: make test
       - name: Build
         run: make build
+      - name: Unit Tests
+        run: |
+          ulimit -n 65536
+          sudo sysctl -w fs.aio-max-nr=30000000
+          sudo sysctl -w fs.file-max=30000000
+
+          make test
       - uses: golangci/golangci-lint-action@v8
         name: Linting

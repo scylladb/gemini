@@ -29,7 +29,7 @@ func GenDDLStmt(
 	t *typedef.Table,
 	r *rand.Rand,
 	_ *typedef.PartitionRangeConfig,
-	sc *typedef.SchemaConfig,
+	sc typedef.SchemaConfig,
 ) (*typedef.Stmts, error) {
 	maxVariant := 1
 	validCols := t.ValidColumnsForDelete()
@@ -44,7 +44,7 @@ func GenDDLStmt(
 	default:
 		column := typedef.ColumnDef{
 			Name: generators.GenColumnName("col", len(t.Columns)+1),
-			Type: generators.GenColumnType(len(t.Columns)+1, sc, r),
+			Type: generators.GenColumnType(len(t.Columns)+1, &sc, r),
 		}
 		return genAddColumnStmt(t, s.Keyspace.Name, &column)
 	}

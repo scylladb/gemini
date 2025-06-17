@@ -1,0 +1,25 @@
+
+[TestBuildQueriesCreation - 1]
+CREATE KEYSPACE IF NOT EXISTS logs WITH replication={'class':'NetworkTopologyStrategy','datacenter1':1,'replication_factor':1} AND durable_writes = true;
+createKeyspace
+---
+
+[TestBuildQueriesCreation - 2]
+CREATE TABLE IF NOT EXISTS logs.statements(col1 int,col2 ascii,ddl boolean, ts timestamp, ty text, statement text, values text, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((col1,col2, ty), ddl, ts)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';
+createTable
+---
+
+[TestBuildQueriesCreation - 3]
+INSERT INTO logs.statements (col1,col2,ddl,ts,ty,statement,values,host,attempt,gemini_attempt,error,dur) VALUES(?,?,?,?,?,?,?,?,?,?,?,?);
+insert
+---
+
+[TestBuildQueriesCreation - 4]
+SELECT ts,ty,statement,values,host,attempt,gemini_attempt,error,dur FROM logs.statements WHERE col1=? AND col2=? AND ty=? AND ddl=false ORDER BY ts;
+select
+---
+
+[TestBuildQueriesCreation - 5]
+SELECT ts,ty,statement,values,host,attempt,gemini_attempt,error,dur FROM logs.statements WHERE col1=? AND col2=? AND ty=? AND ddl=true ORDER BY ts;
+selectDDL
+---

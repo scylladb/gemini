@@ -15,7 +15,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -31,27 +30,23 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/gocql/gocql"
-	"github.com/gocql/gocql/hostpolicy"
-	"github.com/hailocab/go-hostpool"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/jobs"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/realrandom"
-	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
+	"github.com/scylladb/gemini/pkg/workpool"
 )
 
 var (
@@ -78,40 +73,16 @@ func init() {
 	setupFlags(rootCmd)
 }
 
-func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Schema, error) {
-	byteValue, err := os.ReadFile(confFile)
-	if err != nil {
-		return nil, err
-	}
-
-	var shm typedef.Schema
-
-	err = json.Unmarshal(byteValue, &shm)
-	if err != nil {
-		return nil, err
-	}
-
-	schemaBuilder := builders.SchemaBuilder{}
-	schemaBuilder.Keyspace(shm.Keyspace).Config(schemaConfig)
-	for t, tbl := range shm.Tables {
-		shm.Tables[t].LinkIndexAndColumns()
-		schemaBuilder.Table(tbl)
-	}
-	return schemaBuilder.Build(), nil
-}
-
 //nolint:gocyclo
 func run(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := signal.NotifyContext(
 		cmd.Context(),
 		syscall.SIGTERM,
-		syscall.SIGABRT,
 		syscall.SIGINT,
 	)
 	defer cancel()
 
 	logger := createLogger(level)
-
 	metrics.StartMetricsServer(ctx, bind, logger.Named("metrics"))
 
 	val, err := cmd.PersistentFlags().GetBool("version-json")
@@ -156,20 +127,13 @@ func run(cmd *cobra.Command, _ []string) error {
 		}()
 	}
 
-	outFile, err := createFile(outFileArg, os.Stdout)
+	outFile, err := utils.CreateFile(outFileArg, os.Stdout)
 	if err != nil {
 		return err
 	}
-	defer utils.IgnoreError(outFile.Sync)
 
-	testCluster, oracleCluster, err := createClusters(
-		consistency,
-		testClusterHostSelectionPolicy,
-		oracleClusterHostSelectionPolicy,
-	)
-	if err != nil {
-		return err
-	}
+	pool := workpool.New(1024)
+	defer pool.Close()
 
 	randSrc, distFunc, err := distributions.New(
 		partitionKeyDistribution,
@@ -181,7 +145,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return errors.Wrapf(
 			err,
-			"Faile to create distribution function: %s",
+			"Failed to create distribution function: %s",
 			partitionKeyDistribution,
 		)
 	}
@@ -191,21 +155,73 @@ func run(cmd *cobra.Command, _ []string) error {
 		return errors.Wrap(err, "failed to get schema")
 	}
 
+	gens := generators.New(
+		schema,
+		distFunc,
+		intSeed,
+		partitionCount,
+		pkBufferReuseSize,
+		logger,
+		randSrc,
+	)
+	utils.AddFinalizer(func() {
+		logger.Info("closing generators")
+
+		if err = gens.Close(); err != nil {
+			logger.Error("failed to close generators", zap.Error(err))
+		} else {
+			logger.Info("generators closed")
+		}
+	})
+
 	storeConfig := store.Config{
-		MaxRetriesMutate:            maxRetriesMutate,
-		MaxRetriesMutateSleep:       maxRetriesMutateSleep,
-		UseServerSideTimestamps:     useServerSideTimestamps,
-		TestLogStatementsFile:       testStatementLogFile,
-		OracleLogStatementsFile:     oracleStatementLogFile,
-		LogStatementFileCompression: stmtlogger.MustParseCompression(statementLogFileCompression),
+		MaxRetriesMutate:        maxRetriesMutate,
+		MaxRetriesMutateSleep:   maxRetriesMutateSleep,
+		UseServerSideTimestamps: useServerSideTimestamps,
+		OracleStatementFile:     oracleStatementLogFile,
+		TestStatementFile:       testStatementLogFile,
+		Compression:             stmtlogger.MustParseCompression(statementLogFileCompression),
+		TestClusterConfig: store.ScyllaClusterConfig{
+			Name:                    stmtlogger.TypeTest,
+			Hosts:                   testClusterHost,
+			HostSelectionPolicy:     testClusterHostSelectionPolicy,
+			Consistency:             consistency,
+			RequestTimeout:          requestTimeout,
+			ConnectTimeout:          connectTimeout,
+			UseServerSideTimestamps: useServerSideTimestamps,
+			Username:                testClusterUsername,
+			Password:                testClusterPassword,
+		},
 	}
 
-	st, err := store.New(ctx, schema, testCluster, oracleCluster, storeConfig, logger)
+	if len(oracleClusterHost) > 0 {
+		storeConfig.OracleClusterConfig = &store.ScyllaClusterConfig{
+			Name:                    stmtlogger.TypeOracle,
+			Hosts:                   oracleClusterHost,
+			HostSelectionPolicy:     oracleClusterHostSelectionPolicy,
+			Consistency:             consistency,
+			RequestTimeout:          requestTimeout,
+			ConnectTimeout:          connectTimeout,
+			UseServerSideTimestamps: useServerSideTimestamps,
+			Username:                oracleClusterUsername,
+			Password:                oracleClusterPassword,
+		}
+	}
+
+	st, err := store.New(gens.Gens[schema.Tables[0].Name].Get(ctx).Value, pool, schema, storeConfig, logger.Named("store"), globalStatus.Errors)
 	if err != nil {
 		return err
 	}
 
-	defer utils.IgnoreError(st.Close)
+	utils.AddFinalizer(func() {
+		logger.Info("closing store")
+
+		if err = st.Close(); err != nil {
+			logger.Error("failed to close store", zap.Error(err))
+		} else {
+			logger.Info("store closed")
+		}
+	})
 
 	if dropSchema && mode != jobs.ReadMode {
 		for _, stmt := range generators.GetDropKeyspace(schema) {
@@ -231,26 +247,15 @@ func run(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	ctx, done := context.WithTimeout(ctx, duration+warmup+time.Second*2)
-	defer done()
 	stopFlag := stop.NewFlag("main")
 	warmupStopFlag := stop.NewFlag("warmup")
 	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
 
-	gens := generators.New(
-		ctx,
-		schema,
-		distFunc,
-		intSeed,
-		partitionCount,
-		pkBufferReuseSize,
-		logger,
-		randSrc,
-	)
-	defer utils.IgnoreError(gens.Close)
-
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
+		time.AfterFunc(warmup, func() {
+			warmupStopFlag.SetSoft(true)
+		})
 		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, warmupStopFlag, failFast, verbose, randSrc); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
 			stopFlag.SetHard(true)
@@ -259,31 +264,22 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	if !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(mode, duration, concurrency)
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, stopFlag.CreateChild("workload"), failFast, verbose, randSrc); err != nil {
+		time.AfterFunc(duration, func() {
+			stopFlag.SetHard(true)
+		})
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, stopFlag, failFast, verbose, randSrc); err != nil {
 			logger.Debug("error detected", zap.Error(err))
+			stopFlag.SetHard(true)
 		}
 	}
 
-	logger.Info("test finished")
 	globalStatus.PrintResult(outFile, schema, version, versionInfo)
 	if globalStatus.HasErrors() {
 		return errors.New("gemini encountered errors, exiting with non zero status")
 	}
 
+	logger.Info("test finished")
 	return nil
-}
-
-func createFile(fname string, def *os.File) (*os.File, error) {
-	if fname == "" {
-		return def, nil
-	}
-
-	f, err := os.Create(fname)
-	if err != nil {
-		return nil, errors.Wrapf(err, "Unable to open output file %s", fname)
-	}
-
-	return f, nil
 }
 
 const (
@@ -296,126 +292,19 @@ func createLogger(level string) *zap.Logger {
 	if err := lvl.UnmarshalText([]byte(level)); err != nil {
 		lvl.SetLevel(zap.InfoLevel)
 	}
-	encoderCfg := zap.NewDevelopmentEncoderConfig()
+
+	file, err := utils.CreateFile("gemini.log", os.Stdout)
+	if err != nil {
+		log.Fatalf("failed to create log file: %v", err)
+	}
+
+	encoderCfg := zap.NewProductionEncoderConfig()
 	logger := zap.New(zapcore.NewCore(
 		zapcore.NewJSONEncoder(encoderCfg),
-		zapcore.Lock(os.Stdout),
+		zapcore.NewMultiWriteSyncer(zapcore.Lock(file.(zapcore.WriteSyncer)), zapcore.Lock(os.Stdout)),
 		lvl,
-	))
+	), zap.WithCaller(true), zap.AddCallerSkip(1))
 	return logger
-}
-
-func createClusters(
-	consistency, testSelectionPolicy, oracleSelectionPolicy string,
-) (*gocql.ClusterConfig, *gocql.ClusterConfig, error) {
-	for i := range len(testClusterHost) {
-		testClusterHost[i] = strings.TrimSpace(testClusterHost[i])
-	}
-
-	c, err := gocql.ParseConsistencyWrapper(consistency)
-	if err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to parse consistency %s", consistency)
-	}
-
-	testHostSelectionPolicy, err := getHostSelectionPolicy(testSelectionPolicy, testClusterHost)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	oracleHostSelectionPolicy, err := getHostSelectionPolicy(
-		oracleSelectionPolicy,
-		oracleClusterHost,
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	for i := range len(oracleClusterHost) {
-		oracleClusterHost[i] = strings.TrimSpace(oracleClusterHost[i])
-	}
-
-	testCluster := gocql.NewCluster(testClusterHost...)
-	testCluster.Timeout = requestTimeout
-	testCluster.ConnectTimeout = connectTimeout
-	testCluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
-		Min:        time.Second,
-		Max:        60 * time.Second,
-		NumRetries: 5,
-	}
-
-	testClusterObserver := store.ClusterObserver{
-		ClusterName: "test_cluster",
-	}
-
-	testCluster.Consistency = c
-	testCluster.DefaultTimestamp = !useServerSideTimestamps
-	testCluster.PoolConfig.HostSelectionPolicy = testHostSelectionPolicy
-	testCluster.ConnectObserver = testClusterObserver
-	testCluster.QueryObserver = testClusterObserver
-	testCluster.BatchObserver = testClusterObserver
-
-	if testClusterUsername != "" && testClusterPassword != "" {
-		testCluster.Authenticator = gocql.PasswordAuthenticator{
-			Username: testClusterUsername,
-			Password: testClusterPassword,
-		}
-	}
-
-	if len(oracleClusterHost) == 0 {
-		return testCluster, nil, nil
-	}
-
-	oracleClusterObserver := store.ClusterObserver{
-		ClusterName: "oracle_cluster",
-	}
-
-	oracleCluster := gocql.NewCluster(oracleClusterHost...)
-	oracleCluster.Timeout = requestTimeout
-	oracleCluster.ConnectTimeout = connectTimeout
-	oracleCluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
-		Min:        time.Second,
-		Max:        60 * time.Second,
-		NumRetries: 5,
-	}
-	oracleCluster.ConnectObserver = oracleClusterObserver
-	oracleCluster.QueryObserver = oracleClusterObserver
-	oracleCluster.BatchObserver = oracleClusterObserver
-	oracleCluster.Consistency = c
-	oracleCluster.DefaultTimestamp = !useServerSideTimestamps
-	oracleCluster.PoolConfig.HostSelectionPolicy = oracleHostSelectionPolicy
-
-	if oracleClusterUsername == "" || oracleClusterPassword == "" {
-		oracleCluster.Authenticator = gocql.PasswordAuthenticator{
-			Username: oracleClusterUsername,
-			Password: oracleClusterPassword,
-		}
-	}
-
-	return testCluster, oracleCluster, nil
-}
-
-func getReplicationStrategy(
-	rs string,
-	fallback replication.Replication,
-	logger *zap.Logger,
-) replication.Replication {
-	switch rs {
-	case "network":
-		return replication.NewNetworkTopologyStrategy()
-	case "simple":
-		return replication.NewSimpleStrategy()
-	default:
-		strategy := replication.Replication{}
-		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), &strategy); err != nil {
-			logger.Error(
-				"unable to parse replication strategy",
-				zap.String("strategy", rs),
-				zap.Error(err),
-			)
-			return fallback
-		}
-		return strategy
-	}
 }
 
 func getCQLFeature(feature string) typedef.CQLFeature {
@@ -426,19 +315,6 @@ func getCQLFeature(feature string) typedef.CQLFeature {
 		return typedef.CQL_FEATURE_NORMAL
 	default:
 		return typedef.CQL_FEATURE_BASIC
-	}
-}
-
-func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionPolicy, error) {
-	switch policy {
-	case "round-robin":
-		return gocql.RoundRobinHostPolicy(), nil
-	case "host-pool":
-		return hostpolicy.HostPool(hostpool.New(hosts)), nil
-	case "token-aware":
-		return gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy()), nil
-	default:
-		return nil, fmt.Errorf("unknown host selection policy \"%s\"", policy)
 	}
 }
 

@@ -140,12 +140,14 @@ func (s *Flag) IsHardOrSoft() bool {
 	return s.val.Load() != SignalNoop
 }
 
+func (s *Flag) Load() int32 {
+	return int32(s.val.Load())
+}
+
 func (s *Flag) AddHandler(handler func(signal uint32)) {
 	s.stopHandlers.Append(handler)
-	val := s.val.Load()
-	switch val {
-	case SignalSoftStop, SignalHardStop:
-		handler(val)
+	if s.IsHardOrSoft() {
+		handler(s.val.Load())
 	}
 }
 
@@ -193,7 +195,7 @@ func StartOsSignalsTransmitter(logger *zap.Logger, flags ...*Flag) {
 	go func() {
 		sig := <-graceful
 		switch sig {
-		case syscall.SIGINT:
+		case syscall.SIGINT, syscall.SIGTERM:
 			for i := range flags {
 				flags[i].SetSoft(true)
 			}

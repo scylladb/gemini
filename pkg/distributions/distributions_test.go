@@ -15,8 +15,14 @@
 package distributions
 
 import (
+	"math"
 	"testing"
 	"time"
+)
+
+const (
+	stdDistMean = math.MaxUint64 / 2
+	oneStdDev   = 0.341 * math.MaxUint64
 )
 
 func TestNew(t *testing.T) {
@@ -36,7 +42,7 @@ func TestNew(t *testing.T) {
 			size:          10000,
 			mu:            stdDistMean,
 			sigma:         oneStdDev,
-			maxSameValues: 70,
+			maxSameValues: 60,
 		},
 		{
 			dist:          "uniform",

@@ -15,6 +15,7 @@
 package jobs
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -27,6 +28,7 @@ import (
 )
 
 func genCheckStmtForMv(
+	ctx context.Context,
 	mv *typedef.MaterializedView,
 	s *typedef.Schema,
 	table *typedef.Table,
@@ -36,7 +38,7 @@ func genCheckStmtForMv(
 ) *typedef.Stmt {
 	switch val := rnd.IntN(4); val {
 	case 0:
-		return genSinglePartitionQueryMv(s, table, g, rnd, p, mv)
+		return genSinglePartitionQueryMv(ctx, s, table, g, rnd, p, mv)
 	case 1:
 		lenPartitionKeys := mv.PartitionKeys.Len()
 		numQueryPKs := utils.RandInt2(rnd, 1, lenPartitionKeys)
@@ -45,12 +47,12 @@ func genCheckStmtForMv(
 			numQueryPKs = 1
 		}
 
-		return genMultiplePartitionQueryMv(s, table, g, rnd, p, mv, numQueryPKs)
+		return genMultiplePartitionQueryMv(ctx, s, table, g, rnd, p, mv, numQueryPKs)
 	case 2:
 		lenClusteringKeys := mv.ClusteringKeys.Len()
 		maxClusteringRels := utils.RandInt2(rnd, 0, lenClusteringKeys)
 
-		return genClusteringRangeQueryMv(s, table, g, rnd, p, mv, maxClusteringRels)
+		return genClusteringRangeQueryMv(ctx, s, table, g, rnd, p, mv, maxClusteringRels)
 	case 3:
 		lenPartitionKeys := mv.PartitionKeys.Len()
 		numQueryPKs := utils.RandInt2(rnd, 1, lenPartitionKeys)
@@ -64,7 +66,7 @@ func genCheckStmtForMv(
 		table.RLock()
 		defer table.RUnlock()
 
-		return genMultiplePartitionClusteringRangeQueryMv(s, g, rnd, p, mv, numQueryPKs, maxClusteringRels)
+		return genMultiplePartitionClusteringRangeQueryMv(ctx, s, g, rnd, p, mv, numQueryPKs, maxClusteringRels)
 	default:
 		panic(fmt.Sprintf("unexpected case in genCheckStmtForMv, random value: %d", val))
 	}
@@ -79,6 +81,7 @@ const (
 )
 
 func GenCheckStmt(
+	ctx context.Context,
 	s *typedef.Schema,
 	table *typedef.Table,
 	g generators.Interface,
@@ -91,7 +94,7 @@ func GenCheckStmt(
 	}
 
 	if mvNum > -1 {
-		return genCheckStmtForMv(&table.MaterializedViews[mvNum], s, table, g, rnd, p)
+		return genCheckStmtForMv(ctx, &table.MaterializedViews[mvNum], s, table, g, rnd, p)
 	}
 
 	var n int
@@ -104,17 +107,17 @@ func GenCheckStmt(
 
 	switch n {
 	case SinglePartitionQuery:
-		return genSinglePartitionQuery(s, table, g)
+		return genSinglePartitionQuery(ctx, s, table, g)
 	case MultiplePartitionQuery:
 		numQueryPKs := utils.RandInt2(rnd, 1, table.PartitionKeys.Len())
 		multiplier := int(math.Pow(float64(numQueryPKs), float64(table.PartitionKeys.Len())))
 		if multiplier > 100 {
 			numQueryPKs = 1
 		}
-		return genMultiplePartitionQuery(s, table, g, numQueryPKs)
+		return genMultiplePartitionQuery(ctx, s, table, g, numQueryPKs)
 	case ClusteringRangeQuery:
 		maxClusteringRels := utils.RandInt2(rnd, 1, table.ClusteringKeys.Len())
-		return genClusteringRangeQuery(s, table, g, rnd, p, maxClusteringRels)
+		return genClusteringRangeQuery(ctx, s, table, g, rnd, p, maxClusteringRels)
 	case MultiplePartitionClusteringRangeQuery:
 		numQueryPKs := utils.RandInt2(rnd, 1, table.PartitionKeys.Len())
 		multiplier := int(math.Pow(float64(numQueryPKs), float64(table.PartitionKeys.Len())))
@@ -123,6 +126,7 @@ func GenCheckStmt(
 		}
 		maxClusteringRels := utils.RandInt2(rnd, 0, table.ClusteringKeys.Len())
 		return genMultiplePartitionClusteringRangeQuery(
+			ctx,
 			s,
 			table,
 			g,
@@ -138,19 +142,24 @@ func GenCheckStmt(
 			return genSingleIndexQuery(s, table, g, rnd, p, idxCount)
 		}
 
-		return genSinglePartitionQuery(s, table, g)
+		return genSinglePartitionQuery(ctx, s, table, g)
 	}
 	return nil
 }
 
 func genSinglePartitionQuery(
+	ctx context.Context,
 	s *typedef.Schema,
 	t *typedef.Table,
 	g generators.Interface,
 ) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
-	valuesWithToken := g.GetOld()
+	valuesWithToken := g.GetOld(ctx)
+	if valuesWithToken.Token == 0 {
+		return nil
+	}
+
 	values := valuesWithToken.Value.Copy()
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 	typs := make([]typedef.Type, 0, len(t.PartitionKeys))
@@ -171,6 +180,7 @@ func genSinglePartitionQuery(
 }
 
 func genSinglePartitionQueryMv(
+	ctx context.Context,
 	s *typedef.Schema,
 	t *typedef.Table,
 	g generators.Interface,
@@ -180,7 +190,7 @@ func genSinglePartitionQueryMv(
 ) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
-	valuesWithToken := g.GetOld()
+	valuesWithToken := g.GetOld(ctx)
 	builder := qb.Select(s.Keyspace.Name + "." + mv.Name)
 	typs := make([]typedef.Type, 0, 10)
 	for _, pk := range mv.PartitionKeys {
@@ -206,6 +216,7 @@ func genSinglePartitionQueryMv(
 }
 
 func genMultiplePartitionQuery(
+	ctx context.Context,
 	s *typedef.Schema,
 	t *typedef.Table,
 	g generators.Interface,
@@ -220,9 +231,9 @@ func genMultiplePartitionQuery(
 	tokens := make([]typedef.ValueWithToken, 0, numQueryPKs)
 
 	for j := 0; j < numQueryPKs; j++ {
-		vs := g.GetOld()
+		vs := g.GetOld(ctx)
 		if vs.Token == 0 {
-			g.GiveOlds(tokens...)
+			g.GiveOlds(ctx, tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
@@ -246,6 +257,7 @@ func genMultiplePartitionQuery(
 }
 
 func genMultiplePartitionQueryMv(
+	ctx context.Context,
 	s *typedef.Schema,
 	t *typedef.Table,
 	g generators.Interface,
@@ -264,9 +276,9 @@ func genMultiplePartitionQueryMv(
 	tokens := make([]typedef.ValueWithToken, 0, numQueryPKs)
 
 	for j := 0; j < numQueryPKs; j++ {
-		vs := g.GetOld()
+		vs := g.GetOld(ctx)
 		if vs.Token == 0 {
-			g.GiveOlds(tokens...)
+			g.GiveOlds(ctx, tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
@@ -297,6 +309,7 @@ func genMultiplePartitionQueryMv(
 }
 
 func genClusteringRangeQuery(
+	ctx context.Context,
 	s *typedef.Schema,
 	t *typedef.Table,
 	g generators.Interface,
@@ -306,9 +319,12 @@ func genClusteringRangeQuery(
 ) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
-	vs := g.GetOld()
+	valuesWithToken := g.GetOld(ctx)
+	if valuesWithToken.Token == 0 {
+		return nil
+	}
 	allTypes := make([]typedef.Type, 0, len(t.PartitionKeys)+maxClusteringRels+1)
-	values := vs.Value.Copy()
+	values := valuesWithToken.Value.Copy()
 	builder := qb.Select(s.Keyspace.Name + "." + t.Name)
 
 	for _, pk := range t.PartitionKeys {
@@ -336,11 +352,12 @@ func genClusteringRangeQuery(
 			Types:     allTypes,
 		},
 		Values:          values,
-		ValuesWithToken: []typedef.ValueWithToken{vs},
+		ValuesWithToken: []typedef.ValueWithToken{valuesWithToken},
 	}
 }
 
 func genClusteringRangeQueryMv(
+	ctx context.Context,
 	s *typedef.Schema,
 	t *typedef.Table,
 	g generators.Interface,
@@ -351,8 +368,11 @@ func genClusteringRangeQueryMv(
 ) *typedef.Stmt {
 	t.RLock()
 	defer t.RUnlock()
-	vs := g.GetOld()
-	values := vs.Value.Copy()
+	valuesWithToken := g.GetOld(ctx)
+	if valuesWithToken.Token == 0 {
+		return nil
+	}
+	values := valuesWithToken.Value.Copy()
 	if mv.HaveNonPrimaryKey() {
 		mvValues := append([]any{}, mv.NonPrimaryKey.Type.GenValue(r, p)...)
 		values = append(mvValues, values...)
@@ -386,11 +406,12 @@ func genClusteringRangeQueryMv(
 			Types:     allTypes,
 		},
 		Values:          values,
-		ValuesWithToken: []typedef.ValueWithToken{vs},
+		ValuesWithToken: []typedef.ValueWithToken{valuesWithToken},
 	}
 }
 
 func genMultiplePartitionClusteringRangeQuery(
+	ctx context.Context,
 	s *typedef.Schema,
 	t *typedef.Table,
 	g generators.Interface,
@@ -414,9 +435,9 @@ func genMultiplePartitionClusteringRangeQuery(
 	}
 
 	for j := 0; j < numQueryPKs; j++ {
-		vs := g.GetOld()
+		vs := g.GetOld(ctx)
 		if vs.Token == 0 {
-			g.GiveOlds(tokens...)
+			g.GiveOlds(ctx, tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
@@ -452,6 +473,7 @@ func genMultiplePartitionClusteringRangeQuery(
 }
 
 func genMultiplePartitionClusteringRangeQueryMv(
+	ctx context.Context,
 	s *typedef.Schema,
 	g generators.Interface,
 	r *rand.Rand,
@@ -491,9 +513,9 @@ func genMultiplePartitionClusteringRangeQueryMv(
 	}
 
 	for j := 0; j < numQueryPKs; j++ {
-		vs := g.GetOld()
+		vs := g.GetOld(ctx)
 		if vs.Token == 0 {
-			g.GiveOlds(tokens...)
+			g.GiveOlds(ctx, tokens...)
 			return nil
 		}
 		tokens = append(tokens, vs)
