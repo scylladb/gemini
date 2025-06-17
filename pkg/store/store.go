@@ -33,8 +33,8 @@ import (
 	"go.uber.org/zap"
 	"gopkg.in/inf.v0"
 
-	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 var comparers = []cmp.Option{
@@ -73,12 +73,9 @@ type Store interface {
 }
 
 type Config struct {
-	TestLogStatementsFile       string
-	OracleLogStatementsFile     string
-	LogStatementFileCompression stmtlogger.Compression
-	MaxRetriesMutate            int
-	MaxRetriesMutateSleep       time.Duration
-	UseServerSideTimestamps     bool
+	MaxRetriesMutate        int
+	MaxRetriesMutateSleep   time.Duration
+	UseServerSideTimestamps bool
 }
 
 func New(
@@ -97,8 +94,6 @@ func New(
 		schema,
 		oracleCluster,
 		cfg,
-		cfg.OracleLogStatementsFile,
-		cfg.LogStatementFileCompression,
 		logger,
 	)
 	if err != nil {
@@ -110,8 +105,6 @@ func New(
 		schema,
 		testCluster,
 		cfg,
-		cfg.TestLogStatementsFile,
-		cfg.LogStatementFileCompression,
 		logger,
 	)
 	if err != nil {
@@ -134,7 +127,12 @@ type delegatingStore struct {
 }
 
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error {
-	if err := ds.testStore.mutate(ctx, testBuilder, mo.None[time.Time]()); err != nil {
+	doCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	doCtx = context.WithValue(doCtx, utils.QueryID, gocql.UUIDFromTime(time.Now()))
+
+	if err := ds.testStore.mutate(doCtx, testBuilder, mo.None[time.Time]()); err != nil {
 		return pkgerrors.Wrapf(
 			err,
 			"unable to apply mutations to the %s store",
@@ -143,7 +141,7 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder
 	}
 
 	if ds.oracleStore != nil {
-		if err := ds.oracleStore.mutate(ctx, oracleBuilder, mo.None[time.Time]()); err != nil {
+		if err := ds.oracleStore.mutate(doCtx, oracleBuilder, mo.None[time.Time]()); err != nil {
 			return pkgerrors.Wrapf(
 				err,
 				"unable to apply mutations to the %s store",
@@ -158,13 +156,18 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder
 func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error {
 	var oracleCh chan mo.Result[Rows]
 
+	doCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	doCtx = context.WithValue(doCtx, utils.QueryID, gocql.UUIDFromTime(time.Now()))
+
 	if ds.oracleStore != nil {
-		oracleCh = ds.workers.Send(ctx, func(ctx context.Context) (Rows, error) {
+		oracleCh = ds.workers.Send(doCtx, func(ctx context.Context) (Rows, error) {
 			return nil, ds.oracleStore.mutate(ctx, stmt, mo.None[time.Time]())
 		})
 	}
 
-	testCh := ds.workers.Send(ctx, func(ctx context.Context) (Rows, error) {
+	testCh := ds.workers.Send(doCtx, func(ctx context.Context) (Rows, error) {
 		return nil, ds.testStore.mutate(ctx, stmt, mo.None[time.Time]())
 	})
 
@@ -206,6 +209,7 @@ func (ds delegatingStore) Check(
 	doCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	doCtx = context.WithValue(doCtx, utils.QueryID, gocql.UUIDFromTime(time.Now()))
 	var oracleCh chan mo.Result[Rows]
 
 	if ds.oracleStore != nil {
@@ -304,8 +308,6 @@ func getStore(
 	schema *typedef.Schema,
 	clusterConfig *gocql.ClusterConfig,
 	cfg Config,
-	stmtLogFile string,
-	compression stmtlogger.Compression,
 	logger *zap.Logger,
 ) (storeLoader, error) {
 	if clusterConfig == nil {
@@ -317,11 +319,6 @@ func getStore(
 		return nil, pkgerrors.Wrapf(err, "failed to connect to %s cluster", name)
 	}
 
-	stmtLogger, err := stmtlogger.NewFileLogger(stmtLogFile, compression)
-	if err != nil {
-		return nil, err
-	}
-
 	return &cqlStore{
 		session:                 session,
 		schema:                  schema,
@@ -330,6 +327,5 @@ func getStore(
 		maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
 		useServerSideTimestamps: cfg.UseServerSideTimestamps,
 		logger:                  logger.Named(name),
-		stmtLogger:              stmtLogger,
 	}, nil
 }

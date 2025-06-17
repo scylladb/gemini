@@ -23,6 +23,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          check-latest: true
       - name: Set up gotestfmt
         uses: GoTestTools/gotestfmt-action@v2
         with:

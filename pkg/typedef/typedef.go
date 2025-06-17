@@ -268,11 +268,13 @@ func (st StatementType) OpType() OpType {
 		return OpUpdate
 	case DeleteStatementType:
 		return OpDelete
-	case AlterColumnStatementType, DropColumnStatementType, AddColumnStatementType:
+	case AlterColumnStatementType, DropColumnStatementType, AddColumnStatementType,
+		DropTableStatementType, CreateTableStatementType, DropTypeStatementType,
+		CreateTypeStatementType, DropIndexStatementType, CreateIndexStatementType:
 		return OpSchemaAlter
 	case DropKeyspaceStatementType:
 		return OpSchemaDrop
-	case CreateKeyspaceStatementType, CreateSchemaStatementType:
+	case CreateKeyspaceStatementType:
 		return OpSchemaCreate
 	default:
 		panic(fmt.Sprintf("unknown statement type %d", st))
@@ -312,7 +314,7 @@ func (v Values) CopyFrom(src Values) Values {
 
 type StatementCacheType uint8
 
-func (t StatementCacheType) ToString() string {
+func (t StatementCacheType) String() string {
 	switch t {
 	case CacheInsert:
 		return "CacheInsert"

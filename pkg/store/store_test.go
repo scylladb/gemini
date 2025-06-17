@@ -49,14 +49,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 			logger:      logger,
 		}
 
-		ctx := t.Context()
-
 		testStore.
-			On("mutate", ctx, stmt).
+			On("mutate", mock.Anything, stmt).
 			Once().
 			Return(nil)
 		oracleStore.
-			On("mutate", ctx, stmt).
+			On("mutate", mock.Anything, stmt).
 			Once().
 			Return(nil)
 
@@ -81,7 +79,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 
 		ctx := t.Context()
 
-		testStore.On("mutate", ctx, stmt).Return(nil)
+		testStore.On("mutate", mock.Anything, stmt).Return(nil)
 
 		err := ds.Mutate(ctx, stmt)
 
@@ -107,11 +105,11 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		ctx := t.Context()
 
 		testStore.
-			On("mutate", ctx, stmt).
+			On("mutate", mock.Anything, stmt).
 			Once().
 			Return(testErr)
 		oracleStore.
-			On("mutate", ctx, stmt).
+			On("mutate", mock.Anything, stmt).
 			Once().
 			Return(nil)
 
@@ -140,11 +138,11 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		ctx := t.Context()
 
 		testStore.
-			On("mutate", ctx, stmt).
+			On("mutate", mock.Anything, stmt).
 			Once().
 			Return(nil)
 		oracleStore.
-			On("mutate", ctx, stmt).
+			On("mutate", mock.Anything, stmt).
 			Once().
 			Return(oracleErr)
 
@@ -173,10 +171,10 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleErr := errors.New("oracle store mutation failed")
 		ctx := t.Context()
 
-		testStore.On("mutate", ctx, stmt).
+		testStore.On("mutate", mock.Anything, stmt).
 			Once().
 			Return(testErr)
-		oracleStore.On("mutate", ctx, stmt).
+		oracleStore.On("mutate", mock.Anything, stmt).
 			Once().
 			Return(oracleErr)
 
@@ -205,10 +203,10 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		cancelCtx, cancel := context.WithCancel(ctx)
 		cancel()
 
-		testStore.On("mutate", cancelCtx, stmt).
+		testStore.On("mutate", mock.Anything, stmt).
 			Once().
 			Return(context.Canceled)
-		oracleStore.On("mutate", cancelCtx, stmt).
+		oracleStore.On("mutate", mock.Anything, stmt).
 			Once().
 			Return(context.Canceled)
 
@@ -237,7 +235,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		ctx := t.Context()
 
 		testStore.
-			On("mutate", ctx, stmt).
+			On("mutate", mock.Anything, stmt).
 			Return(nil).
 			Run(func(_ mock.Arguments) {
 				mu.Lock()
@@ -247,7 +245,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 			})
 
 		oracleStore.
-			On("mutate", ctx, stmt).
+			On("mutate", mock.Anything, stmt).
 			Return(nil).
 			Run(func(_ mock.Arguments) {
 				mu.Lock()
@@ -297,11 +295,11 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 
 		// Setup expectations
 		testStore.
-			On("mutate", ctx, stmt).
+			On("mutate", mock.Anything, stmt).
 			Once().
 			Return(testErr)
 		oracleStore.
-			On("mutate", ctx, stmt).
+			On("mutate", mock.Anything, stmt).
 			Once().
 			Return(nil).
 			Run(func(_ mock.Arguments) {
@@ -332,11 +330,11 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		ctx := t.Context()
 
 		testStore.
-			On("mutate", ctx, (*typedef.Stmt)(nil)).
+			On("mutate", mock.Anything, (*typedef.Stmt)(nil)).
 			Once().
 			Return(nil)
 		oracleStore.
-			On("mutate", ctx, (*typedef.Stmt)(nil)).
+			On("mutate", mock.Anything, (*typedef.Stmt)(nil)).
 			Once().
 			Return(nil)
 

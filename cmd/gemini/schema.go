@@ -19,11 +19,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"os"
 	"strings"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
+	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/tableopts"
@@ -38,6 +40,28 @@ const (
 	MaxTupleParts   = 5
 	MaxUDTParts     = 5
 )
+
+func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Schema, error) {
+	byteValue, err := os.ReadFile(confFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var shm typedef.Schema
+
+	err = json.Unmarshal(byteValue, &shm)
+	if err != nil {
+		return nil, err
+	}
+
+	schemaBuilder := builders.SchemaBuilder{}
+	schemaBuilder.Keyspace(shm.Keyspace).Config(schemaConfig)
+	for t, tbl := range shm.Tables {
+		shm.Tables[t].LinkIndexAndColumns()
+		schemaBuilder.Table(tbl)
+	}
+	return schemaBuilder.Build(), nil
+}
 
 func getSchema(seed uint64, logger *zap.Logger) (*typedef.Schema, typedef.SchemaConfig, error) {
 	var (
