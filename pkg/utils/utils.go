@@ -31,6 +31,13 @@ import (
 	"gopkg.in/inf.v0"
 )
 
+type QueryContextKey string
+
+const (
+	QueryID       QueryContextKey = "query_id"
+	GeminiAttempt QueryContextKey = "gemini_attempt"
+)
+
 type MemoryFootprint interface {
 	MemoryFootprint() uint64
 }

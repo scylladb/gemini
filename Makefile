@@ -118,7 +118,7 @@ scylla-shutdown-cluster:
 
 .PHONY: test
 test:
-	@go test -covermode=atomic -tags testing -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | go tool gotestfmt -showteststatus
+	@go test -covermode=atomic -gcflags="-N -l" -tags testing -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | go tool gotestfmt -showteststatus
 
 .PHONY: pprof-profile
 pprof-profile:

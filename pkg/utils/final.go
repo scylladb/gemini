@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2025 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,33 +11,28 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package main
 
-import (
-	_ "embed"
-	"log"
-	"runtime/debug"
+package utils
 
-	"github.com/scylladb/gemini/pkg/utils"
+import "sync"
+
+var (
+	finalizers   []func()
+	finalizersMu sync.Mutex
 )
 
-func main() {
-	defer utils.ExecuteFinalizers()
+func AddFinalizer(f func()) {
+	finalizersMu.Lock()
+	defer finalizersMu.Unlock()
 
-	if err := rootCmd.Execute(); err != nil {
-		log.Panicln(err)
-	}
+	finalizers = append(finalizers, sync.OnceFunc(f))
 }
 
-func init() {
-	if info, ok := debug.ReadBuildInfo(); ok {
-		for _, setting := range info.Settings {
-			switch setting.Key {
-			case "vcs.revision":
-				commit = setting.Value
-			case "vcs.time":
-				date = setting.Value
-			}
-		}
+func ExecuteFinalizers() {
+	finalizersMu.Lock()
+	defer finalizersMu.Unlock()
+
+	for _, f := range finalizers {
+		f()
 	}
 }

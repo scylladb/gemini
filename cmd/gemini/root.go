@@ -39,7 +39,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/jobs"
@@ -76,28 +75,6 @@ func init() {
 	rootCmd.Version = versionInfo.String()
 
 	setupFlags(rootCmd)
-}
-
-func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Schema, error) {
-	byteValue, err := os.ReadFile(confFile)
-	if err != nil {
-		return nil, err
-	}
-
-	var shm typedef.Schema
-
-	err = json.Unmarshal(byteValue, &shm)
-	if err != nil {
-		return nil, err
-	}
-
-	schemaBuilder := builders.SchemaBuilder{}
-	schemaBuilder.Keyspace(shm.Keyspace).Config(schemaConfig)
-	for t, tbl := range shm.Tables {
-		shm.Tables[t].LinkIndexAndColumns()
-		schemaBuilder.Table(tbl)
-	}
-	return schemaBuilder.Build(), nil
 }
 
 //nolint:gocyclo
@@ -166,6 +143,10 @@ func run(cmd *cobra.Command, _ []string) error {
 		consistency,
 		testClusterHostSelectionPolicy,
 		oracleClusterHostSelectionPolicy,
+		logger,
+		testStatementLogFile,
+		oracleStatementLogFile,
+		stmtlogger.MustParseCompression(statementLogFileCompression),
 	)
 	if err != nil {
 		return err
@@ -181,7 +162,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return errors.Wrapf(
 			err,
-			"Faile to create distribution function: %s",
+			"Failed to create distribution function: %s",
 			partitionKeyDistribution,
 		)
 	}
@@ -192,12 +173,9 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	storeConfig := store.Config{
-		MaxRetriesMutate:            maxRetriesMutate,
-		MaxRetriesMutateSleep:       maxRetriesMutateSleep,
-		UseServerSideTimestamps:     useServerSideTimestamps,
-		TestLogStatementsFile:       testStatementLogFile,
-		OracleLogStatementsFile:     oracleStatementLogFile,
-		LogStatementFileCompression: stmtlogger.MustParseCompression(statementLogFileCompression),
+		MaxRetriesMutate:        maxRetriesMutate,
+		MaxRetriesMutateSleep:   maxRetriesMutateSleep,
+		UseServerSideTimestamps: useServerSideTimestamps,
 	}
 
 	st, err := store.New(ctx, schema, testCluster, oracleCluster, storeConfig, logger)
@@ -306,7 +284,13 @@ func createLogger(level string) *zap.Logger {
 }
 
 func createClusters(
-	consistency, testSelectionPolicy, oracleSelectionPolicy string,
+	consistency,
+	testSelectionPolicy,
+	oracleSelectionPolicy string,
+	logger *zap.Logger,
+	testLogFile string,
+	oracleLogFile string,
+	compression stmtlogger.Compression,
 ) (*gocql.ClusterConfig, *gocql.ClusterConfig, error) {
 	for i := range len(testClusterHost) {
 		testClusterHost[i] = strings.TrimSpace(testClusterHost[i])
@@ -343,8 +327,24 @@ func createClusters(
 		NumRetries: 5,
 	}
 
+	testLogger, err := stmtlogger.NewFileLogger(testLogFile, compression, logger.With(zap.String("stmtlogger", "test")))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	utils.AddFinalizer(func() {
+		if err = testLogger.Close(); err != nil {
+			logger.Error("failed to close test logger", zap.Error(err))
+			return
+		}
+
+		logger.Info("test logger successfully flushed and closed")
+	})
+
 	testClusterObserver := store.ClusterObserver{
 		ClusterName: "test_cluster",
+		Logger:      testLogger,
+		AppLogger:   logger,
 	}
 
 	testCluster.Consistency = c
@@ -365,8 +365,26 @@ func createClusters(
 		return testCluster, nil, nil
 	}
 
+	oracleLogger, err := stmtlogger.NewFileLogger(oracleLogFile, compression, logger.With(
+		zap.String("stmtlogger", "oracle"),
+	))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	utils.AddFinalizer(func() {
+		if err = oracleLogger.Close(); err != nil {
+			logger.Error("failed to close oracle logger", zap.Error(err))
+			return
+		}
+
+		logger.Info("test logger successfully flushed and closed")
+	})
+
 	oracleClusterObserver := store.ClusterObserver{
 		ClusterName: "oracle_cluster",
+		Logger:      oracleLogger,
+		AppLogger:   logger,
 	}
 
 	oracleCluster := gocql.NewCluster(oracleClusterHost...)
