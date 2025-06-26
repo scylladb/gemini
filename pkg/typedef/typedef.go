@@ -160,12 +160,14 @@ func ParseStatementTypeFromQuery(query string) StatementType {
 		return AlterColumnStatementType
 	}
 
-	if strings.HasPrefix(query, "DROP COLUMN") {
-		return DropColumnStatementType
-	}
+	if strings.HasPrefix(query, "ALTER TABLE") {
+		if strings.HasPrefix(query, "DROP") {
+			return DropColumnStatementType
+		}
 
-	if strings.HasPrefix(query, "ADD COLUMN") {
-		return AddColumnStatementType
+		if strings.HasPrefix(query, "ADD") {
+			return AddColumnStatementType
+		}
 	}
 
 	if strings.HasPrefix(query, "CREATE KEYSPACE") {
@@ -268,7 +270,9 @@ func (st StatementType) OpType() OpType {
 		return OpUpdate
 	case DeleteStatementType:
 		return OpDelete
-	case AlterColumnStatementType, DropColumnStatementType, AddColumnStatementType:
+	case AlterColumnStatementType, DropColumnStatementType, AddColumnStatementType,
+		DropTableStatementType, CreateTableStatementType, DropTypeStatementType,
+		CreateTypeStatementType, DropIndexStatementType, CreateIndexStatementType:
 		return OpSchemaAlter
 	case DropKeyspaceStatementType:
 		return OpSchemaDrop
@@ -312,7 +316,7 @@ func (v Values) CopyFrom(src Values) Values {
 
 type StatementCacheType uint8
 
-func (t StatementCacheType) ToString() string {
+func (t StatementCacheType) String() string {
 	switch t {
 	case CacheInsert:
 		return "CacheInsert"

@@ -67,3 +67,23 @@ const (
 const (
 	KnownIssuesJSONWithTuples = "https://github.com/scylladb/scylla/issues/3708"
 )
+
+func (op OpType) IsSelect() bool {
+	return op == OpSelect
+}
+
+func (op OpType) IsInsert() bool {
+	return op == OpInsert
+}
+
+func (op OpType) IsUpdate() bool {
+	return op == OpUpdate
+}
+
+func (op OpType) IsDelete() bool {
+	return op == OpDelete
+}
+
+func (op OpType) IsSchemaChange() bool {
+	return op == OpSchemaAlter || op == OpSchemaDrop || op == OpSchemaCreate
+}

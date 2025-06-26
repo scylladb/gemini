@@ -14,7 +14,14 @@
 
 package stmtlogger
 
-import "github.com/pkg/errors"
+import (
+	"bufio"
+	"compress/gzip"
+	"io"
+
+	"github.com/klauspost/compress/zstd"
+	"github.com/pkg/errors"
+)
 
 type Compression int
 
@@ -57,4 +64,40 @@ func ParseCompression(value string) (Compression, error) {
 	default:
 		return NoCompression, errors.Errorf("unknown compression %q", value)
 	}
+}
+
+func (c Compression) newWriter(input io.Writer) (flusher, io.Closer, error) {
+	var writer flusher
+	var closer io.Closer
+	switch c {
+	case ZSTDCompression:
+		zstdWriter, err := zstd.NewWriter(
+			input,
+			zstd.WithEncoderLevel(zstd.SpeedBestCompression),
+			zstd.WithEncoderCRC(true),
+			zstd.WithWindowSize(zstd.MaxWindowSize),
+			zstd.WithLowerEncoderMem(false),
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		writer = zstdWriter
+		closer = zstdWriter
+	case GZIPCompression:
+		gzipWriter, err := gzip.NewWriterLevel(input, gzip.BestSpeed)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		writer = gzipWriter
+		closer = gzipWriter
+	default:
+		if cl, ok := input.(io.Closer); ok {
+			closer = cl
+		}
+		writer = bufio.NewWriterSize(input, bufioWriterSize)
+	}
+
+	return writer, closer, nil
 }

@@ -15,7 +15,6 @@
 package generators
 
 import (
-	"context"
 	"math"
 	"math/rand/v2"
 
@@ -26,20 +25,16 @@ import (
 )
 
 type Generators struct {
-	cancel context.CancelFunc
-	Gens   map[string]*Generator
+	Gens map[string]*Generator
 }
 
 func New(
-	ctx context.Context,
 	schema *typedef.Schema,
 	distFunc distributions.DistributionFunc,
 	seed, distributionSize, pkBufferReuseSize uint64,
 	logger *zap.Logger,
 	source rand.Source,
 ) *Generators {
-	base, cancel := context.WithCancel(ctx)
-
 	cfg := Config{
 		PartitionsRangeConfig:      schema.Config.GetPartitionRangeConfig(),
 		PartitionsCount:            distributionSize,
@@ -49,13 +44,12 @@ func New(
 	}
 
 	gens := &Generators{
-		Gens:   make(map[string]*Generator, len(schema.Tables)),
-		cancel: cancel,
+		Gens: make(map[string]*Generator, len(schema.Tables)),
 	}
 
 	partitionRangeConfig := schema.Config.GetPartitionRangeConfig()
 	for _, table := range schema.Tables {
-		g := NewGenerator(base, table, cfg, logger.Named("generators-"+table.Name), source)
+		g := NewGenerator(table, cfg, logger.Named("generators-"+table.Name), source)
 
 		if table.PartitionKeys.ValueVariationsNumber(&partitionRangeConfig) < math.MaxUint32 {
 			// Low partition key variation can lead to having staled partitions
@@ -80,8 +74,6 @@ func (g *Generators) Get(table *typedef.Table) *Generator {
 }
 
 func (g *Generators) Close() error {
-	g.cancel()
-
 	for _, gen := range g.Gens {
 		_ = gen.Close()
 	}

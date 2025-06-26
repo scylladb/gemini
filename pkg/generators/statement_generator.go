@@ -86,29 +86,26 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 		}
 		return &table
 	}
-	columns := make(typedef.Columns, utils.RandInt2(r, sc.GetMinColumns(), sc.GetMaxColumns()))
-	for i := range len(columns) {
-		columns[i] = &typedef.ColumnDef{
+
+	columns := utils.RandInt2(r, sc.GetMinColumns(), sc.GetMaxColumns())
+	table.Columns = make(typedef.Columns, 0, columns)
+
+	for i := range columns {
+		table.Columns = append(table.Columns, &typedef.ColumnDef{
 			Name: GenColumnName("col", i),
-			Type: GenColumnType(len(columns), &sc, r),
-		}
+			Type: GenColumnType(columns, &sc, r),
+		})
 	}
-	table.Columns = columns
 
-	var indexes []typedef.IndexDef
-	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && len(columns) > 0 {
-		indexes = CreateIndexesForColumn(&table, utils.RandInt2(r, 1, len(columns)))
+	if sc.CQLFeature > typedef.CQL_FEATURE_NORMAL && sc.UseMaterializedViews && columns > 0 {
+		table.Indexes = CreateIndexesForColumn(&table, utils.RandInt2(r, 1, columns))
 	}
-	table.Indexes = indexes
 
-	var mvs []typedef.MaterializedView
-	if sc.CQLFeature > typedef.CQL_FEATURE_BASIC && sc.UseMaterializedViews &&
+	if sc.CQLFeature > typedef.CQL_FEATURE_NORMAL && sc.UseMaterializedViews &&
 		len(clusteringKeys) > 0 &&
-		columns.ValidColumnsForPrimaryKey().Len() != 0 {
-		mvs = CreateMaterializedViews(columns, table.Name, partitionKeys, clusteringKeys, r)
+		table.Columns.ValidColumnsForPrimaryKey().Len() != 0 {
+		table.MaterializedViews = CreateMaterializedViews(table.Columns, table.Name, partitionKeys, clusteringKeys, r)
 	}
-
-	table.MaterializedViews = mvs
 
 	return &table
 }

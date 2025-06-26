@@ -118,27 +118,29 @@ scylla-shutdown-cluster:
 
 .PHONY: test
 test:
-	@go test -covermode=atomic -tags testing -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | go tool gotestfmt -showteststatus
+	@go test -covermode=atomic -gcflags="-N -l" -tags testing -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | go tool gotestfmt -showteststatus
+
+PPROF_PORT ?= 6060
 
 .PHONY: pprof-profile
 pprof-profile:
-	@go tool pprof -http=:8080 http://localhost:6060/debug/pprof/profile
+	@go tool pprof -http=:8080 http://localhost:$(PPROF_PORT)/debug/pprof/profile
 
 .PHONY: pprof-heap
 pprof-heap:
-	@go tool pprof -http=:8085 http://localhost:6060/debug/pprof/heap
+	@go tool pprof -http=:8085 http://localhost:$(PPROF_PORT)/debug/pprof/heap
 
 .PHONY: pprof-goroutine
 pprof-goroutine:
-	@go tool pprof -http=:8082 http://localhost:6060/debug/pprof/goroutine
+	@go tool pprof -http=:8082 "http://localhost:$(PPROF_PORT)/debug/pprof/goroutine?debug=1"
 
 .PHONY: pprof-block
 pprof-block:
-	@go tool pprof -http=:8083 http://localhost:6060/debug/pprof/block
+	@go tool pprof -http=:8083 http://localhost:$(PPROF_PORT)/debug/pprof/block
 
 .PHONY: pprof-mutex
 pprof-mutex:
-	@go tool pprof -http=:8084 http://localhost:6060/debug/pprof/mutex
+	@go tool pprof -http=:8084 http://localhost:$(PPROF_PORT)/debug/pprof/mutex
 
 .PHONY: docker-integration-test
 docker-integration-test:
