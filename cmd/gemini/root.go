@@ -49,6 +49,10 @@ import (
 	"github.com/scylladb/gemini/pkg/workpool"
 )
 
+const (
+	WorkPoolSize = 2048
+)
+
 var (
 	rootCmd = &cobra.Command{
 		Use:          "gemini",
@@ -132,8 +136,14 @@ func run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	pool := workpool.New(1024)
-	defer pool.Close()
+	pool := workpool.New(WorkPoolSize)
+	utils.AddFinalizer(func() {
+		if err = pool.Close(); err != nil {
+			logger.Error("failed to close workpool", zap.Error(err))
+		} else {
+			logger.Info("workpool closed")
+		}
+	})
 
 	randSrc, distFunc, err := distributions.New(
 		partitionKeyDistribution,

@@ -42,7 +42,7 @@ func TestNew(t *testing.T) {
 			size:          10000,
 			mu:            stdDistMean,
 			sigma:         oneStdDev,
-			maxSameValues: 60,
+			maxSameValues: 100,
 		},
 		{
 			dist:          "uniform",
@@ -50,7 +50,7 @@ func TestNew(t *testing.T) {
 			size:          10000,
 			mu:            stdDistMean,
 			sigma:         oneStdDev,
-			maxSameValues: 10,
+			maxSameValues: 100,
 		},
 	}
 

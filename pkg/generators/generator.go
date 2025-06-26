@@ -197,7 +197,7 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 	maxValuesIn := g.partitions.MaxValuesStored()
 	threshold := uint64(float64(maxValuesIn) * 0.90)
 
-	t := time.NewTicker(sleepTime)
+	t := time.NewTicker(2*time.Second)
 	defer t.Stop()
 	for {
 		select {
