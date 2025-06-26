@@ -43,7 +43,7 @@ jobs:
         warmup: ["0", "30s"]
         dataset-size: [large]
         oracle-scylla-version: ["6.2"]
-        test-scylla-version: ["6.2"]
+        test-scylla-version: ["2025.1"]
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
