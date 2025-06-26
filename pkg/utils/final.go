@@ -14,7 +14,10 @@
 
 package utils
 
-import "sync"
+import (
+	"slices"
+	"sync"
+)
 
 var (
 	finalizers   []func()
@@ -32,6 +35,7 @@ func ExecuteFinalizers() {
 	finalizersMu.Lock()
 	defer finalizersMu.Unlock()
 
+	slices.Reverse(finalizers)
 	for _, f := range finalizers {
 		f()
 	}

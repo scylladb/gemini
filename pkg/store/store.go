@@ -232,9 +232,14 @@ func createCluster(
 	cluster.Events.DisableNodeStatusEvents = false
 	cluster.Logger = zap.NewStdLog(logger.Named("gocql").With(zap.String("cluster", string(config.Name))))
 	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
-		Min:        time.Second,
-		Max:        60 * time.Second,
-		NumRetries: 5,
+		Min:        10 * time.Millisecond,
+		Max:        10 * time.Second,
+		NumRetries: 10,
+	}
+	cluster.ReconnectionPolicy = &gocql.ExponentialReconnectionPolicy{
+		MaxRetries:      10,
+		InitialInterval: 100 * time.Millisecond,
+		MaxInterval:     config.ConnectTimeout,
 	}
 	cluster.Consistency = c
 	cluster.DefaultTimestamp = !config.UseServerSideTimestamps

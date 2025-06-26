@@ -120,10 +120,11 @@ func (p *Partition) pick(ctx context.Context) typedef.ValueWithToken {
 }
 
 func (p *Partition) Close() error {
-	old := p.oldValues.Swap(nil)
-	close(*old)
-	old = p.values.Swap(nil)
-	close(*old)
+	oldValues := p.oldValues.Swap(nil)
+	values := p.values.Swap(nil)
+
+	close(*oldValues)
+	close(*values)
 
 	return nil
 }
@@ -143,17 +144,28 @@ func (p Partitions) Close() error {
 func (p Partitions) FullValues() uint64 {
 	full := uint64(0)
 
-	if ch := p[0].values.Load(); ch != nil {
-		c := cap(*ch)
+	for i := range len(p) {
+		if p[i].Stale() {
+			continue
+		}
 
-		for i := range len(p) {
-			if p[i].Stale() {
-				continue
-			}
+		if ch := p[i].values.Load(); ch != nil {
+			full += uint64(len(*ch))
+		}
+	}
 
-			if ch = p[i].values.Load(); ch != nil && c-len(*ch) <= 0 {
-				full++
-			}
+	return full
+}
+
+func (p Partitions) MaxValuesStored() uint64 {
+	full := uint64(0)
+	for i := range len(p) {
+		if p[i].Stale() {
+			continue
+		}
+
+		if ch := p[i].values.Load(); ch != nil {
+			full += uint64(cap(*ch))
 		}
 	}
 

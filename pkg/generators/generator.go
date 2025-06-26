@@ -194,14 +194,22 @@ const sleepTime = 1 * time.Second
 func (g *Generator) fillAllPartitions(ctx context.Context) {
 	var dropped uint64
 
-	// 3% of partitions are allowed to be full at the same time.
-	// This is to avoid starvation of partitions.
-	threePrecent := uint64(float64(g.partitionCount) * 0.97)
+	maxValuesIn := g.partitions.MaxValuesStored()
+	threshold := uint64(float64(maxValuesIn) * 0.90)
 
+	t := time.NewTicker(sleepTime)
+	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-t.C:
+			metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new").Add(float64(dropped))
+			dropped = 0
+
+			if maxValuesIn-g.partitions.FullValues() < threshold {
+				time.Sleep(sleepTime)
+			}
 		default:
 		}
 
@@ -209,7 +217,9 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 
 		token, values, err := g.createPartitionKeyValues()
 		if err != nil {
-			g.logger.Panic("failed to get primary key hash", zap.Error(err))
+			g.logger.Error("failed to get primary key hash", zap.Error(err))
+			running.Record()
+			continue
 		}
 
 		partition := &g.partitions[g.shardOf(token)]
@@ -228,16 +238,6 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 		}
 
 		dropped++
-		if dropped%g.partitionCount == 0 {
-			fullPartitions := g.partitions.FullValues()
-			metrics.GeneratorFilledPartitions.WithLabelValues(g.table.Name).Set(float64(fullPartitions))
-			metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new").Add(float64(dropped))
-			dropped = 0
-
-			if fullPartitions-g.partitionCount <= threePrecent {
-				time.Sleep(sleepTime)
-			}
-		}
 	}
 }
 

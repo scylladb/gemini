@@ -48,8 +48,8 @@ func (c *cqlStore) name() string {
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
 	var err error
 	for i := range c.maxRetriesMutate {
-		defer metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
 		mutateErr := c.doMutate(context.WithValue(ctx, utils.GeminiAttempt, i), stmt, ts)
+		defer metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
 
 		if mutateErr == nil {
 			return nil
@@ -109,7 +109,6 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	defer func() {
 		query.Release()
 		metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
-		_ = iter.Close()
 	}()
 
 	rows := make(Rows, iter.NumRows())
@@ -123,7 +122,7 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 		rows[i] = row
 	}
 
-	return rows, nil
+	return rows, iter.Close()
 }
 
 func (c *cqlStore) Close() error {
