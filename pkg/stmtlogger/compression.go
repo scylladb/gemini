@@ -99,5 +99,21 @@ func (c Compression) newWriter(input io.Writer) (flusher, io.Closer, error) {
 		writer = bufio.NewWriterSize(input, bufioWriterSize)
 	}
 
-	return writer, closer, nil
+	return writer, closerWrapper{
+		closer:  closer,
+		flusher: writer,
+	}, nil
+}
+
+type closerWrapper struct {
+	closer  io.Closer
+	flusher flusher
+}
+
+func (c closerWrapper) Close() error {
+	if err := c.flusher.Flush(); err != nil {
+		return err
+	}
+
+	return c.closer.Close()
 }

@@ -145,68 +145,74 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 
 func TestScyllaLogger(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	oracleFile := dir + "/oracle_statements.json"
-	testFile := dir + "/test_statements.json"
 
-	assert := require.New(t)
-	session := utils.SingleScylla(t)
+	for _, item := range CompressionTests {
+		t.Run("Compression_"+item.Compression.String(), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			oracleFile := dir + "/oracle_statements.json"
+			testFile := dir + "/test_statements.json"
 
-	jobList := joberror.NewErrorList(1)
-	pool := workpool.New(50)
-	t.Cleanup(func() {
-		_ = pool.Close()
-	})
-	chMetrics := metrics.NewChannelMetrics[Item]("test", "test", 1)
-	partitionKeys := []*typedef.ColumnDef{
-		{Name: "col1", Type: typedef.TypeInt},
-		{Name: "col2", Type: typedef.TypeText},
+			assert := require.New(t)
+			session := utils.SingleScylla(t)
+
+			jobList := joberror.NewErrorList(1)
+			pool := workpool.New(50)
+			t.Cleanup(func() {
+				_ = pool.Close()
+			})
+			chMetrics := metrics.NewChannelMetrics[Item]("test", "test", 1)
+			partitionKeys := []*typedef.ColumnDef{
+				{Name: "col1", Type: typedef.TypeInt},
+				{Name: "col2", Type: typedef.TypeText},
+			}
+
+			ch := make(chan Item, 10)
+			zapLogger := utils.Must(zap.NewDevelopment())
+
+			logger, err := NewScyllaLoggerWithSession(
+				typedef.Values{5, "test_ddl"},
+				session,
+				partitionKeys,
+				replication.NewNetworkTopologyStrategy(),
+				ch,
+				oracleFile, testFile, item.Compression, jobList,
+				pool, zapLogger, chMetrics,
+			)
+			assert.NoError(err)
+			assert.NotNil(logger)
+
+			itemTest, testJobErr := errorStatement(TypeTest)
+			itemOracle, _ := errorStatement(TypeOracle)
+
+			ch <- ddlStatement(TypeTest)
+			ch <- ddlStatement(TypeOracle)
+			ch <- successStatement(TypeTest)
+			ch <- itemTest
+			ch <- successStatement(TypeOracle)
+			ch <- itemOracle
+
+			jobList.AddError(testJobErr)
+			time.Sleep(2 * time.Second)
+			close(ch)
+			assert.NoError(logger.Close())
+
+			var count int
+			assert.NoError(session.Query("SELECT COUNT(*) FROM logs.statements").Scan(&count))
+			assert.Equal(6, count)
+
+			oracleStatements := strings.SplitSeq(item.ReadData(t, utils.Must(os.Open(oracleFile))), "\n")
+			testStatements := strings.SplitSeq(item.ReadData(t, utils.Must(os.Open(testFile))), "\n")
+
+			assert.Len(slices.Collect(oracleStatements), 3)
+			assert.Len(slices.Collect(testStatements), 3)
+
+			assert.Equal(
+				slices.SortedStableFunc(oracleStatements, strings.Compare),
+				slices.SortedStableFunc(testStatements, strings.Compare),
+			)
+		})
 	}
-
-	ch := make(chan Item, 10)
-	zapLogger := utils.Must(zap.NewDevelopment())
-
-	logger, err := NewScyllaLoggerWithSession(
-		typedef.Values{5, "test_ddl"},
-		session,
-		partitionKeys,
-		replication.NewNetworkTopologyStrategy(),
-		ch,
-		oracleFile, testFile, NoCompression, jobList,
-		pool, zapLogger, chMetrics,
-	)
-	assert.NoError(err)
-	assert.NotNil(logger)
-
-	itemTest, testJobErr := errorStatement(TypeTest)
-	itemOracle, _ := errorStatement(TypeOracle)
-
-	ch <- ddlStatement(TypeTest)
-	ch <- ddlStatement(TypeOracle)
-	ch <- successStatement(TypeTest)
-	ch <- itemTest
-	ch <- successStatement(TypeOracle)
-	ch <- itemOracle
-
-	jobList.AddError(testJobErr)
-	time.Sleep(1 * time.Second)
-	close(ch)
-	assert.NoError(logger.Close())
-
-	var count int
-	assert.NoError(session.Query("SELECT COUNT(*) FROM logs.statements").Scan(&count))
-	assert.Equal(6, count)
-
-	oracleStatements := strings.SplitSeq(string(utils.Must(os.ReadFile(oracleFile))), "\n")
-	testStatements := strings.SplitSeq(string(utils.Must(os.ReadFile(testFile))), "\n")
-
-	assert.Len(slices.Collect(oracleStatements), 3)
-	assert.Len(slices.Collect(testStatements), 3)
-
-	assert.Equal(
-		slices.SortedStableFunc(oracleStatements, strings.Compare),
-		slices.SortedStableFunc(testStatements, strings.Compare),
-	)
 }
 
 func ddlStatement(ty Type) Item {

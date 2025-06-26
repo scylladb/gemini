@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package stmtlogger_test
+package stmtlogger
 
 import (
 	"compress/gzip"
@@ -30,88 +30,87 @@ import (
 	"github.com/samber/mo"
 	"go.uber.org/zap"
 
-	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
+var CompressionTests = []struct {
+	ReadData    func(tb testing.TB, f io.Reader) string
+	Compression Compression
+}{
+	{
+		Compression: NoCompression,
+		ReadData: func(tb testing.TB, f io.Reader) string {
+			tb.Helper()
+
+			data, err := io.ReadAll(f)
+			if err != nil {
+				tb.Fatalf("Failed to read file: %s", err)
+			}
+
+			return string(data)
+		},
+	},
+	{
+		Compression: GZIPCompression,
+		ReadData: func(tb testing.TB, f io.Reader) string {
+			tb.Helper()
+
+			reader, err := gzip.NewReader(f)
+			if err != nil {
+				tb.Fatalf("Failed to read file: %s", err)
+			}
+
+			data, err := io.ReadAll(reader)
+			if err != nil {
+				tb.Fatalf("Failed to read data from file: %s", err)
+			}
+
+			return string(data)
+		},
+	},
+	{
+		Compression: ZSTDCompression,
+		ReadData: func(tb testing.TB, f io.Reader) string {
+			tb.Helper()
+			reader, err := zstd.NewReader(f)
+			if err != nil {
+				tb.Fatalf("Failed to read file: %s", err)
+			}
+
+			data, err := io.ReadAll(reader)
+			if err != nil {
+				tb.Fatalf("Failed to read data from file: %s", err)
+			}
+
+			return string(data)
+		},
+	},
+}
+
 func TestOutputToFile(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		ReadData    func(tb testing.TB, f io.Reader) string
-		Compression stmtlogger.Compression
-	}{
-		{
-			Compression: stmtlogger.NoCompression,
-			ReadData: func(tb testing.TB, f io.Reader) string {
-				tb.Helper()
-
-				data, err := io.ReadAll(f)
-				if err != nil {
-					tb.Fatalf("Failed to read file: %s", err)
-				}
-
-				return string(data)
-			},
-		},
-		{
-			Compression: stmtlogger.GZIPCompression,
-			ReadData: func(tb testing.TB, f io.Reader) string {
-				tb.Helper()
-
-				reader, err := gzip.NewReader(f)
-				if err != nil {
-					tb.Fatalf("Failed to read file: %s", err)
-				}
-
-				data, err := io.ReadAll(reader)
-				if err != nil {
-					tb.Fatalf("Failed to read data from file: %s", err)
-				}
-
-				return string(data)
-			},
-		},
-		{
-			Compression: stmtlogger.ZSTDCompression,
-			ReadData: func(tb testing.TB, f io.Reader) string {
-				tb.Helper()
-				reader, err := zstd.NewReader(f)
-				if err != nil {
-					tb.Fatalf("Failed to read file: %s", err)
-				}
-
-				data, err := io.ReadAll(reader)
-				if err != nil {
-					tb.Fatalf("Failed to read data from file: %s", err)
-				}
-
-				return string(data)
-			},
-		},
-	}
-
-	for _, item := range tests {
+	for _, item := range CompressionTests {
 		t.Run("Compression_"+item.Compression.String(), func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
 			file := filepath.Join(dir, "test.log")
 
-			logger, err := stmtlogger.NewLogger(stmtlogger.WithFileLogger(file, item.Compression, zap.NewNop()))
+			logger, err := NewLogger(WithFileLogger(file, item.Compression, zap.NewNop()))
 			if err != nil {
 				t.Fatalf("Failed to initialize the logger %s", err)
 			}
 
-			data := stmtlogger.Item{
+			data := Item{
 				ID:        gocql.TimeUUID(),
 				Statement: "INSERT INTO ks1.table1(pk1) VALUES(?)",
 				Values:    mo.Left[typedef.Values, string]([]any{1}),
 				Error:     mo.Left[error, string](nil),
-				Duration:  stmtlogger.Duration{Duration: 10 * time.Second},
+				Duration:  Duration{Duration: 10 * time.Second},
 				Host:      "test_host",
-				Start:     stmtlogger.Time{Time: time.Now()},
-				Type:      stmtlogger.TypeTest,
+				Start:     Time{Time: time.Now()},
+				Type:      TypeTest,
 			}
 
 			if err = logger.LogStmt(data); err != nil {
@@ -135,28 +134,28 @@ func TestOutputToFile(t *testing.T) {
 }
 
 func BenchmarkLogger(b *testing.B) {
-	runs := []stmtlogger.Compression{
-		stmtlogger.NoCompression,
-		stmtlogger.GZIPCompression,
-		stmtlogger.ZSTDCompression,
+	runs := []Compression{
+		NoCompression,
+		GZIPCompression,
+		ZSTDCompression,
 	}
 
 	for _, compression := range runs {
 		b.Run(compression.String(), func(b *testing.B) {
 			b.ReportAllocs()
 			file := filepath.Join(b.TempDir(), "test.json")
-			logger := utils.Must(stmtlogger.NewLogger(stmtlogger.WithFileLogger(file, compression, zap.NewNop())))
+			logger := utils.Must(NewLogger(WithFileLogger(file, compression, zap.NewNop())))
 			rows := &atomic.Int64{}
 
-			data := stmtlogger.Item{
+			data := Item{
 				ID:        gocql.TimeUUID(),
 				Statement: "INSERT INTO ks1.table1(pk1) VALUES(?)",
 				Values:    mo.Left[typedef.Values, string]([]any{1}),
 				Error:     mo.Left[error, string](nil),
-				Duration:  stmtlogger.Duration{Duration: 10 * time.Second},
+				Duration:  Duration{Duration: 10 * time.Second},
 				Host:      "test_host",
-				Start:     stmtlogger.Time{Time: time.Now()},
-				Type:      stmtlogger.TypeTest,
+				Start:     Time{Time: time.Now()},
+				Type:      TypeTest,
 			}
 
 			b.SetParallelism(100)

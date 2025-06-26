@@ -28,7 +28,6 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/samber/mo"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/joberror"
@@ -414,19 +413,10 @@ func (s *ScyllaLogger) openStatementFile(name string) (io.Writer, func() error, 
 
 	testFile, closer, err := s.compression.newWriter(testFileFd)
 	if err != nil {
-		if closeErr := testFileFd.Close(); closeErr != nil {
-			s.logger.Error("failed to close test statements file", zap.Error(closeErr))
-		}
-		return nil, func() error {
-			err = multierr.Append(nil, testFileFd.Sync())
-			return multierr.Append(nil, testFileFd.Close())
-		}, errors.Wrapf(err, "failed to create test statements file writer %q", name)
+		return nil, testFileFd.Close, errors.Wrapf(err, "failed to create test statements file writer %q", name)
 	}
 
-	return testFile, func() error {
-		err = multierr.Append(nil, testFile.Flush())
-		return multierr.Append(err, closer.Close())
-	}, nil
+	return testFile, closer.Close, nil
 }
 
 func (s *ScyllaLogger) writeBrokenPartitionsToFile(errs []joberror.JobError) error {
