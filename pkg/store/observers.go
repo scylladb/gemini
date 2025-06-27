@@ -108,7 +108,7 @@ func (c ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQ
 			Start:         stmtlogger.Time{Time: query.Start},
 			Duration:      stmtlogger.Duration{Duration: query.End.Sub(query.Start)},
 			Host:          instance,
-			Attempt:       query.Attempt,
+			Attempt:       query.Metrics.Attempts,
 			GeminiAttempt: geminiAttempt,
 			Type:          c.ClusterName,
 			StatementType: op,

@@ -137,6 +137,14 @@ func New(
 		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
 	}
 
+	if cfg.MaxRetriesMutate <= 1 {
+		cfg.MaxRetriesMutate = 10
+	}
+
+	if cfg.MaxRetriesMutateSleep <= 10*time.Millisecond {
+		cfg.MaxRetriesMutateSleep = 200 * time.Millisecond
+	}
+
 	testStore := &cqlStore{
 		session:                 testSession,
 		schema:                  schema,

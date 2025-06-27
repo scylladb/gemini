@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -44,15 +43,11 @@ type GlobalStatus struct {
 }
 
 func (gs *GlobalStatus) AddWriteError(err joberror.JobError) {
-	// TODO: https://github.com/scylladb/gemini/issues/302 - Move out and add logging
-	log.Printf("Error detected: %#v", err)
 	gs.Errors.AddError(err)
 	gs.WriteErrors.Add(1)
 }
 
 func (gs *GlobalStatus) AddReadError(err joberror.JobError) {
-	// TODO: https://github.com/scylladb/gemini/issues/302 - Move out and add logging
-	log.Printf("Error detected: %#v", err)
 	gs.Errors.AddError(err)
 	gs.ReadErrors.Add(1)
 }
@@ -85,7 +80,7 @@ func (gs *GlobalStatus) String() string {
 }
 
 func (gs *GlobalStatus) HasErrors() bool {
-	return gs.WriteErrors.Load() > 0 || gs.ReadErrors.Load() > 0
+	return gs.Errors.Len() >= gs.Errors.Cap()
 }
 
 //nolint:forbidigo

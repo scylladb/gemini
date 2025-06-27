@@ -16,6 +16,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	errs "errors"
 	"time"
 
@@ -45,6 +46,17 @@ func (c *cqlStore) name() string {
 	return c.system
 }
 
+type MutationError struct {
+	Inner         error
+	PartitionKeys []any
+}
+
+func (e MutationError) Error() string {
+	data, _ := json.Marshal(e.PartitionKeys)
+
+	return "mutation error: " + e.Inner.Error() + ", partition keys: " + utils.UnsafeString(data)
+}
+
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
 	var err error
 	for i := range c.maxRetriesMutate {
@@ -52,13 +64,6 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 		metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
 
 		if mutateErr == nil {
-			if i > 0 {
-				c.logger.Info("mutation applied after many attempts",
-					zap.Int("attempt", i),
-					zap.Any("values", stmt.Values),
-					zap.String("system", c.system),
-				)
-			}
 			return nil
 		}
 
@@ -66,14 +71,10 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 			return nil
 		}
 
-		err = multierr.Append(err, mutateErr)
-		c.logger.Error(
-			"failed to apply mutation",
-			zap.Int("attempt", i),
-			zap.Error(err),
-			zap.String("system", c.system),
-			zap.Any("values", stmt.Values),
-		)
+		err = multierr.Append(err, MutationError{
+			Inner:         mutateErr,
+			PartitionKeys: stmt.Values,
+		})
 		time.Sleep(c.maxRetriesMutateSleep)
 	}
 
@@ -106,6 +107,8 @@ func (c *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, timestamp m
 				zap.Any("values", stmt.Values),
 			)
 		}
+
+		return err
 	}
 
 	return nil

@@ -284,7 +284,7 @@ func buildCreateTableQuery(
 	builder.WriteString("ddl boolean, ts timestamp, ty text, statement text, values blob, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, ")
 	builder.WriteString("PRIMARY KEY ((")
 	builder.WriteString(partitions)
-	builder.WriteString(", ty), ddl, ts)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'}")
+	builder.WriteString(", ty), ddl, ts, attempt, gemini_attempt)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'}")
 	builder.WriteString(" AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';")
 
 	createTable := builder.String()

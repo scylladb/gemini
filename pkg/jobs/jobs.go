@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -166,7 +167,7 @@ func mutationJob(
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
 	stopFlag *stop.Flag,
-	failFast, verbose bool,
+	_, verbose bool,
 ) error {
 	logger = logger.Named("mutation_job")
 	logger.Info("starting mutation loop")
@@ -188,7 +189,7 @@ func mutationJob(
 			return err
 		}
 
-		if failFast && globalStatus.HasErrors() {
+		if globalStatus.HasErrors() {
 			stopFlag.SetSoft(true)
 			return nil
 		}
@@ -209,21 +210,17 @@ func validationJob(
 	p *typedef.PartitionRangeConfig,
 	g *generators.Generator,
 	globalStatus *status.GlobalStatus,
-	logger *zap.Logger,
+	_ *zap.Logger,
 	stopFlag *stop.Flag,
-	failFast, _ bool,
+	_, _ bool,
 ) error {
-	logger = logger.Named("validation_job")
-	logger.Info("starting validation loop")
-	defer logger.Info("ending validation loop")
-
 	maxAttempts := schemaCfg.AsyncObjectStabilizationAttempts
-	if maxAttempts < 1 {
-		maxAttempts = 1
+	if maxAttempts <= 1 {
+		maxAttempts = 10
 	}
 	delay := schemaCfg.AsyncObjectStabilizationDelay
-	if delay < 0 {
-		delay = 10 * time.Millisecond
+	if delay <= 10*time.Millisecond {
+		delay = 200 * time.Millisecond
 	}
 
 	for !stopFlag.IsHardOrSoft() {
@@ -238,7 +235,7 @@ func validationJob(
 				return
 			}
 
-			err = validation(ctx, table, s, stmt, logger, maxAttempts, delay)
+			err = validation(ctx, table, s, stmt, maxAttempts, delay)
 			if stmt.ValuesWithToken != nil {
 				for _, token := range stmt.ValuesWithToken {
 					g.ReleaseToken(token.Token)
@@ -247,7 +244,7 @@ func validationJob(
 		})
 
 		if stmt == nil {
-			time.Sleep(2 * delay)
+			continue
 		}
 
 		if err != nil {
@@ -267,7 +264,7 @@ func validationJob(
 
 		globalStatus.ReadOps.Add(1)
 
-		if failFast && globalStatus.HasErrors() {
+		if globalStatus.HasErrors() {
 			stopFlag.SetSoft(true)
 			return nil
 		}
@@ -290,18 +287,15 @@ func warmupJob(
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
 	stopFlag *stop.Flag,
-	failFast, _ bool,
+	_, _ bool,
 ) error {
-	logger = logger.Named("warmup")
-	logger.Info("starting warmup loop")
-	defer logger.Info("ending warmup loop")
 	for !stopFlag.IsHardOrSoft() {
 		err := mutation(ctx, schema, table, s, r, p, g, globalStatus, false, logger)
 		if err != nil {
 			return err
 		}
 
-		if failFast && globalStatus.HasErrors() {
+		if globalStatus.HasErrors() {
 			stopFlag.SetSoft(true)
 			return nil
 		}
@@ -420,59 +414,27 @@ func validation(
 	table *typedef.Table,
 	s store.Store,
 	stmt *typedef.Stmt,
-	logger *zap.Logger,
 	maxAttempts int,
 	delay time.Duration,
 ) error {
-	var lastErr, err error
+	var acc error
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		lastErr = err
-		err = s.Check(ctx, table, stmt, attempt == maxAttempts)
-
+		err := s.Check(ctx, table, stmt, attempt == maxAttempts)
 		if err == nil {
-			if attempt > 1 {
-				logger.Info(
-					"Validation successfully completed",
-					zap.Int("attempt", attempt),
-				)
-			}
 			return nil
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+
+		if errors.Is(err, context.Canceled) {
 			// When context is canceled, it means that the test was commanded to stop
 			// to skip logging part it is returned here
 			return nil
 		}
-
-		if errors.Is(err, unWrapErr(lastErr)) {
-			logger.Warn(
-				"Retrying failed validation. Error same as at attempt before.",
-				zap.Int("attempt", attempt),
-				zap.Int("max_attempts", maxAttempts),
-			)
-		} else {
-			logger.Warn("Retrying failed validation.",
-				zap.Int("attempt", attempt),
-				zap.Int("max_attempts", maxAttempts),
-				zap.Error(err),
-			)
-		}
+		acc = multierr.Append(acc, err)
 
 		attempt++
 		time.Sleep(delay)
 	}
 
-	logger.Error("Validation failed", zap.Error(err))
-
-	return err
-}
-
-func unWrapErr(err error) error {
-	nextErr := err
-	for nextErr != nil {
-		err = nextErr
-		nextErr = errors.Unwrap(err)
-	}
-	return err
+	return acc
 }

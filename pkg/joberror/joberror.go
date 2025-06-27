@@ -74,6 +74,17 @@ func (el *ErrorList) MarshalJSON() ([]byte, error) {
 	return json.Marshal(el.Errors())
 }
 
+func (el *ErrorList) Cap() int {
+	return el.limit
+}
+
+func (el *ErrorList) Len() int {
+	el.mu.Lock()
+	defer el.mu.Unlock()
+
+	return len(el.errors)
+}
+
 func (el *ErrorList) Error() string {
 	var builder strings.Builder
 	builder.Grow(1024)
