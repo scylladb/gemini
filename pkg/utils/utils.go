@@ -113,7 +113,7 @@ func UUIDFromTime(rnd *rand.Rand) string {
 	return gocql.UUIDFromTime(RandDate(rnd)).String()
 }
 
-func CreateFile(input string, def ...io.Writer) (io.Writer, error) {
+func CreateFile(input string, closeOnExit bool, def ...io.Writer) (io.Writer, error) {
 	switch input {
 	case "":
 		if len(def) > 0 && def[0] != nil {
@@ -131,10 +131,12 @@ func CreateFile(input string, def ...io.Writer) (io.Writer, error) {
 			return nil, errors.Wrapf(err, "failed to open file %s", input)
 		}
 
-		AddFinalizer(func() {
-			IgnoreError(w.Sync)
-			IgnoreError(w.Close)
-		})
+		if closeOnExit {
+			AddFinalizer(func() {
+				IgnoreError(w.Sync)
+				IgnoreError(w.Close)
+			})
+		}
 
 		return w, nil
 	}

@@ -77,9 +77,13 @@ func NewGenerator(
 	table *typedef.Table,
 	config Config,
 	logger *zap.Logger,
-	source rand.Source,
+	src *rand.ChaCha8,
 ) *Generator {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	newSrc := [32]byte{}
+	_, _ = src.Read(newSrc[:])
+	rnd := rand.New(rand.NewChaCha8(newSrc))
 
 	metrics.GeneratorPartitionSize.WithLabelValues(table.Name).Set(float64(config.PartitionsCount))
 	metrics.GeneratorBufferSize.WithLabelValues(table.Name).Set(float64(config.PkUsedBufferSize))
@@ -89,7 +93,7 @@ func NewGenerator(
 		logger:            logger,
 		table:             table,
 		routingKeyCreator: &routingkey.Creator{},
-		r:                 rand.New(source),
+		r:                 rnd,
 		idxFunc:           config.PartitionsDistributionFunc,
 		partitions:        NewPartitions(config.PartitionsCount, config.PkUsedBufferSize),
 		partitionsConfig:  config.PartitionsRangeConfig,
@@ -195,7 +199,7 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 	var dropped uint64
 
 	maxValuesIn := g.partitions.MaxValuesStored()
-	threshold := uint64(float64(maxValuesIn) * 0.90)
+	threshold := uint64(float64(maxValuesIn) * 0.95)
 
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
@@ -242,10 +246,6 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 }
 
 func (g *Generator) shardOf(token uint64) int {
-	if token < g.partitionCount {
-		return int(token)
-	}
-
 	return int(token % g.partitionCount)
 }
 

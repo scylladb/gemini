@@ -90,7 +90,7 @@ func TestBuildQueriesExecution(t *testing.T) {
 }
 
 func successStatement(ty Type) Item {
-	start := time.Now()
+	start := time.Now().Add(-(5 * time.Second))
 	statement := "INSERT INTO test_table (col1, col2) VALUES (?, ?)"
 	values := typedef.Values{1, "test"}
 
@@ -100,7 +100,7 @@ func successStatement(ty Type) Item {
 		Statement:     statement,
 		Host:          "test_host",
 		Type:          ty,
-		Values:        mo.Left[typedef.Values, string](values),
+		Values:        mo.Left[typedef.Values, []byte](values),
 		Duration:      Duration{Duration: time.Second},
 		Attempt:       1,
 		GeminiAttempt: 1,
@@ -112,7 +112,7 @@ func successStatement(ty Type) Item {
 }
 
 func errorStatement(ty Type) (Item, joberror.JobError) {
-	start := time.Now()
+	start := time.Now().Add(-(10 * time.Second))
 	ers := errors.New("test error")
 	statement := "INSERT INTO test_table (col1, col2) VALUES (?, ?)"
 	values := typedef.Values{2, "test_2"}
@@ -123,7 +123,7 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 		Statement:     statement,
 		Host:          "test_host",
 		Type:          ty,
-		Values:        mo.Left[typedef.Values, string](values),
+		Values:        mo.Left[typedef.Values, []byte](values),
 		Duration:      Duration{Duration: time.Second},
 		Attempt:       1,
 		GeminiAttempt: 1,
@@ -201,28 +201,30 @@ func TestScyllaLogger(t *testing.T) {
 			assert.NoError(session.Query("SELECT COUNT(*) FROM logs.statements").Scan(&count))
 			assert.Equal(6, count)
 
-			oracleStatements := strings.SplitSeq(item.ReadData(t, utils.Must(os.Open(oracleFile))), "\n")
-			testStatements := strings.SplitSeq(item.ReadData(t, utils.Must(os.Open(testFile))), "\n")
+			oracleData := item.ReadData(t, utils.Must(os.Open(oracleFile)))
+			testData := item.ReadData(t, utils.Must(os.Open(testFile)))
 
-			assert.Len(slices.Collect(oracleStatements), 3)
-			assert.Len(slices.Collect(testStatements), 3)
+			oracleStatements := strings.SplitSeq(strings.TrimRight(oracleData, "\n"), "\n")
+			testStatements := strings.SplitSeq(strings.TrimRight(testData, "\n"), "\n")
 
-			assert.Equal(
-				slices.SortedStableFunc(oracleStatements, strings.Compare),
-				slices.SortedStableFunc(testStatements, strings.Compare),
-			)
+			sortedOracle := slices.SortedStableFunc(oracleStatements, strings.Compare)
+			sortedTest := slices.SortedStableFunc(testStatements, strings.Compare)
+
+			assert.Equal(sortedOracle, sortedTest)
+			assert.Len(sortedOracle, 2)
+			assert.Len(sortedTest, 2)
 		})
 	}
 }
 
 func ddlStatement(ty Type) Item {
 	return Item{
-		Start:         Time{Time: time.Now()},
+		Start:         Time{Time: time.Now().Add(-(15 * time.Second))},
 		Error:         mo.Right[error, string](""),
 		Statement:     "CREATE TABLE IF NOT EXISTS test_table (col1 int, col2 text, PRIMARY KEY (col1))",
 		Host:          "test_host",
 		Type:          ty,
-		Values:        mo.Left[typedef.Values, string](nil),
+		Values:        mo.Left[typedef.Values, []byte](nil),
 		Duration:      Duration{Duration: time.Second},
 		Attempt:       1,
 		GeminiAttempt: 1,

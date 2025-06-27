@@ -33,7 +33,7 @@ func New(
 	distFunc distributions.DistributionFunc,
 	seed, distributionSize, pkBufferReuseSize uint64,
 	logger *zap.Logger,
-	source rand.Source,
+	source *rand.ChaCha8,
 ) *Generators {
 	cfg := Config{
 		PartitionsRangeConfig:      schema.Config.GetPartitionRangeConfig(),
