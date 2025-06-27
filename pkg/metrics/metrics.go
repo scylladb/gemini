@@ -171,6 +171,13 @@ var (
 		},
 		[]string{"file"},
 	)
+
+	ExecutionErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "execution_errors",
+		},
+		[]string{"ty"},
+	)
 )
 
 func init() {
@@ -197,6 +204,7 @@ func init() {
 		StalePartitions,
 		MemoryMetrics,
 		FileSizeMetrics,
+		ExecutionErrors,
 	)
 
 	r.MustRegister(

@@ -13,7 +13,7 @@ BUILD_DATE ?= $(shell git log -1 --format=%cd --date=format:%Y-%m-%dT%H:%M:%SZ 2
 LDFLAGS_VERSION := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(BUILD_DATE)
 
 CQL_FEATURES ?= normal
-CONCURRENCY ?= 4
+CONCURRENCY ?= 2
 DURATION ?= 10m
 WARMUP ?= 30s
 MODE ?= mixed
@@ -26,8 +26,7 @@ define get_scylla_ip
 	$(shell docker inspect --format "{{ .NetworkSettings.Networks.$(GEMINI_DOCKER_NETWORK).IPAddress }}" "$(1)")
 endef
 
-GEMINI_FLAGS ?= --fail-fast \
-	--level=info \
+GEMINI_FLAGS ?= --level=info \
 	--consistency=QUORUM \
 	--test-host-selection-policy=token-aware \
 	--oracle-host-selection-policy=token-aware \

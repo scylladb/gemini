@@ -106,6 +106,8 @@ func (c *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, timestamp m
 				zap.String("query", queryBody),
 				zap.Any("values", stmt.Values),
 			)
+
+			return nil
 		}
 
 		return err

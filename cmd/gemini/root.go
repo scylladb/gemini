@@ -137,13 +137,6 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	pool := workpool.New(WorkPoolSize)
-	utils.AddFinalizer(func() {
-		if err = pool.Close(); err != nil {
-			logger.Error("failed to close workpool", zap.Error(err))
-		} else {
-			logger.Info("workpool closed")
-		}
-	})
 
 	randSrc, distFunc, err := distributions.New(
 		partitionKeyDistribution,

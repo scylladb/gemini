@@ -169,25 +169,15 @@ func mutationJob(
 	stopFlag *stop.Flag,
 	_, verbose bool,
 ) error {
-	logger = logger.Named("mutation_job")
-	logger.Info("starting mutation loop")
-	defer logger.Info("ending mutation loop")
-
 	for !stopFlag.IsHardOrSoft() {
-		var err error
-
 		metrics.ExecutionTime("mutation_job", func() {
 			if schemaCfg.CQLFeature == typedef.CQL_FEATURE_ALL && r.IntN(1000000)%100000 == 0 {
-				err = ddl(ctx, schema, schemaCfg, table, s, r, p, globalStatus, logger, verbose)
+				_ = ddl(ctx, schema, schemaCfg, table, s, r, p, globalStatus, logger, verbose)
 				return
 			}
 
-			err = mutation(ctx, schema, table, s, r, p, g, globalStatus, true, logger)
+			_ = mutation(ctx, schema, table, s, r, p, g, globalStatus, true, logger)
 		})
-
-		if err != nil {
-			return err
-		}
 
 		if globalStatus.HasErrors() {
 			stopFlag.SetSoft(true)
@@ -258,11 +248,9 @@ func validationJob(
 				Query:         cql,
 				PartitionKeys: stmt.Values.Copy(),
 			})
-
-			return err
+		} else {
+			globalStatus.ReadOps.Add(1)
 		}
-
-		globalStatus.ReadOps.Add(1)
 
 		if globalStatus.HasErrors() {
 			stopFlag.SetSoft(true)
@@ -290,10 +278,7 @@ func warmupJob(
 	_, _ bool,
 ) error {
 	for !stopFlag.IsHardOrSoft() {
-		err := mutation(ctx, schema, table, s, r, p, g, globalStatus, false, logger)
-		if err != nil {
-			return err
-		}
+		_ = mutation(ctx, schema, table, s, r, p, g, globalStatus, false, logger)
 
 		if globalStatus.HasErrors() {
 			stopFlag.SetSoft(true)
@@ -393,11 +378,11 @@ func mutation(
 		cql, _ := mutateStmt.Query.ToCql()
 
 		globalStatus.AddWriteError(joberror.JobError{
-			Timestamp: time.Now(),
-			StmtType:  mutateStmt.QueryType.String(),
-			Err:       err,
-			Message:   "Mutation failed",
-			Query:     cql,
+			Timestamp:     time.Now(),
+			StmtType:      mutateStmt.QueryType.String(),
+			Message:       "Mutation failed: " + err.Error(),
+			Query:         cql,
+			PartitionKeys: mutateStmt.Values.Copy(),
 		})
 
 		return err

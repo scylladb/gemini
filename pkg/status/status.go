@@ -23,6 +23,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -45,11 +46,13 @@ type GlobalStatus struct {
 func (gs *GlobalStatus) AddWriteError(err joberror.JobError) {
 	gs.Errors.AddError(err)
 	gs.WriteErrors.Add(1)
+	metrics.ExecutionErrors.WithLabelValues("write").Inc()
 }
 
 func (gs *GlobalStatus) AddReadError(err joberror.JobError) {
 	gs.Errors.AddError(err)
 	gs.ReadErrors.Add(1)
+	metrics.ExecutionErrors.WithLabelValues("read").Inc()
 }
 
 func (gs *GlobalStatus) PrintResultAsJSON(
@@ -71,6 +74,7 @@ func (gs *GlobalStatus) PrintResultAsJSON(
 	if err := encoder.Encode(result); err != nil {
 		return errors.Wrap(err, "unable to create json from result")
 	}
+
 	return nil
 }
 
@@ -80,7 +84,7 @@ func (gs *GlobalStatus) String() string {
 }
 
 func (gs *GlobalStatus) HasErrors() bool {
-	return gs.Errors.Len() >= gs.Errors.Cap()
+	return (gs.ReadErrors.Load() + gs.WriteErrors.Load()) >= uint64(gs.Errors.Cap())
 }
 
 //nolint:forbidigo
@@ -108,6 +112,9 @@ func (gs *GlobalStatus) PrintResult(
 }
 
 func NewGlobalStatus(limit int) *GlobalStatus {
+	metrics.ExecutionErrors.WithLabelValues("write").Add(0)
+	metrics.ExecutionErrors.WithLabelValues("read").Add(0)
+
 	return &GlobalStatus{
 		Errors: joberror.NewErrorList(limit),
 	}

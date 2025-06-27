@@ -27,11 +27,11 @@ import (
 
 type JobError struct {
 	Timestamp     time.Time      `json:"timestamp"`
-	Err           error          `json:"err"`
+	Err           error          `json:"err,omitempty"`
 	Message       string         `json:"message"`
 	Query         string         `json:"query"`
 	StmtType      string         `json:"stmt-type"`
-	PartitionKeys typedef.Values `json:"partition-keys,omitempty"`
+	PartitionKeys typedef.Values `json:"partition-keys"`
 }
 
 func (j *JobError) Error() string {
