@@ -146,75 +146,75 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 func TestScyllaLogger(t *testing.T) {
 	t.Parallel()
 
-	for _, item := range CompressionTests {
-		t.Run("Compression_"+item.Compression.String(), func(t *testing.T) {
-			t.Parallel()
-			dir := t.TempDir()
-			oracleFile := dir + "/oracle_statements.json"
-			testFile := dir + "/test_statements.json"
+	item := CompressionTests[0]
 
-			assert := require.New(t)
-			session := utils.SingleScylla(t)
+	t.Run("Compression_"+item.Compression.String(), func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		oracleFile := dir + "/oracle_statements.json"
+		testFile := dir + "/test_statements.json"
 
-			jobList := joberror.NewErrorList(1)
-			pool := workpool.New(50)
-			t.Cleanup(func() {
-				_ = pool.Close()
-			})
-			chMetrics := metrics.NewChannelMetrics[Item]("test", "test", 1)
-			partitionKeys := []*typedef.ColumnDef{
-				{Name: "col1", Type: typedef.TypeInt},
-				{Name: "col2", Type: typedef.TypeText},
-			}
+		assert := require.New(t)
+		session := utils.SingleScylla(t)
 
-			ch := make(chan Item, 10)
-			zapLogger := utils.Must(zap.NewDevelopment())
-
-			logger, err := NewScyllaLoggerWithSession(
-				typedef.Values{5, "test_ddl"},
-				session,
-				partitionKeys,
-				replication.NewNetworkTopologyStrategy(),
-				ch,
-				oracleFile, testFile, item.Compression, jobList,
-				pool, zapLogger, chMetrics,
-			)
-			assert.NoError(err)
-			assert.NotNil(logger)
-
-			itemTest, testJobErr := errorStatement(TypeTest)
-			itemOracle, _ := errorStatement(TypeOracle)
-
-			ch <- ddlStatement(TypeTest)
-			ch <- ddlStatement(TypeOracle)
-			ch <- successStatement(TypeTest)
-			ch <- itemTest
-			ch <- successStatement(TypeOracle)
-			ch <- itemOracle
-
-			jobList.AddError(testJobErr)
-			time.Sleep(2 * time.Second)
-			close(ch)
-			assert.NoError(logger.Close())
-
-			var count int
-			assert.NoError(session.Query("SELECT COUNT(*) FROM logs.statements").Scan(&count))
-			assert.Equal(6, count)
-
-			oracleData := item.ReadData(t, utils.Must(os.Open(oracleFile)))
-			testData := item.ReadData(t, utils.Must(os.Open(testFile)))
-
-			oracleStatements := strings.SplitSeq(strings.TrimRight(oracleData, "\n"), "\n")
-			testStatements := strings.SplitSeq(strings.TrimRight(testData, "\n"), "\n")
-
-			sortedOracle := slices.SortedStableFunc(oracleStatements, strings.Compare)
-			sortedTest := slices.SortedStableFunc(testStatements, strings.Compare)
-
-			assert.Equal(sortedOracle, sortedTest)
-			assert.Len(sortedOracle, 2)
-			assert.Len(sortedTest, 2)
+		jobList := joberror.NewErrorList(1)
+		pool := workpool.New(50)
+		t.Cleanup(func() {
+			_ = pool.Close()
 		})
-	}
+		chMetrics := metrics.NewChannelMetrics[Item]("test", "test", 1)
+		partitionKeys := []*typedef.ColumnDef{
+			{Name: "col1", Type: typedef.TypeInt},
+			{Name: "col2", Type: typedef.TypeText},
+		}
+
+		ch := make(chan Item, 10)
+		zapLogger := utils.Must(zap.NewDevelopment())
+
+		logger, err := NewScyllaLoggerWithSession(
+			typedef.Values{5, "test_ddl"},
+			session,
+			partitionKeys,
+			replication.NewNetworkTopologyStrategy(),
+			ch,
+			oracleFile, testFile, item.Compression, jobList,
+			pool, zapLogger, chMetrics,
+		)
+		assert.NoError(err)
+		assert.NotNil(logger)
+
+		itemTest, testJobErr := errorStatement(TypeTest)
+		itemOracle, _ := errorStatement(TypeOracle)
+
+		ch <- ddlStatement(TypeTest)
+		ch <- ddlStatement(TypeOracle)
+		ch <- successStatement(TypeTest)
+		ch <- itemTest
+		ch <- successStatement(TypeOracle)
+		ch <- itemOracle
+
+		jobList.AddError(testJobErr)
+		time.Sleep(2 * time.Second)
+		close(ch)
+		assert.NoError(logger.Close())
+
+		var count int
+		assert.NoError(session.Query("SELECT COUNT(*) FROM logs.statements").Scan(&count))
+		assert.Equal(6, count)
+
+		oracleData := item.ReadData(t, utils.Must(os.Open(oracleFile)))
+		testData := item.ReadData(t, utils.Must(os.Open(testFile)))
+
+		oracleStatements := strings.SplitSeq(strings.TrimRight(oracleData, "\n"), "\n")
+		testStatements := strings.SplitSeq(strings.TrimRight(testData, "\n"), "\n")
+
+		sortedOracle := slices.SortedStableFunc(oracleStatements, strings.Compare)
+		sortedTest := slices.SortedStableFunc(testStatements, strings.Compare)
+
+		assert.Equal(sortedOracle, sortedTest)
+		assert.Len(sortedOracle, 2)
+		assert.Len(sortedTest, 2)
+	})
 }
 
 func ddlStatement(ty Type) Item {

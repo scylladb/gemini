@@ -241,25 +241,12 @@ func (s *ScyllaLogger) commiter(ctx context.Context, insert string, partitionKey
 	}
 
 	for {
-		select {
-		case <-ctx.Done():
-			for {
-				select {
-				case item, more := <-s.channel:
-					if !more {
-						return
-					}
-					logStatement(item)
-				default:
-					return
-				}
-			}
-		case item, more := <-s.channel:
-			if !more {
-				return
-			}
-			logStatement(item)
+		item, more := <-s.channel
+		if !more {
+			break
 		}
+
+		logStatement(item)
 	}
 }
 
@@ -495,8 +482,8 @@ func (s *ScyllaLogger) writeBrokenPartitionsToFile(errs []joberror.JobError) err
 
 	for {
 		select {
-		case item, ok := <-oracleCh:
-			if !ok {
+		case item, more := <-oracleCh:
+			if !more {
 				oracleCh = nil
 				if testCh == nil {
 					return nil
@@ -507,8 +494,8 @@ func (s *ScyllaLogger) writeBrokenPartitionsToFile(errs []joberror.JobError) err
 			if err = oracleJSONEncoder.Encode(item); err != nil {
 				s.logger.Error("failed to encode oracle statement", zap.Error(err), zap.Any("item", item))
 			}
-		case item, ok := <-testCh:
-			if !ok {
+		case item, more := <-testCh:
+			if !more {
 				testCh = nil
 				if oracleCh == nil {
 					return nil
@@ -525,7 +512,6 @@ func (s *ScyllaLogger) writeBrokenPartitionsToFile(errs []joberror.JobError) err
 
 func (s *ScyllaLogger) Close() error {
 	s.cancel()
-	s.wg.Wait()
 
 	errs := s.errors.Errors()
 	if len(errs) == 0 {
@@ -535,6 +521,8 @@ func (s *ScyllaLogger) Close() error {
 	if err := s.writeBrokenPartitionsToFile(errs); err != nil {
 		return errors.Wrap(err, "failed to write broken partitions to file")
 	}
+
+	s.wg.Wait()
 
 	return nil
 }

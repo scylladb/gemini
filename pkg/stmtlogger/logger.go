@@ -201,7 +201,7 @@ func (l *Logger) LogStmt(item Item) error {
 
 func (l *Logger) Close() error {
 	old := l.channel.Swap(nil)
-	defer close(*old)
+	close(*old)
 
 	return l.closer.Close()
 }
@@ -209,7 +209,7 @@ func (l *Logger) Close() error {
 type itemMarshal struct {
 	Start         string `json:"time"`
 	Values        any    `json:"values"`
-	Error         string `json:"e,omitempty"`
+	Error         string `json:"error"`
 	Statement     string `json:"query"`
 	Host          string `json:"host"`
 	Duration      string `json:"duration"`

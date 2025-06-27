@@ -41,7 +41,7 @@ func TestNewWorkers(t *testing.T) {
 			})
 
 			// Verify channel buffer size
-			assert.Equal(t, count*ChannelSizeMultiplier, cap(w.ch))
+			assert.Equal(t, count*ChannelSizeMultiplier, cap(*w.ch.Load()))
 
 			// Verify workers can handle count number of concurrent tasks
 			// by sending count tasks and ensuring they all complete
@@ -299,33 +299,12 @@ func TestWorkersRelease(t *testing.T) {
 func TestWorkersClose(t *testing.T) {
 	t.Parallel()
 	t.Run("close workers", func(t *testing.T) {
+		t.Parallel()
 		w := New(2)
 
 		// Close should not panic
 		err := w.Close()
 		assert.NoError(t, err)
-
-		// Verify the channel is closed
-		_, open := <-w.ch
-		assert.False(t, open, "Channel should be closed")
-	})
-
-	t.Run("send after close", func(t *testing.T) {
-		t.Parallel()
-		w := New(2)
-		err := w.Close()
-		assert.NoError(t, err)
-
-		// Sending to a closed channel should panic, but we recover
-		defer func() {
-			r := recover()
-			assert.NotNil(t, r, "Expected panic when sending to closed channel")
-		}()
-
-		_ = w.Send(t.Context(), func(_ context.Context) (any, error) {
-			return nil, nil
-		})
-		t.Fatal("Should not reach this point")
 	})
 
 	t.Run("double close", func(t *testing.T) {
