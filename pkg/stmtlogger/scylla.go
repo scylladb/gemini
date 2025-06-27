@@ -48,8 +48,9 @@ var (
 )
 
 type ScyllaLogger struct {
+	cancel               context.CancelFunc
 	session              *gocql.Session
-	channel              <-chan Item
+	channel              chan Item
 	errors               *joberror.ErrorList
 	wg                   *sync.WaitGroup
 	pool                 *workpool.Pool
@@ -100,7 +101,7 @@ func NewScyllaLoggerWithSession(
 	session *gocql.Session,
 	partitionKeys typedef.Columns,
 	repl replication.Replication,
-	ch <-chan Item,
+	ch chan Item,
 	oracleStatementsFile string,
 	testStatementsFile string,
 	compression Compression,
@@ -128,8 +129,10 @@ func NewScyllaLoggerWithSession(
 	}
 
 	wg := &sync.WaitGroup{}
+	ctx, cancel := context.WithCancel(context.Background())
 
 	logger := &ScyllaLogger{
+		cancel:               cancel,
 		schemaChangeValues:   schemaChangeValues,
 		session:              session,
 		compression:          compression,
@@ -147,13 +150,13 @@ func NewScyllaLoggerWithSession(
 	}
 
 	logger.wg.Add(1)
-	go logger.commiter(insertStatement, partitionKeys.LenValues())
+	go logger.commiter(ctx, insertStatement, partitionKeys.LenValues())
 
 	return logger, nil
 }
 
 func NewScyllaLogger(
-	ch <-chan Item,
+	ch chan Item,
 	schemaChangeValues typedef.Values,
 	schema *typedef.Schema,
 	oracleStatementsFile string,
@@ -181,16 +184,14 @@ func NewScyllaLogger(
 	)
 }
 
-func (s *ScyllaLogger) commiter(insert string, partitionKeysCount int) {
+func (s *ScyllaLogger) commiter(ctx context.Context, insert string, partitionKeysCount int) {
 	defer s.wg.Done()
-
-	ctx := context.Background()
 
 	schemaChangeValues := make([]any, 0, partitionKeysCount+1)
 	schemaChangeValues = append(schemaChangeValues, s.schemaChangeValues[:partitionKeysCount]...)
 	schemaChangeValues = append(schemaChangeValues, true)
 
-	for item := range s.channel {
+	logStatement := func(item Item) {
 		s.metrics.Dec(item)
 		s.pool.SendWithoutResult(ctx, func(_ context.Context) {
 			values := make([]any, 0, partitionKeysCount+additionalColumnsCount)
@@ -198,6 +199,10 @@ func (s *ScyllaLogger) commiter(insert string, partitionKeysCount int) {
 			if item.StatementType.IsSchemaChange() {
 				values = append(values, schemaChangeValues...)
 			} else {
+				if !item.Values.IsLeft() {
+					return
+				}
+
 				itemValues := item.Values.MustLeft()
 
 				if len(itemValues) >= partitionKeysCount {
@@ -233,6 +238,28 @@ func (s *ScyllaLogger) commiter(insert string, partitionKeysCount int) {
 				s.logger.Error("failed to insert into statements table", zap.Error(err))
 			}
 		})
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			for {
+				select {
+				case item, more := <-s.channel:
+					if !more {
+						return
+					}
+					logStatement(item)
+				default:
+					return
+				}
+			}
+		case item, more := <-s.channel:
+			if !more {
+				return
+			}
+			logStatement(item)
+		}
 	}
 }
 
@@ -497,6 +524,7 @@ func (s *ScyllaLogger) writeBrokenPartitionsToFile(errs []joberror.JobError) err
 }
 
 func (s *ScyllaLogger) Close() error {
+	s.cancel()
 	s.wg.Wait()
 
 	errs := s.errors.Errors()

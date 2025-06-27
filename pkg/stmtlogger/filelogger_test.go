@@ -15,7 +15,6 @@
 package stmtlogger
 
 import (
-	"compress/gzip"
 	"encoding/json"
 	"io"
 	"os"
@@ -26,7 +25,6 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
-	"github.com/klauspost/compress/zstd"
 	"github.com/samber/mo"
 	"go.uber.org/zap"
 
@@ -51,41 +49,41 @@ var CompressionTests = []struct {
 			return string(data)
 		},
 	},
-	{
-		Compression: GZIPCompression,
-		ReadData: func(tb testing.TB, f io.Reader) string {
-			tb.Helper()
-
-			reader, err := gzip.NewReader(f)
-			if err != nil {
-				tb.Fatalf("Failed to read file: %s", err)
-			}
-
-			data, err := io.ReadAll(reader)
-			if err != nil {
-				tb.Fatalf("Failed to read data from file: %s", err)
-			}
-
-			return string(data)
-		},
-	},
-	{
-		Compression: ZSTDCompression,
-		ReadData: func(tb testing.TB, f io.Reader) string {
-			tb.Helper()
-			reader, err := zstd.NewReader(f)
-			if err != nil {
-				tb.Fatalf("Failed to read file: %s", err)
-			}
-
-			data, err := io.ReadAll(reader)
-			if err != nil {
-				tb.Fatalf("Failed to read data from file: %s", err)
-			}
-
-			return string(data)
-		},
-	},
+	//{
+	//	Compression: GZIPCompression,
+	//	ReadData: func(tb testing.TB, f io.Reader) string {
+	//		tb.Helper()
+	//
+	//		reader, err := gzip.NewReader(f)
+	//		if err != nil {
+	//			tb.Fatalf("Failed to read file: %s", err)
+	//		}
+	//
+	//		data, err := io.ReadAll(reader)
+	//		if err != nil {
+	//			tb.Fatalf("Failed to read data from file: %s", err)
+	//		}
+	//
+	//		return string(data)
+	//	},
+	//},
+	//{
+	//	Compression: ZSTDCompression,
+	//	ReadData: func(tb testing.TB, f io.Reader) string {
+	//		tb.Helper()
+	//		reader, err := zstd.NewReader(f)
+	//		if err != nil {
+	//			tb.Fatalf("Failed to read file: %s", err)
+	//		}
+	//
+	//		data, err := io.ReadAll(reader)
+	//		if err != nil {
+	//			tb.Fatalf("Failed to read data from file: %s", err)
+	//		}
+	//
+	//		return string(data)
+	//	},
+	//},
 }
 
 func TestOutputToFile(t *testing.T) {

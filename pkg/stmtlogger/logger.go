@@ -78,11 +78,11 @@ type (
 		channelSize int
 	}
 
-	Option func(*options, <-chan Item, metrics.ChannelMetrics) error
+	Option func(*options, chan Item, metrics.ChannelMetrics) error
 )
 
 func WithChannelSize(size int) Option {
-	return func(o *options, _ <-chan Item, _ metrics.ChannelMetrics) error {
+	return func(o *options, _ chan Item, _ metrics.ChannelMetrics) error {
 		if size <= 0 {
 			return errors.New("channel size must be greater than 0")
 		}
@@ -103,7 +103,7 @@ func WithScyllaLogger(
 	pool *workpool.Pool,
 	l *zap.Logger,
 ) Option {
-	return func(o *options, ch <-chan Item, chMetrics metrics.ChannelMetrics) error {
+	return func(o *options, ch chan Item, chMetrics metrics.ChannelMetrics) error {
 		logger, err := NewScyllaLogger(
 			ch,
 			schemaChangesValues,
@@ -130,7 +130,7 @@ func WithScyllaLogger(
 }
 
 func WithIOWriterLogger(name string, input io.Writer, compression Compression, l *zap.Logger) Option {
-	return func(o *options, ch <-chan Item, _ metrics.ChannelMetrics) error {
+	return func(o *options, ch chan Item, _ metrics.ChannelMetrics) error {
 		logger, err := NewIOWriterLogger(ch, name, input, compression, l)
 		if err != nil {
 			return err
@@ -143,7 +143,7 @@ func WithIOWriterLogger(name string, input io.Writer, compression Compression, l
 }
 
 func WithFileLogger(filePath string, compression Compression, l *zap.Logger) Option {
-	return func(o *options, ch <-chan Item, _ metrics.ChannelMetrics) error {
+	return func(o *options, ch chan Item, _ metrics.ChannelMetrics) error {
 		logger, err := NewFileLogger(ch, filePath, compression, l)
 		if err != nil {
 			return err
@@ -201,7 +201,7 @@ func (l *Logger) LogStmt(item Item) error {
 
 func (l *Logger) Close() error {
 	old := l.channel.Swap(nil)
-	close(*old)
+	defer close(*old)
 
 	return l.closer.Close()
 }

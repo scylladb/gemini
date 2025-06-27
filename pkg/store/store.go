@@ -236,6 +236,7 @@ func createCluster(
 	cluster.Events.DisableSchemaEvents = false
 	cluster.Events.DisableNodeStatusEvents = false
 	cluster.Logger = zap.NewStdLog(logger.Named("gocql").With(zap.String("cluster", string(config.Name))))
+	cluster.DefaultIdempotence = false
 	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
 		Min:        10 * time.Millisecond,
 		Max:        10 * time.Second,

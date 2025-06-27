@@ -49,14 +49,21 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 	var err error
 	for i := range c.maxRetriesMutate {
 		mutateErr := c.doMutate(context.WithValue(ctx, utils.GeminiAttempt, i), stmt, ts)
-		defer metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
+		metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
 
 		if mutateErr == nil {
+			if i > 0 {
+				c.logger.Info("mutation applied after many attempts",
+					zap.Int("attempt", i),
+					zap.Any("values", stmt.Values),
+					zap.String("system", c.system),
+				)
+			}
 			return nil
 		}
 
-		if errors.Is(mutateErr, context.Canceled) || errors.Is(mutateErr, context.DeadlineExceeded) {
-			return mutateErr
+		if errors.Is(mutateErr, context.Canceled) {
+			return nil
 		}
 
 		err = multierr.Append(err, mutateErr)
@@ -64,6 +71,8 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 			"failed to apply mutation",
 			zap.Int("attempt", i),
 			zap.Error(err),
+			zap.String("system", c.system),
+			zap.Any("values", stmt.Values),
 		)
 		time.Sleep(c.maxRetriesMutateSleep)
 	}
@@ -84,16 +93,18 @@ func (c *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, timestamp m
 	}
 
 	if err := query.Exec(); err != nil {
-		if errs.Is(err, context.DeadlineExceeded) || errs.Is(err, context.Canceled) {
+		if errs.Is(err, context.Canceled) {
+			return nil
+		}
+
+		if errs.Is(err, context.DeadlineExceeded) {
+			metrics.CQLQueryTimeouts.WithLabelValues(c.system, c.system).Inc()
+
 			c.logger.Debug("deadline exceeded for mutation query",
 				zap.String("system", c.system),
 				zap.String("query", queryBody),
 				zap.Any("values", stmt.Values),
 			)
-		}
-
-		if !c.ignore(err, opType(stmt)) {
-			return errors.Wrapf(err, "[cluster = %s, query = '%s']", c.system, queryBody)
 		}
 	}
 
@@ -144,19 +155,5 @@ func opType(stmt *typedef.Stmt) string {
 		return "batch"
 	default:
 		return "unknown"
-	}
-}
-
-func (c *cqlStore) ignore(err error, ty string) bool {
-	if err == nil {
-		return true
-	}
-	//nolint:errorlint
-	switch {
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		metrics.CQLQueryTimeouts.WithLabelValues(c.system, ty).Inc()
-		return true
-	default:
-		return false
 	}
 }
