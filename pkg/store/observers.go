@@ -46,6 +46,12 @@ func (c ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedB
 				geminiAttempt = 1
 			}
 
+			partitionKeysTokens := ctx.Value(utils.PartitionKeys).([]typedef.ValueWithToken)
+			partitionKeys := make([]any, len(partitionKeysTokens))
+			for _, pk := range partitionKeysTokens {
+				partitionKeys = append(partitionKeys, pk.Value...)
+			}
+
 			queryID, ok := ctx.Value(utils.QueryID).(gocql.UUID)
 			if !ok {
 				queryID = gocql.UUIDFromTime(batch.Start)
@@ -63,6 +69,7 @@ func (c ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedB
 				GeminiAttempt: geminiAttempt,
 				Type:          c.ClusterName,
 				StatementType: op,
+				PartitionKeys: partitionKeys,
 			})
 			if err != nil {
 				c.AppLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("batch", batch))
@@ -95,6 +102,12 @@ func (c ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQ
 			geminiAttempt = 1
 		}
 
+		partitionKeysTokens := ctx.Value(utils.PartitionKeys).([]typedef.ValueWithToken)
+		partitionKeys := make([]any, len(partitionKeysTokens))
+		for _, pk := range partitionKeysTokens {
+			partitionKeys = append(partitionKeys, pk.Value...)
+		}
+
 		queryID, ok := ctx.Value(utils.QueryID).(gocql.UUID)
 		if !ok {
 			queryID = gocql.UUIDFromTime(query.Start)
@@ -112,6 +125,7 @@ func (c ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQ
 			GeminiAttempt: geminiAttempt,
 			Type:          c.ClusterName,
 			StatementType: op,
+			PartitionKeys: partitionKeys,
 		})
 		if err != nil {
 			c.AppLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("query", query))

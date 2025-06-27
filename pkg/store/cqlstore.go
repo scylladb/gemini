@@ -59,8 +59,12 @@ func (e MutationError) Error() string {
 
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
 	var err error
+
+	newCtx := context.WithValue(ctx, utils.PartitionKeys, stmt.ValuesWithToken)
+
 	for i := range c.maxRetriesMutate {
-		mutateErr := c.doMutate(context.WithValue(ctx, utils.GeminiAttempt, i), stmt, ts)
+		newCtx = context.WithValue(newCtx, utils.GeminiAttempt, i)
+		mutateErr := c.doMutate(newCtx, stmt, ts)
 		metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
 
 		if mutateErr == nil {

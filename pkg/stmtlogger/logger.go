@@ -57,6 +57,7 @@ type (
 		GeminiAttempt int                               `json:"g_a"`
 		ID            gocql.UUID                        `json:"id"`
 		StatementType typedef.OpType                    `json:"-"`
+		PartitionKeys typedef.Values `json:"partitionKeys"`
 	}
 
 	Duration struct {
@@ -215,6 +216,7 @@ type itemMarshal struct {
 	Duration      string `json:"duration"`
 	Attempt       int    `json:"driver_attempt"`
 	GeminiAttempt int    `json:"gemini_attempt"`
+	PartitionKeys []any   `json:"partition_keys,omitempty"`
 }
 
 func (i Item) MarshalJSON() ([]byte, error) {
@@ -245,6 +247,7 @@ func (i Item) MarshalJSON() ([]byte, error) {
 		Duration:      i.Duration.Duration.String(),
 		Attempt:       i.Attempt,
 		GeminiAttempt: i.GeminiAttempt,
+		PartitionKeys: i.PartitionKeys,
 	})
 }
 

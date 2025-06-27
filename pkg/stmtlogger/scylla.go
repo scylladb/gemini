@@ -199,16 +199,8 @@ func (s *ScyllaLogger) commiter(ctx context.Context, insert string, partitionKey
 			if item.StatementType.IsSchemaChange() {
 				values = append(values, schemaChangeValues...)
 			} else {
-				if !item.Values.IsLeft() {
-					return
-				}
-
-				itemValues := item.Values.MustLeft()
-
-				if len(itemValues) >= partitionKeysCount {
-					values = append(values, itemValues[:partitionKeysCount]...)
-					values = append(values, false)
-				}
+				values = append(values, item.PartitionKeys...)
+				values = append(values, false)
 			}
 
 			var itemErr string

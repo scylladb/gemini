@@ -106,6 +106,7 @@ func successStatement(ty Type) Item {
 		GeminiAttempt: 1,
 		ID:            gocql.TimeUUID(),
 		StatementType: typedef.OpInsert,
+		PartitionKeys: values,
 	}
 
 	return item
@@ -129,6 +130,7 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 		GeminiAttempt: 1,
 		ID:            gocql.TimeUUID(),
 		StatementType: typedef.OpInsert,
+		PartitionKeys: values,
 	}
 
 	err := joberror.JobError{
