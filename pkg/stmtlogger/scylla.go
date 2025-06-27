@@ -199,7 +199,7 @@ func (s *ScyllaLogger) commiter(ctx context.Context, insert string, partitionKey
 			if item.StatementType.IsSchemaChange() {
 				values = append(values, schemaChangeValues...)
 			} else {
-				values = append(values, item.PartitionKeys...)
+				values = append(values, item.PartitionKeys[:s.partitionKeysCount]...)
 				values = append(values, false)
 			}
 

@@ -60,7 +60,11 @@ func (e MutationError) Error() string {
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
 	var err error
 
-	newCtx := context.WithValue(ctx, utils.PartitionKeys, stmt.ValuesWithToken)
+	partitionKeys := make([]any, 0, len(stmt.ValuesWithToken))
+	for _, pk := range stmt.ValuesWithToken {
+		partitionKeys = append(partitionKeys, pk.Value...)
+	}
+	newCtx := context.WithValue(ctx, utils.PartitionKeys, partitionKeys)
 
 	for i := range c.maxRetriesMutate {
 		newCtx = context.WithValue(newCtx, utils.GeminiAttempt, i)
@@ -77,7 +81,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 
 		err = multierr.Append(err, MutationError{
 			Inner:         mutateErr,
-			PartitionKeys: stmt.Values,
+			PartitionKeys: partitionKeys,
 		})
 		time.Sleep(c.maxRetriesMutateSleep)
 	}

@@ -302,11 +302,16 @@ func createLogger(level string) *zap.Logger {
 	}
 
 	encoderCfg := zap.NewProductionEncoderConfig()
+	encoderCfg.EncodeTime = zapcore.RFC3339NanoTimeEncoder
+	encoderCfg.EncodeDuration = zapcore.StringDurationEncoder
+	encoderCfg.EncodeLevel = zapcore.LowercaseLevelEncoder
+	encoderCfg.EncodeCaller = zapcore.FullCallerEncoder
+
 	logger := zap.New(zapcore.NewCore(
 		zapcore.NewJSONEncoder(encoderCfg),
 		zapcore.NewMultiWriteSyncer(zapcore.Lock(file.(zapcore.WriteSyncer)), zapcore.Lock(os.Stdout)),
 		lvl,
-	), zap.WithCaller(true), zap.AddCallerSkip(1))
+	))
 	return logger
 }
 

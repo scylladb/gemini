@@ -46,16 +46,12 @@ func (c ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedB
 				geminiAttempt = 1
 			}
 
-			partitionKeysTokens := ctx.Value(utils.PartitionKeys).([]typedef.ValueWithToken)
-			partitionKeys := make([]any, len(partitionKeysTokens))
-			for _, pk := range partitionKeysTokens {
-				partitionKeys = append(partitionKeys, pk.Value...)
-			}
-
 			queryID, ok := ctx.Value(utils.QueryID).(gocql.UUID)
 			if !ok {
 				queryID = gocql.UUIDFromTime(batch.Start)
 			}
+
+			partitionKeys := ctx.Value(utils.PartitionKeys).(typedef.Values)
 
 			err := c.Logger.LogStmt(stmtlogger.Item{
 				ID:            queryID,
@@ -102,11 +98,7 @@ func (c ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQ
 			geminiAttempt = 1
 		}
 
-		partitionKeysTokens := ctx.Value(utils.PartitionKeys).([]typedef.ValueWithToken)
-		partitionKeys := make([]any, len(partitionKeysTokens))
-		for _, pk := range partitionKeysTokens {
-			partitionKeys = append(partitionKeys, pk.Value...)
-		}
+		partitionKeys := ctx.Value(utils.PartitionKeys).([]any)
 
 		queryID, ok := ctx.Value(utils.QueryID).(gocql.UUID)
 		if !ok {

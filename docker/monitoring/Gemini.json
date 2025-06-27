@@ -305,7 +305,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "gemini_execution_errors",
+          "expr": "gemini_execution_errors{ty=\"read\"}",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -368,7 +368,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "gemini_execution_erros{ty=\"write\"}",
+          "expr": "gemini_execution_errors{ty=\"write\"}",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -3262,5 +3262,5 @@
   "timezone": "browser",
   "title": "Gemini Monitoring",
   "uid": "fem2xi0ku27eoc",
-  "version": 4
+  "version": 6
 }
