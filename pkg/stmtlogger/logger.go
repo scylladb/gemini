@@ -92,7 +92,6 @@ func WithChannelSize(size int) Option {
 
 func WithScyllaLogger(
 	schemaChangesValues typedef.PartitionKeys,
-	schemaPartitionKeys typedef.Columns,
 	schema *typedef.Schema,
 	oracleStatementsFile string,
 	testStatementsFile string,

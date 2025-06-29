@@ -19,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 func TestJobError_Error(t *testing.T) {
@@ -32,10 +34,10 @@ func TestJobError_Error(t *testing.T) {
 		Err:       err,
 		Message:   "test message",
 		Query:     "SELECT * FROM test",
-		StmtType:  "SELECT",
+		StmtType:  typedef.SelectStatementType,
 	}
 
-	expected := "JobError(err=test error): test message (stmt-type=SELECT, query=SELECT * FROM test) time=2023-01-01T12:00:00Z"
+	expected := "JobError(err=test error): test message (stmt-type=SelectStatement, query=SELECT * FROM test) time=2023-01-01T12:00:00Z"
 	actual := jobErr.Error()
 
 	if actual != expected {
@@ -53,10 +55,10 @@ func TestJobError_ErrorWithEmptyFields(t *testing.T) {
 		Err:       nil,
 		Message:   "",
 		Query:     "",
-		StmtType:  "",
+		StmtType:  typedef.SelectStatementType,
 	}
 
-	expected := "JobError(err=<nil>):  (stmt-type=, query=) time=2023-01-01T12:00:00Z"
+	expected := "JobError(err=<nil>):  (stmt-type=SelectStatement, query=) time=2023-01-01T12:00:00Z"
 	actual := jobErr.Error()
 
 	if actual != expected {
@@ -98,7 +100,7 @@ func TestErrorList_AddError(t *testing.T) {
 		Err:       errors.New("error 1"),
 		Message:   "message 1",
 		Query:     "query 1",
-		StmtType:  "SELECT",
+		StmtType:  typedef.SelectStatementType,
 	}
 
 	err2 := JobError{
@@ -106,7 +108,7 @@ func TestErrorList_AddError(t *testing.T) {
 		Err:       errors.New("error 2"),
 		Message:   "message 2",
 		Query:     "query 2",
-		StmtType:  "INSERT",
+		StmtType:  typedef.InsertStatementType,
 	}
 
 	el.AddError(err1)
@@ -139,7 +141,7 @@ func TestErrorList_AddErrorExceedsLimit(t *testing.T) {
 			Err:       errors.New("error"),
 			Message:   "message",
 			Query:     "query",
-			StmtType:  "SELECT",
+			StmtType:  typedef.SelectStatementType,
 		}
 		el.AddError(err)
 	}
@@ -150,7 +152,7 @@ func TestErrorList_AddErrorExceedsLimit(t *testing.T) {
 		Err:       errors.New("error 3"),
 		Message:   "message 3",
 		Query:     "query 3",
-		StmtType:  "SELECT",
+		StmtType:  typedef.SelectStatementType,
 	}
 	el.AddError(err)
 
@@ -165,7 +167,7 @@ func TestErrorList_AddErrorExceedsLimit(t *testing.T) {
 		Err:       errors.New("error 4"),
 		Message:   "message 4",
 		Query:     "query 4",
-		StmtType:  "SELECT",
+		StmtType:  typedef.SelectStatementType,
 	}
 	el.AddError(err4)
 
@@ -194,7 +196,7 @@ func TestErrorList_Errors(t *testing.T) {
 			Err:       errors.New("error"),
 			Message:   "message",
 			Query:     "query",
-			StmtType:  "SELECT",
+			StmtType:  typedef.SelectStatementType,
 		}
 		el.AddError(err)
 	}
@@ -223,7 +225,7 @@ func TestErrorList_Error(t *testing.T) {
 		Err:       errors.New("error 1"),
 		Message:   "message 1",
 		Query:     "query 1",
-		StmtType:  "SELECT",
+		StmtType:  typedef.SelectStatementType,
 	}
 
 	err2 := JobError{
@@ -231,7 +233,7 @@ func TestErrorList_Error(t *testing.T) {
 		Err:       errors.New("error 2"),
 		Message:   "message 2",
 		Query:     "query 2",
-		StmtType:  "INSERT",
+		StmtType:  typedef.InsertStatementType,
 	}
 
 	el.AddError(err1)
@@ -239,8 +241,8 @@ func TestErrorList_Error(t *testing.T) {
 
 	errorStr = el.Error()
 
-	val := `0JobError(err=error 1): message 1 (stmt-type=SELECT, query=query 1) time=2023-01-01T12:00:00Z
-1JobError(err=error 2): message 2 (stmt-type=INSERT, query=query 2) time=2023-01-01T12:00:00Z
+	val := `0JobError(err=error 1): message 1 (stmt-type=SelectStatement, query=query 1) time=2023-01-01T12:00:00Z
+1JobError(err=error 2): message 2 (stmt-type=InsertStatement, query=query 2) time=2023-01-01T12:00:00Z
 `
 	// Check that the string contains the expected parts
 	if errorStr != val {
@@ -275,7 +277,7 @@ func TestErrorList_ConcurrentAccess(t *testing.T) {
 					Err:       errors.New("concurrent error"),
 					Message:   "concurrent message",
 					Query:     "concurrent query",
-					StmtType:  "SELECT",
+					StmtType:  typedef.SelectStatementType,
 				}
 				el.AddError(err)
 			}

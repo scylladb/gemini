@@ -44,9 +44,8 @@ const (
 )
 
 var (
-	additionalColumnsArr          = strings.Split(additionalColumns, ",")
-	additionalColumnsCount        = len(additionalColumnsArr)
-	additionalColumnsPlaceholders = strings.Trim(strings.Repeat("?,", additionalColumnsCount), ",")
+	additionalColumnsArr   = strings.Split(additionalColumns, ",")
+	additionalColumnsCount = len(additionalColumnsArr)
 )
 
 type ScyllaLogger struct {

@@ -16,7 +16,6 @@ package typedef
 
 import (
 	"bytes"
-	"github.com/scylladb/gemini/pkg/utils"
 	"math"
 	"math/rand/v2"
 	"reflect"
@@ -26,6 +25,7 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 // nolint:revive

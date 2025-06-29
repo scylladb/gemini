@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/gkampitakis/go-snaps/snaps"
-	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/samber/mo"
 	"github.com/stretchr/testify/require"
@@ -76,8 +75,7 @@ func successStatement(ty Type) Item {
 		Duration:      Duration{Duration: time.Second},
 		Attempt:       1,
 		GeminiAttempt: 1,
-		ID:            gocql.TimeUUID(),
-		StatementType: typedef.OpInsert,
+		StatementType: typedef.InsertStatementType,
 		PartitionKeys: typedef.Values{"col1": []any{1}, "col2": []any{"test_1"}},
 	}
 
@@ -100,8 +98,7 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 		Duration:      Duration{Duration: time.Second},
 		Attempt:       1,
 		GeminiAttempt: 1,
-		ID:            gocql.TimeUUID(),
-		StatementType: typedef.OpInsert,
+		StatementType: typedef.InsertStatementType,
 		PartitionKeys: typedef.Values{"col1": []any{2}, "col2": []any{"test_2"}},
 	}
 
@@ -202,7 +199,6 @@ func ddlStatement(ty Type) Item {
 		Duration:      Duration{Duration: time.Second},
 		Attempt:       1,
 		GeminiAttempt: 1,
-		ID:            gocql.TimeUUID(),
-		StatementType: typedef.OpSchemaCreate,
+		StatementType: typedef.CreateSchemaStatementType,
 	}
 }

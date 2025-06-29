@@ -62,7 +62,7 @@ func (g *Generator) genSinglePartitionQueryMv(ctx context.Context, mv *typedef.M
 
 func (g *Generator) genMultiplePartitionQueryMv(ctx context.Context, mv *typedef.MaterializedView) *typedef.Stmt {
 	numQueryPKs := utils.RandInt2(g.random, 2, mv.PartitionKeys.Len())
-	values := make([]any, numQueryPKs*mv.PartitionKeys.LenValues())
+	values := make([]any, 0, numQueryPKs*mv.PartitionKeys.LenValues())
 	builder := qb.Select(g.keyspace + "." + mv.Name)
 
 	for _, pk := range mv.PartitionKeys {

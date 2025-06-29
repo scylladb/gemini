@@ -216,6 +216,7 @@ func (st StatementType) IsSchema() bool {
 		return false
 	}
 }
+
 func (st StatementType) OpType() OpType {
 	switch st {
 	case SelectStatementType,

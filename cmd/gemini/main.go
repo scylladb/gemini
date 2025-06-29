@@ -46,7 +46,8 @@ func main() {
 		}
 
 		if val {
-			data, err := json.MarshalIndent(versionInfo, "", "    ")
+			var data []byte
+			data, err = json.MarshalIndent(versionInfo, "", "    ")
 			if err != nil {
 				log.Fatalf("Failed to marshal version info: %v", err)
 			}
