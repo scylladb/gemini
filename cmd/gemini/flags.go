@@ -84,7 +84,7 @@ var (
 func setupFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().BoolVarP(&versionFlag, "version", "", false, "Print version information")
 	cmd.PersistentFlags().
-		BoolP("version-json", "", false, "Print version information in JSON format")
+		BoolP("version-json", "", true, "Print version information in JSON format")
 	cmd.Flags().
 		StringSliceVarP(&testClusterHost, "test-cluster", "t", []string{}, "Host names or IPs of the test cluster that is system under test")
 	cmd.Flags().
