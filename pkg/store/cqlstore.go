@@ -58,9 +58,11 @@ func (e MutationError) Error() string {
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
 	var err error
 
-	cqlRequestsMetric := metrics.CQLRequests.WithLabelValues(c.system, stmt.QueryType.OpType().String())
-	cqlErrorRequestsMetric := metrics.CQLErrorRequests.WithLabelValues(c.system, stmt.QueryType.OpType().String())
-	cqlTimeoutRequestsMetric := metrics.CQLQueryTimeouts.WithLabelValues(c.system, stmt.QueryType.OpType().String())
+	stType := stmt.QueryType.String()
+
+	cqlRequestsMetric := metrics.CQLRequests.WithLabelValues(c.system, stType)
+	cqlErrorRequestsMetric := metrics.CQLErrorRequests.WithLabelValues(c.system, stType)
+	cqlTimeoutRequestsMetric := metrics.CQLQueryTimeouts.WithLabelValues(c.system, stType)
 
 	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
 	defer query.Release()
@@ -102,7 +104,7 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 
 	defer func() {
 		query.Release()
-		metrics.CQLRequests.WithLabelValues(c.system, stmt.QueryType.OpType().String()).Inc()
+		metrics.CQLRequests.WithLabelValues(c.system, stmt.QueryType.String()).Inc()
 	}()
 
 	rows := make(Rows, iter.NumRows())

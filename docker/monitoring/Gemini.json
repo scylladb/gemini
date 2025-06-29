@@ -1567,7 +1567,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (cluster, query, instance)(rate(gemini_cql_query_time_bucket{cluster=\"test_cluster\",query=~\"InsertStatement|SelectStatement|UpdateStatement|DeleteStatement\"}[$__rate_interval]))",
+          "expr": "sum by (cluster, query, instance)(rate(gemini_cql_query_time_bucket{cluster=\"test\"}[$__rate_interval]))",
           "legendFormat": "{{instance}} {{query}}",
           "range": true,
           "refId": "A"
@@ -1626,7 +1626,7 @@
         {
           "editorMode": "code",
           "exemplar": false,
-          "expr": "gemini_cql_connections{host=~\".+\", cluster=\"oracle_cluster\"}",
+          "expr": "gemini_cql_connections{host=~\".+\", cluster=\"oracle\"}",
           "instant": true,
           "interval": "0",
           "legendFormat": "{{instance}} - {{host}}",
@@ -1699,7 +1699,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "gemini_cql_connect_time_sum{cluster=\"oracle_cluster\"} / gemini_cql_connect_time_count{cluster=\"oracle_cluster\"}",
+          "expr": "gemini_cql_connect_time_sum{cluster=\"oracle\"} / gemini_cql_connect_time_count{cluster=\"oracle\"}",
           "legendFormat": "{{instance}} - {{host}} {{cluster}}",
           "range": true,
           "refId": "A"
@@ -1762,7 +1762,7 @@
         {
           "editorMode": "code",
           "exemplar": false,
-          "expr": "gemini_cql_connections{host=~\".+\", cluster=~\"test_cluster\"}",
+          "expr": "gemini_cql_connections{host=~\".+\", cluster=~\"test\"}",
           "instant": true,
           "interval": "0",
           "legendFormat": "{{instance}} - {{host}}",
@@ -1835,7 +1835,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "gemini_cql_connect_time_sum{cluster=\"test_cluster\"} / gemini_cql_connect_time_count{cluster=\"test_cluster\"}",
+          "expr": "gemini_cql_connect_time_sum{cluster=\"test\"} / gemini_cql_connect_time_count{cluster=\"test\"}",
           "legendFormat": "{{instance}} - {{host}} {{cluster}}",
           "range": true,
           "refId": "A"
@@ -2020,7 +2020,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "rate(gemini_cql_query_time_sum{cluster=\"test_cluster\"}[$__rate_interval]) / rate(gemini_cql_query_time_count{cluster=\"test_cluster\"}[$__rate_interval])",
+          "expr": "rate(gemini_cql_query_time_sum{cluster=\"test\"}[$__rate_interval]) / rate(gemini_cql_query_time_count{cluster=\"test\"}[$__rate_interval])",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -2090,7 +2090,7 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 8,
+        "w": 12,
         "x": 0,
         "y": 86
       },
@@ -2122,12 +2122,163 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P1809F7CD0C75ACF3"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 5,
+            "pointSize": 12,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 86
+      },
+      "id": 46,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.6.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "rate(gemini_cql_batches[$__rate_interval])",
+          "legendFormat": "{{instance}} - {{cluster}} {{error}} {{query}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Batch Queries",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P1809F7CD0C75ACF3"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 93
+      },
+      "id": 47,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.6.1",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (instance, query_type) (gemini_cql_queries{cluster=\"test\"})",
+          "legendFormat": "{{query_type}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Test Cluster Average Connection Time",
+      "type": "stat"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 93
+        "y": 107
       },
       "id": 9,
       "panels": [],
@@ -2199,7 +2350,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 94
+        "y": 108
       },
       "id": 1,
       "options": {
@@ -2296,7 +2447,7 @@
         "h": 7,
         "w": 4,
         "x": 8,
-        "y": 94
+        "y": 108
       },
       "id": 5,
       "options": {
@@ -2388,7 +2539,7 @@
         "h": 7,
         "w": 5,
         "x": 12,
-        "y": 94
+        "y": 108
       },
       "id": 2,
       "options": {
@@ -2487,7 +2638,7 @@
         "h": 7,
         "w": 7,
         "x": 17,
-        "y": 94
+        "y": 108
       },
       "id": 4,
       "options": {
@@ -2589,7 +2740,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 101
+        "y": 115
       },
       "id": 3,
       "options": {
@@ -2742,7 +2893,7 @@
         "h": 8,
         "w": 10,
         "x": 0,
-        "y": 109
+        "y": 123
       },
       "id": 12,
       "options": {
@@ -2834,7 +2985,7 @@
         "h": 8,
         "w": 14,
         "x": 10,
-        "y": 109
+        "y": 123
       },
       "id": 31,
       "options": {
@@ -2869,7 +3020,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 117
+        "y": 131
       },
       "id": 39,
       "panels": [],
@@ -2940,7 +3091,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 118
+        "y": 132
       },
       "id": 40,
       "options": {
@@ -3008,7 +3159,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 118
+        "y": 132
       },
       "id": 41,
       "options": {
@@ -3111,7 +3262,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 126
+        "y": 140
       },
       "id": 42,
       "options": {
@@ -3211,7 +3362,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 126
+        "y": 140
       },
       "id": 43,
       "options": {
@@ -3255,12 +3406,12 @@
     "list": []
   },
   "time": {
-    "from": "now-5m",
+    "from": "now-15m",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "browser",
   "title": "Gemini Monitoring",
   "uid": "fem2xi0ku27eoc",
-  "version": 6
+  "version": 19
 }
