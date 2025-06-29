@@ -17,6 +17,7 @@ package statements
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/scylladb/gocqlx/v3/qb"
@@ -47,6 +48,22 @@ func (g *Generator) Select(ctx context.Context) *typedef.Stmt {
 	return nil
 }
 
+const MaxCartesianProductCount = float64(100.0)
+
+// in totalCartesianProductCount chooses the first number of partition keys that
+// multiplied by the number of partition keys does not exceed MaxCartesianProductCount.
+func (g *Generator) totalCartesianProductCount(numQueryPKs, pkLen float64) int {
+
+	for i := int(numQueryPKs); i > 0; i-- {
+		multiplier := math.Pow(float64(i), pkLen)
+		if multiplier < MaxCartesianProductCount {
+			return i
+		}
+	}
+
+	return 1
+}
+
 func (g *Generator) genSinglePartitionQuery(ctx context.Context) *typedef.Stmt {
 	g.table.RLock()
 	defer g.table.RUnlock()
@@ -68,12 +85,14 @@ func (g *Generator) genSinglePartitionQuery(ctx context.Context) *typedef.Stmt {
 
 func (g *Generator) getMultiplePartitionKeys(initial int) int {
 	l := g.table.PartitionKeys.Len()
-	return min(initial, l) + g.random.IntN(l)
+	maximumCount := g.totalCartesianProductCount(float64(initial), float64(l))
+	return min(initial, l) + g.random.IntN(maximumCount)
 }
 
 func (g *Generator) getMultipleClusteringKeys(initial int) int {
 	l := g.table.ClusteringKeys.Len()
-	return min(initial, l) + g.random.IntN(l)
+	maximumCount := g.totalCartesianProductCount(float64(initial), float64(l))
+	return min(initial, l) + g.random.IntN(maximumCount)
 }
 
 func (g *Generator) getIndex(initial int) int {
