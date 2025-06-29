@@ -130,7 +130,7 @@ func (v *Validation) Do(ctx context.Context) error {
 
 		if v.status.HasErrors() {
 			v.stopFlag.SetSoft(true)
-			return nil
+			return errors.New("validation job stopped due to errors")
 		}
 	}
 

@@ -115,7 +115,6 @@ func New(
 		statementLogger, err = stmtlogger.NewLogger(
 			stmtlogger.WithScyllaLogger(
 				schemaChangesValues,
-				schema.Tables[0].PartitionKeys,
 				schema,
 				cfg.OracleStatementFile,
 				cfg.TestStatementFile,
