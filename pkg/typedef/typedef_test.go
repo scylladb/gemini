@@ -15,8 +15,6 @@
 package typedef
 
 import (
-	"bytes"
-	"fmt"
 	"math/big"
 	"net"
 	"testing"
@@ -100,38 +98,4 @@ var stmt = &Stmt{
 		"a",
 		big.NewInt(1001),
 	},
-}
-
-func TestPrettyCQL(t *testing.T) {
-	t.Parallel()
-
-	query, err := stmt.PrettyCQL()
-	if err != nil {
-		t.Errorf("failed to generate prettyCQL %v", err)
-	}
-	//nolint:lll
-	expected := fmt.Sprintf(
-		`INSERT INTO tbl(col1, col2, col3, col4, col5, col6,col7,col8,col9,cold10,col11,col12,col13,col14,col15,col16,col17,col18,col19,col20) VALUES ('a',10,textasblob('a'),true,'1999-12-31',1000,10.00,10m0s,10.00,'192.168.0.1',10,2,'a','%s','%s',63176980-bfde-11d3-bc37-1c4d704231dc,63176980-bfde-11d3-bc37-1c4d704231dc,1,'a',1001);`,
-		millennium.Format("15:04:05.999"),
-		millennium.Format("2006-01-02T15:04:05.999-0700"),
-	)
-
-	if query != expected {
-		t.Error("expected", expected, "got", query)
-	}
-}
-
-func BenchmarkPrettyCQL(b *testing.B) {
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		query, _ := stmt.Query.ToCql()
-		values := stmt.Values.Copy()
-		builder := bytes.NewBuffer(nil)
-
-		if err := prettyCQL(builder, query, values, stmt.Types); err != nil {
-			b.Error(err)
-		}
-	}
 }

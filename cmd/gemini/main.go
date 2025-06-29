@@ -11,25 +11,80 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package main
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"log"
+	"net/http"
+	"net/http/pprof"
+	"os"
+	"os/signal"
 	"runtime/debug"
+	"strconv"
+	"syscall"
 
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
 func main() {
-	defer func() {
-		log.Println("Executing finalizers...")
-		utils.ExecuteFinalizers()
-		log.Println("Finalizers executed. Exiting...")
-	}()
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer cancel()
 
-	if err := rootCmd.Execute(); err != nil {
-		log.Panicln(err)
+	if err := rootCmd.ParseFlags(os.Args); err != nil {
+		log.Fatalf("Failed to parse flags: %v", err)
 	}
+
+	if versionFlag {
+		val, err := rootCmd.PersistentFlags().GetBool("version-json")
+		if err != nil {
+			log.Fatalf("Failed to get version info as json flag: %v", err)
+		}
+
+		if val {
+			data, err := json.MarshalIndent(versionInfo, "", "    ")
+			if err != nil {
+				log.Fatalf("Failed to marshal version info: %v", err)
+			}
+
+			//nolint:forbidigo
+			fmt.Println(string(data))
+			return
+		}
+
+		fmt.Println(versionInfo.String())
+
+		return
+	}
+
+	metrics.StartMetricsServer(ctx, metricsPort)
+
+	if profilingPort != 0 {
+		go func() {
+			mux := http.NewServeMux()
+
+			mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+			mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+			mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+			mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+			mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+
+			log.Fatal(http.ListenAndServe("0.0.0.0:"+strconv.Itoa(profilingPort), mux))
+		}()
+	}
+
+	status := 0
+
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
+		status = 1
+	}
+
+	utils.ExecuteFinalizers()
+	os.Exit(status)
 }
 
 func init() {
@@ -43,4 +98,13 @@ func init() {
 			}
 		}
 	}
+
+	var err error
+
+	versionInfo, err = NewVersionInfo()
+	if err != nil {
+		panic(err)
+	}
+
+	rootCmd.Version = versionInfo.String()
 }

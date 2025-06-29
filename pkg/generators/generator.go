@@ -20,7 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/distributions"
@@ -40,9 +39,9 @@ import (
 // approximate different token distributions from a sparse set of tokens.
 
 type Interface interface {
-	Get(context.Context) typedef.ValueWithToken
-	GetOld(context.Context) typedef.ValueWithToken
-	GiveOlds(context.Context, ...typedef.ValueWithToken)
+	Get(context.Context) typedef.PartitionKeys
+	GetOld(context.Context) typedef.PartitionKeys
+	GiveOlds(context.Context, ...typedef.PartitionKeys)
 	ReleaseToken(uint64)
 }
 
@@ -92,14 +91,14 @@ func NewGenerator(
 		cancel:            cancel,
 		logger:            logger,
 		table:             table,
-		routingKeyCreator: &routingkey.Creator{},
+		routingKeyCreator: routingkey.New(table),
 		r:                 rnd,
 		idxFunc:           config.PartitionsDistributionFunc,
 		partitions:        NewPartitions(config.PartitionsCount, config.PkUsedBufferSize),
 		partitionsConfig:  config.PartitionsRangeConfig,
 		partitionCount:    config.PartitionsCount,
-		oldValuesMetrics:  metrics.NewChannelMetrics[typedef.ValueWithToken]("generator", table.Name+"_old_values", config.PkUsedBufferSize),
-		valuesMetrics:     metrics.NewChannelMetrics[typedef.ValueWithToken]("generator", table.Name+"_values", config.PkUsedBufferSize),
+		oldValuesMetrics:  metrics.NewChannelMetrics[typedef.PartitionKeys]("generator", table.Name+"_old_values", config.PkUsedBufferSize),
+		valuesMetrics:     metrics.NewChannelMetrics[typedef.PartitionKeys]("generator", table.Name+"_values", config.PkUsedBufferSize),
 	}
 
 	go g.start(ctx)
@@ -107,7 +106,7 @@ func NewGenerator(
 	return g
 }
 
-func (g *Generator) Get(ctx context.Context) typedef.ValueWithToken {
+func (g *Generator) Get(ctx context.Context) typedef.PartitionKeys {
 	targetPart := g.GetPartitionForToken(uint64(g.idxFunc()))
 	for targetPart.Stale() {
 		targetPart = g.GetPartitionForToken(uint64(g.idxFunc()))
@@ -124,7 +123,7 @@ func (g *Generator) GetPartitionForToken(token uint64) *Partition {
 
 // GetOld returns a previously used value and token or a new if
 // the old queue is empty.
-func (g *Generator) GetOld(ctx context.Context) typedef.ValueWithToken {
+func (g *Generator) GetOld(ctx context.Context) typedef.PartitionKeys {
 	targetPart := g.GetPartitionForToken(uint64(g.idxFunc()))
 	for targetPart.Stale() {
 		targetPart = g.GetPartitionForToken(uint64(g.idxFunc()))
@@ -138,12 +137,14 @@ func (g *Generator) GetOld(ctx context.Context) typedef.ValueWithToken {
 }
 
 // GiveOlds returns the supplied values for later reuse unless
-func (g *Generator) GiveOlds(ctx context.Context, tokens ...typedef.ValueWithToken) {
+func (g *Generator) GiveOlds(ctx context.Context, tokens ...typedef.PartitionKeys) {
+	m := metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "old")
+
 	for _, token := range tokens {
 		if g.GetPartitionForToken(token.Token).giveOld(ctx, token) {
 			g.oldValuesMetrics.Inc(token)
 		} else {
-			metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "old").Inc()
+			m.Inc()
 		}
 	}
 }
@@ -232,7 +233,7 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 			continue
 		}
 
-		v := typedef.ValueWithToken{Token: token, Value: values}
+		v := typedef.PartitionKeys{Token: token, Values: values}
 		pushed := partition.push(v)
 		running.Record()
 
@@ -249,22 +250,22 @@ func (g *Generator) shardOf(token uint64) int {
 	return int(token % g.partitionCount)
 }
 
-func (g *Generator) createPartitionKeyValues(r ...*rand.Rand) (uint64, []any, error) {
+func (g *Generator) createPartitionKeyValues(r ...*rand.Rand) (uint64, map[string][]any, error) {
 	rnd := g.r
 
 	if len(r) > 0 && r[0] != nil {
 		rnd = r[0]
 	}
 
-	values := make([]any, 0, g.table.PartitionKeysLenValues())
+	values := make(map[string][]any, g.table.PartitionKeys.Len())
 
 	for _, pk := range g.table.PartitionKeys {
-		values = append(values, pk.Type.GenValue(rnd, &g.partitionsConfig)...)
+		values[pk.Name] = append(values[pk.Name], pk.Type.GenValue(rnd, &g.partitionsConfig)...)
 	}
 
-	token, err := g.routingKeyCreator.GetHash(g.table, values)
+	token, err := g.routingKeyCreator.GetHash(values)
 	if err != nil {
-		return 0, nil, errors.Wrap(err, "failed to get primary key hash")
+		return 0, nil, err
 	}
 
 	return token, values, nil

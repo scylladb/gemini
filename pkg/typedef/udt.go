@@ -15,11 +15,9 @@
 package typedef
 
 import (
-	"bytes"
 	"math/rand/v2"
 
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
 )
 
 type UDTType struct {
@@ -46,37 +44,6 @@ func (t *UDTType) CQLDef() string {
 
 func (t *UDTType) CQLHolder() string {
 	return "?"
-}
-
-func (t *UDTType) CQLPretty(builder *bytes.Buffer, value any) error {
-	s, ok := value.(map[string]any)
-	if !ok {
-		return errors.Errorf("udt pretty, expected map[string]any, got [%T]%v", value, value)
-	}
-
-	builder.WriteRune('{')
-	defer builder.WriteRune('}')
-
-	i := 0
-	for k, v := range t.ValueTypes {
-		keyVal, kexExists := s[k]
-		if !kexExists {
-			continue
-		}
-
-		builder.WriteString(k)
-		builder.WriteRune(':')
-		if err := v.CQLPretty(builder, keyVal); err != nil {
-			return err
-		}
-
-		if i != len(s)-1 {
-			builder.WriteRune(',')
-		}
-		i++
-	}
-
-	return nil
 }
 
 func (t *UDTType) Indexable() bool {

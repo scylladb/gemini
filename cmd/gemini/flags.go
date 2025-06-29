@@ -39,7 +39,7 @@ var (
 	mode                             string
 	failFast                         bool
 	duration                         time.Duration
-	bind                             string
+	metricsPort                      string
 	warmup                           time.Duration
 	replicationStrategy              string
 	tableOptions                     []string
@@ -78,9 +78,11 @@ var (
 	testStatementLogFile             string
 	oracleStatementLogFile           string
 	statementLogFileCompression      string
+	versionFlag                      bool
 )
 
 func setupFlags(cmd *cobra.Command) {
+	cmd.PersistentFlags().BoolVarP(&versionFlag, "version", "", false, "Print version information")
 	cmd.PersistentFlags().
 		BoolP("version-json", "", false, "Print version information in JSON format")
 	cmd.Flags().
@@ -111,7 +113,7 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		StringVarP(&outFileArg, "outfile", "", "", "Specify the name of the file where the results should go")
 	cmd.Flags().
-		StringVarP(&bind, "bind", "b", "0.0.0.0:2112", "Specify the interface and port which to bind prometheus metrics on. Default is ':2112'")
+		StringVarP(&metricsPort, "bind", "b", "0.0.0.0:2112", "Specify the interface and port which to bind prometheus metrics on. Default is ':2112'")
 	cmd.Flags().
 		DurationVarP(&warmup, "warmup", "", 0, "Specify the warmup period as a duration for example 30s or 10h")
 	cmd.Flags().StringVarP(

@@ -21,7 +21,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/samber/mo"
 	"go.uber.org/zap"
@@ -46,18 +45,17 @@ type (
 	Type string
 
 	Item struct {
-		Start         Time                              `json:"s"`
-		Error         mo.Either[error, string]          `json:"e,omitempty"`
-		Statement     string                            `json:"q"`
-		Host          string                            `json:"h"`
-		Type          Type                              `json:"-"`
-		Values        mo.Either[typedef.Values, []byte] `json:"v"`
-		Duration      Duration                          `json:"d"`
-		Attempt       int                               `json:"d_a"`
-		GeminiAttempt int                               `json:"g_a"`
-		ID            gocql.UUID                        `json:"id"`
-		StatementType typedef.OpType                    `json:"-"`
-		PartitionKeys typedef.Values `json:"partitionKeys"`
+		Start         Time                     `json:"s"`
+		PartitionKeys typedef.Values           `json:"partitionKeys"`
+		Error         mo.Either[error, string] `json:"e,omitempty"`
+		Statement     string                   `json:"q"`
+		Host          string                   `json:"h"`
+		Type          Type                     `json:"-"`
+		Values        mo.Either[[]any, []byte] `json:"v"`
+		Duration      Duration                 `json:"d"`
+		Attempt       int                      `json:"d_a"`
+		GeminiAttempt int                      `json:"g_a"`
+		StatementType typedef.StatementType    `json:"-"`
 	}
 
 	Duration struct {
@@ -93,7 +91,8 @@ func WithChannelSize(size int) Option {
 }
 
 func WithScyllaLogger(
-	schemaChangesValues typedef.Values,
+	schemaChangesValues typedef.PartitionKeys,
+	schemaPartitionKeys typedef.Columns,
 	schema *typedef.Schema,
 	oracleStatementsFile string,
 	testStatementsFile string,
@@ -190,8 +189,6 @@ func (l *Logger) init(ch chan<- Item, logger mo.Either[*ScyllaLogger, *IOWriterL
 }
 
 func (l *Logger) LogStmt(item Item) error {
-	item.Values = mo.Left[typedef.Values, []byte](item.Values.MustLeft().Copy())
-
 	if ch := l.channel.Load(); ch != nil {
 		*ch <- item
 		l.metrics.Inc(item)
@@ -208,15 +205,15 @@ func (l *Logger) Close() error {
 }
 
 type itemMarshal struct {
-	Start         string `json:"time"`
-	Values        any    `json:"values"`
-	Error         string `json:"error"`
-	Statement     string `json:"query"`
-	Host          string `json:"host"`
-	Duration      string `json:"duration"`
-	Attempt       int    `json:"driver_attempt"`
-	GeminiAttempt int    `json:"gemini_attempt"`
-	PartitionKeys []any   `json:"partition_keys,omitempty"`
+	Values        any            `json:"values"`
+	PartitionKeys typedef.Values `json:"partition_keys,omitempty"`
+	Start         string         `json:"time"`
+	Error         string         `json:"error"`
+	Statement     string         `json:"query"`
+	Host          string         `json:"host"`
+	Duration      string         `json:"duration"`
+	Attempt       int            `json:"driver_attempt"`
+	GeminiAttempt int            `json:"gemini_attempt"`
 }
 
 func (i Item) MarshalJSON() ([]byte, error) {
@@ -262,12 +259,6 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 func (i Item) MemoryFootprint() uint64 {
 	size := uint64(unsafe.Sizeof(Item{})) + utils.Sizeof(i.Statement) +
 		utils.Sizeof(i.Host)
-
-	if i.Values.IsLeft() {
-		size += i.Values.MustLeft().MemoryFootprint()
-	} else {
-		size += uint64(len(i.Values.MustRight()))
-	}
 
 	return size
 }

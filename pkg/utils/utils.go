@@ -32,12 +32,6 @@ import (
 
 type QueryContextKey string
 
-const (
-	QueryID       QueryContextKey = "query_id"
-	GeminiAttempt QueryContextKey = "gemini_attempt"
-	PartitionKeys QueryContextKey = "partition_keys"
-)
-
 type MemoryFootprint interface {
 	MemoryFootprint() uint64
 }

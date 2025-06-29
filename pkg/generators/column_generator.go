@@ -127,3 +127,22 @@ func GenPrimaryKeyColumnType(r *rand.Rand) typedef.Type {
 func GenIndexName(prefix string, idx int) string {
 	return fmt.Sprintf("%s_idx", GenColumnName(prefix, idx))
 }
+
+func CreateIndexesForColumn(table *typedef.Table, maxIndexes int) []typedef.IndexDef {
+	createdCount := 0
+	indexes := make([]typedef.IndexDef, 0, maxIndexes)
+	for i, col := range table.Columns {
+		if col.Type.Indexable() && typedef.TypesForIndex.Contains(col.Type) {
+			indexes = append(indexes, typedef.IndexDef{
+				IndexName:  GenIndexName(table.Name+"_col", i),
+				ColumnName: table.Columns[i].Name,
+				Column:     table.Columns[i],
+			})
+			createdCount++
+		}
+		if createdCount == maxIndexes {
+			break
+		}
+	}
+	return indexes
+}

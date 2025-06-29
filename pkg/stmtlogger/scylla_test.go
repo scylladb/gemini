@@ -39,16 +39,13 @@ import (
 func TestBuildQueriesCreation(t *testing.T) {
 	t.Parallel()
 
-	createKeyspace, createTable, insert, sel, selectDDL := buildCreateTableQuery([]*typedef.ColumnDef{
+	createKeyspace, createTable := buildCreateTableQuery([]*typedef.ColumnDef{
 		{Name: "col1", Type: typedef.TypeInt},
 		{Name: "col2", Type: typedef.TypeAscii},
 	}, replication.NewNetworkTopologyStrategy())
 
 	snaps.MatchSnapshot(t, createKeyspace, "createKeyspace")
 	snaps.MatchSnapshot(t, createTable, "createTable")
-	snaps.MatchSnapshot(t, insert, "insert")
-	snaps.MatchSnapshot(t, sel, "select")
-	snaps.MatchSnapshot(t, selectDDL, "selectDDL")
 }
 
 func TestBuildQueriesExecution(t *testing.T) {
@@ -57,56 +54,31 @@ func TestBuildQueriesExecution(t *testing.T) {
 
 	session := utils.SingleScylla(t)
 
-	createKeyspace, createTable, insert, sel, selectDDL := buildCreateTableQuery([]*typedef.ColumnDef{
+	createKeyspace, createTable := buildCreateTableQuery([]*typedef.ColumnDef{
 		{Name: "col1", Type: typedef.TypeInt},
 		{Name: "col2", Type: typedef.TypeAscii},
 	}, replication.NewNetworkTopologyStrategy())
 
 	assert.NoError(session.Query(createKeyspace).Exec())
 	assert.NoError(session.Query(createTable).Exec())
-	assert.NoError(session.Query(
-		insert,
-		1, "test", false, time.Now(), string(TypeOracle), "TEST STATEMENT", "",
-		"test_host", 1, 1, "", 1*time.Second,
-	).Exec())
-	assert.NoError(session.Query(
-		insert,
-		2, "test_ddl", true, time.Now(), string(TypeOracle), "TEST DDL STATEMENT", "",
-		"test_host", 1, 1, "", 1*time.Second,
-	).Exec())
-
-	m := make(map[string]any)
-
-	iter := session.Query(selectDDL, 2, "test_ddl", string(TypeOracle)).Iter()
-	assert.Equal(1, iter.NumRows())
-	assert.True(iter.MapScan(m))
-	assert.NoError(iter.Close())
-
-	iter = session.Query(sel, 1, "test", string(TypeOracle)).Iter()
-	assert.Equal(1, iter.NumRows())
-	m = make(map[string]any)
-	assert.True(iter.MapScan(m))
-	assert.NoError(iter.Close())
 }
 
 func successStatement(ty Type) Item {
 	start := time.Now().Add(-(5 * time.Second))
 	statement := "INSERT INTO test_table (col1, col2) VALUES (?, ?)"
-	values := typedef.Values{1, "test"}
-
 	item := Item{
 		Start:         Time{Time: start},
 		Error:         mo.Right[error, string](""),
 		Statement:     statement,
 		Host:          "test_host",
 		Type:          ty,
-		Values:        mo.Left[typedef.Values, []byte](values),
+		Values:        mo.Left[[]any, []byte]([]any{1, "test"}),
 		Duration:      Duration{Duration: time.Second},
 		Attempt:       1,
 		GeminiAttempt: 1,
 		ID:            gocql.TimeUUID(),
 		StatementType: typedef.OpInsert,
-		PartitionKeys: values,
+		PartitionKeys: typedef.Values{"col1": []any{1}, "col2": []any{"test_1"}},
 	}
 
 	return item
@@ -116,7 +88,7 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 	start := time.Now().Add(-(10 * time.Second))
 	ers := errors.New("test error")
 	statement := "INSERT INTO test_table (col1, col2) VALUES (?, ?)"
-	values := typedef.Values{2, "test_2"}
+	values := []any{2, "test_2"}
 
 	item := Item{
 		Start:         Time{Time: start},
@@ -124,13 +96,13 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 		Statement:     statement,
 		Host:          "test_host",
 		Type:          ty,
-		Values:        mo.Left[typedef.Values, []byte](values),
+		Values:        mo.Left[[]any, []byte](values),
 		Duration:      Duration{Duration: time.Second},
 		Attempt:       1,
 		GeminiAttempt: 1,
 		ID:            gocql.TimeUUID(),
 		StatementType: typedef.OpInsert,
-		PartitionKeys: values,
+		PartitionKeys: typedef.Values{"col1": []any{2}, "col2": []any{"test_2"}},
 	}
 
 	err := joberror.JobError{
@@ -138,8 +110,8 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 		Err:           ers,
 		Message:       "Mutation Validation failed",
 		Query:         statement,
-		StmtType:      "insert",
-		PartitionKeys: values,
+		StmtType:      typedef.InsertStatementType,
+		PartitionKeys: typedef.Values{"col1": []any{2}, "col2": []any{"test_2"}},
 	}
 
 	return item, err
@@ -174,7 +146,7 @@ func TestScyllaLogger(t *testing.T) {
 		zapLogger := utils.Must(zap.NewDevelopment())
 
 		logger, err := NewScyllaLoggerWithSession(
-			typedef.Values{5, "test_ddl"},
+			typedef.PartitionKeys{Values: typedef.Values{"col1": []any{5}, "col2": []any{"test_ddl"}}},
 			session,
 			partitionKeys,
 			replication.NewNetworkTopologyStrategy(),
@@ -226,7 +198,7 @@ func ddlStatement(ty Type) Item {
 		Statement:     "CREATE TABLE IF NOT EXISTS test_table (col1 int, col2 text, PRIMARY KEY (col1))",
 		Host:          "test_host",
 		Type:          ty,
-		Values:        mo.Left[typedef.Values, []byte](nil),
+		Values:        mo.Left[[]any, []byte](nil),
 		Duration:      Duration{Duration: time.Second},
 		Attempt:       1,
 		GeminiAttempt: 1,

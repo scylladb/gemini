@@ -16,19 +16,13 @@ package jobs
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"math/rand/v2"
 	"time"
 
-	"github.com/pkg/errors"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/joberror"
-	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -42,61 +36,33 @@ const (
 	WarmupMode = "warmup"
 )
 
-const (
-	warmupName   = "Warmup"
-	validateName = "Validation"
-	mutateName   = "Mutation"
-)
-
-var (
-	warmup   = job{name: warmupName, function: warmupJob}
-	validate = job{name: validateName, function: validationJob}
-	mutate   = job{name: mutateName, function: mutationJob}
-)
-
 type List struct {
 	name     string
-	jobs     []job
+	modes    []string
 	duration time.Duration
 	workers  uint64
 }
 
-type job struct {
-	function func(
-		context.Context,
-		*typedef.Schema,
-		typedef.SchemaConfig,
-		*typedef.Table,
-		store.Store,
-		*rand.Rand,
-		*typedef.PartitionRangeConfig,
-		*generators.Generator,
-		*status.GlobalStatus,
-		*zap.Logger,
-		*stop.Flag,
-		bool,
-		bool,
-	) error
-	name string
+type Worker interface {
+	Name() string
+	Do(context.Context) error
 }
 
 func ListFromMode(mode string, duration time.Duration, workers uint64) List {
-	jobs := make([]job, 0, 2)
-	name := "work cycle"
+	var modes []string
 	switch mode {
+	case MixedMode:
+		modes = []string{WriteMode, ReadMode}
 	case WriteMode:
-		jobs = append(jobs, mutate)
+		modes = []string{WriteMode}
 	case ReadMode:
-		jobs = append(jobs, validate)
+		modes = []string{ReadMode}
 	case WarmupMode:
-		jobs = append(jobs, warmup)
-		name = "warmup cycle"
-	default:
-		jobs = append(jobs, mutate, validate)
+		modes = []string{WarmupMode}
 	}
+
 	return List{
-		name:     name,
-		jobs:     jobs,
+		modes:    modes,
 		duration: duration,
 		workers:  workers,
 	}
@@ -107,11 +73,10 @@ func (l List) Run(
 	schema *typedef.Schema,
 	schemaConfig typedef.SchemaConfig,
 	s store.Store,
-	generators *generators.Generators,
+	gens *generators.Generators,
 	globalStatus *status.GlobalStatus,
 	logger *zap.Logger,
 	stopFlag *stop.Flag,
-	failFast, verbose bool,
 	src *rand.ChaCha8,
 ) error {
 	ctx, cancel := context.WithTimeout(base, l.duration)
@@ -119,32 +84,43 @@ func (l List) Run(
 	logger = logger.Named(l.name)
 	g, gCtx := errgroup.WithContext(ctx)
 
-	partitionRangeConfig := schemaConfig.GetPartitionRangeConfig()
 	logger.Info("start jobs")
 	for _, table := range schema.Tables {
 		newSrc := [32]byte{}
 		_, _ = src.Read(newSrc[:])
-		rnd := rand.New(rand.NewChaCha8(newSrc))
+
 		for range l.workers {
-			for idx := range l.jobs {
-				jobF := l.jobs[idx].function
-				generator := generators.Get(table)
-				g.Go(func() error {
-					return jobF(
-						gCtx,
+			for _, mode := range l.modes {
+				var worker Worker
+
+				switch mode {
+				case WriteMode, WarmupMode:
+					worker = NewMutation(
 						schema,
 						schemaConfig,
 						table,
-						s,
-						rnd,
-						&partitionRangeConfig,
-						generator,
+						gens.Get(table),
 						globalStatus,
-						logger,
 						stopFlag,
-						failFast,
-						verbose,
+						s,
+						mode != WarmupMode,
+						newSrc,
 					)
+				case ReadMode:
+					worker = NewValidation(
+						schema.Keyspace.Name,
+						table,
+						schemaConfig,
+						gens.Get(table),
+						globalStatus,
+						stopFlag,
+						s,
+						newSrc,
+					)
+				}
+
+				g.Go(func() error {
+					return worker.Do(gCtx)
 				})
 			}
 		}
@@ -155,271 +131,22 @@ func (l List) Run(
 
 // mutationJob continuously applies mutations against the database
 // for as long as the pump is active.
-func mutationJob(
-	ctx context.Context,
-	schema *typedef.Schema,
-	schemaCfg typedef.SchemaConfig,
-	table *typedef.Table,
-	s store.Store,
-	r *rand.Rand,
-	p *typedef.PartitionRangeConfig,
-	g *generators.Generator,
-	globalStatus *status.GlobalStatus,
-	logger *zap.Logger,
-	stopFlag *stop.Flag,
-	_, verbose bool,
-) error {
-	for !stopFlag.IsHardOrSoft() {
-		metrics.ExecutionTime("mutation_job", func() {
-			if schemaCfg.CQLFeature == typedef.CQL_FEATURE_ALL && r.IntN(1000000)%100000 == 0 {
-				_ = ddl(ctx, schema, schemaCfg, table, s, r, p, globalStatus, logger, verbose)
-				return
-			}
-
-			_ = mutation(ctx, schema, table, s, r, p, g, globalStatus, true, logger)
-		})
-
-		if globalStatus.HasErrors() {
-			stopFlag.SetSoft(true)
-			return nil
-		}
-	}
-
-	return nil
-}
-
-// validationJob continuously applies validations against the database
-// for as long as the pump is active.
-func validationJob(
-	ctx context.Context,
-	schema *typedef.Schema,
-	schemaCfg typedef.SchemaConfig,
-	table *typedef.Table,
-	s store.Store,
-	r *rand.Rand,
-	p *typedef.PartitionRangeConfig,
-	g *generators.Generator,
-	globalStatus *status.GlobalStatus,
-	_ *zap.Logger,
-	stopFlag *stop.Flag,
-	_, _ bool,
-) error {
-	maxAttempts := schemaCfg.AsyncObjectStabilizationAttempts
-	if maxAttempts <= 1 {
-		maxAttempts = 10
-	}
-	delay := schemaCfg.AsyncObjectStabilizationDelay
-	if delay <= 10*time.Millisecond {
-		delay = 200 * time.Millisecond
-	}
-
-	for !stopFlag.IsHardOrSoft() {
-		var (
-			err  error
-			stmt *typedef.Stmt
-		)
-
-		metrics.ExecutionTime("validation_job", func() {
-			stmt = GenCheckStmt(ctx, schema, table, g, r, p)
-			if stmt == nil {
-				return
-			}
-
-			err = validation(ctx, table, s, stmt, maxAttempts, delay)
-			if stmt.ValuesWithToken != nil {
-				for _, token := range stmt.ValuesWithToken {
-					g.ReleaseToken(token.Token)
-				}
-			}
-		})
-
-		if stmt == nil {
-			continue
-		}
-
-		if err != nil {
-			cql, _ := stmt.Query.ToCql()
-
-			globalStatus.AddReadError(joberror.JobError{
-				Timestamp:     time.Now(),
-				Err:           err,
-				StmtType:      stmt.QueryType.String(),
-				Message:       "Validation failed",
-				Query:         cql,
-				PartitionKeys: stmt.Values.Copy(),
-			})
-		} else {
-			globalStatus.ReadOps.Add(1)
-		}
-
-		if globalStatus.HasErrors() {
-			stopFlag.SetSoft(true)
-			return nil
-		}
-	}
-
-	return nil
-}
-
-// warmupJob continuously applies mutations against the database
-// for as long as the pump is active or the supplied duration expires.
-func warmupJob(
-	ctx context.Context,
-	schema *typedef.Schema,
-	_ typedef.SchemaConfig,
-	table *typedef.Table,
-	s store.Store,
-	r *rand.Rand,
-	p *typedef.PartitionRangeConfig,
-	g *generators.Generator,
-	globalStatus *status.GlobalStatus,
-	logger *zap.Logger,
-	stopFlag *stop.Flag,
-	_, _ bool,
-) error {
-	for !stopFlag.IsHardOrSoft() {
-		_ = mutation(ctx, schema, table, s, r, p, g, globalStatus, false, logger)
-
-		if globalStatus.HasErrors() {
-			stopFlag.SetSoft(true)
-			return nil
-		}
-	}
-
-	return nil
-}
-
-func ddl(
-	ctx context.Context,
-	schema *typedef.Schema,
-	sc typedef.SchemaConfig,
-	table *typedef.Table,
-	s store.Store,
-	r *rand.Rand,
-	p *typedef.PartitionRangeConfig,
-	globalStatus *status.GlobalStatus,
-	logger *zap.Logger,
-	verbose bool,
-) error {
-	if len(table.MaterializedViews) > 0 {
-		// Scylla does not allow changing the DDL of a table with materialized views.
-		return nil
-	}
-	table.Lock()
-	defer table.Unlock()
-	ddlStmts, err := GenDDLStmt(schema, table, r, p, sc)
-	if err != nil {
-		logger.Error("Failed! DDL Mutation statement generation failed", zap.Error(err))
-		globalStatus.WriteErrors.Add(1)
-		return err
-	}
-
-	if ddlStmts == nil {
-		logger.Debug("no statement generated", zap.String("job", "ddl"))
-		return nil
-	}
-
-	for _, ddlStmt := range ddlStmts.List {
-		if err = s.Mutate(ctx, ddlStmt); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return nil
-			}
-
-			cql, _ := ddlStmt.Query.ToCql()
-
-			globalStatus.AddWriteError(joberror.JobError{
-				Timestamp: time.Now(),
-				StmtType:  ddlStmts.QueryType.String(),
-				Message:   "DDL failed: " + err.Error(),
-				Query:     cql,
-			})
-
-			return err
-		}
-		globalStatus.WriteOps.Add(1)
-	}
-	ddlStmts.PostStmtHook()
-	if verbose {
-		jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
-		fmt.Printf("New schema: %v\n", string(jsonSchema)) //nolint:forbidigo
-	}
-	return nil
-}
-
-func mutation(
-	ctx context.Context,
-	schema *typedef.Schema,
-	table *typedef.Table,
-	s store.Store,
-	r *rand.Rand,
-	p *typedef.PartitionRangeConfig,
-	g *generators.Generator,
-	globalStatus *status.GlobalStatus,
-	deletes bool,
-	logger *zap.Logger,
-) error {
-	mutateStmt, err := GenMutateStmt(ctx, schema, table, g, r, p, deletes)
-	if err != nil {
-		logger.Error("Failed! Mutation statement generation failed", zap.Error(err))
-		globalStatus.WriteErrors.Add(1)
-		return err
-	}
-
-	if mutateStmt == nil {
-		logger.Debug("no statement generated", zap.String("job", "mutation"))
-		return err
-	}
-
-	if err = s.Mutate(ctx, mutateStmt); err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil
-		}
-
-		cql, _ := mutateStmt.Query.ToCql()
-
-		globalStatus.AddWriteError(joberror.JobError{
-			Timestamp:     time.Now(),
-			StmtType:      mutateStmt.QueryType.String(),
-			Message:       "Mutation failed: " + err.Error(),
-			Query:         cql,
-			PartitionKeys: mutateStmt.Values.Copy(),
-		})
-
-		return err
-	}
-
-	globalStatus.WriteOps.Add(1)
-	g.GiveOlds(ctx, mutateStmt.ValuesWithToken...)
-
-	return nil
-}
-
-func validation(
-	ctx context.Context,
-	table *typedef.Table,
-	s store.Store,
-	stmt *typedef.Stmt,
-	maxAttempts int,
-	delay time.Duration,
-) error {
-	var acc error
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		err := s.Check(ctx, table, stmt, attempt == maxAttempts)
-		if err == nil {
-			return nil
-		}
-
-		if errors.Is(err, context.Canceled) {
-			// When context is canceled, it means that the test was commanded to stop
-			// to skip logging part it is returned here
-			return nil
-		}
-		acc = multierr.Append(acc, err)
-
-		attempt++
-		time.Sleep(delay)
-	}
-
-	return acc
-}
+//func mutationJob(ctx context.Context, stmtGen *statements.Generator, globalStatus *status.GlobalStatus, logger *zap.Logger, stopFlag *stop.Flag) error {
+//	for !stopFlag.IsHardOrSoft() {
+//		metrics.ExecutionTime("mutation_job", func() {
+//			if schemaCfg.CQLFeature == typedef.CQL_FEATURE_ALL && r.IntN(1000000)%100000 == 0 {
+//				_ = ddl(ctx, globalStatus, logger)
+//				return
+//			}
+//
+//			_ = mutation(ctx, globalStatus, true, logger)
+//		})
+//
+//		if globalStatus.HasErrors() {
+//			stopFlag.SetSoft(true)
+//			return nil
+//		}
+//	}
+//
+//	return nil
+//}

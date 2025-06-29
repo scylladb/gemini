@@ -15,13 +15,11 @@
 package typedef
 
 import (
-	"bytes"
 	"math/rand/v2"
 	"slices"
 	"strings"
 
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
 )
 
 type TupleType struct {
@@ -55,36 +53,6 @@ func (t *TupleType) CQLDef() string {
 
 func (t *TupleType) CQLHolder() string {
 	return "(" + strings.TrimRight(strings.Repeat("?,", len(t.ValueTypes)), ",") + ")"
-}
-
-func (t *TupleType) CQLPretty(builder *bytes.Buffer, value any) error {
-	values, ok := value.([]any)
-	if !ok {
-		values, ok = value.(Values)
-		if !ok {
-			return errors.Errorf("expected []any, got [%T]%v", value, value)
-		}
-	}
-
-	if len(values) == 0 {
-		return nil
-	}
-
-	if len(values) != len(t.ValueTypes) {
-		return errors.Errorf("expected %d values, got %d", len(t.ValueTypes), len(values))
-	}
-
-	for i, tp := range t.ValueTypes {
-		if err := tp.CQLPretty(builder, values[i]); err != nil {
-			return err
-		}
-
-		if i < len(values)-1 {
-			builder.WriteRune(',')
-		}
-	}
-
-	return nil
 }
 
 func (t *TupleType) Indexable() bool {

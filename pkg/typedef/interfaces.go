@@ -15,7 +15,6 @@
 package typedef
 
 import (
-	"bytes"
 	"math/rand/v2"
 
 	"github.com/gocql/gocql"
@@ -25,7 +24,6 @@ type Type interface {
 	Name() string
 	CQLDef() string
 	CQLHolder() string
-	CQLPretty(*bytes.Buffer, any) error
 	GenValue(*rand.Rand, *PartitionRangeConfig) []any
 	GenJSONValue(*rand.Rand, *PartitionRangeConfig) any
 	LenValue() int

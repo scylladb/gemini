@@ -312,7 +312,7 @@ func getDriverVersionInfo(ctx context.Context, client *github.Client) (Component
 }
 
 func (v VersionInfo) String() string {
-	return fmt.Sprintf(`:
+	return fmt.Sprintf(`gemini :
     version: %s
     commit sha: %s
     commit date: %s

@@ -16,6 +16,7 @@ package typedef
 
 import (
 	"bytes"
+	"github.com/scylladb/gemini/pkg/utils"
 	"math"
 	"math/rand/v2"
 	"reflect"
@@ -25,7 +26,6 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 // nolint:revive
@@ -147,36 +147,6 @@ func (mt *MapType) Name() string {
 
 func (mt *MapType) CQLHolder() string {
 	return "?"
-}
-
-func (mt *MapType) CQLPretty(builder *bytes.Buffer, value any) error {
-	if reflect.TypeOf(value).Kind() != reflect.Map {
-		return errors.Errorf("expected map, got [%T]%v", value, value)
-	}
-
-	builder.WriteRune('{')
-	defer builder.WriteRune('}')
-
-	vof := reflect.ValueOf(value)
-	s := vof.MapRange()
-	length := vof.Len()
-
-	for id := 0; s.Next(); id++ {
-		if err := mt.KeyType.CQLPretty(builder, s.Key().Interface()); err != nil {
-			return err
-		}
-		builder.WriteRune(':')
-
-		if err := mt.ValueType.CQLPretty(builder, s.Value().Interface()); err != nil {
-			return err
-		}
-
-		if id < length-1 {
-			builder.WriteRune(',')
-		}
-	}
-
-	return nil
 }
 
 func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {

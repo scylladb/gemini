@@ -15,18 +15,13 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"math/rand/v2"
-	"net/http"
-	"net/http/pprof"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -38,7 +33,6 @@ import (
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/jobs"
-	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/realrandom"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
@@ -65,70 +59,22 @@ var (
 )
 
 func init() {
-	var err error
-
-	versionInfo, err = NewVersionInfo()
-	if err != nil {
-		panic(err)
-	}
-
-	rootCmd.Version = versionInfo.String()
-
 	setupFlags(rootCmd)
 }
 
 //nolint:gocyclo
 func run(cmd *cobra.Command, _ []string) error {
-	ctx, cancel := signal.NotifyContext(
-		cmd.Context(),
-		syscall.SIGTERM,
-		syscall.SIGINT,
-	)
-	defer cancel()
-
+	ctx := cmd.Context()
 	logger := createLogger(level)
-	metrics.StartMetricsServer(ctx, bind, logger.Named("metrics"))
-
-	val, err := cmd.PersistentFlags().GetBool("version-json")
-	if err != nil {
-		return err
-	}
-
-	if val {
-		var data []byte
-		data, err = json.MarshalIndent(versionInfo, "", "    ")
-		if err != nil {
-			return err
-		}
-
-		//nolint:forbidigo
-		fmt.Println(string(data))
-		return nil
-	}
 
 	globalStatus := status.NewGlobalStatus(maxErrorsToStore)
 	defer utils.IgnoreError(logger.Sync)
 
-	if err = validateSeed(seed); err != nil {
+	if err := validateSeed(seed); err != nil {
 		return errors.Wrapf(err, "failed to parse --seed argument")
 	}
-	if err = validateSeed(schemaSeed); err != nil {
+	if err := validateSeed(schemaSeed); err != nil {
 		return errors.Wrapf(err, "failed to parse --schema-seed argument")
-	}
-
-	intSeed := seedFromString(seed)
-	if profilingPort != 0 {
-		go func() {
-			mux := http.NewServeMux()
-
-			mux.HandleFunc("GET /debug/pprof/", pprof.Index)
-			mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
-			mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
-			mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
-			mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
-
-			log.Fatal(http.ListenAndServe("0.0.0.0:"+strconv.Itoa(profilingPort), mux))
-		}()
 	}
 
 	outFile, err := utils.CreateFile(outFileArg, true, os.Stdout)
@@ -137,6 +83,8 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	pool := workpool.New(WorkPoolSize)
+
+	intSeed := seedFromString(seed)
 
 	randSrc, distFunc, err := distributions.New(
 		partitionKeyDistribution,
@@ -211,7 +159,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	st, err := store.New(gens.Gens[schema.Tables[0].Name].Get(ctx).Value, pool, schema, storeConfig, logger.Named("store"), globalStatus.Errors)
+	st, err := store.New(gens.Gens[schema.Tables[0].Name].Get(ctx), pool, schema, storeConfig, logger.Named("store"), globalStatus.Errors)
 	if err != nil {
 		return err
 	}
@@ -252,15 +200,20 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	stopFlag := stop.NewFlag("main")
 	warmupStopFlag := stop.NewFlag("warmup")
-	stop.StartOsSignalsTransmitter(logger, stopFlag, warmupStopFlag)
+	go func() {
+		<-ctx.Done()
+		stopFlag.SetHard(true)
+		warmupStopFlag.SetHard(true)
+	}()
 
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
 		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
 		time.AfterFunc(warmup, func() {
-			warmupStopFlag.SetSoft(true)
+			warmupStopFlag.SetSoft(false)
 		})
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, warmupStopFlag, failFast, verbose, randSrc); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, warmupStopFlag, randSrc); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
+			warmupStopFlag.SetHard(true)
 			stopFlag.SetHard(true)
 		}
 	}
@@ -270,13 +223,13 @@ func run(cmd *cobra.Command, _ []string) error {
 		time.AfterFunc(duration, func() {
 			stopFlag.SetHard(true)
 		})
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, stopFlag, failFast, verbose, randSrc); err != nil {
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, stopFlag, randSrc); err != nil {
 			logger.Debug("error detected", zap.Error(err))
 			stopFlag.SetHard(true)
 		}
 	}
 
-	globalStatus.PrintResult(outFile, schema, version, versionInfo)
+	globalStatus.PrintResult(outFile, schema, versionInfo.String(), versionInfo)
 	if globalStatus.HasErrors() {
 		return errors.New("gemini encountered errors, exiting with non zero status")
 	}
@@ -305,7 +258,7 @@ func createLogger(level string) *zap.Logger {
 	encoderCfg.EncodeTime = zapcore.RFC3339NanoTimeEncoder
 	encoderCfg.EncodeDuration = zapcore.StringDurationEncoder
 	encoderCfg.EncodeLevel = zapcore.LowercaseLevelEncoder
-	encoderCfg.EncodeCaller = zapcore.FullCallerEncoder
+	encoderCfg.EncodeCaller = nil
 
 	logger := zap.New(zapcore.NewCore(
 		zapcore.NewJSONEncoder(encoderCfg),

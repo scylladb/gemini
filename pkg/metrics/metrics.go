@@ -16,6 +16,7 @@ package metrics
 
 import (
 	"context"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -26,7 +27,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"go.uber.org/zap"
 )
 
 var registerer = prometheus.NewRegistry()
@@ -44,7 +44,12 @@ var (
 	CQLRequests = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "cql_requests",
-			Help: "How many CQL requests processed, partitioned by system and CQL query type aka 'method' (batch, delete, insert, update).",
+		},
+		[]string{"system", "method"},
+	)
+	CQLErrorRequests = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "cql_error_requests",
 		},
 		[]string{"system", "method"},
 	)
@@ -205,6 +210,7 @@ func init() {
 		MemoryMetrics,
 		FileSizeMetrics,
 		ExecutionErrors,
+		CQLErrorRequests,
 	)
 
 	r.MustRegister(
@@ -242,7 +248,7 @@ func init() {
 	)
 }
 
-func StartMetricsServer(ctx context.Context, bind string, logger *zap.Logger) {
+func StartMetricsServer(ctx context.Context, bind string) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.InstrumentMetricHandler(
 		registerer, promhttp.HandlerFor(registerer, promhttp.HandlerOpts{
@@ -267,7 +273,14 @@ func StartMetricsServer(ctx context.Context, bind string, logger *zap.Logger) {
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("Failed to start Metrics server", zap.String("bind", bind), zap.Error(err))
+			panic(errors.Wrapf(err, "failed to start metrics server on %s", bind))
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		if err := server.Shutdown(context.Background()); err != nil {
+			log.Println(err)
 		}
 	}()
 }

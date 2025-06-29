@@ -24,12 +24,14 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-type Partition struct {
-	values    atomic.Pointer[chan typedef.ValueWithToken]
-	oldValues atomic.Pointer[chan typedef.ValueWithToken]
-	inFlight  inflight.InFlight
-	isStale   atomic.Bool
-}
+type (
+	Partition struct {
+		values    atomic.Pointer[chan typedef.PartitionKeys]
+		oldValues atomic.Pointer[chan typedef.PartitionKeys]
+		inFlight  inflight.InFlight
+		isStale   atomic.Bool
+	}
+)
 
 func (p *Partition) MarkStale() error {
 	p.isStale.Store(true)
@@ -42,7 +44,7 @@ func (p *Partition) Stale() bool {
 
 // get returns a new value and ensures that it's corresponding token
 // is not already in-flight.
-func (p *Partition) get(ctx context.Context) typedef.ValueWithToken {
+func (p *Partition) get(ctx context.Context) typedef.PartitionKeys {
 	for {
 		v := p.pick(ctx)
 		if v.Token != 0 || p.inFlight.AddIfNotPresent(v.Token) {
@@ -53,47 +55,51 @@ func (p *Partition) get(ctx context.Context) typedef.ValueWithToken {
 
 // getOld returns a previously used value and token or a new if
 // the old queue is empty.
-func (p *Partition) getOld(ctx context.Context) (typedef.ValueWithToken, bool) {
+func (p *Partition) getOld(ctx context.Context) (typedef.PartitionKeys, bool) {
 	if ch := p.oldValues.Load(); ch != nil {
 		select {
 		case v := <-*ch:
+			if v.Token == 0 {
+				return typedef.PartitionKeys{}, false
+			}
 			return v, true
 		case <-ctx.Done():
-			return typedef.ValueWithToken{}, false
-		default:
+			return typedef.PartitionKeys{}, false
 		}
 	}
 
-	return typedef.ValueWithToken{}, false
+	return typedef.PartitionKeys{}, false
 }
 
 // giveOld returns the supplied value for later reuse unless the value
 // is empty, in which case it removes the corresponding token from the
 // in-flight tracking.
-func (p *Partition) giveOld(ctx context.Context, v typedef.ValueWithToken) bool {
+func (p *Partition) giveOld(ctx context.Context, v typedef.PartitionKeys) bool {
 	if ch := p.oldValues.Load(); ch != nil {
-		select {
-		case <-ctx.Done():
-			return false
-		case *ch <- v:
-			return true
-		default:
-			clear(v.Value)
-			return false
-			// Old partition buffer is full, just drop the value
+		for range 100 {
+			select {
+			case <-ctx.Done():
+				return false
+			case *ch <- v:
+				return true
+			default:
+			}
 		}
+
+		clear(v.Values)
+		return false
 	}
 
 	return false
 }
 
-func (p *Partition) push(v typedef.ValueWithToken) bool {
+func (p *Partition) push(v typedef.PartitionKeys) bool {
 	if ch := p.values.Load(); ch != nil {
 		select {
 		case *ch <- v:
 			return true
 		default:
-			clear(v.Value)
+			clear(v.Values)
 			return false
 		}
 	}
@@ -106,17 +112,17 @@ func (p *Partition) releaseToken(token uint64) {
 	p.inFlight.Delete(token)
 }
 
-func (p *Partition) pick(ctx context.Context) typedef.ValueWithToken {
+func (p *Partition) pick(ctx context.Context) typedef.PartitionKeys {
 	if ch := p.values.Load(); ch != nil {
 		select {
 		case v := <-*ch:
 			return v
 		case <-ctx.Done():
-			return typedef.ValueWithToken{}
+			return typedef.PartitionKeys{}
 		}
 	}
 
-	return typedef.ValueWithToken{}
+	return typedef.PartitionKeys{}
 }
 
 func (p *Partition) Close() error {
@@ -176,8 +182,8 @@ func NewPartitions(count, pkBufferSize uint64) Partitions {
 	partitions := make(Partitions, count)
 
 	for i := range len(partitions) {
-		values := make(chan typedef.ValueWithToken, pkBufferSize)
-		oldValues := make(chan typedef.ValueWithToken, pkBufferSize)
+		values := make(chan typedef.PartitionKeys, pkBufferSize)
+		oldValues := make(chan typedef.PartitionKeys, pkBufferSize)
 
 		partitions[i] = Partition{
 			inFlight: inflight.New(),

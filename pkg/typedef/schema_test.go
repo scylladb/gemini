@@ -17,6 +17,7 @@ package typedef
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 
@@ -100,7 +101,7 @@ func TestSchemaConfigValidate(t *testing.T) {
 			t.Parallel()
 			got := test.config.Valid()
 			//nolint:errorlint
-			if got != test.want {
+			if !errors.Is(got, test.want) {
 				t.Fatalf("expected '%s', got '%s'", test.want, got)
 			}
 		})

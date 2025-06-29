@@ -315,34 +315,4 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
-
-	t.Run("nil statement", func(t *testing.T) {
-		t.Parallel()
-
-		testStore := &mockStoreLoader{}
-		oracleStore := &mockStoreLoader{}
-
-		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
-		}
-		ctx := t.Context()
-
-		testStore.
-			On("mutate", mock.Anything, (*typedef.Stmt)(nil)).
-			Once().
-			Return(nil)
-		oracleStore.
-			On("mutate", mock.Anything, (*typedef.Stmt)(nil)).
-			Once().
-			Return(nil)
-
-		err := ds.Mutate(ctx, nil)
-
-		assert.NoError(t, err)
-		testStore.AssertExpectations(t)
-		oracleStore.AssertExpectations(t)
-	})
 }

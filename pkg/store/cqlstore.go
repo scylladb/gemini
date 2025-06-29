@@ -17,13 +17,11 @@ package store
 import (
 	"context"
 	"encoding/json"
-	errs "errors"
 	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/samber/mo"
-	"github.com/scylladb/gocqlx/v3/qb"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
@@ -48,7 +46,7 @@ func (c *cqlStore) name() string {
 
 type MutationError struct {
 	Inner         error
-	PartitionKeys []any
+	PartitionKeys typedef.Values
 }
 
 func (e MutationError) Error() string {
@@ -60,79 +58,51 @@ func (e MutationError) Error() string {
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
 	var err error
 
-	partitionKeys := make([]any, 0, len(stmt.ValuesWithToken))
-	for _, pk := range stmt.ValuesWithToken {
-		partitionKeys = append(partitionKeys, pk.Value...)
+	cqlRequestsMetric := metrics.CQLRequests.WithLabelValues(c.system, stmt.QueryType.OpType().String())
+	cqlErrorRequestsMetric := metrics.CQLErrorRequests.WithLabelValues(c.system, stmt.QueryType.OpType().String())
+	cqlTimeoutRequestsMetric := metrics.CQLQueryTimeouts.WithLabelValues(c.system, stmt.QueryType.OpType().String())
+
+	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
+	defer query.Release()
+
+	if !c.useServerSideTimestamps {
+		ts = ts.MapNone(func() (time.Time, bool) {
+			return time.Now(), true
+		})
+		query.WithTimestamp(ts.MustGet().UnixMicro())
 	}
-	newCtx := context.WithValue(ctx, utils.PartitionKeys, partitionKeys)
 
-	for i := range c.maxRetriesMutate {
-		newCtx = context.WithValue(newCtx, utils.GeminiAttempt, i)
-		mutateErr := c.doMutate(newCtx, stmt, ts)
-		metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
+	for range c.maxRetriesMutate {
+		mutateErr := query.Exec()
+		cqlRequestsMetric.Inc()
 
-		if mutateErr == nil {
+		if mutateErr == nil || errors.Is(mutateErr, gocql.ErrNotFound) || errors.Is(mutateErr, context.Canceled) {
 			return nil
 		}
 
-		if errors.Is(mutateErr, context.Canceled) {
+		if errors.Is(mutateErr, context.DeadlineExceeded) {
+			cqlTimeoutRequestsMetric.Inc()
 			return nil
 		}
 
 		err = multierr.Append(err, MutationError{
 			Inner:         mutateErr,
-			PartitionKeys: partitionKeys,
+			PartitionKeys: stmt.PartitionKeys.Values,
 		})
+		cqlErrorRequestsMetric.Inc()
 		time.Sleep(c.maxRetriesMutateSleep)
 	}
 
 	return err
 }
 
-func (c *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, timestamp mo.Option[time.Time]) error {
-	queryBody, _ := stmt.Query.ToCql()
-	query := c.session.Query(queryBody, stmt.Values...).WithContext(ctx)
-	defer query.Release()
-
-	if !c.useServerSideTimestamps {
-		timestamp = timestamp.MapNone(func() (time.Time, bool) {
-			return time.Now(), true
-		})
-		query.WithTimestamp(timestamp.MustGet().UnixMicro())
-	}
-
-	if err := query.Exec(); err != nil {
-		if errs.Is(err, context.Canceled) {
-			return nil
-		}
-
-		if errs.Is(err, context.DeadlineExceeded) {
-			metrics.CQLQueryTimeouts.WithLabelValues(c.system, c.system).Inc()
-
-			c.logger.Debug("deadline exceeded for mutation query",
-				zap.String("system", c.system),
-				zap.String("query", queryBody),
-				zap.Any("values", stmt.Values),
-			)
-
-			return nil
-		}
-
-		return err
-	}
-
-	return nil
-}
-
 func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
-	cql, _ := stmt.Query.ToCql()
-
-	query := c.session.Query(cql, stmt.Values...).WithContext(ctx)
+	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
 	iter := query.Iter()
 
 	defer func() {
 		query.Release()
-		metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
+		metrics.CQLRequests.WithLabelValues(c.system, stmt.QueryType.OpType().String()).Inc()
 	}()
 
 	rows := make(Rows, iter.NumRows())
@@ -152,21 +122,4 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 func (c *cqlStore) Close() error {
 	c.session.Close()
 	return nil
-}
-
-func opType(stmt *typedef.Stmt) string {
-	switch stmt.Query.(type) {
-	case *qb.InsertBuilder:
-		return "insert"
-	case *qb.DeleteBuilder:
-		return "delete"
-	case *qb.UpdateBuilder:
-		return "update"
-	case *qb.SelectBuilder:
-		return "select"
-	case *qb.BatchBuilder:
-		return "batch"
-	default:
-		return "unknown"
-	}
 }

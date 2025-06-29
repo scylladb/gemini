@@ -16,6 +16,7 @@ package store
 
 import (
 	"context"
+	"slices"
 
 	"github.com/gocql/gocql"
 	"github.com/samber/mo"
@@ -23,8 +24,6 @@ import (
 
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
-	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type ClusterObserver struct {
@@ -36,36 +35,22 @@ type ClusterObserver struct {
 func (c ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedBatch) {
 	instance := batch.Host.ConnectAddressAndPort()
 
+	data := MustGetContextData(ctx)
+
 	for i, query := range batch.Statements {
-		stType := typedef.ParseStatementTypeFromQuery(query)
-		op := stType.OpType()
-
-		if c.Logger != nil && op != typedef.OpSelect {
-			geminiAttempt, ok := ctx.Value(utils.GeminiAttempt).(int)
-			if !ok {
-				geminiAttempt = 1
-			}
-
-			queryID, ok := ctx.Value(utils.QueryID).(gocql.UUID)
-			if !ok {
-				queryID = gocql.UUIDFromTime(batch.Start)
-			}
-
-			partitionKeys := ctx.Value(utils.PartitionKeys).(typedef.Values)
-
+		if c.Logger != nil && !data.Statement.QueryType.IsSelect() {
 			err := c.Logger.LogStmt(stmtlogger.Item{
-				ID:            queryID,
 				Error:         mo.Left[error, string](batch.Err),
 				Statement:     query,
-				Values:        mo.Left[typedef.Values, []byte](batch.Values[i]),
+				Values:        mo.Left[[]any, []byte](slices.Clone(batch.Values[i])),
 				Start:         stmtlogger.Time{Time: batch.Start},
 				Duration:      stmtlogger.Duration{Duration: batch.End.Sub(batch.Start)},
 				Host:          instance,
 				Attempt:       batch.Attempt,
-				GeminiAttempt: geminiAttempt,
+				GeminiAttempt: data.GeminiAttempt,
 				Type:          c.ClusterName,
-				StatementType: op,
-				PartitionKeys: partitionKeys,
+				StatementType: data.Statement.QueryType,
+				PartitionKeys: data.Statement.PartitionKeys.Values.Copy(),
 			})
 			if err != nil {
 				c.AppLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("batch", batch))
@@ -73,7 +58,7 @@ func (c ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedB
 		}
 
 		metrics.GoCQLBatchQueries.
-			WithLabelValues(string(c.ClusterName), instance, stType.String()).
+			WithLabelValues(string(c.ClusterName), instance, data.Statement.QueryType.String()).
 			Inc()
 	}
 
@@ -89,35 +74,21 @@ func (c ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQ
 			Inc()
 	}
 
-	stType := typedef.ParseStatementTypeFromQuery(query.Statement)
-	op := stType.OpType()
+	data := MustGetContextData(ctx)
 
-	if c.Logger != nil && op != typedef.OpSelect {
-		geminiAttempt, ok := ctx.Value(utils.GeminiAttempt).(int)
-		if !ok {
-			geminiAttempt = 1
-		}
-
-		partitionKeys := ctx.Value(utils.PartitionKeys).([]any)
-
-		queryID, ok := ctx.Value(utils.QueryID).(gocql.UUID)
-		if !ok {
-			queryID = gocql.UUIDFromTime(query.Start)
-		}
-
+	if c.Logger != nil && !data.Statement.QueryType.IsSelect() {
 		err := c.Logger.LogStmt(stmtlogger.Item{
-			ID:            queryID,
 			Error:         mo.Left[error, string](query.Err),
 			Statement:     query.Statement,
-			Values:        mo.Left[typedef.Values, []byte](query.Values),
+			Values:        mo.Left[[]any, []byte](slices.Clone(query.Values)),
 			Start:         stmtlogger.Time{Time: query.Start},
 			Duration:      stmtlogger.Duration{Duration: query.End.Sub(query.Start)},
 			Host:          instance,
 			Attempt:       query.Metrics.Attempts,
-			GeminiAttempt: geminiAttempt,
+			GeminiAttempt: data.GeminiAttempt,
 			Type:          c.ClusterName,
-			StatementType: op,
-			PartitionKeys: partitionKeys,
+			StatementType: data.Statement.QueryType,
+			PartitionKeys: data.Statement.PartitionKeys.Values.Copy(),
 		})
 		if err != nil {
 			c.AppLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("query", query))
@@ -125,11 +96,11 @@ func (c ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQ
 	}
 
 	metrics.GoCQLQueries.
-		WithLabelValues(string(c.ClusterName), instance, stType.String()).
+		WithLabelValues(string(c.ClusterName), instance, data.Statement.QueryType.String()).
 		Inc()
 
 	metrics.GoCQLQueryTime.
-		WithLabelValues(string(c.ClusterName), instance, stType.String()).
+		WithLabelValues(string(c.ClusterName), instance, data.Statement.QueryType.String()).
 		Observe(float64(query.End.Sub(query.Start) / 1e3))
 }
 

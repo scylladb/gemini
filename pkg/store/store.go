@@ -39,7 +39,6 @@ import (
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gemini/pkg/workpool"
 )
 
@@ -75,7 +74,7 @@ type Store interface {
 
 	Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
 	Mutate(context.Context, *typedef.Stmt) error
-	Check(context.Context, *typedef.Table, *typedef.Stmt, bool) error
+	Check(context.Context, *typedef.Table, *typedef.Stmt, int) error
 }
 
 type (
@@ -103,7 +102,7 @@ type (
 )
 
 func New(
-	schemaChangesValues typedef.Values,
+	schemaChangesValues typedef.PartitionKeys,
 	workers *workpool.Pool,
 	schema *typedef.Schema,
 	cfg Config,
@@ -116,6 +115,7 @@ func New(
 		statementLogger, err = stmtlogger.NewLogger(
 			stmtlogger.WithScyllaLogger(
 				schemaChangesValues,
+				schema.Tables[0].PartitionKeys,
 				schema,
 				cfg.OracleStatementFile,
 				cfg.TestStatementFile,
@@ -277,13 +277,12 @@ type delegatingStore struct {
 	statementLogger *stmtlogger.Logger
 }
 
-func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error {
-	doCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	doCtx = context.WithValue(doCtx, utils.QueryID, gocql.UUIDFromTime(time.Now()))
-
-	if err := ds.testStore.mutate(doCtx, testBuilder, mo.None[time.Time]()); err != nil {
+func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef.Stmt) error {
+	ctx = WithContextData(ctx, ContextData{
+		GeminiAttempt: 0,
+		Statement:     stmt,
+	})
+	if err := ds.testStore.mutate(ctx, testBuilder, mo.None[time.Time]()); err != nil {
 		return pkgerrors.Wrapf(
 			err,
 			"unable to apply mutations to the %s store",
@@ -292,7 +291,7 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder
 	}
 
 	if ds.oracleStore != nil {
-		if err := ds.oracleStore.mutate(doCtx, oracleBuilder, mo.None[time.Time]()); err != nil {
+		if err := ds.oracleStore.mutate(ctx, stmt, mo.None[time.Time]()); err != nil {
 			return pkgerrors.Wrapf(
 				err,
 				"unable to apply mutations to the %s store",
@@ -305,9 +304,12 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder
 }
 
 func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error {
-	var oracleCh chan mo.Result[any]
+	doCtx := WithContextData(ctx, ContextData{
+		GeminiAttempt: 0,
+		Statement:     stmt,
+	})
 
-	doCtx := context.WithValue(ctx, utils.QueryID, gocql.TimeUUID())
+	var oracleCh chan mo.Result[any]
 
 	if ds.oracleStore != nil {
 		oracleCh = ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
@@ -352,10 +354,14 @@ func (ds delegatingStore) Check(
 	ctx context.Context,
 	table *typedef.Table,
 	stmt *typedef.Stmt,
-	detailedDiff bool,
+	attempt int,
 ) error {
-	doCtx := context.WithValue(ctx, utils.QueryID, gocql.TimeUUID())
 	var oracleCh chan mo.Result[any]
+
+	doCtx := WithContextData(ctx, ContextData{
+		GeminiAttempt: attempt,
+		Statement:     stmt,
+	})
 
 	if ds.oracleStore != nil {
 		oracleCh = ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
@@ -392,34 +398,21 @@ func (ds delegatingStore) Check(
 	}
 
 	if len(testRows) != len(oracleRows) {
-		if !detailedDiff {
-			return ErrorRowDifference{
-				TestRows:   len(testRows),
-				OracleRows: len(oracleRows),
-			}
-		}
 		testSet := pks(table, testRows)
 		oracleSet := pks(table, oracleRows)
 		missingInTest := strset.Difference(oracleSet, testSet).List()
 		missingInOracle := strset.Difference(testSet, oracleSet).List()
 
 		return ErrorRowDifference{
-			TestRows:        len(testRows),
-			OracleRows:      len(oracleRows),
 			MissingInTest:   missingInTest,
 			MissingInOracle: missingInOracle,
+			TestRows:        len(testRows),
+			OracleRows:      len(oracleRows),
 		}
 	}
 
 	if reflect.DeepEqual(testRows, oracleRows) {
 		return nil
-	}
-
-	if !detailedDiff {
-		return ErrorRowDifference{
-			TestRows:   len(testRows),
-			OracleRows: len(oracleRows),
-		}
 	}
 
 	slices.SortStableFunc(testRows, rowsCmp)

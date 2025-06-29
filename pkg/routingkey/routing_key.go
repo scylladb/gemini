@@ -25,51 +25,51 @@ import (
 )
 
 type Creator struct {
+	table            *typedef.Table
 	routingKeyBuffer []byte
 }
 
-func (rc *Creator) CreateRoutingKey(table *typedef.Table, values []any) ([]byte, error) {
-	partitionKeys := table.PartitionKeys
-	if len(partitionKeys) == 1 {
-		// single column routing key
-		routingKey, err := gocql.Marshal(
-			partitionKeys[0].Type.CQLType(),
-			values[0],
-		)
-		if err != nil {
-			return nil, err
-		}
-		return routingKey, nil
+func New(table *typedef.Table) *Creator {
+	return &Creator{
+		routingKeyBuffer: make([]byte, 0, 256),
+		table:            table,
 	}
+}
 
-	if rc.routingKeyBuffer == nil {
-		rc.routingKeyBuffer = make([]byte, 0, 256)
+func (rc *Creator) CreateRoutingKey(values map[string][]any) ([]byte, error) {
+	if len(rc.table.PartitionKeys) == 1 && len(values[rc.table.PartitionKeys[0].Name]) == 1 {
+		return gocql.Marshal(
+			rc.table.PartitionKeys[0].Type.CQLType(),
+			values[rc.table.PartitionKeys[0].Name][0],
+		)
 	}
 
 	// composite routing key
 	buf := bytes.NewBuffer(rc.routingKeyBuffer)
-	for i := range partitionKeys {
-		encoded, err := gocql.Marshal(
-			partitionKeys[i].Type.CQLType(),
-			values[i],
-		)
-		if err != nil {
-			return nil, err
+	for _, pk := range rc.table.PartitionKeys {
+		ty := pk.Type.CQLType()
+		for _, v := range values[pk.Name] {
+			encoded, err := gocql.Marshal(ty, v)
+			if err != nil {
+				return nil, err
+			}
+			lenBuf := []byte{0x00, 0x00}
+			binary.BigEndian.PutUint16(lenBuf, uint16(len(encoded)))
+			buf.Write(lenBuf)
+			buf.Write(encoded)
+			buf.WriteByte(0x00)
 		}
-		lenBuf := []byte{0x00, 0x00}
-		binary.BigEndian.PutUint16(lenBuf, uint16(len(encoded)))
-		buf.Write(lenBuf)
-		buf.Write(encoded)
-		buf.WriteByte(0x00)
 	}
+
 	routingKey := buf.Bytes()
 	return routingKey, nil
 }
 
-func (rc *Creator) GetHash(t *typedef.Table, values typedef.Values) (uint64, error) {
-	b, err := rc.CreateRoutingKey(t, values)
+func (rc *Creator) GetHash(values map[string][]any) (uint64, error) {
+	b, err := rc.CreateRoutingKey(values)
 	if err != nil {
 		return 0, err
 	}
+
 	return uint64(murmur.Murmur3H1(b)), nil
 }

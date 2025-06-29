@@ -192,19 +192,16 @@ func CreateMaterializedViews(
 	validColumns := c.ValidColumnsForPrimaryKey()
 	var mvs []typedef.MaterializedView
 	numMvs := 1
-	for i := 0; i < numMvs; i++ {
+	for i := range numMvs {
 		col := validColumns.Random(r)
 		if col == nil {
 			log.Printf("unable to generate valid columns for materialized view")
 			continue
 		}
 
-		cols := typedef.Columns{
-			col,
-		}
 		mv := typedef.MaterializedView{
 			Name:           fmt.Sprintf("%s_mv_%d", tableName, i),
-			PartitionKeys:  append(cols, partitionKeys...),
+			PartitionKeys:  append(typedef.Columns{col}, partitionKeys...),
 			ClusteringKeys: clusteringKeys,
 			NonPrimaryKey:  col,
 		}
