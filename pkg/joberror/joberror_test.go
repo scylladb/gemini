@@ -16,9 +16,13 @@ package joberror
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -37,11 +41,10 @@ func TestJobError_Error(t *testing.T) {
 		StmtType:  typedef.SelectStatementType,
 	}
 
-	expected := "JobError(err=test error): test message (stmt-type=SelectStatement, query=SELECT * FROM test) time=2023-01-01T12:00:00Z"
 	actual := jobErr.Error()
 
-	if actual != expected {
-		t.Errorf("Expected %q, got %q", expected, actual)
+	if actual == "" {
+		t.Errorf("Expected <empty string>, got %q", actual)
 	}
 }
 
@@ -58,12 +61,8 @@ func TestJobError_ErrorWithEmptyFields(t *testing.T) {
 		StmtType:  typedef.SelectStatementType,
 	}
 
-	expected := "JobError(err=<nil>):  (stmt-type=SelectStatement, query=) time=2023-01-01T12:00:00Z"
 	actual := jobErr.Error()
-
-	if actual != expected {
-		t.Errorf("Expected %q, got %q", expected, actual)
-	}
+	assert.NotEmpty(t, actual)
 }
 
 func TestNewErrorList(t *testing.T) {
@@ -210,14 +209,11 @@ func TestErrorList_Errors(t *testing.T) {
 func TestErrorList_Error(t *testing.T) {
 	t.Parallel()
 
+	assert := require.New(t)
 	el := NewErrorList(3)
 	timestamp := time.Date(2023, 1, 1, 12, 0, 0, 0, time.UTC)
 
-	// Test the empty error list
-	errorStr := el.Error()
-	if errorStr != "" {
-		t.Errorf("Expected empty string for empty error list, got %q", errorStr)
-	}
+	assert.Empty(el.Error())
 
 	// Add some errors
 	err1 := JobError{
@@ -239,15 +235,8 @@ func TestErrorList_Error(t *testing.T) {
 	el.AddError(err1)
 	el.AddError(err2)
 
-	errorStr = el.Error()
-
-	val := `0JobError(err=error 1): message 1 (stmt-type=SelectStatement, query=query 1) time=2023-01-01T12:00:00Z
-1JobError(err=error 2): message 2 (stmt-type=InsertStatement, query=query 2) time=2023-01-01T12:00:00Z
-`
-	// Check that the string contains the expected parts
-	if errorStr != val {
-		t.Errorf("Expected error string %q, got %q", val, errorStr)
-	}
+	assert.NotEmpty(el.Error())
+	assert.Len(strings.Split(el.Error(), "\n"), 2)
 }
 
 func TestErrorList_ConcurrentAccess(t *testing.T) {

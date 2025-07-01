@@ -144,15 +144,15 @@ func New(
 		cfg.MaxRetriesMutateSleep = 200 * time.Millisecond
 	}
 
-	testStore := &cqlStore{
-		session:                 testSession,
-		schema:                  schema,
-		system:                  "test",
-		maxRetriesMutate:        cfg.MaxRetriesMutate,
-		maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
-		useServerSideTimestamps: cfg.UseServerSideTimestamps,
-		logger:                  logger.Named("test_store"),
-	}
+	testStore := newCQLStore(
+		testSession,
+		schema,
+		logger.Named("test_store"),
+		"test",
+		cfg.MaxRetriesMutate,
+		cfg.MaxRetriesMutateSleep,
+		cfg.UseServerSideTimestamps,
+	)
 
 	var oracleStore storeLoader
 
@@ -162,15 +162,16 @@ func New(
 		if err != nil {
 			return nil, pkgerrors.Wrap(err, "failed to create test cluster")
 		}
-		oracleStore = &cqlStore{
-			session:                 oracleSession,
-			schema:                  schema,
-			system:                  "oracle",
-			maxRetriesMutate:        cfg.MaxRetriesMutate,
-			maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
-			useServerSideTimestamps: cfg.UseServerSideTimestamps,
-			logger:                  logger.Named("oracle_store"),
-		}
+
+		oracleStore = newCQLStore(
+			oracleSession,
+			schema,
+			logger.Named("oracle_store"),
+			"oracle",
+			cfg.MaxRetriesMutate,
+			cfg.MaxRetriesMutateSleep,
+			cfg.UseServerSideTimestamps,
+		)
 	}
 
 	return &delegatingStore{
@@ -336,7 +337,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		result = <-oracleCh
 		ds.workers.Release(oracleCh)
 		if result.IsError() {
-			// Test store failed, transition cannot take place
+			// Oracle store failed, transition cannot take place
 			ds.logger.Error(
 				"oracle store failed mutation, transition to next state impossible so continuing with next mutation",
 				zap.Error(result.Error()),

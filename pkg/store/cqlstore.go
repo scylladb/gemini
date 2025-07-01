@@ -21,6 +21,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/mo"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
@@ -31,13 +32,44 @@ import (
 )
 
 type cqlStore struct {
-	session                 *gocql.Session
-	schema                  *typedef.Schema
-	logger                  *zap.Logger
-	system                  string
-	maxRetriesMutate        int
-	maxRetriesMutateSleep   time.Duration
-	useServerSideTimestamps bool
+	cqlRequestsMetric         [typedef.StatementTypeCount]prometheus.Counter
+	cqlErrorRequestsMetric    [typedef.StatementTypeCount]prometheus.Counter
+	cqlTimeoutsRequestsMetric [typedef.StatementTypeCount]prometheus.Counter
+	session                   *gocql.Session
+	schema                    *typedef.Schema
+	logger                    *zap.Logger
+	system                    string
+	maxRetriesMutate          int
+	maxRetriesMutateSleep     time.Duration
+	useServerSideTimestamps   bool
+}
+
+func newCQLStore(
+	session *gocql.Session,
+	schema *typedef.Schema,
+	logger *zap.Logger,
+	system string,
+	maxRetriesMutate int,
+	maxRetriesMutateSleep time.Duration,
+	useServerSideTimestamps bool,
+) *cqlStore {
+	store := &cqlStore{
+		session:                 session,
+		schema:                  schema,
+		logger:                  logger,
+		system:                  system,
+		maxRetriesMutate:        maxRetriesMutate,
+		maxRetriesMutateSleep:   maxRetriesMutateSleep,
+		useServerSideTimestamps: useServerSideTimestamps,
+	}
+
+	for i := range typedef.StatementTypeCount {
+		store.cqlRequestsMetric[i] = metrics.CQLRequests.WithLabelValues(system, i.String())
+		store.cqlErrorRequestsMetric[i] = metrics.CQLRequests.WithLabelValues(system, i.String())
+		store.cqlTimeoutsRequestsMetric[i] = metrics.CQLRequests.WithLabelValues(system, i.String())
+	}
+
+	return store
 }
 
 func (c *cqlStore) name() string {
@@ -58,12 +90,6 @@ func (e MutationError) Error() string {
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
 	var err error
 
-	stType := stmt.QueryType.String()
-
-	cqlRequestsMetric := metrics.CQLRequests.WithLabelValues(c.system, stType)
-	cqlErrorRequestsMetric := metrics.CQLErrorRequests.WithLabelValues(c.system, stType)
-	cqlTimeoutRequestsMetric := metrics.CQLQueryTimeouts.WithLabelValues(c.system, stType)
-
 	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
 	defer query.Release()
 
@@ -76,14 +102,14 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 
 	for range c.maxRetriesMutate {
 		mutateErr := query.Exec()
-		cqlRequestsMetric.Inc()
+		c.cqlRequestsMetric[stmt.QueryType].Inc()
 
 		if mutateErr == nil || errors.Is(mutateErr, gocql.ErrNotFound) || errors.Is(mutateErr, context.Canceled) {
 			return nil
 		}
 
 		if errors.Is(mutateErr, context.DeadlineExceeded) {
-			cqlTimeoutRequestsMetric.Inc()
+			c.cqlTimeoutsRequestsMetric[stmt.QueryType].Inc()
 			return nil
 		}
 
@@ -91,7 +117,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 			Inner:         mutateErr,
 			PartitionKeys: stmt.PartitionKeys.Values,
 		})
-		cqlErrorRequestsMetric.Inc()
+		c.cqlErrorRequestsMetric[stmt.QueryType].Inc()
 		time.Sleep(c.maxRetriesMutateSleep)
 	}
 
@@ -104,7 +130,7 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 
 	defer func() {
 		query.Release()
-		metrics.CQLRequests.WithLabelValues(c.system, stmt.QueryType.String()).Inc()
+		c.cqlRequestsMetric[stmt.QueryType].Inc()
 	}()
 
 	rows := make(Rows, iter.NumRows())

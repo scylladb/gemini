@@ -17,7 +17,6 @@ package statements
 import (
 	"context"
 	"fmt"
-	"math"
 	"slices"
 
 	"github.com/scylladb/gocqlx/v3/qb"
@@ -48,22 +47,6 @@ func (g *Generator) Select(ctx context.Context) *typedef.Stmt {
 	return nil
 }
 
-const MaxCartesianProductCount = float64(100.0)
-
-// in totalCartesianProductCount chooses the first number of partition keys that
-// multiplied by the number of partition keys does not exceed MaxCartesianProductCount.
-func (g *Generator) totalCartesianProductCount(numQueryPKs, pkLen float64) int {
-
-	for i := int(numQueryPKs); i > 0; i-- {
-		multiplier := math.Pow(float64(i), pkLen)
-		if multiplier < MaxCartesianProductCount {
-			return i
-		}
-	}
-
-	return 1
-}
-
 func (g *Generator) genSinglePartitionQuery(ctx context.Context) *typedef.Stmt {
 	g.table.RLock()
 	defer g.table.RUnlock()
@@ -85,13 +68,20 @@ func (g *Generator) genSinglePartitionQuery(ctx context.Context) *typedef.Stmt {
 
 func (g *Generator) getMultiplePartitionKeys(initial int) int {
 	l := g.table.PartitionKeys.Len()
-	maximumCount := g.totalCartesianProductCount(float64(initial), float64(l))
+	if l == 0 {
+		panic("table has no partition keys")
+	}
+
+	maximumCount := TotalCartesianProductCount(float64(initial), float64(l))
 	return min(initial, l) + g.random.IntN(maximumCount)
 }
 
 func (g *Generator) getMultipleClusteringKeys(initial int) int {
 	l := g.table.ClusteringKeys.Len()
-	maximumCount := g.totalCartesianProductCount(float64(initial), float64(l))
+	if l == 0 {
+		return 0
+	}
+	maximumCount := TotalCartesianProductCount(float64(initial), float64(l))
 	return min(initial, l) + g.random.IntN(maximumCount)
 }
 
@@ -120,13 +110,19 @@ func (g *Generator) buildMultiPartitionsKey(ctx context.Context) (typedef.Values
 	numQueryPKs := g.getMultiplePartitionKeys(2)
 	pks := make(typedef.Values)
 
+	maybeReturn := make([]typedef.PartitionKeys, 0, numQueryPKs)
+
 	for range numQueryPKs {
 		pk := g.generator.GetOld(ctx)
 		if pk.Token == 0 {
+			if len(maybeReturn) > 0 {
+				g.generator.GiveOlds(ctx, maybeReturn...)
+			}
 			return nil, nil
 		}
 
 		pks.Merge(pk.Values)
+		maybeReturn = append(maybeReturn, pk)
 	}
 
 	if numQueryPKs != len(pks["pk0"]) {
@@ -170,7 +166,7 @@ func (g *Generator) genMultiplePartitionQuery(ctx context.Context) *typedef.Stmt
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		PartitionKeys: typedef.PartitionKeys{Token: 0, Values: pks},
+		PartitionKeys: typedef.PartitionKeys{Values: pks},
 		Values:        pks.ToCQLValues(g.table.PartitionKeys),
 		QueryType:     typedef.SelectMultiPartitionType,
 		Query:         query,
@@ -207,7 +203,7 @@ func (g *Generator) genMultiplePartitionClusteringRangeQuery(ctx context.Context
 
 	return &typedef.Stmt{
 		QueryType:     typedef.SelectMultiPartitionRangeStatementType,
-		PartitionKeys: typedef.PartitionKeys{Token: 0, Values: pks},
+		PartitionKeys: typedef.PartitionKeys{Values: pks},
 		Values:        values,
 		Query:         query,
 	}

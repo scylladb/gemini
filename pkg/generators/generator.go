@@ -18,8 +18,9 @@ import (
 	"context"
 	"math/rand/v2"
 	"sync"
-	"time"
+	"sync/atomic"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/distributions"
@@ -46,14 +47,15 @@ type Interface interface {
 }
 
 type Generator struct {
-	logger            *zap.Logger
-	table             *typedef.Table
-	routingKeyCreator *routingkey.Creator
+	oldValuesMetrics  metrics.ChannelMetrics
+	oldDroppedValues  prometheus.Counter
+	valuesMetrics     metrics.ChannelMetrics
 	r                 *rand.Rand
 	idxFunc           distributions.DistributionFunc
 	cancel            context.CancelFunc
-	oldValuesMetrics  metrics.ChannelMetrics
-	valuesMetrics     metrics.ChannelMetrics
+	logger            *zap.Logger
+	routingKeyCreator *routingkey.Creator
+	table             *typedef.Table
 	partitions        Partitions
 	partitionsConfig  typedef.PartitionRangeConfig
 	wg                sync.WaitGroup
@@ -97,8 +99,9 @@ func NewGenerator(
 		partitions:        NewPartitions(config.PartitionsCount, config.PkUsedBufferSize),
 		partitionsConfig:  config.PartitionsRangeConfig,
 		partitionCount:    config.PartitionsCount,
-		oldValuesMetrics:  metrics.NewChannelMetrics[typedef.PartitionKeys]("generator", table.Name+"_old_values", config.PkUsedBufferSize),
-		valuesMetrics:     metrics.NewChannelMetrics[typedef.PartitionKeys]("generator", table.Name+"_values", config.PkUsedBufferSize),
+		oldValuesMetrics:  metrics.NewChannelMetrics("generator", table.Name+"_old_values"),
+		valuesMetrics:     metrics.NewChannelMetrics("generator", table.Name+"_values"),
+		oldDroppedValues:  metrics.GeneratorDroppedValues.WithLabelValues(table.Name, "old"),
 	}
 
 	go g.start(ctx)
@@ -113,7 +116,7 @@ func (g *Generator) Get(ctx context.Context) typedef.PartitionKeys {
 	}
 
 	v := targetPart.get(ctx)
-	g.valuesMetrics.Dec(v)
+	g.valuesMetrics.Dec()
 	return v
 }
 
@@ -130,7 +133,7 @@ func (g *Generator) GetOld(ctx context.Context) typedef.PartitionKeys {
 	}
 	v, exists := targetPart.getOld(ctx)
 	if exists {
-		g.oldValuesMetrics.Dec(v)
+		g.oldValuesMetrics.Dec()
 	}
 
 	return v
@@ -138,13 +141,11 @@ func (g *Generator) GetOld(ctx context.Context) typedef.PartitionKeys {
 
 // GiveOlds returns the supplied values for later reuse unless
 func (g *Generator) GiveOlds(ctx context.Context, tokens ...typedef.PartitionKeys) {
-	m := metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "old")
-
 	for _, token := range tokens {
 		if g.GetPartitionForToken(token.Token).giveOld(ctx, token) {
-			g.oldValuesMetrics.Inc(token)
+			g.oldValuesMetrics.Inc()
 		} else {
-			m.Inc()
+			g.oldDroppedValues.Inc()
 		}
 	}
 }
@@ -155,30 +156,46 @@ func (g *Generator) ReleaseToken(token uint64) {
 }
 
 func (g *Generator) start(ctx context.Context) {
+	stopped := &atomic.Bool{}
 	g.wg.Add(1)
 	defer g.wg.Done()
 
+	go func() {
+		<-ctx.Done()
+		stopped.Store(true)
+		g.logger.Info("stopping partition key generation loop")
+	}()
+
 	g.logger.Info("starting partition key generation loop")
-	g.fillAllPartitions(ctx)
+	g.fillAllPartitions(stopped)
 }
 
 func (g *Generator) FindAndMarkStalePartitions() {
-	nonStale := make([]bool, g.partitionCount)
+	nonStale := make([][]typedef.PartitionKeys, g.partitionCount)
 	for range g.partitionCount * 100 {
-		token, _, err := g.createPartitionKeyValues()
+		token, values, err := g.createPartitionKeyValues()
 		if err != nil {
 			g.logger.Panic("failed to get primary key hash", zap.Error(err))
 		}
 
-		nonStale[g.shardOf(token)] = true
+		nonStale[g.shardOf(token)] = append(nonStale[g.shardOf(token)], typedef.PartitionKeys{
+			Values: values,
+			Token:  token,
+		})
 	}
 
 	stalePartitions := 0
 	for idx, v := range nonStale {
-		if !v {
+		if len(v) == 0 {
 			stalePartitions++
 			if err := g.partitions[idx].MarkStale(); err != nil {
 				g.logger.Panic("failed to mark partition as stale", zap.Error(err))
+			}
+		} else {
+			for _, item := range v {
+				if g.partitions[idx].push(item) {
+					g.valuesMetrics.Inc()
+				}
 			}
 		}
 	}
@@ -191,35 +208,15 @@ func (g *Generator) FindAndMarkStalePartitions() {
 	metrics.StalePartitions.WithLabelValues(g.table.Name).Set(float64(stalePartitions))
 }
 
-const sleepTime = 1 * time.Second
-
 // fillAllPartitions guarantees that each partition was tested to be full
 // at least once since the function started and before it ended.
 // In other words, no partition will be starved.
-func (g *Generator) fillAllPartitions(ctx context.Context) {
+func (g *Generator) fillAllPartitions(stopped *atomic.Bool) {
 	var dropped uint64
 
-	maxValuesIn := g.partitions.MaxValuesStored()
-	threshold := uint64(float64(maxValuesIn) * 0.95)
+	running := metrics.ExecutionTimeStart("value_generation_" + g.table.Name)
 
-	t := time.NewTicker(2 * time.Second)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new").Add(float64(dropped))
-			dropped = 0
-
-			if maxValuesIn-g.partitions.FullValues() < threshold {
-				time.Sleep(sleepTime)
-			}
-		default:
-		}
-
-		running := metrics.ExecutionTimeStart("value_generation")
-
+	for !stopped.Load() {
 		token, values, err := g.createPartitionKeyValues()
 		if err != nil {
 			g.logger.Error("failed to get primary key hash", zap.Error(err))
@@ -238,7 +235,7 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 		running.Record()
 
 		if pushed {
-			g.valuesMetrics.Inc(v)
+			g.valuesMetrics.Inc()
 			continue
 		}
 

@@ -159,7 +159,7 @@ func NewLogger(opts ...Option) (*Logger, error) {
 		channelSize: defaultChanSize,
 	}
 
-	chMetrics := metrics.NewChannelMetrics[Item]("statement_logger", "statement_logger", uint64(o.channelSize))
+	chMetrics := metrics.NewChannelMetrics("statement_logger", "statement_logger")
 	ch := make(chan Item, o.channelSize)
 
 	for _, opt := range opts {
@@ -190,7 +190,7 @@ func (l *Logger) init(ch chan<- Item, logger mo.Either[*ScyllaLogger, *IOWriterL
 func (l *Logger) LogStmt(item Item) error {
 	if ch := l.channel.Load(); ch != nil {
 		*ch <- item
-		l.metrics.Inc(item)
+		l.metrics.Inc()
 	}
 
 	return nil

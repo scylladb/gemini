@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package generators
+package statements
 
 import (
 	"fmt"
-	"log"
 	"math/rand/v2"
 	"strings"
+
+	"github.com/samber/mo"
 
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -45,25 +46,29 @@ func GenSchema(sc typedef.SchemaConfig, seed rand.Source) *typedef.Schema {
 
 func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.Table {
 	partitionKeys := make(
-		typedef.Columns,
+		typedef.Columns, 0,
 		utils.RandInt2(r, sc.GetMinPartitionKeys(), sc.GetMaxPartitionKeys()),
 	)
-	for i := range len(partitionKeys) {
-		partitionKeys[i] = &typedef.ColumnDef{
+
+	for i := range cap(partitionKeys) {
+		partitionKeys = append(partitionKeys, typedef.ColumnDef{
 			Name: GenColumnName("pk", i),
 			Type: GenPartitionKeyColumnType(r),
-		}
+		})
 	}
+
 	clusteringKeys := make(
-		typedef.Columns,
+		typedef.Columns, 0,
 		utils.RandInt2(r, sc.GetMinClusteringKeys(), sc.GetMaxClusteringKeys()),
 	)
-	for i := range len(clusteringKeys) {
-		clusteringKeys[i] = &typedef.ColumnDef{
+
+	for i := range cap(partitionKeys) {
+		clusteringKeys = append(clusteringKeys, typedef.ColumnDef{
 			Name: GenColumnName("ck", i),
 			Type: GenPrimaryKeyColumnType(r),
-		}
+		})
 	}
+
 	table := typedef.Table{
 		Name:           tableName,
 		PartitionKeys:  partitionKeys,
@@ -76,14 +81,12 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 		table.TableOptions = append(table.TableOptions, option.ToCQL())
 	}
 	if sc.UseCounters {
-		table.Columns = typedef.Columns{
-			{
-				Name: GenColumnName("col", 0),
-				Type: &typedef.CounterType{
-					Value: 0,
-				},
+		table.Columns = typedef.Columns{{
+			Name: GenColumnName("col", 0),
+			Type: &typedef.CounterType{
+				Value: 0,
 			},
-		}
+		}}
 		return &table
 	}
 
@@ -91,7 +94,7 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 	table.Columns = make(typedef.Columns, 0, columns)
 
 	for i := range columns {
-		table.Columns = append(table.Columns, &typedef.ColumnDef{
+		table.Columns = append(table.Columns, typedef.ColumnDef{
 			Name: GenColumnName("col", i),
 			Type: GenColumnType(columns, &sc, r),
 		})
@@ -190,20 +193,15 @@ func CreateMaterializedViews(
 	r *rand.Rand,
 ) []typedef.MaterializedView {
 	validColumns := c.ValidColumnsForPrimaryKey()
-	var mvs []typedef.MaterializedView
-	numMvs := 1
-	for i := range numMvs {
+	mvs := make([]typedef.MaterializedView, 0, 1)
+	for i := range 1 {
 		col := validColumns.Random(r)
-		if col == nil {
-			log.Printf("unable to generate valid columns for materialized view")
-			continue
-		}
 
 		mv := typedef.MaterializedView{
 			Name:           fmt.Sprintf("%s_mv_%d", tableName, i),
 			PartitionKeys:  append(typedef.Columns{col}, partitionKeys...),
 			ClusteringKeys: clusteringKeys,
-			NonPrimaryKey:  col,
+			NonPrimaryKey:  mo.Some(col),
 		}
 		mvs = append(mvs, mv)
 	}

@@ -19,6 +19,7 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -42,6 +43,8 @@ type List struct {
 	duration time.Duration
 	workers  uint64
 }
+
+var ErrNoStatement = errors.New("no statement generated")
 
 type Worker interface {
 	Name() string
@@ -129,6 +132,7 @@ func (l List) Run(
 	return g.Wait()
 }
 
+//nolint
 // mutationJob continuously applies mutations against the database
 // for as long as the pump is active.
 //func mutationJob(ctx context.Context, stmtGen *statements.Generator, globalStatus *status.GlobalStatus, logger *zap.Logger, stopFlag *stop.Flag) error {

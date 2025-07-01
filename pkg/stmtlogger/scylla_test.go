@@ -38,7 +38,7 @@ import (
 func TestBuildQueriesCreation(t *testing.T) {
 	t.Parallel()
 
-	createKeyspace, createTable := buildCreateTableQuery([]*typedef.ColumnDef{
+	createKeyspace, createTable := buildCreateTableQuery([]typedef.ColumnDef{
 		{Name: "col1", Type: typedef.TypeInt},
 		{Name: "col2", Type: typedef.TypeAscii},
 	}, replication.NewNetworkTopologyStrategy())
@@ -53,7 +53,7 @@ func TestBuildQueriesExecution(t *testing.T) {
 
 	session := utils.SingleScylla(t)
 
-	createKeyspace, createTable := buildCreateTableQuery([]*typedef.ColumnDef{
+	createKeyspace, createTable := buildCreateTableQuery([]typedef.ColumnDef{
 		{Name: "col1", Type: typedef.TypeInt},
 		{Name: "col2", Type: typedef.TypeAscii},
 	}, replication.NewNetworkTopologyStrategy())
@@ -107,7 +107,7 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 		Err:           ers,
 		Message:       "Mutation Validation failed",
 		Query:         statement,
-		StmtType:      typedef.InsertStatementType,
+		StmtType:      typedef.SelectStatementType,
 		PartitionKeys: typedef.Values{"col1": []any{2}, "col2": []any{"test_2"}},
 	}
 
@@ -133,8 +133,8 @@ func TestScyllaLogger(t *testing.T) {
 		t.Cleanup(func() {
 			_ = pool.Close()
 		})
-		chMetrics := metrics.NewChannelMetrics[Item]("test", "test", 1)
-		partitionKeys := []*typedef.ColumnDef{
+		chMetrics := metrics.NewChannelMetrics("test", "test")
+		partitionKeys := []typedef.ColumnDef{
 			{Name: "col1", Type: typedef.TypeInt},
 			{Name: "col2", Type: typedef.TypeText},
 		}

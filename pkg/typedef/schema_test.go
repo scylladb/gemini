@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/samber/mo"
 
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/tableopts"
@@ -142,7 +143,7 @@ func TestSchemaMarshalUnmarshalNotChanged(t *testing.T) {
 
 	opts := cmp.Options{
 		cmp.AllowUnexported(Table{}, MaterializedView{}),
-		cmpopts.IgnoreUnexported(Table{}, MaterializedView{}),
+		cmpopts.IgnoreUnexported(Table{}, MaterializedView{}, mo.Option[ColumnDef]{}),
 		cmpopts.EquateEmpty(),
 	}
 
@@ -267,10 +268,10 @@ var fullSchema = Schema{
 			},
 			MaterializedViews: []MaterializedView{
 				{
-					NonPrimaryKey: &ColumnDef{
+					NonPrimaryKey: mo.Some(ColumnDef{
 						Type: TypeDecimal,
 						Name: "col5",
-					},
+					}),
 					Name: "mv0",
 					PartitionKeys: Columns{
 						{Name: "pk0", Type: TypeFloat},
@@ -291,10 +292,10 @@ var fullSchema = Schema{
 						{Name: "ck6", Type: TypeDouble},
 					},
 				}, {
-					NonPrimaryKey: &ColumnDef{
+					NonPrimaryKey: mo.Some(ColumnDef{
 						Type: TypeAscii,
 						Name: "col0_idx",
-					},
+					}),
 					Name: "mv1",
 					PartitionKeys: Columns{
 						{Name: "pk0", Type: TypeFloat},
@@ -381,7 +382,7 @@ var fullSchema = Schema{
 			},
 			MaterializedViews: []MaterializedView{
 				{
-					NonPrimaryKey: nil,
+					NonPrimaryKey: mo.None[ColumnDef](),
 					Name:          "mv0",
 					PartitionKeys: Columns{
 						{Name: "pk0", Type: TypeTinyint},

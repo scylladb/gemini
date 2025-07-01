@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package generators
+package statements
 
 import (
 	"fmt"
-	"math/rand/v2"
 
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 func GenColumnName(prefix string, idx int) string {
 	return fmt.Sprintf("%s%d", prefix, idx)
 }
 
-func GenColumnType(numColumns int, sc *typedef.SchemaConfig, r *rand.Rand) typedef.Type {
+func GenColumnType(numColumns int, sc *typedef.SchemaConfig, r utils.Random) typedef.Type {
 	n := r.IntN(numColumns + 5)
 	switch n {
 	case numColumns:
@@ -43,11 +43,11 @@ func GenColumnType(numColumns int, sc *typedef.SchemaConfig, r *rand.Rand) typed
 	}
 }
 
-func GenSimpleType(_ *typedef.SchemaConfig, r *rand.Rand) typedef.SimpleType {
+func GenSimpleType(_ *typedef.SchemaConfig, r utils.Random) typedef.SimpleType {
 	return typedef.AllTypes[r.IntN(len(typedef.AllTypes))]
 }
 
-func GenTupleType(sc *typedef.SchemaConfig, r *rand.Rand) typedef.Type {
+func GenTupleType(sc *typedef.SchemaConfig, r utils.Random) typedef.Type {
 	n := max(r.IntN(sc.MaxTupleParts), 2)
 	typeList := make([]typedef.SimpleType, n)
 	for i := range n {
@@ -60,7 +60,7 @@ func GenTupleType(sc *typedef.SchemaConfig, r *rand.Rand) typedef.Type {
 	}
 }
 
-func GenUDTType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.UDTType {
+func GenUDTType(sc *typedef.SchemaConfig, r utils.Random) *typedef.UDTType {
 	udtNum := r.Uint32()
 	typeName := fmt.Sprintf("udt_%d", udtNum)
 	ts := make(map[string]typedef.SimpleType)
@@ -77,15 +77,15 @@ func GenUDTType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.UDTType {
 	}
 }
 
-func GenSetType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.BagType {
+func GenSetType(sc *typedef.SchemaConfig, r utils.Random) *typedef.BagType {
 	return genBagType(typedef.TypeSet, sc, r)
 }
 
-func GenListType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.BagType {
+func GenListType(sc *typedef.SchemaConfig, r utils.Random) *typedef.BagType {
 	return genBagType(typedef.TypeList, sc, r)
 }
 
-func genBagType(kind string, sc *typedef.SchemaConfig, r *rand.Rand) *typedef.BagType {
+func genBagType(kind string, sc *typedef.SchemaConfig, r utils.Random) *typedef.BagType {
 	var t typedef.SimpleType
 	for {
 		t = GenSimpleType(sc, r)
@@ -100,7 +100,7 @@ func genBagType(kind string, sc *typedef.SchemaConfig, r *rand.Rand) *typedef.Ba
 	}
 }
 
-func GenMapType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.MapType {
+func GenMapType(sc *typedef.SchemaConfig, r utils.Random) *typedef.MapType {
 	t := GenSimpleType(sc, r)
 	for {
 		if _, ok := typedef.TypesMapKeyBlacklist[t]; !ok {
@@ -116,11 +116,11 @@ func GenMapType(sc *typedef.SchemaConfig, r *rand.Rand) *typedef.MapType {
 	}
 }
 
-func GenPartitionKeyColumnType(r *rand.Rand) typedef.Type {
+func GenPartitionKeyColumnType(r utils.Random) typedef.Type {
 	return typedef.PartitionKeyTypes[r.IntN(len(typedef.PartitionKeyTypes))]
 }
 
-func GenPrimaryKeyColumnType(r *rand.Rand) typedef.Type {
+func GenPrimaryKeyColumnType(r utils.Random) typedef.Type {
 	return typedef.PkTypes[r.IntN(len(typedef.PkTypes))]
 }
 

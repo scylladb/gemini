@@ -112,8 +112,9 @@ func (t *Table) ValidColumnsForDelete() Columns {
 	if len(t.MaterializedViews) != 0 {
 		for _, mv := range t.MaterializedViews {
 			if mv.HaveNonPrimaryKey() {
+				nonPrimCol := mv.NonPrimaryKey.MustGet()
 				for j := range validCols {
-					if validCols[j].Name == mv.NonPrimaryKey.Name {
+					if validCols[j].Name == nonPrimCol.Name {
 						validCols = slices.Delete(validCols, j, j+1)
 						break
 					}

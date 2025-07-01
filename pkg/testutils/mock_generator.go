@@ -19,12 +19,9 @@ import (
 	"log"
 	"math/rand/v2"
 
-	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
-
-var _ generators.Interface = (*MockGenerator)(nil)
 
 type MockGenerator struct {
 	table             *typedef.Table

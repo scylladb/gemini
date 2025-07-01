@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// nolint
 package jobs
 
 import (
 	"fmt"
-	"math/rand/v2"
 
-	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 const (
@@ -31,23 +32,23 @@ const (
 func GenDDLStmt(
 	s *typedef.Schema,
 	t *typedef.Table,
-	r *rand.Rand,
+	r utils.Random,
 	_ *typedef.PartitionRangeConfig,
 	sc typedef.SchemaConfig,
 ) (*typedef.Stmts, error) {
 	validCols := t.ValidColumnsForDelete()
 	if validCols.Len() == 0 {
 		return genAddColumnStmt(t, s.Keyspace.Name, &typedef.ColumnDef{
-			Name: generators.GenColumnName("col", len(t.Columns)+1),
-			Type: generators.GenColumnType(len(t.Columns)+1, &sc, r),
+			Name: statements.GenColumnName("col", len(t.Columns)+1),
+			Type: statements.GenColumnType(len(t.Columns)+1, &sc, r),
 		})
 	}
 
 	switch n := r.IntN(DDLStatements); n {
 	case DDLAddColumnStatement:
 		return genAddColumnStmt(t, s.Keyspace.Name, &typedef.ColumnDef{
-			Name: generators.GenColumnName("col", len(t.Columns)+1),
-			Type: generators.GenColumnType(len(t.Columns)+1, &sc, r),
+			Name: statements.GenColumnName("col", len(t.Columns)+1),
+			Type: statements.GenColumnType(len(t.Columns)+1, &sc, r),
 		})
 	case DDLDropColumnStatement:
 		return genDropColumnStmt(t, s.Keyspace.Name, validCols.Random(r))
@@ -98,7 +99,7 @@ func genAddColumnStmt(
 func genDropColumnStmt(
 	t *typedef.Table,
 	keyspace string,
-	column *typedef.ColumnDef,
+	column typedef.ColumnDef,
 ) (*typedef.Stmts, error) {
 	return nil, nil
 	//var stmts []*typedef.Stmt

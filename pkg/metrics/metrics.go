@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2025 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ import (
 var registerer = prometheus.NewRegistry()
 
 var (
-	executionTime = prometheus.NewHistogramVec(
+	ExecutionTime = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "execution_time",
 			Help:    "Time taken to execute a task.",
@@ -183,12 +183,16 @@ var (
 		},
 		[]string{"ty"},
 	)
+
+	ErrorMessages = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "errors",
+	}, []string{"ty", "msg"})
 )
 
 func init() {
 	r := prometheus.WrapRegistererWithPrefix("gemini_", registerer)
 
-	r.MustRegister(channelMetrics, executionTime)
+	r.MustRegister(channelMetrics, ExecutionTime)
 
 	r.MustRegister(
 		CQLRequests,
@@ -211,13 +215,15 @@ func init() {
 		FileSizeMetrics,
 		ExecutionErrors,
 		CQLErrorRequests,
+		ErrorMessages,
 	)
 
 	r.MustRegister(
 		collectors.NewGoCollector(
-			collectors.WithGoCollectorRuntimeMetrics(),
+			collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll),
 		),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{
+			ReportErrors: true,
 			PidFn: func() (int, error) {
 				return os.Getpid(), nil
 			},
@@ -236,14 +242,6 @@ func init() {
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			return float64(m.NumGC)
-		}),
-		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Name: "go_last_gc_duration_microseconds",
-			Help: "Duration of the last GC cycle.",
-		}, func() float64 {
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			return float64(m.PauseNs[(m.NumGC+255)%256]) / 1e6
 		}),
 	)
 }
@@ -286,28 +284,38 @@ func StartMetricsServer(ctx context.Context, bind string) {
 }
 
 type RunningTime struct {
-	start time.Time
-	task  string
+	start    time.Time
+	observer prometheus.Observer
+	task     string
 }
 
 func ExecutionTimeStart(task string) RunningTime {
 	return RunningTime{
-		start: time.Now(),
-		task:  task,
+		start:    time.Now(),
+		task:     task,
+		observer: ExecutionTime.WithLabelValues(task),
 	}
 }
 
 func (r RunningTime) Record() {
-	executionTime.
-		WithLabelValues(r.task).
-		Observe(float64(time.Since(r.start).Microseconds()))
+	r.observer.Observe(float64(time.Since(r.start).Microseconds()))
 }
 
-func ExecutionTime(task string, callback func()) {
+func ExecutionTimeFunc(task string, callback func()) {
 	start := time.Now()
 
 	callback()
-	executionTime.
+	ExecutionTime.
 		WithLabelValues(task).
 		Observe(float64(time.Since(start).Nanoseconds()) / 1e3)
+}
+
+func ExecutionTimeWithError(task string, callback func() error) error {
+	start := time.Now()
+	err := callback()
+	ExecutionTime.
+		WithLabelValues(task).
+		Observe(float64(time.Since(start).Nanoseconds()) / 1e3)
+
+	return err
 }

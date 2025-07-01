@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package generators_test
+package statements_test
 
 import (
 	"crypto/sha256"
@@ -25,7 +25,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 
-	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -183,7 +183,7 @@ func TestGetCreateSchema(t *testing.T) {
 		test := tests[name]
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			got := generators.GetCreateTable(test.table, ks)
+			got := statements.GetCreateTable(test.table, ks)
 			if diff := cmp.Diff(got, test.want); diff != "" {
 				t.Fatalf("cmp.Diff failed: %s", diff)
 			}
@@ -208,7 +208,7 @@ func TestGenSchema(t *testing.T) {
 	}
 
 	for _, seed := range seeds {
-		testSchema := generators.GenSchema(
+		testSchema := statements.GenSchema(
 			testSchemaConfig,
 			rand.NewChaCha8(sha256.Sum256([]byte(strconv.FormatInt(int64(seed), 10)))),
 		)
@@ -242,8 +242,8 @@ func transformAndDiff(t *testing.T, testSchema *typedef.Schema) {
 func createColumns(cnt int, prefix string) typedef.Columns {
 	var cols typedef.Columns
 	for i := range cnt {
-		cols = append(cols, &typedef.ColumnDef{
-			Name: generators.GenColumnName(prefix, i),
+		cols = append(cols, typedef.ColumnDef{
+			Name: statements.GenColumnName(prefix, i),
 			Type: typedef.TypeText,
 		})
 	}

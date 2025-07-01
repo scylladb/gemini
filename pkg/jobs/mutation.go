@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// nolint
 package jobs
 
 import (
@@ -50,14 +51,14 @@ func NewMutation(
 	status *status.GlobalStatus,
 	stopFlag *stop.Flag,
 	store store.Store,
-	delete bool,
+	del bool,
 	seed [32]byte,
 ) *Mutation {
 	pc := config.GetPartitionRangeConfig()
 	statementGenerator := statements.New(
 		schema.Keyspace.Name,
-		table,
 		generator,
+		table,
 		rand.New(rand.NewChaCha8(seed)),
 		&pc,
 		config.UseLWT,
@@ -71,39 +72,52 @@ func NewMutation(
 		status:    status,
 		stopFlag:  stopFlag,
 		store:     store,
-		delete:    delete,
+		delete:    del,
 	}
 }
 
 func (m *Mutation) Do(ctx context.Context) error {
 	name := m.Name()
 	for !m.stopFlag.IsHardOrSoft() {
-		metrics.ExecutionTime(name, func() {
+		err := metrics.ExecutionTimeWithError(name, func() error {
 			mutateStmt := m.statement.MutateStatement(ctx, m.delete)
 
 			if mutateStmt == nil {
-				return
+				return ErrNoStatement
 			}
 
-			if err := m.store.Mutate(ctx, mutateStmt); err != nil {
-				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-					return
-				}
+			defer m.generator.ReleaseToken(mutateStmt.PartitionKeys.Token)
 
-				m.status.AddWriteError(joberror.JobError{
-					Timestamp:     time.Now(),
-					StmtType:      mutateStmt.QueryType,
-					Message:       "Mutation failed: " + err.Error(),
-					Query:         mutateStmt.Query,
-					PartitionKeys: mutateStmt.PartitionKeys.Values,
-				})
+			err := m.store.Mutate(ctx, mutateStmt)
 
-				return
+			if err == nil {
+				m.status.WriteOp()
+				m.generator.GiveOlds(ctx, mutateStmt.PartitionKeys)
+				return nil
 			}
 
-			m.status.WriteOp()
-			m.generator.GiveOlds(ctx, mutateStmt.PartitionKeys)
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				return nil
+			}
+
+			return joberror.JobError{
+				Err:           err,
+				Timestamp:     time.Now(),
+				StmtType:      mutateStmt.QueryType,
+				Message:       "Mutation failed: " + err.Error(),
+				Query:         mutateStmt.Query,
+				PartitionKeys: mutateStmt.PartitionKeys.Values,
+			}
 		})
+
+		if errors.Is(err, ErrNoStatement) {
+			time.Sleep(m.schema.Config.AsyncObjectStabilizationDelay)
+		}
+
+		var jobErr joberror.JobError
+		if errors.As(err, &jobErr) {
+			m.status.AddReadError(jobErr)
+		}
 
 		if m.status.HasErrors() {
 			m.stopFlag.SetSoft(true)

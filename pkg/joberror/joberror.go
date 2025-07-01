@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type JobError struct {
@@ -34,14 +35,17 @@ type JobError struct {
 	StmtType      typedef.StatementType `json:"stmt-type"`
 }
 
-func (j *JobError) Error() string {
+func (j JobError) Error() string {
+	data, _ := json.Marshal(j.PartitionKeys)
+
 	return fmt.Sprintf(
-		"JobError(err=%v): %s (stmt-type=%s, query=%s) time=%s",
+		"JobError(err=%v): %s (stmt-type=%s, query=%s, time=%s) partition-keys=%s",
 		j.Err,
 		j.Message,
 		j.StmtType,
 		j.Query,
 		j.Timestamp.Format(time.RFC3339Nano),
+		utils.UnsafeString(data),
 	)
 }
 
@@ -97,7 +101,7 @@ func (el *ErrorList) Error() string {
 		builder.WriteString("\n")
 	}
 
-	return builder.String()
+	return strings.TrimRight(builder.String(), "\n")
 }
 
 func NewErrorList(limit int) *ErrorList {

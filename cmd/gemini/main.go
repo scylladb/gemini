@@ -36,20 +36,21 @@ func main() {
 	defer cancel()
 
 	if err := rootCmd.ParseFlags(os.Args); err != nil {
-		log.Fatalf("Failed to parse flags: %v", err)
+		log.Panicf("Failed to parse flags: %v", err)
 	}
 
-	if versionFlag {
-		val, err := rootCmd.PersistentFlags().GetBool("version-json")
+	versionJSON, err := rootCmd.PersistentFlags().GetBool("version-json")
+
+	if versionFlag || versionJSON {
 		if err != nil {
-			log.Fatalf("Failed to get version info as json flag: %v", err)
+			log.Panicf("Failed to get version info as json flag: %v", err)
 		}
 
-		if val {
+		if versionJSON {
 			var data []byte
-			data, err = json.MarshalIndent(versionInfo, "", "    ")
+			data, err = json.Marshal(versionInfo)
 			if err != nil {
-				log.Fatalf("Failed to marshal version info: %v", err)
+				log.Panicf("Failed to marshal version info: %v\n", err)
 			}
 
 			//nolint:forbidigo
@@ -57,6 +58,7 @@ func main() {
 			return
 		}
 
+		//nolint:forbidigo
 		fmt.Println(versionInfo.String())
 
 		return
@@ -80,12 +82,13 @@ func main() {
 
 	status := 0
 
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	if err = rootCmd.ExecuteContext(ctx); err != nil {
 		status = 1
 	}
 
 	utils.ExecuteFinalizers()
-	os.Exit(status)
+	cancel()
+	os.Exit(status) //nolint:gocritic
 }
 
 func init() {

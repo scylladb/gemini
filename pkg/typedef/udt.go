@@ -15,9 +15,9 @@
 package typedef
 
 import (
-	"math/rand/v2"
-
 	"github.com/gocql/gocql"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type UDTType struct {
@@ -56,7 +56,7 @@ func (t *UDTType) Indexable() bool {
 	return true
 }
 
-func (t *UDTType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
+func (t *UDTType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	vals := make(map[string]any)
 	for name, typ := range t.ValueTypes {
 		vals[name] = typ.GenJSONValue(r, p)
@@ -64,7 +64,7 @@ func (t *UDTType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	return vals
 }
 
-func (t *UDTType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
+func (t *UDTType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	vals := make(map[string]any)
 	for name, typ := range t.ValueTypes {
 		vals[name] = typ.GenValue(r, p)[0]

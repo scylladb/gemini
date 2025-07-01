@@ -34,7 +34,6 @@ type ClusterObserver struct {
 
 func (c ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedBatch) {
 	instance := batch.Host.ConnectAddressAndPort()
-
 	data := MustGetContextData(ctx)
 
 	for i, query := range batch.Statements {

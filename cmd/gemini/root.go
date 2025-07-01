@@ -32,6 +32,7 @@ import (
 
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/jobs"
 	"github.com/scylladb/gemini/pkg/realrandom"
 	"github.com/scylladb/gemini/pkg/status"
@@ -175,7 +176,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	})
 
 	if dropSchema && mode != jobs.ReadMode {
-		for _, stmt := range generators.GetDropKeyspace(schema) {
+		for _, stmt := range statements.GetDropKeyspace(schema) {
 			logger.Debug(stmt)
 			if err = st.Mutate(ctx, typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
 				return errors.Wrap(err, "unable to drop schema")
@@ -183,7 +184,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	testKeyspace, oracleKeyspace := generators.GetCreateKeyspaces(schema)
+	testKeyspace, oracleKeyspace := statements.GetCreateKeyspaces(schema)
 	if err = st.Create(
 		ctx,
 		typedef.SimpleStmt(testKeyspace, typedef.CreateKeyspaceStatementType),
@@ -191,7 +192,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		return errors.Wrap(err, "unable to create keyspace")
 	}
 
-	for _, stmt := range generators.GetCreateSchema(schema) {
+	for _, stmt := range statements.GetCreateSchema(schema) {
 		logger.Debug(stmt)
 		if err = st.Mutate(ctx, typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
 			return errors.Wrap(err, "unable to create schema")
@@ -229,7 +230,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	globalStatus.PrintResult(outFile, schema, versionInfo.String(), versionInfo)
+	globalStatus.PrintResult(outFile, schema, versionInfo.Gemini.Version, versionInfo)
 	if globalStatus.HasErrors() {
 		return errors.New("gemini encountered errors, exiting with non zero status")
 	}

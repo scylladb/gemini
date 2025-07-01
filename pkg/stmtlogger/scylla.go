@@ -203,7 +203,7 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 	query, _ := insertBuilder.ToCql()
 
 	logStatement := func(item Item) {
-		s.metrics.Dec(item)
+		s.metrics.Dec()
 		values := make([]any, 0, partitionKeysCount+additionalColumnsCount)
 
 		if item.StatementType.IsSchema() {
@@ -236,6 +236,12 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 			)
 
 			if len(values) != partitionKeysCount+additionalColumnsCount {
+				metrics.ErrorMessages.WithLabelValues(
+					"statement_logger",
+					fmt.Sprintf("invalid number of values for Scylla insert: expected=%d actual=%d, values=%v, statement=%s",
+						partitionKeysCount+additionalColumnsCount, len(values), values, item.StatementType,
+					),
+				).Inc()
 				s.logger.Error(
 					"invalid number of values for Scylla insert",
 					zap.Int("expected", partitionKeysCount+additionalColumnsCount),
@@ -250,6 +256,7 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 			defer q.Release()
 
 			if err := q.Exec(); err != nil {
+				metrics.ErrorMessages.WithLabelValues("statement_logger", err.Error()).Inc()
 				s.logger.Error("failed to insert into statements table", zap.Error(err))
 			}
 		})
@@ -306,19 +313,6 @@ func buildCreateTableQuery(
 
 	builder.Reset()
 
-	builder.WriteString("SELECT ")
-	builder.WriteString(additionalSelectColumns)
-	builder.WriteString(" FROM logs.statements WHERE ")
-
-	for _, col := range partitionKeys {
-		builder.WriteString(col.Name)
-		builder.WriteRune('=')
-		builder.WriteString(col.Type.CQLHolder())
-		builder.WriteString(" AND ")
-	}
-
-	builder.WriteString("ty=? AND ddl=true ORDER BY ts;")
-
 	return createKeyspace, createTable
 }
 
@@ -335,13 +329,24 @@ func (s *ScyllaLogger) fetchData(ch chan<- Item, ty Type, statement string, valu
 			break
 		}
 
+		v := make([]any, 0)
+		var either mo.Either[[]any, []byte]
+
+		data := m["values"].([]byte)
+
+		if err := json.Unmarshal(data, &v); err != nil {
+			either = mo.Left[[]any, []byte](v)
+		} else {
+			either = mo.Right[[]any, []byte](data)
+		}
+
 		item := Item{
 			Start:         Time{Time: m["ts"].(time.Time)},
 			Error:         mo.Right[error, string](m["error"].(string)),
 			Statement:     m["statement"].(string),
 			Host:          m["host"].(string),
 			Type:          ty,
-			Values:        mo.Right[[]any, []byte](m["values"].([]byte)),
+			Values:        either,
 			Duration:      Duration{Duration: time.Duration(m["dur"].(gocql.Duration).Nanoseconds)},
 			Attempt:       int(m["attempt"].(int16)),
 			GeminiAttempt: int(m["gemini_attempt"].(int16)),
@@ -353,9 +358,7 @@ func (s *ScyllaLogger) fetchData(ch chan<- Item, ty Type, statement string, valu
 	return iter.Close()
 }
 
-func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) (string, []any) {
-	values := make([]any, 0, s.partitionKeysCount+additionalColumnsCount)
-
+func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string, [][]any) {
 	switch jobError.StmtType {
 	case typedef.SelectStatementType, typedef.SelectRangeStatementType,
 		typedef.InsertStatementType, typedef.InsertJSONStatementType,
@@ -364,6 +367,7 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) (string, 
 			Columns(additionalColumnsArr...).
 			OrderBy("ts", qb.ASC)
 
+		values := make([]any, 0, len(s.schemaPartitionKeys))
 		for _, pk := range s.schemaPartitionKeys {
 			builder.Where(qb.Eq(pk.Name))
 			values = append(values, jobError.PartitionKeys[pk.Name]...)
@@ -375,33 +379,49 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) (string, 
 		)
 
 		query, _ := builder.ToCql()
-		return query, values
+		return []string{query}, [][]any{values}
 	case typedef.SelectMultiPartitionType, typedef.SelectMultiPartitionRangeStatementType:
-		builder := qb.Select("logs.statements").
-			Columns(additionalColumnsArr...).
-			OrderBy("ts", qb.ASC)
+		// TODO: Optimization for multi-partition queries
+		// 	Calculate the Cartesian product of all partition keys
+		//  By this we can split the query into multiple queries
+		//  Without running into `cartesian product of IN list N`
+		//  This naive implementation will run one query per partition key value
 
-		for _, pk := range s.schemaPartitionKeys {
-			builder.Where(qb.InTuple(pk.Name, len(jobError.PartitionKeys[pk.Name])))
-			values = append(values, jobError.PartitionKeys[pk.Name]...)
+		iterations := len(jobError.PartitionKeys[s.schemaPartitionKeys[0].Name])
+		queries := make([]string, 0, iterations)
+		values := make([][]any, 0, iterations)
+
+		for i := range iterations {
+			builder := qb.Select("logs.statements").
+				Columns(additionalColumnsArr...).
+				OrderBy("ts", qb.ASC)
+
+			vals := make([]any, 0, len(s.schemaPartitionKeys))
+			for _, pk := range s.schemaPartitionKeys {
+				builder.Where(qb.Eq(pk.Name))
+				vals = append(vals, jobError.PartitionKeys[pk.Name][i])
+			}
+
+			builder.Where(
+				qb.EqLit("ty", "'"+string(ty)+"'"),
+				qb.EqLit("ddl", "false"),
+			)
+
+			query, _ := builder.ToCql()
+			queries = append(queries, query)
+			values = append(values, vals)
 		}
 
-		builder.Where(
-			qb.EqLit("ty", "'"+string(ty)+"'"),
-			qb.EqLit("ddl", "false"),
-		)
+		return queries, values
 
-		query, _ := builder.ToCql()
-
-		return query, values
 	case typedef.SelectByIndexStatementType, typedef.SelectFromMaterializedViewStatementType:
 		s.logger.Warn(
 			"select by index or materialized view is not supported, skipping job error",
 			zap.Any("partition_keys", jobError.PartitionKeys),
 		)
-		return "", nil
+		return nil, nil
 	default:
-		return "", nil
+		return nil, nil
 	}
 }
 
@@ -428,27 +448,35 @@ func (s *ScyllaLogger) fetchFailedPartitions(ch chan<- Item, ty Type, errs []job
 	s.pool.SendWithoutResult(context.Background(), func(_ context.Context) {
 		defer wg.Done()
 		if err := s.fetchData(ch, ty, ddlStatementsQuery, schemaChangeValues); err != nil {
+			metrics.ErrorMessages.WithLabelValues("statement_logger_fetch_ddl", err.Error()).Inc()
 			s.logger.Error("failed to fetch schema change data", zap.Error(err))
 		}
 	})
 
 	for _, jobError := range errs {
-		query, values := s.buildQuery(jobError, ty)
-		if query == "" {
+		queries, values := s.buildQuery(jobError, ty)
+		if len(queries) == 0 || len(values) == 0 {
 			s.logger.Warn("Unsupported type to fetch from statement logs")
 			continue
 		}
 
-		wg.Add(1)
-		s.pool.SendWithoutResult(context.Background(), func(_ context.Context) {
-			defer wg.Done()
-			if err := s.fetchData(ch, ty, query, values); err != nil {
-				s.logger.Error("failed to fetch failed partition data",
-					zap.Error(err),
-					zap.Any("partition_keys", values),
-				)
-			}
-		})
+		for i, query := range queries {
+			wg.Add(1)
+			s.pool.SendWithoutResult(context.Background(), func(_ context.Context) {
+				defer wg.Done()
+				if err := s.fetchData(ch, ty, query, values[i]); err != nil {
+					metrics.ErrorMessages.WithLabelValues("statement_logger_query",
+						fmt.Sprintf(
+							"failed to fetch data for job error %s: error=%v partition-keys=%v", jobError.Error(), err,
+							values,
+						)).Inc()
+					s.logger.Error("failed to fetch failed partition data",
+						zap.Error(err),
+						zap.Any("partition_keys", values),
+					)
+				}
+			})
+		}
 	}
 
 	wg.Wait()

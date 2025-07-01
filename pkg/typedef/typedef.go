@@ -39,12 +39,6 @@ type (
 		Name              string                  `json:"name"`
 	}
 
-	IndexDef struct {
-		Column     *ColumnDef
-		IndexName  string `json:"index_name"`
-		ColumnName string `json:"column_name"`
-	}
-
 	PartitionRangeConfig struct {
 		MaxBlobLength   int
 		MinBlobLength   int

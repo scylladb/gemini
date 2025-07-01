@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/mo"
+
 	"github.com/scylladb/gemini/pkg/builders"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/routingkey"
@@ -129,7 +131,7 @@ func createMv(
 			Name:           fmt.Sprintf("%s_mv_1", table.Name),
 			PartitionKeys:  append(cols, table.PartitionKeys...),
 			ClusteringKeys: table.ClusteringKeys,
-			NonPrimaryKey:  col[0],
+			NonPrimaryKey:  mo.Some(col[0]),
 		}
 	default:
 		return &typedef.MaterializedView{
@@ -274,7 +276,7 @@ func GetOptionsFromCaseName(caseName string) TestCaseOptions {
 
 func createIndexForColumns(
 	t testInterface,
-	columns ...*typedef.ColumnDef,
+	columns ...typedef.ColumnDef,
 ) (indexes []typedef.IndexDef) {
 	if len(columns) < 1 {
 		t.Fatalf("wrong IdxCount case definition")
@@ -301,11 +303,10 @@ func genColumnsFromCase(
 	}
 	columns := make(typedef.Columns, 0, len(typeCase))
 	for idx := range typeCase {
-		columns = append(columns,
-			&typedef.ColumnDef{
-				Type: typeCase[idx],
-				Name: fmt.Sprintf("%s%d", prefix, idx),
-			})
+		columns = append(columns, typedef.ColumnDef{
+			Type: typeCase[idx],
+			Name: fmt.Sprintf("%s%d", prefix, idx),
+		})
 	}
 	return columns
 }

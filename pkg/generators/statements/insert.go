@@ -38,40 +38,31 @@ func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) *t
 		return g.Insert(ctx)
 	}
 
-	return g.Insert(ctx)
-	//
-	//if n := g.random.IntN(1000); n == 10 || n == 100 {
-	//	//switch r.IntN(DeleteStatements) {
-	//	//case DeleteMultiplePartitions:
-	//	//case DeleteWholePartition:
-	//	//case DeleteSingleRow:
-	//	//}
-	//
-	//	return g.Delete(ctx)
-	//}
-	//
-	//switch g.random.IntN(MutationStatements) {
-	//case InsertStatements:
-	//	if g.table.IsCounterTable() {
-	//		return g.Update(ctx)
-	//	}
-	//
-	//	return g.Insert(ctx)
-	//case InsertJSONStatement:
-	//	if g.table.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
-	//		if g.table.IsCounterTable() {
-	//			return g.Update(ctx)
-	//		}
-	//
-	//		return g.Insert(ctx)
-	//	}
-	//
-	//	return g.InsertJSON(ctx)
-	//case UpdateStatement:
+	if n := g.random.IntN(1000); n == 10 || n == 100 {
+		return g.Delete(ctx)
+	}
+
+	switch g.random.IntN(MutationStatements) {
+	case InsertStatements, UpdateStatement:
+		if g.table.IsCounterTable() {
+			return g.Update(ctx)
+		}
+		return g.Insert(ctx)
+	case InsertJSONStatement:
+		if g.table.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
+			if g.table.IsCounterTable() {
+				return g.Update(ctx)
+			}
+
+			return g.Insert(ctx)
+		}
+
+		return g.InsertJSON(ctx)
+	// case UpdateStatement:
 	//	return g.Update(ctx)
-	//default:
-	//	panic("Invalid mutation statement type")
-	//}
+	default:
+		panic("Invalid mutation statement type")
+	}
 }
 
 func (g *Generator) Insert(ctx context.Context) *typedef.Stmt {
@@ -118,48 +109,6 @@ func (g *Generator) Insert(ctx context.Context) *typedef.Stmt {
 	}
 }
 
-func (g *Generator) Update(ctx context.Context) *typedef.Stmt {
-	builder := qb.Update(g.keyspaceAndTable)
-	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
-
-	for _, col := range g.table.Columns {
-		switch ty := col.Type.(type) {
-		case *typedef.TupleType:
-			builder.SetTuple(col.Name, len(ty.ValueTypes))
-			values = append(values, col.Type.GenValue(g.random, g.partitionConfig)...)
-		case *typedef.CounterType:
-			builder.SetLit(col.Name, col.Name+"+1")
-		default:
-			builder.Set(col.Name)
-			values = append(values, col.Type.GenValue(g.random, g.partitionConfig)...)
-		}
-	}
-
-	pks := g.generator.Get(ctx)
-	if pks.Token == 0 {
-		return nil
-	}
-
-	for _, pk := range g.table.PartitionKeys {
-		builder.Where(qb.Eq(pk.Name))
-		values = append(values, pks.Values[pk.Name]...)
-	}
-
-	for _, ck := range g.table.ClusteringKeys {
-		builder.Where(qb.Eq(ck.Name))
-		values = append(values, ck.Type.GenValue(g.random, g.partitionConfig)...)
-	}
-
-	query, _ := builder.ToCql()
-
-	return &typedef.Stmt{
-		PartitionKeys: pks,
-		Values:        values,
-		QueryType:     typedef.UpdateStatementType,
-		Query:         query,
-	}
-}
-
 func (g *Generator) InsertJSON(ctx context.Context) *typedef.Stmt {
 	if g.table.IsCounterTable() {
 		return nil
@@ -200,37 +149,6 @@ func (g *Generator) InsertJSON(ctx context.Context) *typedef.Stmt {
 		PartitionKeys: pks,
 		Query:         query,
 		Values:        []any{utils.UnsafeString(jsonString)},
-	}
-}
-
-func (g *Generator) Delete(ctx context.Context) *typedef.Stmt {
-	pks := g.generator.GetOld(ctx)
-	if pks.Token == 0 {
-		return nil
-	}
-
-	builder := qb.Delete(g.keyspaceAndTable)
-	values := make([]any, 0, g.table.PartitionKeys.LenValues()+2)
-
-	for _, pk := range g.table.PartitionKeys {
-		builder = builder.Where(qb.Eq(pk.Name))
-		values = append(values, pks.Values[pk.Name]...)
-	}
-
-	if len(g.table.ClusteringKeys) > 0 {
-		ck := g.table.ClusteringKeys[0]
-		builder = builder.Where(qb.GtOrEq(ck.Name)).Where(qb.LtOrEq(ck.Name))
-		values = append(values, ck.Type.GenValue(g.random, g.partitionConfig)...)
-		values = append(values, ck.Type.GenValue(g.random, g.partitionConfig)...)
-	}
-
-	query, _ := builder.ToCql()
-
-	return &typedef.Stmt{
-		PartitionKeys: pks,
-		Values:        values,
-		QueryType:     typedef.DeleteStatementType,
-		Query:         query,
 	}
 }
 

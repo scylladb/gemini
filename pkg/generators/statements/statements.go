@@ -15,11 +15,18 @@
 package statements
 
 import (
-	"math/rand/v2"
+	"context"
+	"math"
 
-	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
+
+type ValueGenerator interface {
+	Get(context.Context) typedef.PartitionKeys
+	GetOld(context.Context) typedef.PartitionKeys
+	GiveOlds(ctx context.Context, tokens ...typedef.PartitionKeys)
+}
 
 const (
 	SelectSinglePartitionQuery int = iota
@@ -47,9 +54,9 @@ const (
 )
 
 type Generator struct {
-	generator        generators.Interface
+	generator        ValueGenerator
 	table            *typedef.Table
-	random           *rand.Rand
+	random           utils.Random
 	partitionConfig  *typedef.PartitionRangeConfig
 	keyspace         string
 	keyspaceAndTable string
@@ -58,9 +65,9 @@ type Generator struct {
 
 func New(
 	schema string,
+	valueGenerator ValueGenerator,
 	table *typedef.Table,
-	generator generators.Interface,
-	random *rand.Rand,
+	random utils.Random,
 	partitionConfig *typedef.PartitionRangeConfig,
 	useLWT bool,
 ) *Generator {
@@ -68,9 +75,24 @@ func New(
 		keyspace:         schema,
 		keyspaceAndTable: schema + "." + table.Name,
 		table:            table,
-		generator:        generator,
 		random:           random,
 		partitionConfig:  partitionConfig,
 		useLWT:           useLWT,
+		generator:        valueGenerator,
 	}
+}
+
+const MaxCartesianProductCount = float64(100.0)
+
+// in TotalCartesianProductCount chooses the first number of partition keys that
+// multiplied by the number of partition keys does not exceed MaxCartesianProductCount.
+func TotalCartesianProductCount(initial, pkLen float64) int {
+	for i := int(initial); i > 0; i-- {
+		multiplier := math.Pow(float64(i), pkLen)
+		if multiplier < MaxCartesianProductCount {
+			return i
+		}
+	}
+
+	return 1
 }

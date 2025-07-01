@@ -67,8 +67,8 @@ func NewValidation(
 
 	statementGenerator := statements.New(
 		keyspace,
-		table,
 		generator,
+		table,
 		rand.New(rand.NewChaCha8(seed)),
 		&pc,
 		schemaConfig.UseLWT,
@@ -90,43 +90,60 @@ func (v *Validation) Do(ctx context.Context) error {
 	name := v.Name()
 
 	for !v.stopFlag.IsHardOrSoft() {
-		var (
-			acc  error
-			stmt *typedef.Stmt
-		)
 
-		metrics.ExecutionTime(name, func() {
-			stmt = v.statement.Select(ctx)
+		err := metrics.ExecutionTimeWithError(name, func() error {
+			var acc error
+
+			stmt := v.statement.Select(ctx)
 			if stmt == nil {
-				return
+				if v.status.HasErrors() {
+					v.stopFlag.SetSoft(true)
+				}
+				return ErrNoStatement
 			}
 
 			for attempt := 1; attempt <= v.maxAttempts; attempt++ {
 				err := v.store.Check(ctx, v.table, stmt, attempt)
 				if err == nil {
 					v.status.ReadOp()
-					return
+					return nil
 				}
 
-				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-					return
+				if errors.Is(err, context.DeadlineExceeded) {
+					continue
+				}
+
+				if errors.Is(err, context.Canceled) {
+					return nil
 				}
 
 				if attempt == v.maxAttempts {
-					v.status.AddReadError(joberror.JobError{
+					return joberror.JobError{
 						Timestamp:     time.Now(),
-						Err:           err,
+						Err:           acc,
 						StmtType:      stmt.QueryType,
 						Message:       "Validation failed:" + err.Error(),
 						Query:         stmt.Query,
 						PartitionKeys: stmt.PartitionKeys.Values,
-					})
+					}
 				}
 
 				acc = multierr.Append(acc, err)
 				time.Sleep(v.delay)
 			}
+
+			return nil
 		})
+
+		if errors.Is(err, ErrNoStatement) {
+			time.Sleep(v.delay)
+			continue
+		}
+
+		var jobErr joberror.JobError
+		if errors.As(err, &jobErr) {
+			v.status.AddReadError(jobErr)
+		}
 
 		if v.status.HasErrors() {
 			v.stopFlag.SetSoft(true)

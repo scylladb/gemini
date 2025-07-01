@@ -24,8 +24,9 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/samber/mo"
 
-	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -129,7 +130,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 
 	opts := cmp.Options{
 		cmp.AllowUnexported(typedef.Table{}, typedef.MaterializedView{}),
-		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}),
+		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}, mo.Option[typedef.ColumnDef]{}),
 	}
 
 	b, err := json.MarshalIndent(s1, "  ", "  ")
@@ -165,15 +166,15 @@ func TestPrimitives(t *testing.T) {
 	}
 
 	cols := typedef.Columns{
-		&typedef.ColumnDef{
+		typedef.ColumnDef{
 			Name: "pk_mv_0",
-			Type: generators.GenListType(sc, r),
+			Type: statements.GenListType(sc, r),
 		},
-		&typedef.ColumnDef{
+		typedef.ColumnDef{
 			Name: "pk_mv_1",
-			Type: generators.GenTupleType(sc, r),
+			Type: statements.GenTupleType(sc, r),
 		},
-		&typedef.ColumnDef{
+		typedef.ColumnDef{
 			Name: "ct_1",
 			Type: &typedef.CounterType{},
 		},
@@ -242,7 +243,7 @@ func TestValidColumnsForDelete(t *testing.T) {
 		)
 	}
 
-	s1.Tables[0].MaterializedViews[0].NonPrimaryKey = s1.Tables[0].Columns[4]
+	s1.Tables[0].MaterializedViews[0].NonPrimaryKey = mo.Some(s1.Tables[0].Columns[4])
 	expected = typedef.Columns{
 		s1.Tables[0].Columns[2],
 		s1.Tables[0].Columns[3],
@@ -260,12 +261,12 @@ func TestValidColumnsForDelete(t *testing.T) {
 		s1.Tables[0].MaterializedViews,
 		s1.Tables[0].MaterializedViews[0],
 	)
-	s1.Tables[0].MaterializedViews[1].NonPrimaryKey = s1.Tables[0].Columns[3]
+	s1.Tables[0].MaterializedViews[1].NonPrimaryKey = mo.Some(s1.Tables[0].Columns[3])
 	s1.Tables[0].MaterializedViews = append(
 		s1.Tables[0].MaterializedViews,
 		s1.Tables[0].MaterializedViews[0],
 	)
-	s1.Tables[0].MaterializedViews[2].NonPrimaryKey = s1.Tables[0].Columns[2]
+	s1.Tables[0].MaterializedViews[2].NonPrimaryKey = mo.Some(s1.Tables[0].Columns[2])
 
 	expected = typedef.Columns{}
 	validColsToDelete = s1.Tables[0].ValidColumnsForDelete()
@@ -292,25 +293,25 @@ func getTestSchema(r *rand.Rand) *typedef.Schema {
 		MaxUDTParts:               2,
 	}
 	columns := typedef.Columns{
-		&typedef.ColumnDef{
-			Name: generators.GenColumnName("col", 0),
-			Type: generators.GenMapType(sc, r),
+		typedef.ColumnDef{
+			Name: statements.GenColumnName("col", 0),
+			Type: statements.GenMapType(sc, r),
 		},
-		&typedef.ColumnDef{
-			Name: generators.GenColumnName("col", 1),
-			Type: generators.GenSetType(sc, r),
+		typedef.ColumnDef{
+			Name: statements.GenColumnName("col", 1),
+			Type: statements.GenSetType(sc, r),
 		},
-		&typedef.ColumnDef{
-			Name: generators.GenColumnName("col", 2),
-			Type: generators.GenListType(sc, r),
+		typedef.ColumnDef{
+			Name: statements.GenColumnName("col", 2),
+			Type: statements.GenListType(sc, r),
 		},
-		&typedef.ColumnDef{
-			Name: generators.GenColumnName("col", 3),
-			Type: generators.GenTupleType(sc, r),
+		typedef.ColumnDef{
+			Name: statements.GenColumnName("col", 3),
+			Type: statements.GenTupleType(sc, r),
 		},
-		&typedef.ColumnDef{
-			Name: generators.GenColumnName("col", 4),
-			Type: generators.GenUDTType(sc, r),
+		typedef.ColumnDef{
+			Name: statements.GenColumnName("col", 4),
+			Type: statements.GenUDTType(sc, r),
 		},
 	}
 
@@ -323,30 +324,26 @@ func getTestSchema(r *rand.Rand) *typedef.Schema {
 		Tables: []*typedef.Table{
 			{
 				Name: "table",
-				PartitionKeys: typedef.Columns{
-					&typedef.ColumnDef{
-						Name: generators.GenColumnName("pk", 0),
-						Type: generators.GenSimpleType(sc, r),
-					},
-				},
-				ClusteringKeys: typedef.Columns{
-					&typedef.ColumnDef{
-						Name: generators.GenColumnName("ck", 0),
-						Type: generators.GenSimpleType(sc, r),
-					},
-				},
+				PartitionKeys: typedef.Columns{typedef.ColumnDef{
+					Name: statements.GenColumnName("pk", 0),
+					Type: statements.GenSimpleType(sc, r),
+				}},
+				ClusteringKeys: typedef.Columns{typedef.ColumnDef{
+					Name: statements.GenColumnName("ck", 0),
+					Type: statements.GenSimpleType(sc, r),
+				}},
 				Columns: columns,
 			},
 		},
 	}
 	sch.Tables[0].Indexes = []typedef.IndexDef{
 		{
-			IndexName:  generators.GenIndexName(sch.Tables[0].Name+"_col", 0),
+			IndexName:  statements.GenIndexName(sch.Tables[0].Name+"_col", 0),
 			ColumnName: columns[0].Name,
 			Column:     columns[0],
 		},
 		{
-			IndexName:  generators.GenIndexName(sch.Tables[0].Name+"_col", 1),
+			IndexName:  statements.GenIndexName(sch.Tables[0].Name+"_col", 1),
 			ColumnName: columns[1].Name,
 			Column:     columns[1],
 		},
@@ -357,7 +354,7 @@ func getTestSchema(r *rand.Rand) *typedef.Schema {
 			Name:           sch.Tables[0].Name + "_mv_0",
 			PartitionKeys:  sch.Tables[0].PartitionKeys,
 			ClusteringKeys: sch.Tables[0].ClusteringKeys,
-			NonPrimaryKey:  nil,
+			NonPrimaryKey:  mo.None[typedef.ColumnDef](),
 		},
 	}
 

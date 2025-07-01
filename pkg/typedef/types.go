@@ -15,15 +15,11 @@
 package typedef
 
 import (
-	"bytes"
 	"math"
-	"math/rand/v2"
 	"reflect"
-	"strconv"
 	"sync/atomic"
 
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
 
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -149,7 +145,7 @@ func (mt *MapType) CQLHolder() string {
 	return "?"
 }
 
-func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
+func (mt *MapType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	count := r.IntN(9) + 1
 	vals := reflect.MakeMap(
 		reflect.MapOf(
@@ -166,7 +162,7 @@ func (mt *MapType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	return vals.Interface()
 }
 
-func (mt *MapType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
+func (mt *MapType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxMapSize+1)
 	vals := reflect.MakeMap(
 		reflect.MapOf(
@@ -222,35 +218,14 @@ func (ct *CounterType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *CounterType) CQLPretty(builder *bytes.Buffer, value any) error {
-	switch v := value.(type) {
-	case int64:
-		builder.WriteString(strconv.FormatInt(v, 10))
-	case int:
-		builder.WriteString(strconv.FormatInt(int64(v), 10))
-	case int32:
-		builder.WriteString(strconv.FormatInt(int64(v), 10))
-	case uint64:
-		builder.WriteString(strconv.FormatUint(v, 10))
-	case uint32:
-		builder.WriteString(strconv.FormatUint(uint64(v), 10))
-	case uint:
-		builder.WriteString(strconv.FormatUint(uint64(v), 10))
-	default:
-		return errors.Errorf("counter cql pretty, unknown type [%T]%v", value, value)
-	}
-
-	return nil
-}
-
-func (ct *CounterType) GenJSONValue(r *rand.Rand, _ *PartitionRangeConfig) any {
+func (ct *CounterType) GenJSONValue(r utils.Random, _ *PartitionRangeConfig) any {
 	if utils.IsUnderTest() {
 		return r.Int64()
 	}
 	return atomic.AddInt64(&ct.Value, 1)
 }
 
-func (ct *CounterType) GenValue(r *rand.Rand, _ *PartitionRangeConfig) []any {
+func (ct *CounterType) GenValue(r utils.Random, _ *PartitionRangeConfig) []any {
 	if utils.IsUnderTest() {
 		return []any{r.Int64()}
 	}

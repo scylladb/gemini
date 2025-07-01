@@ -117,7 +117,7 @@ func (st SimpleType) Indexable() bool {
 	return st != TypeDuration
 }
 
-func (st SimpleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
+func (st SimpleType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	switch st {
 	case TypeBlob:
 		ln := r.IntN(p.MaxBlobLength) + p.MinBlobLength
@@ -131,11 +131,11 @@ func (st SimpleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	return st.genValue(r, p)
 }
 
-func (st SimpleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
+func (st SimpleType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	return []any{st.genValue(r, p)}
 }
 
-func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) any {
+func (st SimpleType) genValue(r utils.Random, p *PartitionRangeConfig) any {
 	switch st {
 	case TypeAscii, TypeText, TypeVarchar, TypeBlob:
 		ln := r.IntN(p.MaxStringLength) + p.MinStringLength
@@ -143,7 +143,7 @@ func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	case TypeBigint:
 		return r.Int64()
 	case TypeBoolean:
-		return r.Int()%2 == 0
+		return r.IntN(2) == 0
 	case TypeDate:
 		return utils.RandDateStr(r)
 	case TypeTime:
@@ -153,15 +153,15 @@ func (st SimpleType) genValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	case TypeDecimal:
 		return inf.NewDec(r.Int64(), 3)
 	case TypeDouble:
-		return r.Float64()
+		return float64(r.Uint64()<<11>>11) / (1 << 53)
 	case TypeDuration:
 		return (time.Minute * time.Duration(r.IntN(100))).String()
 	case TypeFloat:
-		return r.Float32()
+		return float32(r.Uint32()<<8>>8) / (1 << 24)
 	case TypeInet:
 		return net.ParseIP(utils.RandIPV4Address(r, r.IntN(math.MaxUint8), 2)).String()
 	case TypeInt:
-		return r.Int32()
+		return int32(r.Int64N(math.MaxInt32))
 	case TypeSmallint:
 		return int16(r.Uint64N(math.MaxUint16))
 	case TypeTimeuuid, TypeUuid:

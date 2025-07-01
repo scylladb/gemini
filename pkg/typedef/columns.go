@@ -16,10 +16,12 @@ package typedef
 
 import (
 	"encoding/json"
-	"math/rand/v2"
+	"slices"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type ColumnDef struct {
@@ -36,6 +38,14 @@ func (cd *ColumnDef) IsValidForPrimaryKey() bool {
 		}
 	}
 	return false
+}
+
+func (cd *ColumnDef) MarshalJSON() ([]byte, error) {
+	if (ColumnDef{}) == *cd {
+		return json.Marshal(nil)
+	}
+
+	return json.Marshal(*cd)
 }
 
 func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
@@ -96,7 +106,7 @@ func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type Columns []*ColumnDef
+type Columns []ColumnDef
 
 func (c Columns) Len() int {
 	return len(c)
@@ -110,22 +120,15 @@ func (c Columns) Names() []string {
 	return names
 }
 
-func (c Columns) Remove(column *ColumnDef) Columns {
-	out := c
-	for idx := range c {
-		if c[idx].Name == column.Name {
-			copy(out[idx:], out[idx+1:])
-			out[len(out)-1] = nil
-			out = out[:len(c)-1]
-			break
-		}
-	}
-	return out
+func (c Columns) Remove(column ColumnDef) Columns {
+	return slices.DeleteFunc(c, func(col ColumnDef) bool {
+		return col.Name == column.Name
+	})
 }
 
 func (c Columns) ToJSONMap(
 	values map[string]any,
-	r *rand.Rand,
+	r utils.Random,
 	p *PartitionRangeConfig,
 ) map[string]any {
 	for _, k := range c {
@@ -144,7 +147,7 @@ func (c Columns) ValidColumnsForPrimaryKey() Columns {
 	return validCols
 }
 
-func (c Columns) Random(r *rand.Rand) *ColumnDef {
+func (c Columns) Random(r utils.Random) ColumnDef {
 	return c[r.IntN(len(c))]
 }
 

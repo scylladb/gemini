@@ -16,7 +16,6 @@ package typedef
 
 import (
 	"math"
-	"math/rand/v2"
 
 	"github.com/gocql/gocql"
 
@@ -56,7 +55,7 @@ func (ct *BagType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
+func (ct *BagType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]any, count)
 	for i := 0; i < count; i++ {
@@ -65,7 +64,7 @@ func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
 	return []any{out}
 }
 
-func (ct *BagType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
+func (ct *BagType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]any, count)
 	for i := 0; i < count; i++ {

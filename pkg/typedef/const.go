@@ -47,6 +47,8 @@ const (
 	DropTypeStatementType
 	CreateTableStatementType
 	DropTableStatementType
+
+	StatementTypeCount
 )
 
 const (

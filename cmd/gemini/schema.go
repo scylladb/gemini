@@ -26,7 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/builders"
-	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -81,7 +81,7 @@ func getSchema(seed uint64, logger *zap.Logger) (*typedef.Schema, typedef.Schema
 		}
 	} else {
 		src := rand.NewChaCha8(sha256.Sum256([]byte(schemaSeed)))
-		schema = generators.GenSchema(schemaConfig, src)
+		schema = statements.GenSchema(schemaConfig, src)
 	}
 
 	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")

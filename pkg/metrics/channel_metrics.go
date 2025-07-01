@@ -16,8 +16,6 @@ package metrics
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 var channelMetrics = prometheus.NewGaugeVec(
@@ -27,25 +25,20 @@ var channelMetrics = prometheus.NewGaugeVec(
 	[]string{"type", "context"},
 )
 
-type (
-	ChannelMetrics struct {
-		name string
-		ty   string
+type ChannelMetrics struct {
+	channel prometheus.Gauge
+}
+
+func NewChannelMetrics(ty, name string) ChannelMetrics {
+	return ChannelMetrics{
+		channel: channelMetrics.WithLabelValues(ty, name),
 	}
-)
-
-func NewChannelMetrics[T any](ty, name string, size uint64) ChannelMetrics {
-	MemoryMetrics.WithLabelValues(ty, name).Set(float64(utils.Sizeof(make(chan T, size))))
-
-	return ChannelMetrics{name: name, ty: ty}
 }
 
-func (c ChannelMetrics) Inc(data any) {
-	channelMetrics.WithLabelValues(c.ty, c.name).Inc()
-	MemoryMetrics.WithLabelValues(c.ty, c.name).Add(float64(utils.Sizeof(data)))
+func (c ChannelMetrics) Inc() {
+	c.channel.Inc()
 }
 
-func (c ChannelMetrics) Dec(data any) {
-	channelMetrics.WithLabelValues(c.ty, c.name).Dec()
-	MemoryMetrics.WithLabelValues(c.ty, c.name).Sub(float64(utils.Sizeof(data)))
+func (c ChannelMetrics) Dec() {
+	c.channel.Dec()
 }

@@ -38,7 +38,7 @@ jobs:
       max-parallel: 4
       matrix:
         gemini-features: ["basic", "normal"]
-        gemini-concurrency: [2]
+        gemini-concurrency: [1]
         duration: ["3m"]
         warmup: ["0", "30s"]
         dataset-size: [large]
