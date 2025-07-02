@@ -73,7 +73,7 @@ func (g *Generator) getMultiplePartitionKeys(initial int) int {
 	}
 
 	maximumCount := TotalCartesianProductCount(float64(initial), float64(l))
-	return min(initial, l) + g.random.IntN(maximumCount)
+	return g.random.IntN(maximumCount)
 }
 
 func (g *Generator) getMultipleClusteringKeys(initial int) int {
@@ -82,7 +82,7 @@ func (g *Generator) getMultipleClusteringKeys(initial int) int {
 		return 0
 	}
 	maximumCount := TotalCartesianProductCount(float64(initial), float64(l))
-	return min(initial, l) + g.random.IntN(maximumCount)
+	return g.random.IntN(maximumCount)
 }
 
 func (g *Generator) getIndex(initial int) int {

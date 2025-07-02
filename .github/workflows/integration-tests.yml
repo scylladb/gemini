@@ -35,10 +35,10 @@ jobs:
     needs: [build]
     runs-on: ubuntu-24.04
     strategy:
-      max-parallel: 4
+      max-parallel: 1
       matrix:
         gemini-features: ["basic", "normal"]
-        gemini-concurrency: [1]
+        gemini-concurrency: [2]
         duration: ["3m"]
         warmup: ["0", "30s"]
         dataset-size: [large]

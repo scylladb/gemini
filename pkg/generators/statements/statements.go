@@ -87,9 +87,11 @@ const MaxCartesianProductCount = float64(100.0)
 // TotalCartesianProductCount chooses the first number of partition keys that
 // multiplied by the number of partition keys does not exceed MaxCartesianProductCount.
 func TotalCartesianProductCount(initial, pkLen float64) int {
-	multiplier := math.Pow(initial, pkLen)
-	if multiplier < MaxCartesianProductCount {
-		return int(initial)
+	for i := int(initial); i > 0; i-- {
+		multiplier := math.Pow(float64(i), pkLen)
+		if multiplier < MaxCartesianProductCount {
+			return i
+		}
 	}
 
 	return 1
