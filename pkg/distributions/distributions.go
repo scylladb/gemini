@@ -25,20 +25,29 @@ import (
 )
 
 type (
-	TokenIndex       uint64
-	DistributionFunc func() TokenIndex
-
-	generator interface {
-		Uint64() uint64
-	}
+	DistributionFunc func() uint32
 )
 
-func New(distribution string, partitionCount, seed uint64, mu, sigma float64) (*rand.ChaCha8, DistributionFunc, error) {
-	var rnd generator
-
+func New(distribution string, partitionCount int32, seed uint64, mu, sigma float64) (*rand.ChaCha8, DistributionFunc, error) {
 	hash := sha256.Sum256(
 		[]byte(
-			distribution + strconv.FormatUint(partitionCount, 10) + strconv.FormatUint(seed, 10) + strconv.FormatFloat(mu, 'f', -1, 64) + strconv.FormatFloat(sigma, 'f', -1, 64),
+			distribution + strconv.FormatInt(
+				int64(partitionCount),
+				10,
+			) + strconv.FormatUint(
+				seed,
+				10,
+			) + strconv.FormatFloat(
+				mu,
+				'f',
+				-1,
+				64,
+			) + strconv.FormatFloat(
+				sigma,
+				'f',
+				-1,
+				64,
+			),
 		),
 	)
 
@@ -46,7 +55,11 @@ func New(distribution string, partitionCount, seed uint64, mu, sigma float64) (*
 
 	switch strings.ToLower(distribution) {
 	case "zipf":
-		rnd = rand.NewZipf(rand.New(src), 1.001, float64(partitionCount), partitionCount)
+		zipf := rand.NewZipf(rand.New(src), 1.001, float64(partitionCount), uint64(partitionCount))
+
+		return src, func() uint32 {
+			return uint32(zipf.Uint64())
+		}, nil
 	case "lognormal":
 		d := distuv.LogNormal{
 			Src:   src,
@@ -54,8 +67,8 @@ func New(distribution string, partitionCount, seed uint64, mu, sigma float64) (*
 			Sigma: sigma,
 		}
 
-		return src, func() TokenIndex {
-			return TokenIndex(d.Rand())
+		return src, func() uint32 {
+			return uint32(d.Rand())
 		}, nil
 	case "normal":
 		d := distuv.Normal{
@@ -64,8 +77,8 @@ func New(distribution string, partitionCount, seed uint64, mu, sigma float64) (*
 			Sigma: sigma,
 		}
 
-		return src, func() TokenIndex {
-			return TokenIndex(d.Rand())
+		return src, func() uint32 {
+			return uint32(d.Rand())
 		}, nil
 	case "uniform":
 		d := distuv.Uniform{
@@ -74,14 +87,10 @@ func New(distribution string, partitionCount, seed uint64, mu, sigma float64) (*
 			Src: src,
 		}
 
-		return src, func() TokenIndex {
-			return TokenIndex(d.Rand())
+		return src, func() uint32 {
+			return uint32(d.Rand())
 		}, nil
 	default:
 		return nil, nil, errors.Errorf("unsupported distribution: %s", distribution)
 	}
-
-	return src, func() TokenIndex {
-		return TokenIndex(rnd.Uint64())
-	}, nil
 }

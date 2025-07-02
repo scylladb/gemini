@@ -14,14 +14,17 @@
 
 package generators
 
-import "github.com/scylladb/gemini/pkg/typedef"
+import (
+	"github.com/scylladb/gemini/pkg/generators/statements"
+	"github.com/scylladb/gemini/pkg/typedef"
+)
 
 func CreatePkColumns(cnt int, prefix string) typedef.Columns {
 	cols := make(typedef.Columns, 0, cnt)
 
-	for i := 0; i < cnt; i++ {
-		cols = append(cols, &typedef.ColumnDef{
-			Name: GenColumnName(prefix, i),
+	for i := range cnt {
+		cols = append(cols, typedef.ColumnDef{
+			Name: statements.GenColumnName(prefix, i),
 			Type: typedef.TypeInt,
 		})
 	}

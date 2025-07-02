@@ -15,11 +15,9 @@
 package typedef
 
 import (
-	"bytes"
-	"math/rand/v2"
-
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type UDTType struct {
@@ -48,37 +46,6 @@ func (t *UDTType) CQLHolder() string {
 	return "?"
 }
 
-func (t *UDTType) CQLPretty(builder *bytes.Buffer, value any) error {
-	s, ok := value.(map[string]any)
-	if !ok {
-		return errors.Errorf("udt pretty, expected map[string]any, got [%T]%v", value, value)
-	}
-
-	builder.WriteRune('{')
-	defer builder.WriteRune('}')
-
-	i := 0
-	for k, v := range t.ValueTypes {
-		keyVal, kexExists := s[k]
-		if !kexExists {
-			continue
-		}
-
-		builder.WriteString(k)
-		builder.WriteRune(':')
-		if err := v.CQLPretty(builder, keyVal); err != nil {
-			return err
-		}
-
-		if i != len(s)-1 {
-			builder.WriteRune(',')
-		}
-		i++
-	}
-
-	return nil
-}
-
 func (t *UDTType) Indexable() bool {
 	for _, ty := range t.ValueTypes {
 		if ty == TypeDuration {
@@ -89,7 +56,7 @@ func (t *UDTType) Indexable() bool {
 	return true
 }
 
-func (t *UDTType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
+func (t *UDTType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	vals := make(map[string]any)
 	for name, typ := range t.ValueTypes {
 		vals[name] = typ.GenJSONValue(r, p)
@@ -97,7 +64,7 @@ func (t *UDTType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	return vals
 }
 
-func (t *UDTType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
+func (t *UDTType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	vals := make(map[string]any)
 	for name, typ := range t.ValueTypes {
 		vals[name] = typ.GenValue(r, p)[0]

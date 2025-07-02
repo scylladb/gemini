@@ -19,16 +19,9 @@ import (
 	"sync"
 )
 
-type QueryCache interface {
-	GetQuery(qct StatementCacheType) StmtCache
-	Reset()
-	BindToTable(t *Table)
-}
-
 type KnownIssues map[string]bool
 
 type Table struct {
-	queryCache             QueryCache
 	schema                 *Schema
 	Name                   string             `json:"name"`
 	PartitionKeys          Columns            `json:"partition_keys"`
@@ -60,34 +53,44 @@ func (t *Table) IsCounterTable() bool {
 }
 
 func (t *Table) Lock() {
+	if len(t.MaterializedViews) != 0 {
+		return
+	}
+
 	t.mu.Lock()
 }
 
 func (t *Table) Unlock() {
+	if len(t.MaterializedViews) != 0 {
+		return
+	}
+
 	t.mu.Unlock()
 }
 
 func (t *Table) RLock() {
+	if len(t.MaterializedViews) != 0 {
+		return
+	}
 	t.mu.RLock()
 }
 
 func (t *Table) RUnlock() {
+	if len(t.MaterializedViews) != 0 {
+		return
+	}
+
 	t.mu.RUnlock()
 }
 
-func (t *Table) GetQueryCache(st StatementCacheType) StmtCache {
-	return t.queryCache.GetQuery(st)
+func (t *Table) SupportsChanges() bool {
+	// If the table has materialized views, it does not support schema changes.
+	// Scylla does not allow schema changes on tables with materialized views.
+	return len(t.MaterializedViews) != 0
 }
 
-func (t *Table) ResetQueryCache() {
-	t.queryCache.Reset()
-	t.partitionKeysLenValues = 0
-}
-
-func (t *Table) Init(s *Schema, c QueryCache) {
+func (t *Table) Init(s *Schema) {
 	t.schema = s
-	t.queryCache = c
-	t.queryCache.BindToTable(t)
 }
 
 func (t *Table) ValidColumnsForDelete() Columns {
@@ -109,8 +112,9 @@ func (t *Table) ValidColumnsForDelete() Columns {
 	if len(t.MaterializedViews) != 0 {
 		for _, mv := range t.MaterializedViews {
 			if mv.HaveNonPrimaryKey() {
+				nonPrimCol := mv.NonPrimaryKey.MustGet()
 				for j := range validCols {
-					if validCols[j].Name == mv.NonPrimaryKey.Name {
+					if validCols[j].Name == nonPrimCol.Name {
 						validCols = slices.Delete(validCols, j, j+1)
 						break
 					}

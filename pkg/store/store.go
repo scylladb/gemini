@@ -16,19 +16,14 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"math/big"
 	"reflect"
 	"slices"
-	"strings"
 	"time"
 
-	"github.com/gocql/gocql"
-	"github.com/gocql/gocql/hostpolicy"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/hailocab/go-hostpool"
 	pkgerrors "github.com/pkg/errors"
 	"github.com/samber/mo"
 	"github.com/scylladb/go-set/strset"
@@ -39,7 +34,6 @@ import (
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gemini/pkg/workpool"
 )
 
@@ -75,7 +69,7 @@ type Store interface {
 
 	Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
 	Mutate(context.Context, *typedef.Stmt) error
-	Check(context.Context, *typedef.Table, *typedef.Stmt, bool) error
+	Check(context.Context, *typedef.Table, *typedef.Stmt, int) error
 }
 
 type (
@@ -103,7 +97,7 @@ type (
 )
 
 func New(
-	schemaChangesValues typedef.Values,
+	schemaChangesValues typedef.PartitionKeys,
 	workers *workpool.Pool,
 	schema *typedef.Schema,
 	cfg Config,
@@ -132,11 +126,6 @@ func New(
 		}
 	}
 
-	testSession, err := createCluster(cfg.TestClusterConfig, logger, statementLogger, true)
-	if err != nil {
-		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
-	}
-
 	if cfg.MaxRetriesMutate <= 1 {
 		cfg.MaxRetriesMutate = 10
 	}
@@ -145,32 +134,35 @@ func New(
 		cfg.MaxRetriesMutateSleep = 200 * time.Millisecond
 	}
 
-	testStore := &cqlStore{
-		session:                 testSession,
-		schema:                  schema,
-		system:                  "test",
-		maxRetriesMutate:        cfg.MaxRetriesMutate,
-		maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
-		useServerSideTimestamps: cfg.UseServerSideTimestamps,
-		logger:                  logger.Named("test_store"),
+	testStore, err := newCQLStore(
+		cfg.TestClusterConfig,
+		statementLogger,
+		schema,
+		logger.Named("test_store"),
+		"test",
+		cfg.MaxRetriesMutate,
+		cfg.MaxRetriesMutateSleep,
+		cfg.UseServerSideTimestamps,
+	)
+	if err != nil {
+		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
 	}
 
 	var oracleStore storeLoader
 
 	if cfg.OracleClusterConfig != nil {
-		var oracleSession *gocql.Session
-		oracleSession, err = createCluster(*cfg.OracleClusterConfig, logger, statementLogger, true)
+		oracleStore, err = newCQLStore(
+			*cfg.OracleClusterConfig,
+			statementLogger,
+			schema,
+			logger.Named("oracle_store"),
+			"oracle",
+			cfg.MaxRetriesMutate,
+			cfg.MaxRetriesMutateSleep,
+			cfg.UseServerSideTimestamps,
+		)
 		if err != nil {
 			return nil, pkgerrors.Wrap(err, "failed to create test cluster")
-		}
-		oracleStore = &cqlStore{
-			session:                 oracleSession,
-			schema:                  schema,
-			system:                  "oracle",
-			maxRetriesMutate:        cfg.MaxRetriesMutate,
-			maxRetriesMutateSleep:   cfg.MaxRetriesMutateSleep,
-			useServerSideTimestamps: cfg.UseServerSideTimestamps,
-			logger:                  logger.Named("oracle_store"),
 		}
 	}
 
@@ -183,92 +175,6 @@ func New(
 	}, nil
 }
 
-func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionPolicy, error) {
-	switch policy {
-	case "round-robin":
-		return gocql.RoundRobinHostPolicy(), nil
-	case "host-pool":
-		return hostpolicy.HostPool(hostpool.New(hosts)), nil
-	case "token-aware":
-		p := gocql.TokenAwareHostPolicy(
-			gocql.RoundRobinHostPolicy(),
-			gocql.ShuffleReplicas(),
-			gocql.AvoidSlowReplicas(2000),
-		)
-		return p, nil
-	default:
-		return nil, fmt.Errorf("unknown host selection policy \"%s\"", policy)
-	}
-}
-
-func createCluster(
-	config ScyllaClusterConfig,
-	logger *zap.Logger,
-	statementLogger *stmtlogger.Logger,
-	enableObserver bool,
-) (*gocql.Session, error) {
-	for i := range len(config.Hosts) {
-		config.Hosts[i] = strings.TrimSpace(config.Hosts[i])
-	}
-
-	c, err := gocql.ParseConsistencyWrapper(config.Consistency)
-	if err != nil {
-		return nil, err
-	}
-
-	hp, err := getHostSelectionPolicy(config.HostSelectionPolicy, config.Hosts)
-	if err != nil {
-		return nil, err
-	}
-
-	cluster := gocql.NewCluster(config.Hosts...)
-
-	if enableObserver {
-		observer := ClusterObserver{
-			ClusterName: config.Name,
-			AppLogger:   logger,
-			Logger:      statementLogger,
-		}
-
-		cluster.ConnectObserver = observer
-		cluster.QueryObserver = observer
-		cluster.BatchObserver = observer
-	}
-
-	cluster.Timeout = config.RequestTimeout
-	cluster.ConnectTimeout = config.ConnectTimeout
-	cluster.MaxRoutingKeyInfo = 50_000
-	cluster.MaxPreparedStmts = 50_000
-	cluster.ReconnectInterval = config.ConnectTimeout
-	cluster.Events.DisableTopologyEvents = false
-	cluster.Events.DisableSchemaEvents = false
-	cluster.Events.DisableNodeStatusEvents = false
-	cluster.Logger = zap.NewStdLog(logger.Named("gocql").With(zap.String("cluster", string(config.Name))))
-	cluster.DefaultIdempotence = false
-	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
-		Min:        10 * time.Millisecond,
-		Max:        10 * time.Second,
-		NumRetries: 10,
-	}
-	cluster.ReconnectionPolicy = &gocql.ExponentialReconnectionPolicy{
-		MaxRetries:      10,
-		InitialInterval: 100 * time.Millisecond,
-		MaxInterval:     config.ConnectTimeout,
-	}
-	cluster.Consistency = c
-	cluster.DefaultTimestamp = !config.UseServerSideTimestamps
-	cluster.PoolConfig.HostSelectionPolicy = hp
-
-	if config.Username != "" && config.Password != "" {
-		cluster.Authenticator = gocql.PasswordAuthenticator{
-			Username: config.Username,
-			Password: config.Password,
-		}
-	}
-
-	return cluster.CreateSession()
-}
-
 type delegatingStore struct {
 	workers         *workpool.Pool
 	oracleStore     storeLoader
@@ -277,13 +183,12 @@ type delegatingStore struct {
 	statementLogger *stmtlogger.Logger
 }
 
-func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error {
-	doCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	doCtx = context.WithValue(doCtx, utils.QueryID, gocql.UUIDFromTime(time.Now()))
-
-	if err := ds.testStore.mutate(doCtx, testBuilder, mo.None[time.Time]()); err != nil {
+func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef.Stmt) error {
+	ctx = WithContextData(ctx, ContextData{
+		GeminiAttempt: 0,
+		Statement:     stmt,
+	})
+	if err := ds.testStore.mutate(ctx, testBuilder, mo.None[time.Time]()); err != nil {
 		return pkgerrors.Wrapf(
 			err,
 			"unable to apply mutations to the %s store",
@@ -292,7 +197,7 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder
 	}
 
 	if ds.oracleStore != nil {
-		if err := ds.oracleStore.mutate(doCtx, oracleBuilder, mo.None[time.Time]()); err != nil {
+		if err := ds.oracleStore.mutate(ctx, stmt, mo.None[time.Time]()); err != nil {
 			return pkgerrors.Wrapf(
 				err,
 				"unable to apply mutations to the %s store",
@@ -305,9 +210,12 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, oracleBuilder
 }
 
 func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error {
-	var oracleCh chan mo.Result[any]
+	doCtx := WithContextData(ctx, ContextData{
+		GeminiAttempt: 0,
+		Statement:     stmt,
+	})
 
-	doCtx := context.WithValue(ctx, utils.QueryID, gocql.TimeUUID())
+	var oracleCh chan mo.Result[any]
 
 	if ds.oracleStore != nil {
 		oracleCh = ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
@@ -335,7 +243,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		result = <-oracleCh
 		ds.workers.Release(oracleCh)
 		if result.IsError() {
-			// Test store failed, transition cannot take place
+			// Oracle store failed, transition cannot take place
 			ds.logger.Error(
 				"oracle store failed mutation, transition to next state impossible so continuing with next mutation",
 				zap.Error(result.Error()),
@@ -352,10 +260,14 @@ func (ds delegatingStore) Check(
 	ctx context.Context,
 	table *typedef.Table,
 	stmt *typedef.Stmt,
-	detailedDiff bool,
+	attempt int,
 ) error {
-	doCtx := context.WithValue(ctx, utils.QueryID, gocql.TimeUUID())
 	var oracleCh chan mo.Result[any]
+
+	doCtx := WithContextData(ctx, ContextData{
+		GeminiAttempt: attempt,
+		Statement:     stmt,
+	})
 
 	if ds.oracleStore != nil {
 		oracleCh = ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
@@ -392,34 +304,21 @@ func (ds delegatingStore) Check(
 	}
 
 	if len(testRows) != len(oracleRows) {
-		if !detailedDiff {
-			return ErrorRowDifference{
-				TestRows:   len(testRows),
-				OracleRows: len(oracleRows),
-			}
-		}
 		testSet := pks(table, testRows)
 		oracleSet := pks(table, oracleRows)
 		missingInTest := strset.Difference(oracleSet, testSet).List()
 		missingInOracle := strset.Difference(testSet, oracleSet).List()
 
 		return ErrorRowDifference{
-			TestRows:        len(testRows),
-			OracleRows:      len(oracleRows),
 			MissingInTest:   missingInTest,
 			MissingInOracle: missingInOracle,
+			TestRows:        len(testRows),
+			OracleRows:      len(oracleRows),
 		}
 	}
 
 	if reflect.DeepEqual(testRows, oracleRows) {
 		return nil
-	}
-
-	if !detailedDiff {
-		return ErrorRowDifference{
-			TestRows:   len(testRows),
-			OracleRows: len(oracleRows),
-		}
 	}
 
 	slices.SortStableFunc(testRows, rowsCmp)

@@ -44,15 +44,18 @@ type GlobalStatus struct {
 }
 
 func (gs *GlobalStatus) AddWriteError(err joberror.JobError) {
-	gs.Errors.AddError(err)
 	gs.WriteErrors.Add(1)
-	metrics.ExecutionErrors.WithLabelValues("write").Inc()
+	metrics.ExecutionErrors.WithLabelValues("write").Add(1)
+	gs.Errors.AddError(err)
+
+	metrics.ErrorMessages.WithLabelValues("write", err.Error()).Inc()
 }
 
 func (gs *GlobalStatus) AddReadError(err joberror.JobError) {
-	gs.Errors.AddError(err)
 	gs.ReadErrors.Add(1)
 	metrics.ExecutionErrors.WithLabelValues("read").Inc()
+	gs.Errors.AddError(err)
+	metrics.ErrorMessages.WithLabelValues("read", err.Error()).Inc()
 }
 
 func (gs *GlobalStatus) PrintResultAsJSON(
@@ -111,10 +114,15 @@ func (gs *GlobalStatus) PrintResult(
 	}
 }
 
-func NewGlobalStatus(limit int) *GlobalStatus {
-	metrics.ExecutionErrors.WithLabelValues("write").Add(0)
-	metrics.ExecutionErrors.WithLabelValues("read").Add(0)
+func (gs *GlobalStatus) WriteOp() {
+	gs.WriteOps.Add(1)
+}
 
+func (gs *GlobalStatus) ReadOp() {
+	gs.ReadOps.Add(1)
+}
+
+func NewGlobalStatus(limit int) *GlobalStatus {
 	return &GlobalStatus{
 		Errors: joberror.NewErrorList(limit),
 	}

@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"math/rand/v2"
 	"os"
 	"strconv"
 	"strings"
@@ -30,13 +29,16 @@ import (
 	"gopkg.in/inf.v0"
 )
 
-type QueryContextKey string
+type Random interface {
+	Uint32() uint32
+	IntN(int) int
+	Int64() int64
+	Uint64() uint64
+	Uint64N(uint64) uint64
+	Int64N(int64) int64
+}
 
-const (
-	QueryID       QueryContextKey = "query_id"
-	GeminiAttempt QueryContextKey = "gemini_attempt"
-	PartitionKeys QueryContextKey = "partition_keys"
-)
+type QueryContextKey string
 
 type MemoryFootprint interface {
 	MemoryFootprint() uint64
@@ -47,7 +49,7 @@ var maxDateMs = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC).UTC().U
 // RandDateStr generates time in string representation
 // it is done in such way because we wanted to make JSON statement to work
 // but scylla supports only string representation of date in JSON format
-func RandDateStr(rnd *rand.Rand) string {
+func RandDateStr(rnd Random) string {
 	return time.UnixMilli(rnd.Int64N(maxDateMs)).UTC().Format(time.DateOnly)
 }
 
@@ -55,11 +57,11 @@ func RandDateStr(rnd *rand.Rand) string {
 // Date limit needed to make sure that textual representation of the date is parsable by cql and drivers
 // Currently CQL fails: unable to parse date '95260-10-10T19:09:07.148+0000': marshaling error: Unable to parse timestamp from '95260-10-10t19:09:07.148+0000'"
 // if year is bigger than 9999, same as golang time.Parse
-func RandTimestamp(rnd *rand.Rand) int64 {
+func RandTimestamp(rnd Random) int64 {
 	return rnd.Int64N(maxDateMs)
 }
 
-func RandDate(rnd *rand.Rand) time.Time {
+func RandDate(rnd Random) time.Time {
 	return time.Unix(rnd.Int64N(1<<63-2), rnd.Int64N(999999999)).UTC()
 }
 
@@ -67,11 +69,11 @@ func RandDate(rnd *rand.Rand) time.Time {
 // https://github.com/apache/cassandra/blob/f5df4b219e063cb24b9cc0c22b6e614506b8d903/doc/native_protocol_v4.spec#L941
 // An 8 byte two's complement long representing nanoseconds since midnight.
 // Valid values are in the range 0 to 86399999999999
-func RandTime(rnd *rand.Rand) int64 {
+func RandTime(rnd Random) int64 {
 	return rnd.Int64N(86400000000000)
 }
 
-func RandIPV4Address(rnd *rand.Rand, v, pos int) string {
+func RandIPV4Address(rnd Random, v, pos int) string {
 	if pos < 0 || pos > 4 {
 		panic(
 			fmt.Sprintf(
@@ -96,7 +98,7 @@ func RandIPV4Address(rnd *rand.Rand, v, pos int) string {
 	return strings.Join(blocks, ".")
 }
 
-func RandInt2(rnd *rand.Rand, minimum, maximum int) int {
+func RandInt2(rnd Random, minimum, maximum int) int {
 	if maximum <= minimum {
 		return minimum
 	}
@@ -107,7 +109,7 @@ func IgnoreError(fn func() error) {
 	_ = fn()
 }
 
-func UUIDFromTime(rnd *rand.Rand) string {
+func UUIDFromTime(rnd Random) string {
 	if IsUnderTest() {
 		return gocql.TimeUUIDWith(rnd.Int64(), 0, []byte("127.0.0.1")).String()
 	}

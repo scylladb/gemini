@@ -19,12 +19,9 @@ import (
 	"log"
 	"math/rand/v2"
 
-	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/routingkey"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
-
-var _ generators.Interface = (*MockGenerator)(nil)
 
 type MockGenerator struct {
 	table             *typedef.Table
@@ -47,9 +44,9 @@ func NewTestGenerator(
 	}
 }
 
-func (g *MockGenerator) Get(_ context.Context) typedef.ValueWithToken {
+func (g *MockGenerator) Get(_ context.Context) typedef.PartitionKeys {
 	values := g.createPartitionKeyValues(g.rand)
-	token, err := g.routingKeyCreator.GetHash(g.table, values)
+	token, err := g.routingKeyCreator.GetHash(values)
 	if err != nil {
 		log.Printf(
 			"Error on get hash for table:%s, values:%v\nPartitionColumns:%v\nError is: %s\n",
@@ -59,12 +56,12 @@ func (g *MockGenerator) Get(_ context.Context) typedef.ValueWithToken {
 			err,
 		)
 	}
-	return typedef.ValueWithToken{Token: token, Value: values}
+	return typedef.PartitionKeys{Token: token, Values: values}
 }
 
-func (g *MockGenerator) GetOld(_ context.Context) typedef.ValueWithToken {
+func (g *MockGenerator) GetOld(_ context.Context) typedef.PartitionKeys {
 	values := g.createPartitionKeyValues(g.rand)
-	token, err := g.routingKeyCreator.GetHash(g.table, values)
+	token, err := g.routingKeyCreator.GetHash(values)
 	if err != nil {
 		log.Printf(
 			"Error on get hash for table:%s, values:%v\nPartitionColumns:%v\nError is: %s\n",
@@ -74,20 +71,20 @@ func (g *MockGenerator) GetOld(_ context.Context) typedef.ValueWithToken {
 			err,
 		)
 	}
-	return typedef.ValueWithToken{Token: token, Value: values}
+	return typedef.PartitionKeys{Token: token, Values: values}
 }
 
-func (g *MockGenerator) GiveOld(_ context.Context, _ typedef.ValueWithToken) {}
-
-func (g *MockGenerator) GiveOlds(_ context.Context, _ ...typedef.ValueWithToken) {}
+func (g *MockGenerator) GiveOlds(_ context.Context, _ ...typedef.PartitionKeys) {}
 
 func (g *MockGenerator) ReleaseToken(_ uint64) {
 }
 
-func (g *MockGenerator) createPartitionKeyValues(r *rand.Rand) []any {
-	var values []any
+func (g *MockGenerator) createPartitionKeyValues(r *rand.Rand) typedef.Values {
+	values := make(typedef.Values, len(g.table.PartitionKeys))
+
 	for _, pk := range g.table.PartitionKeys {
-		values = append(values, pk.Type.GenValue(r, g.partitionsConfig)...)
+		values[pk.Name] = pk.Type.GenValue(r, g.partitionsConfig)
 	}
+
 	return values
 }

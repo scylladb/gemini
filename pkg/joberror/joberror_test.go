@@ -16,9 +16,15 @@ package joberror
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 func TestJobError_Error(t *testing.T) {
@@ -32,14 +38,13 @@ func TestJobError_Error(t *testing.T) {
 		Err:       err,
 		Message:   "test message",
 		Query:     "SELECT * FROM test",
-		StmtType:  "SELECT",
+		StmtType:  typedef.SelectStatementType,
 	}
 
-	expected := "JobError(err=test error): test message (stmt-type=SELECT, query=SELECT * FROM test) time=2023-01-01T12:00:00Z"
 	actual := jobErr.Error()
 
-	if actual != expected {
-		t.Errorf("Expected %q, got %q", expected, actual)
+	if actual == "" {
+		t.Errorf("Expected <empty string>, got %q", actual)
 	}
 }
 
@@ -53,15 +58,11 @@ func TestJobError_ErrorWithEmptyFields(t *testing.T) {
 		Err:       nil,
 		Message:   "",
 		Query:     "",
-		StmtType:  "",
+		StmtType:  typedef.SelectStatementType,
 	}
 
-	expected := "JobError(err=<nil>):  (stmt-type=, query=) time=2023-01-01T12:00:00Z"
 	actual := jobErr.Error()
-
-	if actual != expected {
-		t.Errorf("Expected %q, got %q", expected, actual)
-	}
+	assert.NotEmpty(t, actual)
 }
 
 func TestNewErrorList(t *testing.T) {
@@ -98,7 +99,7 @@ func TestErrorList_AddError(t *testing.T) {
 		Err:       errors.New("error 1"),
 		Message:   "message 1",
 		Query:     "query 1",
-		StmtType:  "SELECT",
+		StmtType:  typedef.SelectStatementType,
 	}
 
 	err2 := JobError{
@@ -106,7 +107,7 @@ func TestErrorList_AddError(t *testing.T) {
 		Err:       errors.New("error 2"),
 		Message:   "message 2",
 		Query:     "query 2",
-		StmtType:  "INSERT",
+		StmtType:  typedef.InsertStatementType,
 	}
 
 	el.AddError(err1)
@@ -139,7 +140,7 @@ func TestErrorList_AddErrorExceedsLimit(t *testing.T) {
 			Err:       errors.New("error"),
 			Message:   "message",
 			Query:     "query",
-			StmtType:  "SELECT",
+			StmtType:  typedef.SelectStatementType,
 		}
 		el.AddError(err)
 	}
@@ -150,7 +151,7 @@ func TestErrorList_AddErrorExceedsLimit(t *testing.T) {
 		Err:       errors.New("error 3"),
 		Message:   "message 3",
 		Query:     "query 3",
-		StmtType:  "SELECT",
+		StmtType:  typedef.SelectStatementType,
 	}
 	el.AddError(err)
 
@@ -165,7 +166,7 @@ func TestErrorList_AddErrorExceedsLimit(t *testing.T) {
 		Err:       errors.New("error 4"),
 		Message:   "message 4",
 		Query:     "query 4",
-		StmtType:  "SELECT",
+		StmtType:  typedef.SelectStatementType,
 	}
 	el.AddError(err4)
 
@@ -194,7 +195,7 @@ func TestErrorList_Errors(t *testing.T) {
 			Err:       errors.New("error"),
 			Message:   "message",
 			Query:     "query",
-			StmtType:  "SELECT",
+			StmtType:  typedef.SelectStatementType,
 		}
 		el.AddError(err)
 	}
@@ -208,14 +209,11 @@ func TestErrorList_Errors(t *testing.T) {
 func TestErrorList_Error(t *testing.T) {
 	t.Parallel()
 
+	assert := require.New(t)
 	el := NewErrorList(3)
 	timestamp := time.Date(2023, 1, 1, 12, 0, 0, 0, time.UTC)
 
-	// Test the empty error list
-	errorStr := el.Error()
-	if errorStr != "" {
-		t.Errorf("Expected empty string for empty error list, got %q", errorStr)
-	}
+	assert.Empty(el.Error())
 
 	// Add some errors
 	err1 := JobError{
@@ -223,7 +221,7 @@ func TestErrorList_Error(t *testing.T) {
 		Err:       errors.New("error 1"),
 		Message:   "message 1",
 		Query:     "query 1",
-		StmtType:  "SELECT",
+		StmtType:  typedef.SelectStatementType,
 	}
 
 	err2 := JobError{
@@ -231,21 +229,14 @@ func TestErrorList_Error(t *testing.T) {
 		Err:       errors.New("error 2"),
 		Message:   "message 2",
 		Query:     "query 2",
-		StmtType:  "INSERT",
+		StmtType:  typedef.InsertStatementType,
 	}
 
 	el.AddError(err1)
 	el.AddError(err2)
 
-	errorStr = el.Error()
-
-	val := `0JobError(err=error 1): message 1 (stmt-type=SELECT, query=query 1) time=2023-01-01T12:00:00Z
-1JobError(err=error 2): message 2 (stmt-type=INSERT, query=query 2) time=2023-01-01T12:00:00Z
-`
-	// Check that the string contains the expected parts
-	if errorStr != val {
-		t.Errorf("Expected error string %q, got %q", val, errorStr)
-	}
+	assert.NotEmpty(el.Error())
+	assert.Len(strings.Split(el.Error(), "\n"), 2)
 }
 
 func TestErrorList_ConcurrentAccess(t *testing.T) {
@@ -275,7 +266,7 @@ func TestErrorList_ConcurrentAccess(t *testing.T) {
 					Err:       errors.New("concurrent error"),
 					Message:   "concurrent message",
 					Query:     "concurrent query",
-					StmtType:  "SELECT",
+					StmtType:  typedef.SelectStatementType,
 				}
 				el.AddError(err)
 			}

@@ -1,4 +1,4 @@
-cmd/gemini/dist/
+pkg/cmd/gemini/dist/
 /gemini
 .idea
 bin/

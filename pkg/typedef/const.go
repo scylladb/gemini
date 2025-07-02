@@ -26,7 +26,9 @@ const (
 
 const (
 	SelectStatementType StatementType = iota
+	SelectMultiPartitionType
 	SelectRangeStatementType
+	SelectMultiPartitionRangeStatementType
 	SelectByIndexStatementType
 	SelectFromMaterializedViewStatementType
 	DeleteStatementType
@@ -45,6 +47,8 @@ const (
 	DropTypeStatementType
 	CreateTableStatementType
 	DropTableStatementType
+
+	StatementTypeCount
 )
 
 const (
@@ -55,6 +59,7 @@ const (
 	OpSchemaAlter
 	OpSchemaDrop
 	OpSchemaCreate
+	OpCount
 )
 
 //nolint:revive

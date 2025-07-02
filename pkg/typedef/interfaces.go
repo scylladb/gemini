@@ -15,29 +15,22 @@
 package typedef
 
 import (
-	"bytes"
-	"math/rand/v2"
-
 	"github.com/gocql/gocql"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type Type interface {
 	Name() string
 	CQLDef() string
 	CQLHolder() string
-	CQLPretty(*bytes.Buffer, any) error
-	GenValue(*rand.Rand, *PartitionRangeConfig) []any
-	GenJSONValue(*rand.Rand, *PartitionRangeConfig) any
+	GenValue(utils.Random, *PartitionRangeConfig) []any
+	GenJSONValue(utils.Random, *PartitionRangeConfig) any
 	LenValue() int
 	// ValueVariationsNumber returns number of bytes generated value holds
 	ValueVariationsNumber(*PartitionRangeConfig) float64
 	Indexable() bool
 	CQLType() gocql.TypeInfo
-}
-
-type Statement interface {
-	ToCql() (stmt string, names []string)
-	PrettyCQL() (string, error)
 }
 
 type Types []Type

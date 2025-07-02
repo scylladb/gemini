@@ -21,18 +21,18 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
+//go:norace
 func TestGenerator(t *testing.T) {
 	t.Parallel()
 	table := &typedef.Table{
 		Name:          "tbl",
 		PartitionKeys: generators.CreatePkColumns(1, "pk"),
 	}
-	var current uint64
+	var current uint32
 	cfg := generators.Config{
 		PartitionsRangeConfig: typedef.PartitionRangeConfig{
 			MaxStringLength: 10,
@@ -42,22 +42,18 @@ func TestGenerator(t *testing.T) {
 		},
 		PkUsedBufferSize: 100,
 		PartitionsCount:  10000,
-		PartitionsDistributionFunc: func() distributions.TokenIndex {
-			return distributions.TokenIndex(atomic.LoadUint64(&current))
+		PartitionsDistributionFunc: func() uint32 {
+			return atomic.LoadUint32(&current)
 		},
 	}
 	logger, _ := zap.NewDevelopment()
 	generator := generators.NewGenerator(table, cfg, logger, rand.NewChaCha8([32]byte{}))
-	for i := uint64(0); i < cfg.PartitionsCount; i++ {
-		atomic.StoreUint64(&current, i)
+	for i := int32(0); i < cfg.PartitionsCount; i++ {
+		atomic.StoreUint32(&current, uint32(i))
 		v := generator.Get(t.Context())
 		n := generator.Get(t.Context())
-		if v.Token%generator.PartitionCount() != n.Token%generator.PartitionCount() {
+		if v.Token%uint32(generator.PartitionCount()) != n.Token%uint32(generator.PartitionCount()) {
 			t.Errorf("expected %v, got %v", v, n)
 		}
-	}
-
-	if err := generator.Close(); err != nil {
-		t.Fatalf("failed to close generator: %v", err)
 	}
 }

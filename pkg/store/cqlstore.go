@@ -17,29 +17,91 @@ package store
 import (
 	"context"
 	"encoding/json"
-	errs "errors"
+	"errors"
+	"fmt"
+	"slices"
 	"time"
 
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
+	"github.com/gocql/gocql/hostpolicy"
+	"github.com/hailocab/go-hostpool"
+	pkgerrors "github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/mo"
-	"github.com/scylladb/gocqlx/v3/qb"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/metrics"
+	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type cqlStore struct {
-	session                 *gocql.Session
-	schema                  *typedef.Schema
-	logger                  *zap.Logger
-	system                  string
-	maxRetriesMutate        int
-	maxRetriesMutateSleep   time.Duration
-	useServerSideTimestamps bool
+	cqlRequestsMetric         [typedef.StatementTypeCount]prometheus.Counter
+	cqlErrorRequestsMetric    [typedef.StatementTypeCount]prometheus.Counter
+	cqlTimeoutsRequestsMetric [typedef.StatementTypeCount]prometheus.Counter
+	session                   *gocql.Session
+	schema                    *typedef.Schema
+	logger                    *zap.Logger
+	system                    string
+	maxRetriesMutate          int
+	maxRetriesMutateSleep     time.Duration
+	useServerSideTimestamps   bool
+}
+
+func newCQLStoreWithSession(
+	session *gocql.Session,
+	schema *typedef.Schema,
+	logger *zap.Logger,
+	system string,
+	maxRetriesMutate int,
+	maxRetriesMutateSleep time.Duration,
+	useServerSideTimestamps bool,
+) *cqlStore {
+	store := &cqlStore{
+		session:                 session,
+		schema:                  schema,
+		logger:                  logger,
+		system:                  system,
+		maxRetriesMutate:        maxRetriesMutate,
+		maxRetriesMutateSleep:   maxRetriesMutateSleep,
+		useServerSideTimestamps: useServerSideTimestamps,
+	}
+
+	for i := range typedef.StatementTypeCount {
+		store.cqlRequestsMetric[i] = metrics.CQLRequests.WithLabelValues(system, i.String())
+		store.cqlErrorRequestsMetric[i] = metrics.CQLRequests.WithLabelValues(system, i.String())
+		store.cqlTimeoutsRequestsMetric[i] = metrics.CQLRequests.WithLabelValues(system, i.String())
+	}
+
+	return store
+}
+
+func newCQLStore(
+	cfg ScyllaClusterConfig,
+	statementLogger *stmtlogger.Logger,
+	schema *typedef.Schema,
+	logger *zap.Logger,
+	system string,
+	maxRetriesMutate int,
+	maxRetriesMutateSleep time.Duration,
+	useServerSideTimestamps bool,
+) (*cqlStore, error) {
+	testSession, err := createCluster(cfg, logger, statementLogger, true)
+	if err != nil {
+		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
+	}
+
+	return newCQLStoreWithSession(
+		testSession,
+		schema,
+		logger,
+		system,
+		maxRetriesMutate,
+		maxRetriesMutateSleep,
+		useServerSideTimestamps,
+	), nil
 }
 
 func (c *cqlStore) name() string {
@@ -48,7 +110,7 @@ func (c *cqlStore) name() string {
 
 type MutationError struct {
 	Inner         error
-	PartitionKeys []any
+	PartitionKeys typedef.Values
 }
 
 func (e MutationError) Error() string {
@@ -60,79 +122,47 @@ func (e MutationError) Error() string {
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
 	var err error
 
-	partitionKeys := make([]any, 0, len(stmt.ValuesWithToken))
-	for _, pk := range stmt.ValuesWithToken {
-		partitionKeys = append(partitionKeys, pk.Value...)
+	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
+	defer query.Release()
+
+	if !c.useServerSideTimestamps {
+		ts = ts.MapNone(func() (time.Time, bool) {
+			return time.Now(), true
+		})
+		query.WithTimestamp(ts.MustGet().UnixMicro())
 	}
-	newCtx := context.WithValue(ctx, utils.PartitionKeys, partitionKeys)
 
-	for i := range c.maxRetriesMutate {
-		newCtx = context.WithValue(newCtx, utils.GeminiAttempt, i)
-		mutateErr := c.doMutate(newCtx, stmt, ts)
-		metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
+	for range c.maxRetriesMutate {
+		mutateErr := query.Exec()
+		c.cqlRequestsMetric[stmt.QueryType].Inc()
 
-		if mutateErr == nil {
+		if mutateErr == nil || errors.Is(mutateErr, gocql.ErrNotFound) || errors.Is(mutateErr, context.Canceled) {
 			return nil
 		}
 
-		if errors.Is(mutateErr, context.Canceled) {
+		if errors.Is(mutateErr, context.DeadlineExceeded) {
+			c.cqlTimeoutsRequestsMetric[stmt.QueryType].Inc()
 			return nil
 		}
 
 		err = multierr.Append(err, MutationError{
 			Inner:         mutateErr,
-			PartitionKeys: partitionKeys,
+			PartitionKeys: stmt.PartitionKeys.Values,
 		})
+		c.cqlErrorRequestsMetric[stmt.QueryType].Inc()
 		time.Sleep(c.maxRetriesMutateSleep)
 	}
 
 	return err
 }
 
-func (c *cqlStore) doMutate(ctx context.Context, stmt *typedef.Stmt, timestamp mo.Option[time.Time]) error {
-	queryBody, _ := stmt.Query.ToCql()
-	query := c.session.Query(queryBody, stmt.Values...).WithContext(ctx)
-	defer query.Release()
-
-	if !c.useServerSideTimestamps {
-		timestamp = timestamp.MapNone(func() (time.Time, bool) {
-			return time.Now(), true
-		})
-		query.WithTimestamp(timestamp.MustGet().UnixMicro())
-	}
-
-	if err := query.Exec(); err != nil {
-		if errs.Is(err, context.Canceled) {
-			return nil
-		}
-
-		if errs.Is(err, context.DeadlineExceeded) {
-			metrics.CQLQueryTimeouts.WithLabelValues(c.system, c.system).Inc()
-
-			c.logger.Debug("deadline exceeded for mutation query",
-				zap.String("system", c.system),
-				zap.String("query", queryBody),
-				zap.Any("values", stmt.Values),
-			)
-
-			return nil
-		}
-
-		return err
-	}
-
-	return nil
-}
-
 func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
-	cql, _ := stmt.Query.ToCql()
-
-	query := c.session.Query(cql, stmt.Values...).WithContext(ctx)
+	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
 	iter := query.Iter()
 
 	defer func() {
 		query.Release()
-		metrics.CQLRequests.WithLabelValues(c.system, opType(stmt)).Inc()
+		c.cqlRequestsMetric[stmt.QueryType].Inc()
 	}()
 
 	rows := make(Rows, iter.NumRows())
@@ -154,19 +184,80 @@ func (c *cqlStore) Close() error {
 	return nil
 }
 
-func opType(stmt *typedef.Stmt) string {
-	switch stmt.Query.(type) {
-	case *qb.InsertBuilder:
-		return "insert"
-	case *qb.DeleteBuilder:
-		return "delete"
-	case *qb.UpdateBuilder:
-		return "update"
-	case *qb.SelectBuilder:
-		return "select"
-	case *qb.BatchBuilder:
-		return "batch"
+func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionPolicy, error) {
+	switch policy {
+	case "round-robin":
+		return gocql.RoundRobinHostPolicy(), nil
+	case "host-pool":
+		return hostpolicy.HostPool(hostpool.New(slices.Clone(hosts))), nil
+	case "token-aware":
+		p := gocql.TokenAwareHostPolicy(
+			gocql.RoundRobinHostPolicy(),
+			gocql.ShuffleReplicas(),
+			gocql.AvoidSlowReplicas(2000),
+		)
+		return p, nil
 	default:
-		return "unknown"
+		return nil, fmt.Errorf("unknown host selection policy \"%s\"", policy)
 	}
+}
+
+func createCluster(
+	config ScyllaClusterConfig,
+	logger *zap.Logger,
+	statementLogger *stmtlogger.Logger,
+	enableObserver bool,
+) (*gocql.Session, error) {
+	c, err := gocql.ParseConsistencyWrapper(config.Consistency)
+	if err != nil {
+		return nil, err
+	}
+
+	hp, err := getHostSelectionPolicy(config.HostSelectionPolicy, config.Hosts)
+	if err != nil {
+		return nil, err
+	}
+
+	cluster := gocql.NewCluster(slices.Clone(config.Hosts)...)
+
+	if enableObserver {
+		o := NewClusterObserver(statementLogger, logger, config.Name)
+
+		cluster.ConnectObserver = o
+		cluster.QueryObserver = o
+		cluster.BatchObserver = o
+	}
+
+	cluster.Timeout = config.RequestTimeout
+	cluster.ConnectTimeout = config.ConnectTimeout
+	cluster.MaxRoutingKeyInfo = 50_000
+	cluster.MaxPreparedStmts = 50_000
+	cluster.ReconnectInterval = config.ConnectTimeout
+	cluster.Events.DisableTopologyEvents = false
+	cluster.Events.DisableSchemaEvents = false
+	cluster.Events.DisableNodeStatusEvents = false
+	cluster.Logger = zap.NewStdLog(logger.Named("gocql").With(zap.String("cluster", string(config.Name))))
+	cluster.DefaultIdempotence = false
+	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
+		Min:        10 * time.Millisecond,
+		Max:        10 * time.Second,
+		NumRetries: 10,
+	}
+	cluster.ReconnectionPolicy = &gocql.ExponentialReconnectionPolicy{
+		MaxRetries:      10,
+		InitialInterval: 100 * time.Millisecond,
+		MaxInterval:     config.ConnectTimeout,
+	}
+	cluster.Consistency = c
+	cluster.DefaultTimestamp = !config.UseServerSideTimestamps
+	cluster.PoolConfig.HostSelectionPolicy = hp
+
+	if config.Username != "" && config.Password != "" {
+		cluster.Authenticator = gocql.PasswordAuthenticator{
+			Username: config.Username,
+			Password: config.Password,
+		}
+	}
+
+	return cluster.CreateSession()
 }

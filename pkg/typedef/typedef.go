@@ -15,16 +15,14 @@
 package typedef
 
 import (
-	"bytes"
+	"encoding/json"
 	"fmt"
-	"strings"
 	"unsafe"
 
-	"github.com/pkg/errors"
 	"github.com/scylladb/gocqlx/v3/qb"
+	"golang.org/x/exp/maps"
 
 	"github.com/scylladb/gemini/pkg/replication"
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type (
@@ -39,12 +37,6 @@ type (
 		Replication       replication.Replication `json:"replication"`
 		OracleReplication replication.Replication `json:"oracle_replication"`
 		Name              string                  `json:"name"`
-	}
-
-	IndexDef struct {
-		Column     *ColumnDef
-		IndexName  string `json:"index_name"`
-		ColumnName string `json:"column_name"`
 	}
 
 	PartitionRangeConfig struct {
@@ -77,137 +69,32 @@ func (q SimpleQuery) ToCql() (stmt string, names []string) {
 	return q.query, nil
 }
 
-type Stmt struct {
-	ValuesWithToken []ValueWithToken
-	Values          Values
-	StmtCache
-}
+type (
+	PartitionKeys struct {
+		Values Values
+		Token  uint32
+	}
+
+	Stmt struct {
+		PartitionKeys PartitionKeys
+		Query         string
+		Values        []any
+		QueryType     StatementType
+	}
+)
 
 func SimpleStmt(query string, queryType StatementType) *Stmt {
 	return &Stmt{
-		StmtCache: StmtCache{
-			Query:     SimpleQuery{query},
-			QueryType: queryType,
-		},
+		Query:     query,
+		QueryType: queryType,
 	}
-}
-
-func (s *Stmt) PrettyCQL() (string, error) {
-	if s == nil {
-		return "", nil
-	}
-
-	buffer := bytes.NewBuffer(nil)
-
-	if err := s.PrettyCQLBuffered(buffer); err != nil {
-		return "", err
-	}
-
-	return buffer.String(), nil
-}
-
-func (s *Stmt) PrettyCQLBuffered(buffer *bytes.Buffer) error {
-	query, _ := s.Query.ToCql()
-	return prettyCQL(buffer, query, s.Values, s.Types)
 }
 
 func (s *Stmt) ToCql() (string, []string) {
-	return s.Query.ToCql()
-}
-
-func (s *Stmt) Clone() *Stmt {
-	return &Stmt{
-		StmtCache: s.StmtCache,
-		Values:    s.Values.Copy(),
-	}
+	return s.Query, nil
 }
 
 type StatementType uint8
-
-//nolint:gocyclo
-func ParseStatementTypeFromQuery(query string) StatementType {
-	if strings.HasPrefix(query, "SELECT") {
-		if strings.Contains(query, "FROM") {
-			return SelectStatementType
-		}
-		if strings.Contains(query, "RANGE") {
-			return SelectRangeStatementType
-		}
-		if strings.Contains(query, "BY INDEX") {
-			return SelectByIndexStatementType
-		}
-		if strings.Contains(query, "FROM MATERIALIZED VIEW") {
-			return SelectFromMaterializedViewStatementType
-		}
-	}
-
-	if strings.HasPrefix(query, "INSERT") {
-		if strings.Contains(query, "JSON") {
-			return InsertJSONStatementType
-		}
-		return InsertStatementType
-	}
-
-	if strings.HasPrefix(query, "UPDATE") {
-		return UpdateStatementType
-	}
-
-	if strings.HasPrefix(query, "DELETE") {
-		return DeleteStatementType
-	}
-
-	if strings.HasPrefix(query, "ALTER COLUMN") {
-		return AlterColumnStatementType
-	}
-
-	if strings.HasPrefix(query, "ALTER TABLE") {
-		if strings.HasPrefix(query, "DROP") {
-			return DropColumnStatementType
-		}
-
-		if strings.HasPrefix(query, "ADD") {
-			return AddColumnStatementType
-		}
-	}
-
-	if strings.HasPrefix(query, "CREATE KEYSPACE") {
-		return CreateKeyspaceStatementType
-	}
-
-	if strings.HasPrefix(query, "CREATE SCHEMA") {
-		return CreateSchemaStatementType
-	}
-
-	if strings.HasPrefix(query, "CREATE TABLE") {
-		return CreateTableStatementType
-	}
-
-	if strings.HasPrefix(query, "DROP TABLE") {
-		return DropTableStatementType
-	}
-
-	if strings.HasPrefix(query, "DROP KEYSPACE") {
-		return DropKeyspaceStatementType
-	}
-
-	if strings.HasPrefix(query, "CREATE INDEX") {
-		return CreateIndexStatementType
-	}
-
-	if strings.HasPrefix(query, "DROP INDEX") {
-		return DropIndexStatementType
-	}
-
-	if strings.HasPrefix(query, "CREATE TYPE") {
-		return CreateTypeStatementType
-	}
-
-	if strings.HasPrefix(query, "DROP TYPE") {
-		return DropTypeStatementType
-	}
-
-	panic(fmt.Sprintf("unknown statement type for query: %s", query))
-}
 
 //nolint:gocyclo
 func (st StatementType) String() string {
@@ -216,6 +103,10 @@ func (st StatementType) String() string {
 		return "SelectStatement"
 	case SelectRangeStatementType:
 		return "SelectRangeStatement"
+	case SelectMultiPartitionType:
+		return "SelectMultiPartitionType"
+	case SelectMultiPartitionRangeStatementType:
+		return "SelectMultiPartitionRangeStatementType"
 	case SelectByIndexStatementType:
 		return "SelectByIndexStatement"
 	case SelectFromMaterializedViewStatementType:
@@ -257,10 +148,75 @@ func (st StatementType) String() string {
 	}
 }
 
+func (st StatementType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(st.String())
+}
+
+func (o OpType) String() string {
+	switch o {
+	case OpSelect:
+		return "Select"
+	case OpInsert:
+		return "Insert"
+	case OpUpdate:
+		return "Update"
+	case OpDelete:
+		return "Delete"
+	case OpSchemaAlter:
+		return "SchemaAlter"
+	case OpSchemaDrop:
+		return "SchemaDrop"
+	case OpSchemaCreate:
+		return "SchemaCreate"
+	default:
+		panic(fmt.Sprintf("unknown operation type %d", o))
+	}
+}
+
+func (st StatementType) IsSelect() bool {
+	switch st {
+	case SelectStatementType,
+		SelectRangeStatementType,
+		SelectMultiPartitionType,
+		SelectMultiPartitionRangeStatementType,
+		SelectByIndexStatementType,
+		SelectFromMaterializedViewStatementType:
+		return true
+	default:
+		return false
+	}
+}
+
+func (st StatementType) IsInsert() bool {
+	return st == InsertStatementType || st == InsertJSONStatementType
+}
+
+func (st StatementType) IsUpdate() bool {
+	return st == UpdateStatementType
+}
+
+func (st StatementType) IsDelete() bool {
+	return st == DeleteStatementType
+}
+
+func (st StatementType) IsSchema() bool {
+	switch st {
+	case AlterColumnStatementType, DropColumnStatementType, AddColumnStatementType,
+		DropTableStatementType, CreateTableStatementType, DropTypeStatementType,
+		CreateTypeStatementType, DropIndexStatementType, CreateIndexStatementType,
+		CreateKeyspaceStatementType, DropKeyspaceStatementType, CreateSchemaStatementType:
+		return true
+	default:
+		return false
+	}
+}
+
 func (st StatementType) OpType() OpType {
 	switch st {
 	case SelectStatementType,
 		SelectRangeStatementType,
+		SelectMultiPartitionType,
+		SelectMultiPartitionRangeStatementType,
 		SelectByIndexStatementType,
 		SelectFromMaterializedViewStatementType:
 		return OpSelect
@@ -292,112 +248,42 @@ func (st StatementType) PossibleAsyncOperation() bool {
 	}
 }
 
-type Values []any
+type Values map[string][]any
+
+func (v Values) ToCQLValues(pks Columns) []any {
+	if v == nil {
+		return nil
+	}
+
+	values := make([]any, 0, len(v))
+
+	for _, pk := range pks {
+		values = append(values, v[pk.Name]...)
+	}
+
+	return values
+}
+
+func (v Values) Merge(values Values) {
+	for k, value := range values {
+		v[k] = append(v[k], value...)
+	}
+}
 
 func (v Values) MemoryFootprint() uint64 {
 	if v == nil {
 		return 0
 	}
 
-	return utils.Sizeof([]any(v))
+	return 0
+	// return utils.Sizeof([]any(v))
 }
 
 func (v Values) Copy() Values {
-	values := make(Values, len(v))
-	copy(values, v)
-	return values
-}
-
-func (v Values) CopyFrom(src Values) Values {
-	out := v[len(v) : len(v)+len(src)]
-	copy(out, src)
-	return v[:len(v)+len(src)]
+	return maps.Clone(v)
 }
 
 type StatementCacheType uint8
-
-func (t StatementCacheType) String() string {
-	switch t {
-	case CacheInsert:
-		return "CacheInsert"
-	case CacheInsertIfNotExists:
-		return "CacheInsertIfNotExists"
-	case CacheUpdate:
-		return "CacheUpdate"
-	case CacheDelete:
-		return "CacheDelete"
-	default:
-		panic(fmt.Sprintf("unknown statement cache type %d", t))
-	}
-}
-
-const (
-	CacheInsert StatementCacheType = iota
-	CacheInsertIfNotExists
-	CacheUpdate
-	CacheDelete
-	CacheArrayLen
-)
-
-func prettyCQL(builder *bytes.Buffer, q string, values Values, types []Type) error {
-	builder.Grow(len(q))
-
-	if len(types) == 0 {
-		builder.WriteString(q)
-		return nil
-	}
-
-	if len(values) < len(types) {
-		return errors.Errorf("expected at least %d values, got %d", len(types), len(values))
-	}
-
-	var (
-		skip int
-		idx  int
-	)
-
-	for pos, i := strings.Index(q[idx:], "?"), 0; pos != -1; pos = strings.Index(q[idx:], "?") {
-		str := q[idx : idx+pos]
-		// Just to skip the ? in the query, happens only in TUPLE TYPES
-		if skip > 0 {
-			skip--
-			idx += pos + 1
-			continue
-		}
-
-		builder.WriteString(str)
-
-		var value any
-
-		if i >= len(types) {
-			return errors.Errorf(
-				"there are more(%d) ? in the query than types(%d), invalid Query: %s",
-				len(types),
-				i,
-				q,
-			)
-		}
-
-		switch tt := types[i].(type) {
-		case *TupleType:
-			skip = tt.LenValue()
-			value = values[i : i+skip]
-			values = values[skip:]
-		default:
-			value = values[i]
-		}
-
-		if err := types[i].CQLPretty(builder, value); err != nil {
-			return err
-		}
-
-		i++
-		idx += pos + 1
-	}
-
-	builder.WriteString(q[idx:])
-	return nil
-}
 
 func (v ValueWithToken) MemoryFootprint() uint64 {
 	return uint64(unsafe.Sizeof(v)) + v.Value.MemoryFootprint()

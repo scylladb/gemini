@@ -15,13 +15,9 @@
 package typedef
 
 import (
-	"bytes"
 	"math"
-	"math/rand/v2"
-	"reflect"
 
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
 
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -59,35 +55,7 @@ func (ct *BagType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *BagType) CQLPretty(builder *bytes.Buffer, value any) error {
-	if reflect.TypeOf(value).Kind() != reflect.Slice {
-		return errors.Errorf("expected slice, got [%T]%v", value, value)
-	}
-
-	if ct.ComplexType == TypeSet {
-		builder.WriteRune('{')
-		defer builder.WriteRune('}')
-	} else {
-		builder.WriteRune('[')
-		defer builder.WriteRune(']')
-	}
-
-	s := reflect.ValueOf(value)
-
-	for i := 0; i < s.Len(); i++ {
-		if err := ct.ValueType.CQLPretty(builder, s.Index(i).Interface()); err != nil {
-			return err
-		}
-
-		if i < s.Len()-1 {
-			builder.WriteRune(',')
-		}
-	}
-
-	return nil
-}
-
-func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
+func (ct *BagType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]any, count)
 	for i := 0; i < count; i++ {
@@ -96,7 +64,7 @@ func (ct *BagType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
 	return []any{out}
 }
 
-func (ct *BagType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
+func (ct *BagType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]any, count)
 	for i := 0; i < count; i++ {

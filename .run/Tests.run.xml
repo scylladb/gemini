@@ -3,9 +3,6 @@
     <module name="gemini" />
     <working_directory value="$PROJECT_DIR$" />
     <go_parameters value="-timeout 5m -race -tags testing" />
-    <envs>
-      <env name="CGO_ENABLED" value="1" />
-    </envs>
     <kind value="DIRECTORY" />
     <package value="github.com/scylladb/gemini" />
     <directory value="$PROJECT_DIR$" />

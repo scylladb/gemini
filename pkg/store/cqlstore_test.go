@@ -72,26 +72,10 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 	}
 
 	store := &delegatingStore{
-		workers: workpool.New(2),
-		oracleStore: &cqlStore{
-			session:                 oracleSession,
-			schema:                  schema,
-			logger:                  zap.NewNop(),
-			system:                  "oracle",
-			maxRetriesMutate:        1,
-			maxRetriesMutateSleep:   10 * time.Millisecond,
-			useServerSideTimestamps: false,
-		},
-		testStore: &cqlStore{
-			session:                 testSession,
-			schema:                  schema,
-			logger:                  zap.NewNop(),
-			system:                  "test",
-			maxRetriesMutate:        5,
-			maxRetriesMutateSleep:   1 * time.Millisecond,
-			useServerSideTimestamps: false,
-		},
-		logger: zap.NewNop(),
+		workers:     workpool.New(2),
+		oracleStore: newCQLStoreWithSession(oracleSession, schema, zap.NewNop(), "oracle", 1, 10*time.Millisecond, false),
+		testStore:   newCQLStoreWithSession(testSession, schema, zap.NewNop(), "test", 5, 1*time.Millisecond, false),
+		logger:      zap.NewNop(),
 	}
 
 	uuid := gocql.TimeUUID()
@@ -119,5 +103,5 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 		typedef.InsertStatementType,
 	)
 	assert.NoError(store.Mutate(t.Context(), insert))
-	assert.NoError(store.Check(t.Context(), schema.Tables[0], check, true))
+	assert.NoError(store.Check(t.Context(), schema.Tables[0], check, 1))
 }

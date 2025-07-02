@@ -16,6 +16,10 @@ package inflight
 
 import (
 	"sync"
+	"time"
+
+	"go.uber.org/atomic"
+	"golang.org/x/exp/maps"
 )
 
 // We track inflights in the map, maps in golang are not shrinking
@@ -24,9 +28,9 @@ import (
 const shrinkInflightsLimit = 1000
 
 type InFlight interface {
-	AddIfNotPresent(uint64) bool
-	Delete(uint64)
-	Has(uint64) bool
+	AddIfNotPresent(uint32) bool
+	Delete(uint32)
+	Has(uint32) bool
 }
 
 // New creates a instance of a simple InFlight set.
@@ -35,13 +39,26 @@ func New() InFlight {
 	return newSyncU64set(shrinkInflightsLimit)
 }
 
-func newSyncU64set(limit uint64) *syncU64set {
-	return &syncU64set{
-		values:  make(map[uint64]struct{}),
-		limit:   limit,
-		deleted: 0,
-		lock:    sync.RWMutex{},
+func newSyncU64set(limit int64) *syncU64set {
+	s := &syncU64set{
+		values: make(map[uint32]struct{}),
+		lock:   sync.Mutex{},
 	}
+
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			if s.deleted.Load() >= limit {
+				s.lock.Lock()
+				s.values = maps.Clone(s.values)
+				s.lock.Unlock()
+			}
+		}
+	}()
+
+	return s
 }
 
 // NewConcurrent creates a instance of a sharded InFlight set.
@@ -65,38 +82,30 @@ type shardedSyncU64set struct {
 	shards [256]*syncU64set
 }
 
-func (s *shardedSyncU64set) Delete(v uint64) {
+func (s *shardedSyncU64set) Delete(v uint32) {
 	ss := s.shards[v%256]
 	ss.Delete(v)
 }
 
-func (s *shardedSyncU64set) AddIfNotPresent(v uint64) bool {
+func (s *shardedSyncU64set) AddIfNotPresent(v uint32) bool {
 	ss := s.shards[v%256]
 	return ss.AddIfNotPresent(v)
 }
 
-func (s *shardedSyncU64set) Has(v uint64) bool {
+func (s *shardedSyncU64set) Has(v uint32) bool {
 	ss := s.shards[v%256]
 	return ss.Has(v)
 }
 
 type syncU64set struct {
-	values  map[uint64]struct{}
-	deleted uint64
-	limit   uint64
-	lock    sync.RWMutex
+	values  map[uint32]struct{}
+	deleted atomic.Int64
+	lock    sync.Mutex
 }
 
-func (s *syncU64set) AddIfNotPresent(u uint64) bool {
-	s.lock.RLock()
-	_, ok := s.values[u]
-	if ok {
-		s.lock.RUnlock()
-		return false
-	}
-	s.lock.RUnlock()
+func (s *syncU64set) AddIfNotPresent(u uint32) bool {
 	s.lock.Lock()
-	_, ok = s.values[u]
+	_, ok := s.values[u]
 	if ok {
 		s.lock.Unlock()
 		return false
@@ -106,14 +115,14 @@ func (s *syncU64set) AddIfNotPresent(u uint64) bool {
 	return true
 }
 
-func (s *syncU64set) Has(u uint64) bool {
-	s.lock.RLock()
+func (s *syncU64set) Has(u uint32) bool {
+	s.lock.Lock()
 	_, ok := s.values[u]
-	s.lock.RUnlock()
+	s.lock.Unlock()
 	return ok
 }
 
-func (s *syncU64set) Delete(u uint64) {
+func (s *syncU64set) Delete(u uint32) {
 	s.lock.Lock()
 	_, ok := s.values[u]
 	if !ok {
@@ -121,29 +130,7 @@ func (s *syncU64set) Delete(u uint64) {
 		return
 	}
 	delete(s.values, u)
-	s.addDeleted(1)
 	s.lock.Unlock()
-}
 
-func (s *syncU64set) addDeleted(n uint64) {
-	s.deleted += n
-	if s.limit != 0 && s.deleted > s.limit {
-		go s.shrink()
-	}
-}
-
-func (s *syncU64set) shrink() {
-	s.lock.Lock()
-	mapLen := uint64(0)
-	if uint64(len(s.values)) >= s.deleted {
-		mapLen = uint64(len(s.values)) - s.deleted
-	}
-	newValues := make(map[uint64]struct{}, mapLen)
-
-	for key, val := range s.values {
-		newValues[key] = val
-	}
-	s.values = newValues
-	s.deleted = 0
-	s.lock.Unlock()
+	s.deleted.Dec()
 }

@@ -15,13 +15,12 @@
 package typedef
 
 import (
-	"bytes"
-	"math/rand/v2"
 	"slices"
 	"strings"
 
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type TupleType struct {
@@ -57,41 +56,11 @@ func (t *TupleType) CQLHolder() string {
 	return "(" + strings.TrimRight(strings.Repeat("?,", len(t.ValueTypes)), ",") + ")"
 }
 
-func (t *TupleType) CQLPretty(builder *bytes.Buffer, value any) error {
-	values, ok := value.([]any)
-	if !ok {
-		values, ok = value.(Values)
-		if !ok {
-			return errors.Errorf("expected []any, got [%T]%v", value, value)
-		}
-	}
-
-	if len(values) == 0 {
-		return nil
-	}
-
-	if len(values) != len(t.ValueTypes) {
-		return errors.Errorf("expected %d values, got %d", len(t.ValueTypes), len(values))
-	}
-
-	for i, tp := range t.ValueTypes {
-		if err := tp.CQLPretty(builder, values[i]); err != nil {
-			return err
-		}
-
-		if i < len(values)-1 {
-			builder.WriteRune(',')
-		}
-	}
-
-	return nil
-}
-
 func (t *TupleType) Indexable() bool {
 	return !slices.Contains(t.ValueTypes, TypeDuration)
 }
 
-func (t *TupleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
+func (t *TupleType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	out := make([]any, 0, len(t.ValueTypes))
 	for _, tp := range t.ValueTypes {
 		out = append(out, tp.GenJSONValue(r, p))
@@ -99,7 +68,7 @@ func (t *TupleType) GenJSONValue(r *rand.Rand, p *PartitionRangeConfig) any {
 	return out
 }
 
-func (t *TupleType) GenValue(r *rand.Rand, p *PartitionRangeConfig) []any {
+func (t *TupleType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	out := make([]any, 0, len(t.ValueTypes))
 	for _, tp := range t.ValueTypes {
 		out = append(out, tp.GenValue(r, p)...)

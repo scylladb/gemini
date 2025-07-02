@@ -71,7 +71,14 @@ func NewIOWriterLogger(ch <-chan Item, name string, input io.Writer, compression
 	}
 
 	ioWriterLogger.wg.Add(1)
-	go ioWriterLogger.committer(name, ioWriterLogger.wg, input, writer, metrics.NewChannelMetrics[Item]("statement_logger", name, defaultChanSize), logger)
+	go ioWriterLogger.committer(
+		name,
+		ioWriterLogger.wg,
+		input,
+		writer,
+		metrics.NewChannelMetrics("statement_logger", name),
+		logger,
+	)
 
 	return ioWriterLogger, nil
 }
@@ -125,7 +132,7 @@ func (i *IOWriterLogger) committer(
 			if !more {
 				return
 			}
-			chMetrics.Dec(rec)
+			chMetrics.Dec()
 
 			if err := encoder.Encode(rec); err != nil {
 				if errors.Is(err, os.ErrClosed) {

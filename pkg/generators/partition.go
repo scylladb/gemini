@@ -16,20 +16,23 @@ package generators
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"go.uber.org/multierr"
 
-	"github.com/scylladb/gemini/pkg/inflight"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-type Partition struct {
-	values    atomic.Pointer[chan typedef.ValueWithToken]
-	oldValues atomic.Pointer[chan typedef.ValueWithToken]
-	inFlight  inflight.InFlight
-	isStale   atomic.Bool
-}
+type (
+	Partition struct {
+		values    atomic.Pointer[chan typedef.PartitionKeys]
+		oldValues atomic.Pointer[chan typedef.PartitionKeys]
+		wakeup    chan<- struct{}
+		// inFlight  inflight.InFlight
+		isStale atomic.Bool
+	}
+)
 
 func (p *Partition) MarkStale() error {
 	p.isStale.Store(true)
@@ -42,10 +45,10 @@ func (p *Partition) Stale() bool {
 
 // get returns a new value and ensures that it's corresponding token
 // is not already in-flight.
-func (p *Partition) get(ctx context.Context) typedef.ValueWithToken {
+func (p *Partition) get(ctx context.Context) typedef.PartitionKeys {
 	for {
 		v := p.pick(ctx)
-		if v.Token != 0 || p.inFlight.AddIfNotPresent(v.Token) {
+		if v.Token != 0 {
 			return v
 		}
 	}
@@ -53,47 +56,47 @@ func (p *Partition) get(ctx context.Context) typedef.ValueWithToken {
 
 // getOld returns a previously used value and token or a new if
 // the old queue is empty.
-func (p *Partition) getOld(ctx context.Context) (typedef.ValueWithToken, bool) {
+func (p *Partition) getOld(ctx context.Context) (typedef.PartitionKeys, bool) {
 	if ch := p.oldValues.Load(); ch != nil {
 		select {
 		case v := <-*ch:
 			return v, true
 		case <-ctx.Done():
-			return typedef.ValueWithToken{}, false
-		default:
+			return typedef.PartitionKeys{}, false
 		}
 	}
 
-	return typedef.ValueWithToken{}, false
+	return typedef.PartitionKeys{}, false
 }
 
 // giveOld returns the supplied value for later reuse unless the value
 // is empty, in which case it removes the corresponding token from the
 // in-flight tracking.
-func (p *Partition) giveOld(ctx context.Context, v typedef.ValueWithToken) bool {
+func (p *Partition) giveOld(ctx context.Context, v typedef.PartitionKeys) bool {
 	if ch := p.oldValues.Load(); ch != nil {
 		select {
 		case <-ctx.Done():
+			clear(v.Values)
 			return false
 		case *ch <- v:
 			return true
 		default:
-			clear(v.Value)
+			clear(v.Values)
 			return false
-			// Old partition buffer is full, just drop the value
 		}
 	}
 
+	clear(v.Values)
 	return false
 }
 
-func (p *Partition) push(v typedef.ValueWithToken) bool {
+func (p *Partition) push(v typedef.PartitionKeys) bool {
 	if ch := p.values.Load(); ch != nil {
 		select {
 		case *ch <- v:
 			return true
 		default:
-			clear(v.Value)
+			clear(v.Values)
 			return false
 		}
 	}
@@ -102,54 +105,81 @@ func (p *Partition) push(v typedef.ValueWithToken) bool {
 }
 
 // releaseToken removes the corresponding token from the in-flight tracking.
-func (p *Partition) releaseToken(token uint64) {
-	p.inFlight.Delete(token)
+func (p *Partition) releaseToken(_ uint32) {
+	// p.inFlight.Delete(token)
 }
 
-func (p *Partition) pick(ctx context.Context) typedef.ValueWithToken {
-	if ch := p.values.Load(); ch != nil {
+func (p *Partition) wakeUp() {
+	select {
+	case p.wakeup <- struct{}{}:
+	default:
+	}
+}
+
+func (p *Partition) pick(ctx context.Context) typedef.PartitionKeys {
+	if chPtr := p.values.Load(); chPtr != nil {
+		ch := *chPtr
 		select {
-		case v := <-*ch:
+		case v := <-ch:
+			if len(ch) <= cap(ch)/4 {
+				p.wakeUp() // channel at 25% capacity, trigger generator
+			}
 			return v
 		case <-ctx.Done():
-			return typedef.ValueWithToken{}
+			return typedef.PartitionKeys{}
+		default:
+			p.wakeUp()
+			return <-ch
 		}
 	}
 
-	return typedef.ValueWithToken{}
+	return typedef.PartitionKeys{}
 }
 
 func (p *Partition) Close() error {
 	oldValues := p.oldValues.Swap(nil)
-	values := p.values.Swap(nil)
+	if oldValues != nil {
+		close(*oldValues)
+	}
 
-	close(*oldValues)
-	close(*values)
+	values := p.values.Swap(nil)
+	if values != nil {
+		close(*values)
+	}
 
 	return nil
 }
 
-type Partitions []Partition
+type Partitions struct {
+	parts []Partition
+	mu    sync.Mutex
+}
 
-func (p Partitions) Close() error {
+var closePartitions sync.Once
+
+func (p *Partitions) Close() error {
 	var err error
+	closePartitions.Do(func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
 
-	for i := range len(p) {
-		err = multierr.Append(err, p[i].Close())
-	}
+		for i := range len(p.parts) {
+			err = multierr.Append(err, p.parts[i].Close())
+		}
+	})
 
 	return err
 }
 
-func (p Partitions) FullValues() uint64 {
+func (p *Partitions) FullValues() uint64 {
 	full := uint64(0)
 
-	for i := range len(p) {
-		if p[i].Stale() {
+	for i := range len(p.parts) {
+		if p.parts[i].Stale() {
 			continue
 		}
 
-		if ch := p[i].values.Load(); ch != nil {
+		if ch := p.parts[i].values.Load(); ch != nil {
 			full += uint64(len(*ch))
 		}
 	}
@@ -157,14 +187,29 @@ func (p Partitions) FullValues() uint64 {
 	return full
 }
 
-func (p Partitions) MaxValuesStored() uint64 {
+func (p *Partitions) Get(token int) *Partition {
+	idx := token % len(p.parts)
+	partition := &p.parts[idx]
+
+	if partition.Stale() {
+		return nil
+	}
+
+	return partition
+}
+
+func (p *Partitions) Len() int {
+	return len(p.parts)
+}
+
+func (p *Partitions) MaxValuesStored() uint64 {
 	full := uint64(0)
-	for i := range len(p) {
-		if p[i].Stale() {
+	for i := range len(p.parts) {
+		if p.parts[i].Stale() {
 			continue
 		}
 
-		if ch := p[i].values.Load(); ch != nil {
+		if ch := p.parts[i].values.Load(); ch != nil {
 			full += uint64(cap(*ch))
 		}
 	}
@@ -172,20 +217,23 @@ func (p Partitions) MaxValuesStored() uint64 {
 	return full
 }
 
-func NewPartitions(count, pkBufferSize uint64) Partitions {
-	partitions := make(Partitions, count)
+func NewPartitions(count int32, pkBufferSize uint64, wakeup chan<- struct{}) *Partitions {
+	partitions := make([]Partition, count)
 
 	for i := range len(partitions) {
-		values := make(chan typedef.ValueWithToken, pkBufferSize)
-		oldValues := make(chan typedef.ValueWithToken, pkBufferSize)
+		values := make(chan typedef.PartitionKeys, pkBufferSize)
+		oldValues := make(chan typedef.PartitionKeys, pkBufferSize)
 
 		partitions[i] = Partition{
-			inFlight: inflight.New(),
+			wakeup: wakeup,
+			// inFlight: inflight.New(),
 		}
 
 		partitions[i].values.Store(&values)
 		partitions[i].oldValues.Store(&oldValues)
 	}
 
-	return partitions
+	return &Partitions{
+		parts: partitions,
+	}
 }

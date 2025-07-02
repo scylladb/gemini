@@ -25,12 +25,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gocql/gocql"
 	"github.com/klauspost/compress/zstd"
 	"github.com/samber/mo"
 	"go.uber.org/zap"
 
-	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
@@ -103,9 +101,8 @@ func TestOutputToFile(t *testing.T) {
 			}
 
 			data := Item{
-				ID:        gocql.TimeUUID(),
 				Statement: "INSERT INTO ks1.table1(pk1) VALUES(?)",
-				Values:    mo.Left[typedef.Values, []byte]([]any{1}),
+				Values:    mo.Left[[]any, []byte]([]any{1}),
 				Error:     mo.Left[error, string](nil),
 				Duration:  Duration{Duration: 10 * time.Second},
 				Host:      "test_host",
@@ -148,9 +145,8 @@ func BenchmarkLogger(b *testing.B) {
 			rows := &atomic.Int64{}
 
 			data := Item{
-				ID:        gocql.TimeUUID(),
 				Statement: "INSERT INTO ks1.table1(pk1) VALUES(?)",
-				Values:    mo.Left[typedef.Values, []byte]([]any{1}),
+				Values:    mo.Left[[]any, []byte]([]any{1}),
 				Error:     mo.Left[error, string](nil),
 				Duration:  Duration{Duration: 10 * time.Second},
 				Host:      "test_host",
