@@ -296,12 +296,20 @@ func ExecutionTimeStart(task string) RunningTime {
 	}
 }
 
-func (r RunningTime) Start() {
+func (r *RunningTime) Start() {
 	r.start = time.Now()
 }
 
-func (r RunningTime) Record() {
+func (r *RunningTime) Record() {
 	r.observer.Observe(float64(time.Since(r.start).Nanoseconds()))
+}
+
+func (r *RunningTime) RunFuncE(f func() error) error {
+	r.Start()
+	err := f()
+	r.Record()
+
+	return err
 }
 
 func ExecutionTimeFunc(task string, callback func()) {

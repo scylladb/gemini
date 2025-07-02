@@ -27,7 +27,8 @@ type (
 	Partition struct {
 		values    atomic.Pointer[chan typedef.PartitionKeys]
 		oldValues atomic.Pointer[chan typedef.PartitionKeys]
-		//inFlight  inflight.InFlight
+		wakeup    chan<- struct{}
+		// inFlight  inflight.InFlight
 		isStale atomic.Bool
 	}
 )
@@ -58,9 +59,6 @@ func (p *Partition) getOld(ctx context.Context) (typedef.PartitionKeys, bool) {
 	if ch := p.oldValues.Load(); ch != nil {
 		select {
 		case v := <-*ch:
-			if v.Token == 0 {
-				return typedef.PartitionKeys{}, false
-			}
 			return v, true
 		case <-ctx.Done():
 			return typedef.PartitionKeys{}, false
@@ -106,17 +104,31 @@ func (p *Partition) push(v typedef.PartitionKeys) bool {
 }
 
 // releaseToken removes the corresponding token from the in-flight tracking.
-func (p *Partition) releaseToken(token uint32) {
-	//p.inFlight.Delete(token)
+func (p *Partition) releaseToken(_ uint32) {
+	// p.inFlight.Delete(token)
+}
+
+func (p *Partition) wakeUp() {
+	select {
+	case p.wakeup <- struct{}{}:
+	default:
+	}
 }
 
 func (p *Partition) pick(ctx context.Context) typedef.PartitionKeys {
-	if ch := p.values.Load(); ch != nil {
+	if chPtr := p.values.Load(); chPtr != nil {
+		ch := *chPtr
 		select {
-		case v := <-*ch:
+		case v := <-ch:
+			if len(ch) <= cap(ch)/4 {
+				p.wakeUp() // channel at 25% capacity, trigger generator
+			}
 			return v
 		case <-ctx.Done():
 			return typedef.PartitionKeys{}
+		default:
+			p.wakeUp()
+			return <-ch
 		}
 	}
 
@@ -176,7 +188,7 @@ func (p Partitions) MaxValuesStored() uint64 {
 	return full
 }
 
-func NewPartitions(count int32, pkBufferSize uint64) Partitions {
+func NewPartitions(count int32, pkBufferSize uint64, wakeup chan<- struct{}) Partitions {
 	partitions := make(Partitions, count)
 
 	for i := range len(partitions) {
@@ -184,7 +196,8 @@ func NewPartitions(count int32, pkBufferSize uint64) Partitions {
 		oldValues := make(chan typedef.PartitionKeys, pkBufferSize)
 
 		partitions[i] = Partition{
-			//inFlight: inflight.New(),
+			wakeup: wakeup,
+			// inFlight: inflight.New(),
 		}
 
 		partitions[i].values.Store(&values)

@@ -89,9 +89,10 @@ func NewValidation(
 func (v *Validation) Do(ctx context.Context) error {
 	name := v.Name()
 
-	for !v.stopFlag.IsHardOrSoft() {
+	executionTime := metrics.ExecutionTimeStart(name)
 
-		err := metrics.ExecutionTimeWithError(name, func() error {
+	for !v.stopFlag.IsHardOrSoft() {
+		err := executionTime.RunFuncE(func() error {
 			var acc error
 
 			stmt := v.statement.Select(ctx)

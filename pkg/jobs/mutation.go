@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// nolint
 package jobs
 
 import (
@@ -78,8 +77,10 @@ func NewMutation(
 
 func (m *Mutation) Do(ctx context.Context) error {
 	name := m.Name()
+	executionTime := metrics.ExecutionTimeStart(name)
+
 	for !m.stopFlag.IsHardOrSoft() {
-		err := metrics.ExecutionTimeWithError(name, func() error {
+		err := executionTime.RunFuncE(func() error {
 			mutateStmt := m.statement.MutateStatement(ctx, m.delete)
 
 			if mutateStmt == nil {
@@ -132,7 +133,8 @@ func (m *Mutation) Name() string {
 	return "mutation_" + m.table.Name
 }
 
-func (m *Mutation) ddl(ctx context.Context) error {
+// nolint
+func (m *Mutation) ddl(_ context.Context) error {
 	if len(m.table.MaterializedViews) > 0 {
 		// Scylla does not allow changing the DDL of a table with materialized views.
 		return nil

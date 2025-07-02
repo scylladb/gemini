@@ -17,7 +17,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/scylladb/gemini/pkg/metrics"
 	"log"
 	"math"
 	"math/rand/v2"
@@ -38,6 +37,7 @@ import (
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/jobs"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/realrandom"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
@@ -136,10 +136,10 @@ func run(cmd *cobra.Command, _ []string) error {
 		oracleClusterHost[i] = strings.TrimSpace(oracleClusterHost[i])
 	}
 
-	if err := validateSeed(seed); err != nil {
+	if err = validateSeed(seed); err != nil {
 		return errors.Wrapf(err, "failed to parse --seed argument")
 	}
-	if err := validateSeed(schemaSeed); err != nil {
+	if err = validateSeed(schemaSeed); err != nil {
 		return errors.Wrapf(err, "failed to parse --schema-seed argument")
 	}
 

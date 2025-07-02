@@ -16,9 +16,9 @@ package generators
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"sync"
-	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -86,6 +86,7 @@ func NewGenerator(
 	metrics.GeneratorPartitionSize.WithLabelValues(table.Name).Set(float64(config.PartitionsCount))
 	metrics.GeneratorBufferSize.WithLabelValues(table.Name).Set(float64(config.PkUsedBufferSize))
 
+	wakeup := make(chan struct{}, 1)
 	g := &Generator{
 		cancel:            cancel,
 		logger:            logger,
@@ -93,7 +94,7 @@ func NewGenerator(
 		routingKeyCreator: routingkey.New(table),
 		r:                 rnd,
 		idxFunc:           config.PartitionsDistributionFunc,
-		partitions:        NewPartitions(config.PartitionsCount, config.PkUsedBufferSize),
+		partitions:        NewPartitions(config.PartitionsCount, config.PkUsedBufferSize, wakeup),
 		partitionsConfig:  config.PartitionsRangeConfig,
 		partitionCount:    config.PartitionsCount,
 		oldValuesMetrics:  metrics.NewChannelMetrics("generator", table.Name+"_old_values"),
@@ -101,7 +102,7 @@ func NewGenerator(
 		oldDroppedValues:  metrics.GeneratorDroppedValues.WithLabelValues(table.Name, "old"),
 	}
 
-	g.start(ctx)
+	g.start(ctx, wakeup)
 
 	return g
 }
@@ -152,20 +153,28 @@ func (g *Generator) ReleaseToken(token uint32) {
 	g.GetPartitionForToken(token).releaseToken(token)
 }
 
-func (g *Generator) start(ctx context.Context) {
-	stopped := &atomic.Bool{}
+func (g *Generator) start(ctx context.Context, wakeup chan struct{}) {
 	g.wg.Add(1)
 	defer g.wg.Done()
 
 	go func() {
 		<-ctx.Done()
-		stopped.Store(true)
 		g.logger.Info("stopping partition key generation loop")
 	}()
 
 	g.logger.Info("starting partition key generation loop")
 
-	go g.fillAllPartitions(stopped)
+	wakeup <- struct{}{}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-wakeup:
+				g.fillAllPartitions()
+			}
+		}
+	}()
 }
 
 func (g *Generator) FindAndMarkStalePartitions() {
@@ -206,38 +215,63 @@ func (g *Generator) FindAndMarkStalePartitions() {
 	metrics.StalePartitions.WithLabelValues(g.table.Name).Set(float64(stalePartitions))
 }
 
+var errFullPartitions = errors.New("all partitions are full, cannot fill more")
+
 // fillAllPartitions guarantees that each partition was tested to be full
 // at least once since the function started and before it ended.
 // In other words, no partition will be starved.
-func (g *Generator) fillAllPartitions(stopped *atomic.Bool) {
-
-	executionTime := metrics.ExecutionTimeStart("value_generation_" + g.table.Name)
+func (g *Generator) fillAllPartitions() {
 	dropped := metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new")
-	for !stopped.Load() {
-		executionTime.Start()
-		token, values, err := g.createPartitionKeyValues()
-		if err != nil {
-			g.logger.Error("failed to get primary key hash", zap.Error(err))
-			executionTime.Record()
-			continue
+	executionDuration := metrics.ExecutionTimeStart(g.table.Name + "_new")
+	pFilled := make([]bool, len(g.partitions))
+	allFilled := func() bool {
+		for _, filled := range pFilled {
+			if !filled {
+				return false
+			}
 		}
+		return true
+	}
 
-		partition := &g.partitions[g.shardOf(token)]
-		if partition.Stale() {
-			executionTime.Record()
-			continue
+	for {
+		err := executionDuration.RunFuncE(func() error {
+			token, values, err := g.createPartitionKeyValues()
+			if err != nil {
+				g.logger.Error("failed to get primary key hash", zap.Error(err))
+				return nil
+			}
+
+			idx := g.shardOf(token)
+			partition := &g.partitions[idx]
+			if partition.Stale() {
+				return nil
+			}
+
+			v := typedef.PartitionKeys{Token: token, Values: values}
+			pushed := partition.push(v)
+
+			if pushed {
+				g.valuesMetrics.Inc()
+				return nil
+			}
+
+			dropped.Inc()
+
+			if !pFilled[idx] {
+				pFilled[idx] = true
+				if allFilled() {
+					executionDuration.Record()
+
+					return errFullPartitions
+				}
+			}
+
+			return nil
+		})
+
+		if errors.Is(err, errFullPartitions) {
+			return
 		}
-
-		v := typedef.PartitionKeys{Token: token, Values: values}
-		pushed := partition.push(v)
-		executionTime.Record()
-
-		if pushed {
-			g.valuesMetrics.Inc()
-			continue
-		}
-
-		dropped.Inc()
 	}
 }
 
