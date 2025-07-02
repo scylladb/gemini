@@ -50,7 +50,7 @@ GEMINI_FLAGS ?= --level=info \
 	--token-range-slices=10000 \
 	--partition-key-buffer-reuse-size=256 \
 	--partition-key-distribution=uniform \
-	--io-worker-pool-size=$(GEMINI_IO_WORKER_POOL) \
+	--io-worker-pool=$(GEMINI_IO_WORKER_POOL) \
 	--oracle-statement-log-file=$(PWD)/results/oracle-statements.json \
 	--test-statement-log-file=$(PWD)/results/test-statements.json
 
