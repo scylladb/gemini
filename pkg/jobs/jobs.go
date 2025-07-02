@@ -92,39 +92,39 @@ func (l List) Run(
 		newSrc := [32]byte{}
 		_, _ = src.Read(newSrc[:])
 
-		for range l.workers {
-			for _, mode := range l.modes {
-				var worker Worker
-
-				switch mode {
-				case WriteMode, WarmupMode:
-					worker = NewMutation(
-						schema,
-						schemaConfig,
-						table,
-						gens.Get(table),
-						globalStatus,
-						stopFlag,
-						s,
-						mode != WarmupMode,
-						newSrc,
-					)
-				case ReadMode:
-					worker = NewValidation(
-						schema.Keyspace.Name,
-						table,
-						schemaConfig,
-						gens.Get(table),
-						globalStatus,
-						stopFlag,
-						s,
-						newSrc,
-					)
+		for _, mode := range l.modes {
+			switch mode {
+			case WriteMode, WarmupMode:
+				for range l.workers {
+					g.Go(func() error {
+						return NewMutation(
+							schema,
+							schemaConfig,
+							table,
+							gens.Get(table),
+							globalStatus,
+							stopFlag,
+							s,
+							mode != WarmupMode,
+							newSrc,
+						).Do(gCtx)
+					})
 				}
-
-				g.Go(func() error {
-					return worker.Do(gCtx)
-				})
+			case ReadMode:
+				for range l.workers {
+					g.Go(func() error {
+						return NewValidation(
+							schema.Keyspace.Name,
+							table,
+							schemaConfig,
+							gens.Get(table),
+							globalStatus,
+							stopFlag,
+							s,
+							newSrc,
+						).Do(gCtx)
+					})
+				}
 			}
 		}
 	}
