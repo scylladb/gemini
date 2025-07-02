@@ -39,8 +39,8 @@ jobs:
       matrix:
         gemini-features: ["basic", "normal"]
         gemini-concurrency: [2]
-        duration: ["3m"]
-        warmup: ["0", "30s"]
+        duration: ["4m"]
+        warmup: ["1m"]
         dataset-size: [large]
         oracle-scylla-version: ["6.2"]
         test-scylla-version: ["2025.1"]
@@ -68,6 +68,7 @@ jobs:
           SEED=$(python3 -c "import random; print(random.randint(1, 100))")
 
           make integration-test \
+          	GEMINI_IO_WORKER_POOL=2 \
             GEMINI_SEED=$SEED \
             CONCURRENCY=${{ matrix.gemini-concurrency }} \
             CQL_FEATURES=${{ matrix.gemini-features }} \

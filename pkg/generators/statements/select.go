@@ -22,6 +22,7 @@ import (
 	"github.com/scylladb/gocqlx/v3/qb"
 
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 func (g *Generator) Select(ctx context.Context) *typedef.Stmt {
@@ -73,7 +74,7 @@ func (g *Generator) getMultiplePartitionKeys(initial int) int {
 	}
 
 	maximumCount := TotalCartesianProductCount(float64(initial), float64(l))
-	return g.random.IntN(maximumCount)
+	return utils.RandInt2(g.random, 1, maximumCount)
 }
 
 func (g *Generator) getMultipleClusteringKeys(initial int) int {
@@ -82,7 +83,7 @@ func (g *Generator) getMultipleClusteringKeys(initial int) int {
 		return 0
 	}
 	maximumCount := TotalCartesianProductCount(float64(initial), float64(l))
-	return g.random.IntN(maximumCount)
+	return utils.RandInt2(g.random, 1, maximumCount)
 }
 
 func (g *Generator) getIndex(initial int) int {

@@ -16,6 +16,7 @@ package generators
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"go.uber.org/multierr"
@@ -137,35 +138,48 @@ func (p *Partition) pick(ctx context.Context) typedef.PartitionKeys {
 
 func (p *Partition) Close() error {
 	oldValues := p.oldValues.Swap(nil)
-	values := p.values.Swap(nil)
+	if oldValues != nil {
+		close(*oldValues)
+	}
 
-	close(*oldValues)
-	close(*values)
+	values := p.values.Swap(nil)
+	if values != nil {
+		close(*values)
+	}
 
 	return nil
 }
 
-type Partitions []Partition
+type Partitions struct {
+	parts []Partition
+	mu    sync.Mutex
+}
 
-func (p Partitions) Close() error {
+var closePartitions sync.Once
+
+func (p *Partitions) Close() error {
 	var err error
+	closePartitions.Do(func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
 
-	for i := range len(p) {
-		err = multierr.Append(err, p[i].Close())
-	}
+		for i := range len(p.parts) {
+			err = multierr.Append(err, p.parts[i].Close())
+		}
+	})
 
 	return err
 }
 
-func (p Partitions) FullValues() uint64 {
+func (p *Partitions) FullValues() uint64 {
 	full := uint64(0)
 
-	for i := range len(p) {
-		if p[i].Stale() {
+	for i := range len(p.parts) {
+		if p.parts[i].Stale() {
 			continue
 		}
 
-		if ch := p[i].values.Load(); ch != nil {
+		if ch := p.parts[i].values.Load(); ch != nil {
 			full += uint64(len(*ch))
 		}
 	}
@@ -173,14 +187,29 @@ func (p Partitions) FullValues() uint64 {
 	return full
 }
 
-func (p Partitions) MaxValuesStored() uint64 {
+func (p *Partitions) Get(token int) *Partition {
+	idx := token % len(p.parts)
+	partition := &p.parts[idx]
+
+	if partition.Stale() {
+		return nil
+	}
+
+	return partition
+}
+
+func (p *Partitions) Len() int {
+	return len(p.parts)
+}
+
+func (p *Partitions) MaxValuesStored() uint64 {
 	full := uint64(0)
-	for i := range len(p) {
-		if p[i].Stale() {
+	for i := range len(p.parts) {
+		if p.parts[i].Stale() {
 			continue
 		}
 
-		if ch := p[i].values.Load(); ch != nil {
+		if ch := p.parts[i].values.Load(); ch != nil {
 			full += uint64(cap(*ch))
 		}
 	}
@@ -188,8 +217,8 @@ func (p Partitions) MaxValuesStored() uint64 {
 	return full
 }
 
-func NewPartitions(count int32, pkBufferSize uint64, wakeup chan<- struct{}) Partitions {
-	partitions := make(Partitions, count)
+func NewPartitions(count int32, pkBufferSize uint64, wakeup chan<- struct{}) *Partitions {
+	partitions := make([]Partition, count)
 
 	for i := range len(partitions) {
 		values := make(chan typedef.PartitionKeys, pkBufferSize)
@@ -204,5 +233,7 @@ func NewPartitions(count int32, pkBufferSize uint64, wakeup chan<- struct{}) Par
 		partitions[i].oldValues.Store(&oldValues)
 	}
 
-	return partitions
+	return &Partitions{
+		parts: partitions,
+	}
 }

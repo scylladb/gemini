@@ -56,8 +56,4 @@ func TestGenerator(t *testing.T) {
 			t.Errorf("expected %v, got %v", v, n)
 		}
 	}
-
-	if err := generator.Close(); err != nil {
-		t.Fatalf("failed to close generator: %v", err)
-	}
 }

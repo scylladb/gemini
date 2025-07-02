@@ -21,6 +21,7 @@ DATASET_SIZE ?= large
 GEMINI_SEED := $(shell echo $$((RANDOM % 100 + 1)))
 GEMINI_BINARY ?= $(PWD)/bin/gemini
 GEMINI_DOCKER_NETWORK ?= gemini
+GEMINI_IO_WORKER_POOL ?= 1024
 
 define get_scylla_ip
 	$(shell docker inspect --format "{{ .NetworkSettings.Networks.$(GEMINI_DOCKER_NETWORK).IPAddress }}" "$(1)")
@@ -49,6 +50,7 @@ GEMINI_FLAGS ?= --level=info \
 	--token-range-slices=10000 \
 	--partition-key-buffer-reuse-size=256 \
 	--partition-key-distribution=uniform \
+	--io-worker-pool-size=$(GEMINI_IO_WORKER_POOL) \
 	--oracle-statement-log-file=$(PWD)/results/oracle-statements.json \
 	--test-statement-log-file=$(PWD)/results/test-statements.json
 

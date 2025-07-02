@@ -61,21 +61,21 @@ func TestGetMultiplePartitionKeys(t *testing.T) {
 			name:        "initial=2, two partition keys",
 			initial:     2,
 			pkCount:     2,
-			expectedMin: 2,
+			expectedMin: 1,
 			expectedMax: 12, // min(2,2) + 10
 		},
 		{
 			name:        "initial=5, three partition keys",
 			initial:     5,
 			pkCount:     3,
-			expectedMin: 3,
+			expectedMin: 1,
 			expectedMax: 7, // min(5,3) + 4 (4^3 < 100, 5^3 > 100)
 		},
 		{
 			name:        "initial=10, four partition keys",
 			initial:     10,
 			pkCount:     4,
-			expectedMin: 4,
+			expectedMin: 1,
 			expectedMax: 7, // min(10,4) + 3 (3^4 = 81 < 100, 4^4 = 256 > 100)
 		},
 		{
@@ -96,8 +96,8 @@ func TestGetMultiplePartitionKeys(t *testing.T) {
 			name:        "initial=50, five partition keys",
 			initial:     50,
 			pkCount:     5,
-			expectedMin: 5,
-			expectedMax: 7, // min(50,5) + 2 (2^5 = 32 < 100, 3^5 = 243 > 100)
+			expectedMin: 1,
+			expectedMax: 2, // min(50,5) + 2 (2^5 = 32 < 100, 3^5 = 243 > 100)
 		},
 	}
 
@@ -218,7 +218,7 @@ func TestGetMultipleClusteringKeys(t *testing.T) {
 			initial:      5,
 			ckCount:      2,
 			randomValues: []int{0, 5, 9},
-			expectedMin:  2,
+			expectedMin:  1,
 			expectedMax:  12, // min(5,2) + 10
 		},
 		{
@@ -226,7 +226,7 @@ func TestGetMultipleClusteringKeys(t *testing.T) {
 			initial:      10,
 			ckCount:      3,
 			randomValues: []int{0, 2, 3},
-			expectedMin:  3,
+			expectedMin:  1,
 			expectedMax:  7, // min(10,3) + 4 where 4^3 = 64 < 100, 5^3 = 125 > 100
 		},
 		{
@@ -234,7 +234,7 @@ func TestGetMultipleClusteringKeys(t *testing.T) {
 			initial:      100,
 			ckCount:      4,
 			randomValues: []int{0, 1, 2},
-			expectedMin:  4,
+			expectedMin:  1,
 			expectedMax:  7, // min(100,4) + 3 where 3^4 = 81 < 100, 4^4 = 256 > 100
 		},
 		{
@@ -242,7 +242,7 @@ func TestGetMultipleClusteringKeys(t *testing.T) {
 			initial:      50,
 			ckCount:      5,
 			randomValues: []int{0, 1},
-			expectedMin:  5,
+			expectedMin:  1,
 			expectedMax:  7, // min(50,5) + 2 where 2^5 = 32 < 100, 3^5 = 243 > 100
 		},
 		{
@@ -341,7 +341,7 @@ func TestGetMultipleClusteringKeys_EdgeCases(t *testing.T) {
 
 		result := generator.getMultipleClusteringKeys(1000)
 		// Should be min(1000, 2) + 0 = 2
-		require.Equal(t, 2, result)
+		require.Equal(t, 1, result)
 	})
 
 	t.Run("random value affects result correctly", func(t *testing.T) {

@@ -79,9 +79,11 @@ var (
 	oracleStatementLogFile           string
 	statementLogFileCompression      string
 	versionFlag                      bool
+	iOWorkerPool                     int
 )
 
 func setupFlags(cmd *cobra.Command) {
+	cmd.PersistentFlags().IntVarP(&iOWorkerPool, "io-worker-pool", "", 1024, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().BoolVarP(&versionFlag, "version", "", false, "Print version information")
 	cmd.PersistentFlags().
 		BoolP("version-json", "", false, "Print version information in JSON format")

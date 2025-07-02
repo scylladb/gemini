@@ -48,10 +48,6 @@ import (
 	"github.com/scylladb/gemini/pkg/workpool"
 )
 
-const (
-	WorkPoolSize = 2048
-)
-
 var (
 	rootCmd = &cobra.Command{
 		Use:              "gemini",
@@ -148,7 +144,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	pool := workpool.New(WorkPoolSize)
+	pool := workpool.New(iOWorkerPool)
 
 	intSeed := seedFromString(seed)
 

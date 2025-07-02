@@ -56,7 +56,7 @@ type Generator struct {
 	logger            *zap.Logger
 	routingKeyCreator *routingkey.Creator
 	table             *typedef.Table
-	partitions        Partitions
+	partitions        *Partitions
 	partitionsConfig  typedef.PartitionRangeConfig
 	wg                sync.WaitGroup
 	partitionCount    int32
@@ -119,7 +119,7 @@ func (g *Generator) Get(ctx context.Context) typedef.PartitionKeys {
 }
 
 func (g *Generator) GetPartitionForToken(token uint32) *Partition {
-	return &g.partitions[g.shardOf(token)]
+	return g.partitions.Get(g.shardOf(token))
 }
 
 // GetOld returns a previously used value and token or a new if
@@ -195,12 +195,12 @@ func (g *Generator) FindAndMarkStalePartitions() {
 	for idx, v := range nonStale {
 		if len(v) == 0 {
 			stalePartitions++
-			if err := g.partitions[idx].MarkStale(); err != nil {
+			if err := g.partitions.Get(idx).MarkStale(); err != nil {
 				g.logger.Panic("failed to mark partition as stale", zap.Error(err))
 			}
 		} else {
 			for _, item := range v {
-				if g.partitions[idx].push(item) {
+				if g.partitions.Get(idx).push(item) {
 					g.valuesMetrics.Inc()
 				}
 			}
@@ -209,7 +209,7 @@ func (g *Generator) FindAndMarkStalePartitions() {
 
 	g.logger.Info("marked stale partitions",
 		zap.Int("stale_partitions", stalePartitions),
-		zap.Int("total_partitions", len(g.partitions)),
+		zap.Int("total_partitions", g.partitions.Len()),
 	)
 
 	metrics.StalePartitions.WithLabelValues(g.table.Name).Set(float64(stalePartitions))
@@ -223,7 +223,7 @@ var errFullPartitions = errors.New("all partitions are full, cannot fill more")
 func (g *Generator) fillAllPartitions() {
 	dropped := metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new")
 	executionDuration := metrics.ExecutionTimeStart(g.table.Name + "_new")
-	pFilled := make([]bool, len(g.partitions))
+	pFilled := make([]bool, g.partitions.Len())
 	allFilled := func() bool {
 		for _, filled := range pFilled {
 			if !filled {
@@ -242,7 +242,7 @@ func (g *Generator) fillAllPartitions() {
 			}
 
 			idx := g.shardOf(token)
-			partition := &g.partitions[idx]
+			partition := g.partitions.Get(idx)
 			if partition.Stale() {
 				return nil
 			}
