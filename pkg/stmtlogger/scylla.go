@@ -66,10 +66,6 @@ type ScyllaLogger struct {
 }
 
 func newSession(hosts []string, username, password string, logger *zap.Logger) (*gocql.Session, error) {
-	for i := range hosts {
-		hosts[i] = strings.TrimSpace(hosts[i])
-	}
-
 	cluster := gocql.NewCluster(hosts...)
 	cluster.Consistency = gocql.Quorum
 	cluster.DefaultTimestamp = false

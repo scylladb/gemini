@@ -105,7 +105,7 @@ var (
 			Name: "cql_query_errors",
 			Help: "Number of CQL query errors.",
 		},
-		[]string{"cluster", "host", "query", "error"},
+		[]string{"cluster", "host"},
 	)
 
 	GoCQLBatchQueries = prometheus.NewCounterVec(
@@ -291,10 +291,13 @@ type RunningTime struct {
 
 func ExecutionTimeStart(task string) RunningTime {
 	return RunningTime{
-		start:    time.Now(),
 		task:     task,
 		observer: ExecutionTime.WithLabelValues(task),
 	}
+}
+
+func (r RunningTime) Start() {
+	r.start = time.Now()
 }
 
 func (r RunningTime) Record() {

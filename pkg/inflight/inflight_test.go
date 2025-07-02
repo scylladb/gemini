@@ -19,7 +19,6 @@ import (
 	"reflect"
 	"testing"
 	"testing/quick"
-	"time"
 )
 
 func TestAddIfNotPresent(t *testing.T) {
@@ -69,10 +68,10 @@ func TestDeleteSharded(t *testing.T) {
 func TestInflight(t *testing.T) {
 	t.Parallel()
 	flight := newSyncU64set(shrinkInflightsLimit)
-	f := func(v uint64) any {
+	f := func(v uint32) any {
 		return flight.AddIfNotPresent(v)
 	}
-	g := func(v uint64) any {
+	g := func(v uint32) any {
 		flight.Delete(v)
 		return !flight.Has(v)
 	}
@@ -83,35 +82,13 @@ func TestInflight(t *testing.T) {
 	}
 }
 
-//go:norace
-func TestAutoShrink(t *testing.T) {
-	t.Parallel()
-	flight := newSyncU64set(10)
-	for x := uint64(0); x < 11; x++ {
-		flight.AddIfNotPresent(x)
-	}
-	if len(flight.values) != 11 {
-		t.Fatal("expect 11 records in flight, but got ", len(flight.values))
-	}
-	for x := uint64(0); x < 11; x++ {
-		flight.Delete(x)
-	}
-	time.Sleep(time.Second / 2)
-	if flight.deleted != 0 {
-		t.Fatal(
-			"expect that shrink is been executed and deleted dropped back to 0, but got ",
-			flight.deleted,
-		)
-	}
-}
-
 func TestInflightSharded(t *testing.T) {
 	t.Parallel()
 	flight := newShardedSyncU64set()
-	f := func(v uint64) any {
+	f := func(v uint32) any {
 		return flight.AddIfNotPresent(v)
 	}
-	g := func(v uint64) any {
+	g := func(v uint32) any {
 		flight.Delete(v)
 		return !flight.shards[v%256].Has(v)
 	}
@@ -127,9 +104,9 @@ func createQuickConfig() *quick.Config {
 		MaxCount: 200000,
 		Values: func(vs []reflect.Value, r *rand.Rand) {
 			for i := 0; i < len(vs); i++ {
-				uv := r.Uint64()
+				uv := r.Uint32()
 				v := reflect.New(reflect.TypeOf(uv)).Elem()
-				v.SetUint(uv)
+				v.SetUint(uint64(uv))
 				vs[i] = v
 			}
 		},

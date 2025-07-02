@@ -19,8 +19,8 @@ import (
 	"encoding/binary"
 
 	"github.com/gocql/gocql"
+	"github.com/twmb/murmur3"
 
-	"github.com/scylladb/gemini/pkg/murmur"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -65,11 +65,14 @@ func (rc *Creator) CreateRoutingKey(values map[string][]any) ([]byte, error) {
 	return routingKey, nil
 }
 
-func (rc *Creator) GetHash(values map[string][]any) (uint64, error) {
+func (rc *Creator) GetHash(values map[string][]any) (uint32, error) {
 	b, err := rc.CreateRoutingKey(values)
 	if err != nil {
 		return 0, err
 	}
 
-	return uint64(murmur.Murmur3H1(b)), nil
+	h := murmur3.New32()
+	_, _ = h.Write(b)
+
+	return h.Sum32(), nil
 }

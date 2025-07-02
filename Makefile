@@ -47,7 +47,7 @@ GEMINI_FLAGS ?= --level=info \
 	--profiling-port=6060 \
 	--drop-schema=true \
 	--token-range-slices=10000 \
-	--partition-key-buffer-reuse-size=100 \
+	--partition-key-buffer-reuse-size=256 \
 	--partition-key-distribution=uniform \
 	--oracle-statement-log-file=$(PWD)/results/oracle-statements.json \
 	--test-statement-log-file=$(PWD)/results/test-statements.json
@@ -66,7 +66,6 @@ fix:
 
 .PHONY: fieldalign
 fieldalign:
-	@go tool fieldalignment -fix ./cmd/...
 	@go tool fieldalignment -fix ./pkg/...
 
 .PHONY: fmt
@@ -75,11 +74,21 @@ fmt:
 
 .PHONY: build
 build:
-	@CGO_ENABLED=0 go build -ldflags="-s -w"  -ldflags="$(LDFLAGS_VERSION)"  -o bin/gemini ./cmd/gemini
+	@mkdir -p bin
+	@go build \
+		-a -installsuffix cgo \
+		-trimpath \
+		-tags="production,!debug,netgo,osusergo,static_build" \
+		-gcflags="-wb=false -l=4 -B -C -m -m -live -d=ssa/check/on" \
+		-ldflags="-linkmode=external -extldflags '-static' -s -w $(LDFLAGS_VERSION)" \
+		-o bin/gemini ./pkg/cmd
+	@./bin/gemini --version --version-json > bin/version.json
 
 .PHONY: debug-build
 debug-build:
-	@CGO_ENABLED=0 go build -ldflags="$(LDFLAGS_VERSION)" -gcflags="-N -l" -o bin/gemini ./cmd/gemini
+	@mkdir -p bin
+	@go build -ldflags="$(LDFLAGS_VERSION)" -gcflags="-N -l" -o bin/gemini ./pkg/cmd
+	@./bin/gemini --version --version-json > bin/version.json
 
 .PHONY: build-docker
 build-docker:

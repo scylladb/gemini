@@ -43,7 +43,7 @@ type Interface interface {
 	Get(context.Context) typedef.PartitionKeys
 	GetOld(context.Context) typedef.PartitionKeys
 	GiveOlds(context.Context, ...typedef.PartitionKeys)
-	ReleaseToken(uint64)
+	ReleaseToken(uint32)
 }
 
 type Generator struct {
@@ -59,17 +59,17 @@ type Generator struct {
 	partitions        Partitions
 	partitionsConfig  typedef.PartitionRangeConfig
 	wg                sync.WaitGroup
-	partitionCount    uint64
+	partitionCount    int32
 }
 
-func (g *Generator) PartitionCount() uint64 {
+func (g *Generator) PartitionCount() int32 {
 	return g.partitionCount
 }
 
 type Config struct {
 	PartitionsDistributionFunc distributions.DistributionFunc
 	PartitionsRangeConfig      typedef.PartitionRangeConfig
-	PartitionsCount            uint64
+	PartitionsCount            int32
 	Seed                       uint64
 	PkUsedBufferSize           uint64
 }
@@ -104,15 +104,15 @@ func NewGenerator(
 		oldDroppedValues:  metrics.GeneratorDroppedValues.WithLabelValues(table.Name, "old"),
 	}
 
-	go g.start(ctx)
+	g.start(ctx)
 
 	return g
 }
 
 func (g *Generator) Get(ctx context.Context) typedef.PartitionKeys {
-	targetPart := g.GetPartitionForToken(uint64(g.idxFunc()))
+	targetPart := g.GetPartitionForToken(g.idxFunc())
 	for targetPart.Stale() {
-		targetPart = g.GetPartitionForToken(uint64(g.idxFunc()))
+		targetPart = g.GetPartitionForToken(g.idxFunc())
 	}
 
 	v := targetPart.get(ctx)
@@ -120,16 +120,16 @@ func (g *Generator) Get(ctx context.Context) typedef.PartitionKeys {
 	return v
 }
 
-func (g *Generator) GetPartitionForToken(token uint64) *Partition {
+func (g *Generator) GetPartitionForToken(token uint32) *Partition {
 	return &g.partitions[g.shardOf(token)]
 }
 
 // GetOld returns a previously used value and token or a new if
 // the old queue is empty.
 func (g *Generator) GetOld(ctx context.Context) typedef.PartitionKeys {
-	targetPart := g.GetPartitionForToken(uint64(g.idxFunc()))
+	targetPart := g.GetPartitionForToken(g.idxFunc())
 	for targetPart.Stale() {
-		targetPart = g.GetPartitionForToken(uint64(g.idxFunc()))
+		targetPart = g.GetPartitionForToken(g.idxFunc())
 	}
 	v, exists := targetPart.getOld(ctx)
 	if exists {
@@ -151,7 +151,7 @@ func (g *Generator) GiveOlds(ctx context.Context, tokens ...typedef.PartitionKey
 }
 
 // ReleaseToken removes the corresponding token from the in-flight tracking.
-func (g *Generator) ReleaseToken(token uint64) {
+func (g *Generator) ReleaseToken(token uint32) {
 	g.GetPartitionForToken(token).releaseToken(token)
 }
 
@@ -167,7 +167,8 @@ func (g *Generator) start(ctx context.Context) {
 	}()
 
 	g.logger.Info("starting partition key generation loop")
-	g.fillAllPartitions(stopped)
+
+	go g.fillAllPartitions(stopped)
 }
 
 func (g *Generator) FindAndMarkStalePartitions() {
@@ -212,42 +213,42 @@ func (g *Generator) FindAndMarkStalePartitions() {
 // at least once since the function started and before it ended.
 // In other words, no partition will be starved.
 func (g *Generator) fillAllPartitions(stopped *atomic.Bool) {
-	var dropped uint64
 
-	running := metrics.ExecutionTimeStart("value_generation_" + g.table.Name)
-
+	executionTime := metrics.ExecutionTimeStart("value_generation_" + g.table.Name)
+	dropped := metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new")
 	for !stopped.Load() {
+		executionTime.Start()
 		token, values, err := g.createPartitionKeyValues()
 		if err != nil {
 			g.logger.Error("failed to get primary key hash", zap.Error(err))
-			running.Record()
+			executionTime.Record()
 			continue
 		}
 
 		partition := &g.partitions[g.shardOf(token)]
 		if partition.Stale() || partition.inFlight.Has(token) {
-			running.Record()
+			executionTime.Record()
 			continue
 		}
 
 		v := typedef.PartitionKeys{Token: token, Values: values}
 		pushed := partition.push(v)
-		running.Record()
+		executionTime.Record()
 
 		if pushed {
 			g.valuesMetrics.Inc()
 			continue
 		}
 
-		dropped++
+		dropped.Inc()
 	}
 }
 
-func (g *Generator) shardOf(token uint64) int {
-	return int(token % g.partitionCount)
+func (g *Generator) shardOf(token uint32) int {
+	return int(token % uint32(g.partitionCount))
 }
 
-func (g *Generator) createPartitionKeyValues(r ...*rand.Rand) (uint64, map[string][]any, error) {
+func (g *Generator) createPartitionKeyValues(r ...*rand.Rand) (uint32, map[string][]any, error) {
 	rnd := g.r
 
 	if len(r) > 0 && r[0] != nil {

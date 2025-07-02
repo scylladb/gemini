@@ -76,20 +76,19 @@ func (p *Partition) getOld(ctx context.Context) (typedef.PartitionKeys, bool) {
 // in-flight tracking.
 func (p *Partition) giveOld(ctx context.Context, v typedef.PartitionKeys) bool {
 	if ch := p.oldValues.Load(); ch != nil {
-		for range 100 {
-			select {
-			case <-ctx.Done():
-				return false
-			case *ch <- v:
-				return true
-			default:
-			}
+		select {
+		case <-ctx.Done():
+			clear(v.Values)
+			return false
+		case *ch <- v:
+			return true
+		default:
+			clear(v.Values)
+			return false
 		}
-
-		clear(v.Values)
-		return false
 	}
 
+	clear(v.Values)
 	return false
 }
 
@@ -108,7 +107,7 @@ func (p *Partition) push(v typedef.PartitionKeys) bool {
 }
 
 // releaseToken removes the corresponding token from the in-flight tracking.
-func (p *Partition) releaseToken(token uint64) {
+func (p *Partition) releaseToken(token uint32) {
 	p.inFlight.Delete(token)
 }
 
@@ -178,7 +177,7 @@ func (p Partitions) MaxValuesStored() uint64 {
 	return full
 }
 
-func NewPartitions(count, pkBufferSize uint64) Partitions {
+func NewPartitions(count int32, pkBufferSize uint64) Partitions {
 	partitions := make(Partitions, count)
 
 	for i := range len(partitions) {

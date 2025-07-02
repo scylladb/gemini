@@ -72,7 +72,7 @@ func (q SimpleQuery) ToCql() (stmt string, names []string) {
 type (
 	PartitionKeys struct {
 		Values Values
-		Token  uint64
+		Token  uint32
 	}
 
 	Stmt struct {

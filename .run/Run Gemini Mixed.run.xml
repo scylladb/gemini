@@ -1,17 +1,18 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Run Gemini Mixed" type="GoApplicationRunConfiguration" factoryName="Go Application">
     <module name="gemini" />
-    <working_directory value="$PROJECT_DIR$" />
-    <parameters value="--mode=mixed --token-range-slices=10000 --partition-key-buffer-reuse-size=100 --seed=81 --schema-seed=81 --dataset-size=large --cql-features=normal --warmup=5m --duration=10m --drop-schema=true --fail-fast --level=info --test-host-selection-policy=token-aware --oracle-host-selection-policy=token-aware --test-cluster=192.168.100.3,192.168.100.4,192.168.100.5 --oracle-cluster=192.168.100.2 --request-timeout=5s --connect-timeout=120s --use-server-timestamps=false --async-objects-stabilization-attempts=10 --async-objects-stabilization-backoff=10ms --replication-strategy=&quot;{'class': 'NetworkTopologyStrategy', 'replication_factor': '3'}&quot; --oracle-replication-strategy=&quot;{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}&quot; --max-mutation-retries=5 --max-mutation-retries-backoff=10ms --concurrency=10 --profiling-port=6060 --statement-log-file-compression=zstd --partition-key-distribution=uniform" />
+    <working_directory value="$PROJECT_DIR$/bin" />
+    <parameters value="--mode=mixed --token-range-slices=10000 --partition-key-buffer-reuse-size=100 --seed=81 --schema-seed=81 --dataset-size=large --cql-features=normal --warmup=5m --duration=10m --drop-schema=true --fail-fast --level=info --test-host-selection-policy=token-aware --oracle-host-selection-policy=token-aware --test-cluster=192.168.100.3,192.168.100.4,192.168.100.5 --oracle-cluster=192.168.100.2 --request-timeout=500ms --connect-timeout=120s --use-server-timestamps=false --async-objects-stabilization-attempts=10 --async-objects-stabilization-backoff=10ms --replication-strategy=&quot;{'class': 'NetworkTopologyStrategy', 'replication_factor': '3'}&quot; --oracle-replication-strategy=&quot;{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}&quot; --max-mutation-retries=5 --max-mutation-retries-backoff=10ms --concurrency=5 --profiling-port=6060 --statement-log-file-compression=zstd --partition-key-distribution=uniform" />
     <envs>
       <env name="CGO_ENABLED" value="0" />
       <env name="GODEBUG" value="default=go1.24,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0," />
       <env name="GOGC" value="95" />
     </envs>
     <kind value="PACKAGE" />
-    <package value="github.com/scylladb/gemini/cmd/gemini" />
+    <package value="github.com/scylladb/gemini/pkg/cmd" />
     <directory value="$PROJECT_DIR$" />
     <filePath value="$PROJECT_DIR$/cmd/gemini/main.go" />
+    <output_directory value="$PROJECT_DIR$/bin" />
     <method v="2" />
   </configuration>
 </component>

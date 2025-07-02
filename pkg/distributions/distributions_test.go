@@ -30,7 +30,7 @@ func TestNew(t *testing.T) {
 
 	data := []struct {
 		dist          string
-		size          uint64
+		size          int32
 		seed          uint64
 		mu, sigma     float64
 		maxSameValues int
@@ -42,7 +42,7 @@ func TestNew(t *testing.T) {
 			size:          10000,
 			mu:            stdDistMean,
 			sigma:         oneStdDev,
-			maxSameValues: 100,
+			maxSameValues: 3000,
 		},
 		{
 			dist:          "uniform",

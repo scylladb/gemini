@@ -11,6 +11,7 @@ require (
 	github.com/gocql/gocql v1.8.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v69 v69.2.0
+	github.com/google/go-querystring v1.1.0
 	github.com/hailocab/go-hostpool v0.0.0-20160125115350-e80d13ce29ed
 	github.com/klauspost/compress v1.18.0
 	github.com/mitchellh/mapstructure v1.5.0
@@ -23,6 +24,8 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/testcontainers/testcontainers-go v0.37.0
 	github.com/testcontainers/testcontainers-go/modules/scylladb v0.37.0
+	github.com/twmb/murmur3 v1.1.8
+	go.uber.org/atomic v1.7.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b
@@ -138,7 +141,6 @@ require (
 	github.com/golangci/plugin-module-register v0.1.1 // indirect
 	github.com/golangci/revgrep v0.8.0 // indirect
 	github.com/golangci/unconvert v0.0.0-20250410112200-a129a6e6413e // indirect
-	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gordonklaus/ineffassign v0.1.0 // indirect
 	github.com/gostaticanalysis/analysisutil v0.7.1 // indirect

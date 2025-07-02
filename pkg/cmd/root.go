@@ -71,6 +71,14 @@ func run(cmd *cobra.Command, _ []string) error {
 	globalStatus := status.NewGlobalStatus(maxErrorsToStore)
 	defer utils.IgnoreError(logger.Sync)
 
+	for i := range len(testClusterHost) {
+		testClusterHost[i] = strings.TrimSpace(testClusterHost[i])
+	}
+
+	for i := range len(oracleClusterHost) {
+		oracleClusterHost[i] = strings.TrimSpace(oracleClusterHost[i])
+	}
+
 	if err := validateSeed(seed); err != nil {
 		return errors.Wrapf(err, "failed to parse --seed argument")
 	}

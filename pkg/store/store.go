@@ -16,19 +16,14 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"math/big"
 	"reflect"
 	"slices"
-	"strings"
 	"time"
 
-	"github.com/gocql/gocql"
-	"github.com/gocql/gocql/hostpolicy"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/hailocab/go-hostpool"
 	pkgerrors "github.com/pkg/errors"
 	"github.com/samber/mo"
 	"github.com/scylladb/go-set/strset"
@@ -131,11 +126,6 @@ func New(
 		}
 	}
 
-	testSession, err := createCluster(cfg.TestClusterConfig, logger, statementLogger, true)
-	if err != nil {
-		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
-	}
-
 	if cfg.MaxRetriesMutate <= 1 {
 		cfg.MaxRetriesMutate = 10
 	}
@@ -144,8 +134,9 @@ func New(
 		cfg.MaxRetriesMutateSleep = 200 * time.Millisecond
 	}
 
-	testStore := newCQLStore(
-		testSession,
+	testStore, err := newCQLStore(
+		cfg.TestClusterConfig,
+		statementLogger,
 		schema,
 		logger.Named("test_store"),
 		"test",
@@ -153,18 +144,16 @@ func New(
 		cfg.MaxRetriesMutateSleep,
 		cfg.UseServerSideTimestamps,
 	)
+	if err != nil {
+		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
+	}
 
 	var oracleStore storeLoader
 
 	if cfg.OracleClusterConfig != nil {
-		var oracleSession *gocql.Session
-		oracleSession, err = createCluster(*cfg.OracleClusterConfig, logger, statementLogger, true)
-		if err != nil {
-			return nil, pkgerrors.Wrap(err, "failed to create test cluster")
-		}
-
-		oracleStore = newCQLStore(
-			oracleSession,
+		oracleStore, err = newCQLStore(
+			*cfg.OracleClusterConfig,
+			statementLogger,
 			schema,
 			logger.Named("oracle_store"),
 			"oracle",
@@ -172,6 +161,9 @@ func New(
 			cfg.MaxRetriesMutateSleep,
 			cfg.UseServerSideTimestamps,
 		)
+		if err != nil {
+			return nil, pkgerrors.Wrap(err, "failed to create test cluster")
+		}
 	}
 
 	return &delegatingStore{
@@ -181,92 +173,6 @@ func New(
 		logger:          logger.Named("delegating_store"),
 		statementLogger: statementLogger,
 	}, nil
-}
-
-func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionPolicy, error) {
-	switch policy {
-	case "round-robin":
-		return gocql.RoundRobinHostPolicy(), nil
-	case "host-pool":
-		return hostpolicy.HostPool(hostpool.New(hosts)), nil
-	case "token-aware":
-		p := gocql.TokenAwareHostPolicy(
-			gocql.RoundRobinHostPolicy(),
-			gocql.ShuffleReplicas(),
-			gocql.AvoidSlowReplicas(2000),
-		)
-		return p, nil
-	default:
-		return nil, fmt.Errorf("unknown host selection policy \"%s\"", policy)
-	}
-}
-
-func createCluster(
-	config ScyllaClusterConfig,
-	logger *zap.Logger,
-	statementLogger *stmtlogger.Logger,
-	enableObserver bool,
-) (*gocql.Session, error) {
-	for i := range len(config.Hosts) {
-		config.Hosts[i] = strings.TrimSpace(config.Hosts[i])
-	}
-
-	c, err := gocql.ParseConsistencyWrapper(config.Consistency)
-	if err != nil {
-		return nil, err
-	}
-
-	hp, err := getHostSelectionPolicy(config.HostSelectionPolicy, config.Hosts)
-	if err != nil {
-		return nil, err
-	}
-
-	cluster := gocql.NewCluster(config.Hosts...)
-
-	if enableObserver {
-		observer := ClusterObserver{
-			ClusterName: config.Name,
-			AppLogger:   logger,
-			Logger:      statementLogger,
-		}
-
-		cluster.ConnectObserver = observer
-		cluster.QueryObserver = observer
-		cluster.BatchObserver = observer
-	}
-
-	cluster.Timeout = config.RequestTimeout
-	cluster.ConnectTimeout = config.ConnectTimeout
-	cluster.MaxRoutingKeyInfo = 50_000
-	cluster.MaxPreparedStmts = 50_000
-	cluster.ReconnectInterval = config.ConnectTimeout
-	cluster.Events.DisableTopologyEvents = false
-	cluster.Events.DisableSchemaEvents = false
-	cluster.Events.DisableNodeStatusEvents = false
-	cluster.Logger = zap.NewStdLog(logger.Named("gocql").With(zap.String("cluster", string(config.Name))))
-	cluster.DefaultIdempotence = false
-	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
-		Min:        10 * time.Millisecond,
-		Max:        10 * time.Second,
-		NumRetries: 10,
-	}
-	cluster.ReconnectionPolicy = &gocql.ExponentialReconnectionPolicy{
-		MaxRetries:      10,
-		InitialInterval: 100 * time.Millisecond,
-		MaxInterval:     config.ConnectTimeout,
-	}
-	cluster.Consistency = c
-	cluster.DefaultTimestamp = !config.UseServerSideTimestamps
-	cluster.PoolConfig.HostSelectionPolicy = hp
-
-	if config.Username != "" && config.Password != "" {
-		cluster.Authenticator = gocql.PasswordAuthenticator{
-			Username: config.Username,
-			Password: config.Password,
-		}
-	}
-
-	return cluster.CreateSession()
 }
 
 type delegatingStore struct {
