@@ -20,7 +20,6 @@ import (
 
 	"go.uber.org/multierr"
 
-	"github.com/scylladb/gemini/pkg/inflight"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -28,8 +27,8 @@ type (
 	Partition struct {
 		values    atomic.Pointer[chan typedef.PartitionKeys]
 		oldValues atomic.Pointer[chan typedef.PartitionKeys]
-		inFlight  inflight.InFlight
-		isStale   atomic.Bool
+		//inFlight  inflight.InFlight
+		isStale atomic.Bool
 	}
 )
 
@@ -47,7 +46,7 @@ func (p *Partition) Stale() bool {
 func (p *Partition) get(ctx context.Context) typedef.PartitionKeys {
 	for {
 		v := p.pick(ctx)
-		if v.Token != 0 || p.inFlight.AddIfNotPresent(v.Token) {
+		if v.Token != 0 {
 			return v
 		}
 	}
@@ -108,7 +107,7 @@ func (p *Partition) push(v typedef.PartitionKeys) bool {
 
 // releaseToken removes the corresponding token from the in-flight tracking.
 func (p *Partition) releaseToken(token uint32) {
-	p.inFlight.Delete(token)
+	//p.inFlight.Delete(token)
 }
 
 func (p *Partition) pick(ctx context.Context) typedef.PartitionKeys {
@@ -185,7 +184,7 @@ func NewPartitions(count int32, pkBufferSize uint64) Partitions {
 		oldValues := make(chan typedef.PartitionKeys, pkBufferSize)
 
 		partitions[i] = Partition{
-			inFlight: inflight.New(),
+			//inFlight: inflight.New(),
 		}
 
 		partitions[i].values.Store(&values)

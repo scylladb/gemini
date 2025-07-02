@@ -301,7 +301,7 @@ func (r RunningTime) Start() {
 }
 
 func (r RunningTime) Record() {
-	r.observer.Observe(float64(time.Since(r.start).Microseconds()))
+	r.observer.Observe(float64(time.Since(r.start).Nanoseconds()))
 }
 
 func ExecutionTimeFunc(task string, callback func()) {

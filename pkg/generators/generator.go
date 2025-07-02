@@ -81,10 +81,7 @@ func NewGenerator(
 	src *rand.ChaCha8,
 ) *Generator {
 	ctx, cancel := context.WithCancel(context.Background())
-
-	newSrc := [32]byte{}
-	_, _ = src.Read(newSrc[:])
-	rnd := rand.New(rand.NewChaCha8(newSrc))
+	rnd := rand.New(src)
 
 	metrics.GeneratorPartitionSize.WithLabelValues(table.Name).Set(float64(config.PartitionsCount))
 	metrics.GeneratorBufferSize.WithLabelValues(table.Name).Set(float64(config.PkUsedBufferSize))
@@ -226,7 +223,7 @@ func (g *Generator) fillAllPartitions(stopped *atomic.Bool) {
 		}
 
 		partition := &g.partitions[g.shardOf(token)]
-		if partition.Stale() || partition.inFlight.Has(token) {
+		if partition.Stale() {
 			executionTime.Record()
 			continue
 		}

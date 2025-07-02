@@ -16,18 +16,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"log"
-	"net/http"
-	"net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime/debug"
-	"strconv"
 	"syscall"
 
-	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
@@ -35,54 +28,9 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	if err := rootCmd.ParseFlags(os.Args); err != nil {
-		log.Panicf("Failed to parse flags: %v", err)
-	}
-
-	versionJSON, err := rootCmd.PersistentFlags().GetBool("version-json")
-
-	if versionFlag || versionJSON {
-		if err != nil {
-			log.Panicf("Failed to get version info as json flag: %v", err)
-		}
-
-		if versionJSON {
-			var data []byte
-			data, err = json.Marshal(versionInfo)
-			if err != nil {
-				log.Panicf("Failed to marshal version info: %v\n", err)
-			}
-
-			//nolint:forbidigo
-			fmt.Println(string(data))
-			return
-		}
-
-		//nolint:forbidigo
-		fmt.Println(versionInfo.String())
-
-		return
-	}
-
-	metrics.StartMetricsServer(ctx, metricsPort)
-
-	if profilingPort != 0 {
-		go func() {
-			mux := http.NewServeMux()
-
-			mux.HandleFunc("GET /debug/pprof/", pprof.Index)
-			mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
-			mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
-			mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
-			mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
-
-			log.Fatal(http.ListenAndServe("0.0.0.0:"+strconv.Itoa(profilingPort), mux))
-		}()
-	}
-
 	status := 0
 
-	if err = rootCmd.ExecuteContext(ctx); err != nil {
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		status = 1
 	}
 
@@ -102,13 +50,4 @@ func init() {
 			}
 		}
 	}
-
-	var err error
-
-	versionInfo, err = NewVersionInfo()
-	if err != nil {
-		panic(err)
-	}
-
-	rootCmd.Version = versionInfo.String()
 }

@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -188,7 +189,7 @@ func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionP
 	case "round-robin":
 		return gocql.RoundRobinHostPolicy(), nil
 	case "host-pool":
-		return hostpolicy.HostPool(hostpool.New(hosts)), nil
+		return hostpolicy.HostPool(hostpool.New(slices.Clone(hosts))), nil
 	case "token-aware":
 		p := gocql.TokenAwareHostPolicy(
 			gocql.RoundRobinHostPolicy(),
@@ -217,7 +218,7 @@ func createCluster(
 		return nil, err
 	}
 
-	cluster := gocql.NewCluster(config.Hosts...)
+	cluster := gocql.NewCluster(slices.Clone(config.Hosts)...)
 
 	if enableObserver {
 		o := NewClusterObserver(statementLogger, logger, config.Name)

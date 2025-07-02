@@ -49,11 +49,11 @@ func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) *t
 		}
 		return g.Insert(ctx)
 	case InsertJSONStatement:
-		if g.table.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
-			if g.table.IsCounterTable() {
-				return g.Update(ctx)
-			}
+		if g.table.IsCounterTable() {
+			return g.Update(ctx)
+		}
 
+		if g.table.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
 			return g.Insert(ctx)
 		}
 

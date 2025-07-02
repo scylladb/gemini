@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,7 +67,7 @@ type ScyllaLogger struct {
 }
 
 func newSession(hosts []string, username, password string, logger *zap.Logger) (*gocql.Session, error) {
-	cluster := gocql.NewCluster(hosts...)
+	cluster := gocql.NewCluster(slices.Clone(hosts)...)
 	cluster.Consistency = gocql.Quorum
 	cluster.DefaultTimestamp = false
 	cluster.Logger = zap.NewStdLog(logger.Named("statements-scylla"))
@@ -79,7 +80,7 @@ func newSession(hosts []string, username, password string, logger *zap.Logger) (
 		NumRetries: 5,
 	}
 	cluster.PageSize = 10_000
-	cluster.Compressor = gocql.SnappyCompressor{}
+	cluster.Compressor = &gocql.SnappyCompressor{}
 
 	if username != "" && password != "" {
 		cluster.Authenticator = gocql.PasswordAuthenticator{

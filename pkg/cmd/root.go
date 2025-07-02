@@ -15,10 +15,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"log"
 	"math"
 	"math/rand/v2"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"strconv"
 	"strings"
@@ -50,10 +54,11 @@ const (
 
 var (
 	rootCmd = &cobra.Command{
-		Use:          "gemini",
-		Short:        "Gemini is an automatic random testing tool for Scylla.",
-		RunE:         run,
-		SilenceUsage: true,
+		Use:              "gemini",
+		Short:            "Gemini is an automatic random testing tool for Scylla.",
+		RunE:             run,
+		PersistentPreRun: preRun,
+		SilenceUsage:     true,
 	}
 
 	versionInfo VersionInfo
@@ -63,10 +68,62 @@ func init() {
 	setupFlags(rootCmd)
 }
 
+func preRun(cmd *cobra.Command, _ []string) {
+	metrics.StartMetricsServer(cmd.Context(), metricsPort)
+
+	if profilingPort != 0 {
+		go func() {
+			mux := http.NewServeMux()
+
+			mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+			mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+			mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+			mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+			mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+
+			log.Fatal(http.ListenAndServe("0.0.0.0:"+strconv.Itoa(profilingPort), mux))
+		}()
+	}
+
+	var err error
+
+	versionInfo, err = NewVersionInfo()
+	if err != nil {
+		panic(err)
+	}
+
+	cmd.Version = versionInfo.String()
+}
+
 //nolint:gocyclo
 func run(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 	logger := createLogger(level)
+
+	versionJSON, err := cmd.PersistentFlags().GetBool("version-json")
+
+	if versionFlag || versionJSON {
+		if err != nil {
+			log.Panicf("Failed to get version info as json flag: %v", err)
+		}
+
+		if versionJSON {
+			var data []byte
+			data, err = json.Marshal(versionInfo)
+			if err != nil {
+				log.Panicf("Failed to marshal version info: %v\n", err)
+			}
+
+			//nolint:forbidigo
+			fmt.Println(string(data))
+			return nil
+		}
+
+		//nolint:forbidigo
+		fmt.Println(versionInfo.String())
+
+		return nil
+	}
 
 	globalStatus := status.NewGlobalStatus(maxErrorsToStore)
 	defer utils.IgnoreError(logger.Sync)
