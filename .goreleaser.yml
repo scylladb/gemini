@@ -15,7 +15,7 @@ builds:
     goarch:
       - amd64
       - arm64
-    main: ./cmd/gemini
+    main: ./pkg/cmd
     goamd64:
       - v3 # v3 Enables AMD64 SIMD (SSE4.x,AVX2) optimizations
     goarm64:
