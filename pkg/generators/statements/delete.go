@@ -33,7 +33,7 @@ func (g *Generator) Delete(ctx context.Context) *typedef.Stmt {
 
 	for _, pk := range g.table.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
-		values = append(values, pks.Values[pk.Name]...)
+		values = append(values, pks.Values.Get(pk.Name)...)
 	}
 
 	if len(g.table.ClusteringKeys) > 0 {

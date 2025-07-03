@@ -46,7 +46,7 @@ type (
 
 	Item struct {
 		Start         Time                     `json:"s"`
-		PartitionKeys typedef.Values           `json:"partitionKeys"`
+		PartitionKeys *typedef.Values          `json:"partitionKeys"`
 		Error         mo.Either[error, string] `json:"e,omitempty"`
 		Statement     string                   `json:"q"`
 		Host          string                   `json:"h"`
@@ -205,7 +205,7 @@ func (l *Logger) Close() error {
 
 type itemMarshal struct {
 	Values        any            `json:"values"`
-	PartitionKeys typedef.Values `json:"partition_keys,omitempty"`
+	PartitionKeys *typedef.Values `json:"partition_keys,omitempty"`
 	Start         string         `json:"time"`
 	Error         string         `json:"error"`
 	Statement     string         `json:"query"`

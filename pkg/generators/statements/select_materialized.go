@@ -70,7 +70,7 @@ func (g *Generator) genMultiplePartitionQueryMv(ctx context.Context, mv *typedef
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
 	}
 
-	pks := make(typedef.Values, numQueryPKs)
+	pks := typedef.NewValues(mv.PartitionKeys.Len())
 
 	for range numQueryPKs {
 		pk := g.generator.GetOld(ctx)

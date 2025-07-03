@@ -145,6 +145,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	pool := workpool.New(iOWorkerPool)
+	metrics.GeminiInformation.WithLabelValues("io_thread_pool").Set(float64(iOWorkerPool))
 
 	intSeed := seedFromString(seed)
 

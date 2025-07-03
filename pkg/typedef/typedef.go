@@ -15,8 +15,10 @@
 package typedef
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"unsafe"
 
 	"github.com/scylladb/gocqlx/v3/qb"
@@ -30,7 +32,7 @@ type (
 	OpType     uint8
 
 	ValueWithToken struct {
-		Value Values
+		Value *Values
 		Token uint64
 	}
 	Keyspace struct {
@@ -71,7 +73,7 @@ func (q SimpleQuery) ToCql() (stmt string, names []string) {
 
 type (
 	PartitionKeys struct {
-		Values Values
+		Values *Values
 		Token  uint32
 	}
 
@@ -248,39 +250,124 @@ func (st StatementType) PossibleAsyncOperation() bool {
 	}
 }
 
-type Values map[string][]any
+type Values struct {
+	mu   sync.RWMutex
+	data map[string][]any
+}
 
-func (v Values) ToCQLValues(pks Columns) []any {
-	if v == nil {
-		return nil
+func NewValues(initial int) *Values {
+	return &Values{
+		data: make(map[string][]any, initial),
+	}
+}
+
+func NewValuesFromMap(m map[string][]any) *Values {
+	return &Values{
+		data: m,
+	}
+}
+
+func (v *Values) Get(name string) []any {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if values, ok := v.data[name]; ok {
+		return values
 	}
 
-	values := make([]any, 0, len(v))
+	return nil
+}
+
+func (v *Values) Len() int {
+	return len(v.data)
+}
+
+func (v *Values) ToCQLValues(pks Columns) []any {
+	if v == nil {
+		return []any{}
+	}
+
+	v.mu.RLock()
+	values := make([]any, 0, len(v.data)*len(v.data[pks[0].Name]))
 
 	for _, pk := range pks {
-		values = append(values, v[pk.Name]...)
+		values = append(values, v.data[pk.Name]...)
 	}
+	v.mu.RUnlock()
 
 	return values
 }
 
-func (v Values) Merge(values Values) {
-	for k, value := range values {
-		v[k] = append(v[k], value...)
+func (v *Values) Merge(values *Values) {
+	values.mu.RLock()
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	defer values.mu.RUnlock()
+
+	for k, value := range values.data {
+		v.data[k] = append(v.data[k], value...)
 	}
 }
 
-func (v Values) MemoryFootprint() uint64 {
-	if v == nil {
-		return 0
-	}
-
+func (v *Values) MemoryFootprint() uint64 {
 	return 0
-	// return utils.Sizeof([]any(v))
 }
 
-func (v Values) Copy() Values {
-	return maps.Clone(v)
+func (v *Values) MarshalJSON() ([]byte, error) {
+	if v == nil {
+		return []byte("null"), nil
+	}
+
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	return json.Marshal(v.data)
+}
+
+func (v *Values) UnmarshalJSON(data []byte) error {
+	if v == nil {
+		return nil
+	}
+
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		return nil
+	}
+
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	if v.data == nil {
+		v.data = make(map[string][]any)
+	}
+
+	var m map[string][]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("unmarshal values: %w", err)
+	}
+
+	for k, value := range m {
+		v.data[k] = value
+	}
+
+	return nil
+}
+
+func (v *PartitionKeys) Copy() PartitionKeys {
+	return PartitionKeys{
+		Token:  v.Token,
+		Values: v.Values.Copy(),
+	}
+}
+
+func (v *Values) Copy() *Values {
+	if v == nil {
+		return nil
+	}
+
+	v.mu.RLock()
+	m := maps.Clone(v.data)
+	v.mu.RUnlock()
+
+	return &Values{data: m}
 }
 
 type StatementCacheType uint8

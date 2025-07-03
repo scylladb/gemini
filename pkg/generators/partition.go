@@ -76,17 +76,14 @@ func (p *Partition) giveOld(ctx context.Context, v typedef.PartitionKeys) bool {
 	if ch := p.oldValues.Load(); ch != nil {
 		select {
 		case <-ctx.Done():
-			clear(v.Values)
 			return false
 		case *ch <- v:
 			return true
 		default:
-			clear(v.Values)
 			return false
 		}
 	}
 
-	clear(v.Values)
 	return false
 }
 
@@ -96,7 +93,6 @@ func (p *Partition) push(v typedef.PartitionKeys) bool {
 		case *ch <- v:
 			return true
 		default:
-			clear(v.Values)
 			return false
 		}
 	}

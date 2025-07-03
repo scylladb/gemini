@@ -367,7 +367,7 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 		values := make([]any, 0, len(s.schemaPartitionKeys))
 		for _, pk := range s.schemaPartitionKeys {
 			builder.Where(qb.Eq(pk.Name))
-			values = append(values, jobError.PartitionKeys[pk.Name]...)
+			values = append(values, jobError.PartitionKeys.Get(pk.Name)...)
 		}
 
 		builder.Where(
@@ -384,7 +384,7 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 		//  Without running into `cartesian product of IN list N`
 		//  This naive implementation will run one query per partition key value
 
-		iterations := len(jobError.PartitionKeys[s.schemaPartitionKeys[0].Name])
+		iterations := len(jobError.PartitionKeys.Get(s.schemaPartitionKeys[0].Name))
 		queries := make([]string, 0, iterations)
 		values := make([][]any, 0, iterations)
 
@@ -396,7 +396,7 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 			vals := make([]any, 0, len(s.schemaPartitionKeys))
 			for _, pk := range s.schemaPartitionKeys {
 				builder.Where(qb.Eq(pk.Name))
-				vals = append(vals, jobError.PartitionKeys[pk.Name][i])
+				vals = append(vals, jobError.PartitionKeys.Get(pk.Name)[i])
 			}
 
 			builder.Where(

@@ -110,7 +110,7 @@ func (c *cqlStore) name() string {
 
 type MutationError struct {
 	Inner         error
-	PartitionKeys typedef.Values
+	PartitionKeys *typedef.Values
 }
 
 func (e MutationError) Error() string {

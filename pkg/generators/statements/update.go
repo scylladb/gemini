@@ -46,7 +46,7 @@ func (g *Generator) Update(ctx context.Context) *typedef.Stmt {
 
 	for _, pk := range g.table.PartitionKeys {
 		builder.Where(qb.Eq(pk.Name))
-		values = append(values, pks.Values[pk.Name]...)
+		values = append(values, pks.Values.Get(pk.Name)...)
 	}
 
 	for _, ck := range g.table.ClusteringKeys {

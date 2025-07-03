@@ -90,6 +90,8 @@ func (v *Validation) Do(ctx context.Context) error {
 	name := v.Name()
 
 	executionTime := metrics.ExecutionTimeStart(name)
+	metrics.GeminiInformation.WithLabelValues("validation_" + v.table.Name).Inc()
+	defer metrics.GeminiInformation.WithLabelValues("validation_" + v.table.Name).Dec()
 
 	for !v.stopFlag.IsHardOrSoft() {
 		err := executionTime.RunFuncE(func() error {

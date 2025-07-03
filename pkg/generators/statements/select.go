@@ -105,11 +105,11 @@ func (g *Generator) getSinglePartitionKeys(ctx context.Context) (typedef.Partiti
 	return partitionKeys, builder
 }
 
-func (g *Generator) buildMultiPartitionsKey(ctx context.Context) (typedef.Values, *qb.SelectBuilder) {
+func (g *Generator) buildMultiPartitionsKey(ctx context.Context) (*typedef.Values, *qb.SelectBuilder) {
 	builder := qb.Select(g.keyspaceAndTable)
 
 	numQueryPKs := g.getMultiplePartitionKeys(2)
-	pks := make(typedef.Values)
+	pks := typedef.NewValues(g.table.PartitionKeys.Len())
 
 	maybeReturn := make([]typedef.PartitionKeys, 0, numQueryPKs)
 
@@ -126,7 +126,7 @@ func (g *Generator) buildMultiPartitionsKey(ctx context.Context) (typedef.Values
 		maybeReturn = append(maybeReturn, pk)
 	}
 
-	if numQueryPKs != len(pks["pk0"]) {
+	if numQueryPKs != len(pks.Get("pk0")) {
 		return nil, nil
 	}
 

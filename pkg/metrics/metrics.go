@@ -135,34 +135,6 @@ var (
 		[]string{"table", "type"},
 	)
 
-	GeneratorFilledPartitions = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "generated_filled_partitions",
-		},
-		[]string{"table"},
-	)
-
-	GeneratorPartitionSize = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "generated_partition_size",
-		},
-		[]string{"table"},
-	)
-
-	StalePartitions = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "stale_partitions",
-		},
-		[]string{"table"},
-	)
-
-	GeneratorBufferSize = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "generated_buffer_size",
-		},
-		[]string{"table"},
-	)
-
 	MemoryMetrics = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "memory_footprint",
@@ -187,6 +159,10 @@ var (
 	ErrorMessages = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "errors",
 	}, []string{"ty", "msg"})
+
+	GeminiInformation = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "information",
+	}, []string{"ty"})
 )
 
 func init() {
@@ -206,16 +182,13 @@ func init() {
 		GoCQLBatchQueries,
 		GoCQLBatches,
 		GeneratorEmittedValues,
-		GeneratorFilledPartitions,
-		GeneratorPartitionSize,
 		GeneratorDroppedValues,
-		GeneratorBufferSize,
-		StalePartitions,
 		MemoryMetrics,
 		FileSizeMetrics,
 		ExecutionErrors,
 		CQLErrorRequests,
 		ErrorMessages,
+		GeminiInformation,
 	)
 
 	r.MustRegister(
@@ -308,25 +281,6 @@ func (r *RunningTime) RunFuncE(f func() error) error {
 	r.Start()
 	err := f()
 	r.Record()
-
-	return err
-}
-
-func ExecutionTimeFunc(task string, callback func()) {
-	start := time.Now()
-
-	callback()
-	ExecutionTime.
-		WithLabelValues(task).
-		Observe(float64(time.Since(start).Nanoseconds()) / 1e3)
-}
-
-func ExecutionTimeWithError(task string, callback func() error) error {
-	start := time.Now()
-	err := callback()
-	ExecutionTime.
-		WithLabelValues(task).
-		Observe(float64(time.Since(start).Nanoseconds()) / 1e3)
 
 	return err
 }

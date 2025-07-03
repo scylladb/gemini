@@ -78,6 +78,8 @@ func NewMutation(
 func (m *Mutation) Do(ctx context.Context) error {
 	name := m.Name()
 	executionTime := metrics.ExecutionTimeStart(name)
+	metrics.GeminiInformation.WithLabelValues("mutation_" + m.table.Name).Inc()
+	defer metrics.GeminiInformation.WithLabelValues("mutation_" + m.table.Name).Dec()
 
 	for !m.stopFlag.IsHardOrSoft() {
 		err := executionTime.RunFuncE(func() error {

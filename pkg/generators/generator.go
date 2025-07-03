@@ -83,8 +83,8 @@ func NewGenerator(
 	ctx, cancel := context.WithCancel(context.Background())
 	rnd := rand.New(src)
 
-	metrics.GeneratorPartitionSize.WithLabelValues(table.Name).Set(float64(config.PartitionsCount))
-	metrics.GeneratorBufferSize.WithLabelValues(table.Name).Set(float64(config.PkUsedBufferSize))
+	metrics.GeminiInformation.WithLabelValues("partition_count_" + table.Name).Set(float64(config.PartitionsCount))
+	metrics.GeminiInformation.WithLabelValues("partition_buffer_size_" + table.Name).Set(float64(config.PkUsedBufferSize))
 
 	wakeup := make(chan struct{}, 1)
 	g := &Generator{
@@ -186,7 +186,7 @@ func (g *Generator) FindAndMarkStalePartitions() {
 		}
 
 		nonStale[g.shardOf(token)] = append(nonStale[g.shardOf(token)], typedef.PartitionKeys{
-			Values: values,
+			Values: typedef.NewValuesFromMap(values),
 			Token:  token,
 		})
 	}
@@ -207,12 +207,13 @@ func (g *Generator) FindAndMarkStalePartitions() {
 		}
 	}
 
+
 	g.logger.Info("marked stale partitions",
 		zap.Int("stale_partitions", stalePartitions),
 		zap.Int("total_partitions", g.partitions.Len()),
 	)
 
-	metrics.StalePartitions.WithLabelValues(g.table.Name).Set(float64(stalePartitions))
+	metrics.GeminiInformation.WithLabelValues("stale_partition_"+g.table.Name).Set(float64(stalePartitions))
 }
 
 var errFullPartitions = errors.New("all partitions are full, cannot fill more")
@@ -221,8 +222,8 @@ var errFullPartitions = errors.New("all partitions are full, cannot fill more")
 // at least once since the function started and before it ended.
 // In other words, no partition will be starved.
 func (g *Generator) fillAllPartitions() {
-	dropped := metrics.GeneratorDroppedValues.WithLabelValues(g.table.Name, "new")
-	executionDuration := metrics.ExecutionTimeStart(g.table.Name + "_new")
+	dropped := metrics.GeneratorDroppedValues.WithLabelValues("generator_"+g.table.Name, "new")
+	executionDuration := metrics.ExecutionTimeStart("generator_" + g.table.Name + "_new")
 	pFilled := make([]bool, g.partitions.Len())
 	allFilled := func() bool {
 		for _, filled := range pFilled {
@@ -247,7 +248,7 @@ func (g *Generator) fillAllPartitions() {
 				return nil
 			}
 
-			v := typedef.PartitionKeys{Token: token, Values: values}
+			v := typedef.PartitionKeys{Token: token, Values: typedef.NewValuesFromMap(values)}
 			pushed := partition.push(v)
 
 			if pushed {

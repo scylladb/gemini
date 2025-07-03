@@ -158,14 +158,14 @@ test:
 	@go test -covermode=atomic -gcflags="-N -l" -tags testing -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | go tool gotestfmt -showteststatus
 
 PPROF_PORT ?= 6060
-
+PPROF_SECONDS ?= 60
 .PHONY: pprof-profile
 pprof-profile:
-	@go tool pprof -http=:8080 http://localhost:$(PPROF_PORT)/debug/pprof/profile
+	@go tool pprof -http=:8080 'http://localhost:$(PPROF_PORT)/debug/pprof/profile?seconds=$(PPROF_SECONDS)'
 
 .PHONY: pprof-heap
 pprof-heap:
-	@go tool pprof -http=:8085 http://localhost:$(PPROF_PORT)/debug/pprof/heap
+	@go tool pprof -http=:8085 "http://localhost:$(PPROF_PORT)/debug/pprof/heap?seconds=$(PPROF_SECONDS)"
 
 .PHONY: pprof-goroutine
 pprof-goroutine:
@@ -173,7 +173,7 @@ pprof-goroutine:
 
 .PHONY: pprof-block
 pprof-block:
-	@go tool pprof -http=:8083 http://localhost:$(PPROF_PORT)/debug/pprof/block
+	@go tool pprof -http=:8083 'http://localhost:$(PPROF_PORT)/debug/pprof/block'
 
 .PHONY: pprof-mutex
 pprof-mutex:
