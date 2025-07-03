@@ -51,7 +51,7 @@ dockers:
     goarch: amd64
     goamd64: v3
     goos: linux
-    push: false
+    skip_push: true
     id: gemini-amd64
     build_flag_templates:
       - '--platform=linux/amd64/v3'
@@ -61,7 +61,7 @@ dockers:
       - scylladb/gemini:{{ .Version }}-arm64v8
     goarch: arm64
     id: gemini-arm
-    push: false
+    skip_push: true
     goos: linux
     build_flag_templates:
       - '--platform=linux/arm64/v8'

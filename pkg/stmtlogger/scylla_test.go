@@ -76,7 +76,7 @@ func successStatement(ty Type) Item {
 		Attempt:       1,
 		GeminiAttempt: 1,
 		StatementType: typedef.InsertStatementType,
-		PartitionKeys: typedef.Values{"col1": []any{1}, "col2": []any{"test_1"}},
+		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"col1": {1}, "col2": {"test_1"}}),
 	}
 
 	return item
@@ -99,7 +99,7 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 		Attempt:       1,
 		GeminiAttempt: 1,
 		StatementType: typedef.InsertStatementType,
-		PartitionKeys: typedef.Values{"col1": []any{2}, "col2": []any{"test_2"}},
+		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"col1": {2}, "col2": {"test_2"}}),
 	}
 
 	err := joberror.JobError{
@@ -108,7 +108,7 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 		Message:       "Mutation Validation failed",
 		Query:         statement,
 		StmtType:      typedef.SelectStatementType,
-		PartitionKeys: typedef.Values{"col1": []any{2}, "col2": []any{"test_2"}},
+		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"col1": {2}, "col2": {"test_2"}}),
 	}
 
 	return item, err
@@ -143,7 +143,7 @@ func TestScyllaLogger(t *testing.T) {
 		zapLogger := utils.Must(zap.NewDevelopment())
 
 		logger, err := NewScyllaLoggerWithSession(
-			typedef.PartitionKeys{Values: typedef.Values{"col1": []any{5}, "col2": []any{"test_ddl"}}},
+			typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{"col1": {5}, "col2": {"test_ddl"}})},
 			session,
 			partitionKeys,
 			replication.NewNetworkTopologyStrategy(),

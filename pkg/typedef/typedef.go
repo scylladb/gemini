@@ -308,6 +308,11 @@ func (v *Values) Merge(values *Values) {
 	}
 }
 
+func (v *Values) ToMap() map[string][]any {
+	n := v.Copy()
+	return n.data
+}
+
 func (v *Values) MemoryFootprint() uint64 {
 	return 0
 }
