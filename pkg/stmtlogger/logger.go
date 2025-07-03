@@ -204,15 +204,15 @@ func (l *Logger) Close() error {
 }
 
 type itemMarshal struct {
-	Values        any            `json:"values"`
+	Values        any             `json:"values"`
 	PartitionKeys *typedef.Values `json:"partition_keys,omitempty"`
-	Start         string         `json:"time"`
-	Error         string         `json:"error"`
-	Statement     string         `json:"query"`
-	Host          string         `json:"host"`
-	Duration      string         `json:"duration"`
-	Attempt       int            `json:"driver_attempt"`
-	GeminiAttempt int            `json:"gemini_attempt"`
+	Start         string          `json:"time"`
+	Error         string          `json:"error"`
+	Statement     string          `json:"query"`
+	Host          string          `json:"host"`
+	Duration      string          `json:"duration"`
+	Attempt       int             `json:"driver_attempt"`
+	GeminiAttempt int             `json:"gemini_attempt"`
 }
 
 func (i Item) MarshalJSON() ([]byte, error) {

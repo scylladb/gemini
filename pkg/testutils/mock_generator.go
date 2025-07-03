@@ -16,7 +16,6 @@ package testutils
 
 import (
 	"context"
-	"log"
 	"math/rand/v2"
 
 	"github.com/scylladb/gemini/pkg/routingkey"
@@ -45,32 +44,12 @@ func NewTestGenerator(
 }
 
 func (g *MockGenerator) Get(_ context.Context) typedef.PartitionKeys {
-	values := g.createPartitionKeyValues(g.rand)
-	token, err := g.routingKeyCreator.GetHash(values)
-	if err != nil {
-		log.Printf(
-			"Error on get hash for table:%s, values:%v\nPartitionColumns:%v\nError is: %s\n",
-			g.table.Name,
-			g.table.PartitionKeys,
-			values,
-			err,
-		)
-	}
+	token, values := g.createPartitionKeyValues(g.rand)
 	return typedef.PartitionKeys{Token: token, Values: values}
 }
 
 func (g *MockGenerator) GetOld(_ context.Context) typedef.PartitionKeys {
-	values := g.createPartitionKeyValues(g.rand)
-	token, err := g.routingKeyCreator.GetHash(values)
-	if err != nil {
-		log.Printf(
-			"Error on get hash for table:%s, values:%v\nPartitionColumns:%v\nError is: %s\n",
-			g.table.Name,
-			g.table.PartitionKeys,
-			values,
-			err,
-		)
-	}
+	token, values := g.createPartitionKeyValues(g.rand)
 	return typedef.PartitionKeys{Token: token, Values: values}
 }
 
@@ -79,12 +58,13 @@ func (g *MockGenerator) GiveOlds(_ context.Context, _ ...typedef.PartitionKeys) 
 func (g *MockGenerator) ReleaseToken(_ uint64) {
 }
 
-func (g *MockGenerator) createPartitionKeyValues(r *rand.Rand) typedef.Values {
-	values := make(typedef.Values, len(g.table.PartitionKeys))
-
+func (g *MockGenerator) createPartitionKeyValues(r *rand.Rand) (uint32, *typedef.Values) {
+	values := make(map[string][]any, len(g.table.PartitionKeys))
 	for _, pk := range g.table.PartitionKeys {
 		values[pk.Name] = pk.Type.GenValue(r, g.partitionsConfig)
 	}
 
-	return values
+	token, _ := g.routingKeyCreator.GetHash(values)
+
+	return token, typedef.NewValuesFromMap(values)
 }

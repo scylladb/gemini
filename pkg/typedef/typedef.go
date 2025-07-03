@@ -251,8 +251,8 @@ func (st StatementType) PossibleAsyncOperation() bool {
 }
 
 type Values struct {
-	mu   sync.RWMutex
 	data map[string][]any
+	mu   sync.RWMutex
 }
 
 func NewValues(initial int) *Values {
@@ -306,6 +306,11 @@ func (v *Values) Merge(values *Values) {
 	for k, value := range values.data {
 		v.data[k] = append(v.data[k], value...)
 	}
+}
+
+func (v *Values) ToMap() map[string][]any {
+	n := v.Copy()
+	return n.data
 }
 
 func (v *Values) MemoryFootprint() uint64 {

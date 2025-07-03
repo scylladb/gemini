@@ -207,13 +207,12 @@ func (g *Generator) FindAndMarkStalePartitions() {
 		}
 	}
 
-
 	g.logger.Info("marked stale partitions",
 		zap.Int("stale_partitions", stalePartitions),
 		zap.Int("total_partitions", g.partitions.Len()),
 	)
 
-	metrics.GeminiInformation.WithLabelValues("stale_partition_"+g.table.Name).Set(float64(stalePartitions))
+	metrics.GeminiInformation.WithLabelValues("stale_partition_" + g.table.Name).Set(float64(stalePartitions))
 }
 
 var errFullPartitions = errors.New("all partitions are full, cannot fill more")
