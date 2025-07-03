@@ -251,8 +251,8 @@ func (st StatementType) PossibleAsyncOperation() bool {
 }
 
 type Values struct {
-	mu   sync.RWMutex
 	data map[string][]any
+	mu   sync.RWMutex
 }
 
 func NewValues(initial int) *Values {

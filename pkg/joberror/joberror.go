@@ -29,7 +29,7 @@ import (
 type JobError struct {
 	Timestamp     time.Time             `json:"timestamp"`
 	Err           error                 `json:"err,omitempty"`
-	PartitionKeys *typedef.Values        `json:"partition-keys"`
+	PartitionKeys *typedef.Values       `json:"partition-keys"`
 	Message       string                `json:"message"`
 	Query         string                `json:"query"`
 	StmtType      typedef.StatementType `json:"stmt-type"`
