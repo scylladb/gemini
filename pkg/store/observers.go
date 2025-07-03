@@ -183,10 +183,6 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 	duration := query.End.Sub(query.Start)
 
 	if c.logger != nil && !data.Statement.QueryType.IsSelect() {
-		if data.Statement.QueryType.IsInsert() && data.Statement.PartitionKeys.Values.Get("pk3") == nil {
-			panic("partition keys should not be nil")
-		}
-
 		err := c.logger.LogStmt(stmtlogger.Item{
 			Error:         mo.Left[error, string](query.Err),
 			Statement:     query.Statement,
