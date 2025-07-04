@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,6 +36,13 @@ func IsUnderTest() bool {
 	return true
 }
 
+type ipUsed struct {
+	sync.Mutex
+	data map[byte]bool
+}
+
+var usedIPs = &ipUsed{data: make(map[byte]bool, 256)}
+
 func SingleScylla(tb testing.TB, timeouts ...time.Duration) *gocql.Session {
 	tb.Helper()
 
@@ -43,7 +51,17 @@ func SingleScylla(tb testing.TB, timeouts ...time.Duration) *gocql.Session {
 		testVersion = "2025.1"
 	}
 
-	ipPart := rand.IntN(154) + 100
+	random := rand.New(rand.NewPCG(uint64(time.Now().Second()), uint64(time.Now().Nanosecond())))
+	var ipPart byte
+	usedIPs.Lock()
+	for {
+		ipPart = byte(random.IntN(255))
+		if _, ok := usedIPs.data[ipPart]; !ok {
+			usedIPs.data[ipPart] = true
+			break
+		}
+	}
+	usedIPs.Unlock()
 
 	sharedNetwork, err := network.New(
 		tb.Context(),
@@ -53,8 +71,8 @@ func SingleScylla(tb testing.TB, timeouts ...time.Duration) *gocql.Session {
 			Driver: "default",
 			Config: []dockernetwork.IPAMConfig{
 				{
-					Subnet:  fmt.Sprintf("192.168.%d.0/24", ipPart),
-					Gateway: fmt.Sprintf("192.168.%d.1", ipPart),
+					Subnet:  fmt.Sprintf("172.31.%d.0/24", ipPart),
+					Gateway: fmt.Sprintf("172.31.%d.1", ipPart),
 				},
 			},
 		}),
@@ -65,6 +83,9 @@ func SingleScylla(tb testing.TB, timeouts ...time.Duration) *gocql.Session {
 
 	tb.Cleanup(func() {
 		_ = sharedNetwork.Remove(tb.Context())
+		usedIPs.Lock()
+		delete(usedIPs.data, byte(ipPart))
+		usedIPs.Unlock()
 	})
 
 	test, err := scylladb.Run(tb.Context(),
@@ -125,7 +146,17 @@ func TestContainers(tb testing.TB, timeouts ...time.Duration) (*gocql.Session, *
 		testVersion = "2025.1"
 	}
 
-	ipPart := rand.IntN(154) + 100
+	random := rand.New(rand.NewPCG(uint64(time.Now().Second()), uint64(time.Now().Nanosecond())))
+	var ipPart byte
+	usedIPs.Lock()
+	for {
+		ipPart = byte(random.IntN(255))
+		if _, ok := usedIPs.data[ipPart]; !ok {
+			usedIPs.data[ipPart] = true
+			break
+		}
+	}
+	usedIPs.Unlock()
 
 	sharedNetwork, err := network.New(
 		tb.Context(),
@@ -135,8 +166,8 @@ func TestContainers(tb testing.TB, timeouts ...time.Duration) (*gocql.Session, *
 			Driver: "default",
 			Config: []dockernetwork.IPAMConfig{
 				{
-					Subnet:  fmt.Sprintf("192.168.%d.0/24", ipPart),
-					Gateway: fmt.Sprintf("192.168.%d.1", ipPart),
+					Subnet:  fmt.Sprintf("172.31.%d.0/24", ipPart),
+					Gateway: fmt.Sprintf("172.31.%d.1", ipPart),
 				},
 			},
 		}),
@@ -147,6 +178,9 @@ func TestContainers(tb testing.TB, timeouts ...time.Duration) (*gocql.Session, *
 
 	tb.Cleanup(func() {
 		_ = sharedNetwork.Remove(tb.Context())
+		usedIPs.Lock()
+		delete(usedIPs.data, byte(ipPart))
+		usedIPs.Unlock()
 	})
 
 	oracle, err := scylladb.Run(tb.Context(),

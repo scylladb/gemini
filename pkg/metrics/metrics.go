@@ -163,6 +163,13 @@ var (
 	GeminiInformation = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "information",
 	}, []string{"ty"})
+
+	ValidatedRows = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "validated_rows",
+		},
+		[]string{"table"},
+	)
 )
 
 func init() {
@@ -189,6 +196,7 @@ func init() {
 		CQLErrorRequests,
 		ErrorMessages,
 		GeminiInformation,
+		ValidatedRows,
 	)
 
 	r.MustRegister(

@@ -5,7 +5,7 @@ networks:
     ipam:
       driver: default
       config:
-        - subnet: 192.168.100.0/24
+        - subnet: 172.30.0.0/16
 
 services:
   gemini-oracle:
@@ -19,7 +19,7 @@ services:
       - "19042"
     networks:
       gemini:
-        ipv4_address: 192.168.100.2
+        ipv4_address: 172.30.0.2
 
   gemini-test-1:
     image: scylladb/scylla:${SCYLLA_TEST_VERSION:-2025.1}
@@ -32,7 +32,7 @@ services:
       - "19042"
     networks:
       gemini:
-        ipv4_address: 192.168.100.3
+        ipv4_address: 172.30.0.3
   gemini-test-2:
     image: scylladb/scylla:${SCYLLA_TEST_VERSION:-2025.1}
     container_name: gemini-test-2
@@ -44,7 +44,7 @@ services:
       - "19042"
     networks:
       gemini:
-        ipv4_address: 192.168.100.4
+        ipv4_address: 172.30.0.4
   gemini-test-3:
     image: scylladb/scylla:${SCYLLA_TEST_VERSION:-2025.1}
     container_name: gemini-test-3
@@ -56,4 +56,4 @@ services:
       - "19042"
     networks:
       gemini:
-        ipv4_address: 192.168.100.5
+        ipv4_address: 172.30.0.5

@@ -277,10 +277,18 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	stop.StartOsSignalsTransmitter(logger, stopFlag)
 
+	if mutationConcurrency == 0 {
+		mutationConcurrency = concurrency
+	}
+
+	if readConcurrency == 0 {
+		readConcurrency = concurrency
+	}
+
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
 		warmupStopFlag := stopFlag.CreateChild("warmup")
 
-		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
+		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, mutationConcurrency, readConcurrency)
 		time.AfterFunc(warmup, func() {
 			warmupStopFlag.SetHard(false)
 		})
@@ -292,7 +300,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	if !stopFlag.IsHardOrSoft() {
 		work := stopFlag.CreateChild("work")
 
-		jobsList := jobs.ListFromMode(mode, duration, concurrency)
+		jobsList := jobs.ListFromMode(mode, duration, mutationConcurrency, readConcurrency)
 		time.AfterFunc(duration, func() {
 			work.SetHard(false)
 		})

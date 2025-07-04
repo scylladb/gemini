@@ -1,12 +1,12 @@
 - targets:
-    - 192.168.100.2
+    - 172.30.0.2
   labels:
     cluster: oracle
     dc: dc1
 - targets:
-    - 192.168.100.3
-    - 192.168.100.4
-    - 192.168.100.5
+    - 172.30.0.3
+    - 172.30.0.4
+    - 172.30.0.5
   labels:
     cluster: test
     dc: dc2

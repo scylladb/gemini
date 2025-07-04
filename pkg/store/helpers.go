@@ -80,7 +80,7 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 
 func pks(t *typedef.Table, rows Rows) *strset.Set {
 	if len(rows) == 0 {
-		return nil
+		return strset.NewWithSize(0)
 	}
 
 	keySet := strset.NewWithSize(len(rows) * (len(t.PartitionKeys) + len(t.ClusteringKeys)))

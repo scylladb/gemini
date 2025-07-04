@@ -103,5 +103,8 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 		typedef.InsertStatementType,
 	)
 	assert.NoError(store.Mutate(t.Context(), insert))
-	assert.NoError(store.Check(t.Context(), schema.Tables[0], check, 1))
+	count, err := store.Check(t.Context(), schema.Tables[0], check, 1)
+
+	assert.NoError(err)
+	assert.Equal(1, count, "Expected only one row to be inserted with duplicate values")
 }

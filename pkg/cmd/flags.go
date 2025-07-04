@@ -31,7 +31,6 @@ var (
 	oracleClusterPassword            string
 	schemaFile                       string
 	outFileArg                       string
-	concurrency                      uint64
 	seed                             string
 	schemaSeed                       string
 	dropSchema                       bool
@@ -80,9 +79,15 @@ var (
 	statementLogFileCompression      string
 	versionFlag                      bool
 	iOWorkerPool                     int
+
+	concurrency         uint64
+	mutationConcurrency uint64
+	readConcurrency     uint64
 )
 
 func setupFlags(cmd *cobra.Command) {
+	cmd.PersistentFlags().Uint64VarP(&mutationConcurrency, "mutation-concurrency", "", 0, "Number of worker threads to use for IO operations")
+	cmd.PersistentFlags().Uint64VarP(&readConcurrency, "read-concurrency", "", 0, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().IntVarP(&iOWorkerPool, "io-worker-pool", "", 1024, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().BoolVarP(&versionFlag, "version", "", false, "Print version information")
 	cmd.PersistentFlags().

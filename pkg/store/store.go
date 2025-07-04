@@ -69,7 +69,7 @@ type Store interface {
 
 	Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
 	Mutate(context.Context, *typedef.Stmt) error
-	Check(context.Context, *typedef.Table, *typedef.Stmt, int) error
+	Check(context.Context, *typedef.Table, *typedef.Stmt, int) (int, error)
 }
 
 type (
@@ -250,7 +250,7 @@ func (ds delegatingStore) Check(
 	table *typedef.Table,
 	stmt *typedef.Stmt,
 	attempt int,
-) error {
+) (int, error) {
 	var oracleCh chan mo.Result[any]
 
 	if ds.oracleStore != nil {
@@ -274,27 +274,28 @@ func (ds delegatingStore) Check(
 	})
 
 	testResult := <-testCh
+	ds.workers.Release(testCh)
+
 	if testResult.IsError() {
-		ds.workers.Release(oracleCh)
-		return pkgerrors.Wrap(testResult.Error(), "unable to load check data from the test store")
+		return 0, pkgerrors.Wrap(testResult.Error(), "unable to load check data from the test store")
 	}
 
 	if oracleCh == nil {
-		return nil
+		return len(testResult.MustGet().(Rows)), nil
 	}
 
 	oracleResult := <-oracleCh
 	ds.workers.Release(oracleCh)
 
 	if oracleResult.IsError() {
-		return pkgerrors.Wrap(oracleResult.Error(), "unable to load check data from the oracle store")
+		return 0, pkgerrors.Wrap(oracleResult.Error(), "unable to load check data from the oracle store")
 	}
 
 	oracleRows := oracleResult.MustGet().(Rows)
 	testRows := testResult.MustGet().(Rows)
 
 	if len(testRows) == 0 && len(oracleRows) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	if len(testRows) != len(oracleRows) {
@@ -303,7 +304,7 @@ func (ds delegatingStore) Check(
 		missingInTest := strset.Difference(oracleSet, testSet).List()
 		missingInOracle := strset.Difference(testSet, oracleSet).List()
 
-		return ErrorRowDifference{
+		return 0, ErrorRowDifference{
 			MissingInTest:   missingInTest,
 			MissingInOracle: missingInOracle,
 			TestRows:        len(testRows),
@@ -312,7 +313,7 @@ func (ds delegatingStore) Check(
 	}
 
 	if reflect.DeepEqual(testRows, oracleRows) {
-		return nil
+		return len(testRows), nil
 	}
 
 	slices.SortStableFunc(testRows, rowsCmp)
@@ -320,7 +321,7 @@ func (ds delegatingStore) Check(
 
 	for i, oracleRow := range oracleRows {
 		if diff := cmp.Diff(oracleRow, testRows[i], comparers...); diff != "" {
-			return ErrorRowDifference{
+			return 0, ErrorRowDifference{
 				Diff:      diff,
 				OracleRow: oracleRow,
 				TestRow:   testRows[i],
@@ -328,7 +329,7 @@ func (ds delegatingStore) Check(
 		}
 	}
 
-	return nil
+	return len(testRows), nil
 }
 
 func (ds delegatingStore) Close() error {

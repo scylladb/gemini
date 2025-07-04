@@ -92,6 +92,15 @@ func SimpleStmt(query string, queryType StatementType) *Stmt {
 	}
 }
 
+func PreparedStmt(query string, pks map[string][]any, values []any, queryType StatementType) *Stmt {
+	return &Stmt{
+		Query:         query,
+		Values:        values,
+		QueryType:     queryType,
+		PartitionKeys: PartitionKeys{Values: NewValuesFromMap(pks), Token: 0},
+	}
+}
+
 func (s *Stmt) ToCql() (string, []string) {
 	return s.Query, nil
 }

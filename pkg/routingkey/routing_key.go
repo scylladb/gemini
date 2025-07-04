@@ -17,7 +17,6 @@ package routingkey
 import (
 	"bytes"
 	"encoding/binary"
-	"hash"
 
 	"github.com/gocql/gocql"
 	"github.com/twmb/murmur3"
@@ -26,39 +25,14 @@ import (
 )
 
 type Creator struct {
-	table  *typedef.Table
-	hasher hash.Hash32
+	table *typedef.Table
 }
 
 func New(table *typedef.Table) *Creator {
 	return &Creator{
-		table:  table,
-		hasher: murmur3.New32(),
+		table: table,
 	}
 }
-
-//goroutine 1 [running]:
-//github.com/twmb/murmur3.(*digest).Write(0xc00039c320, {0xc000818e00, 0xf, 0x100})
-//github.com/twmb/murmur3@v1.1.8/murmur.go:36 +0xfe
-//github.com/scylladb/gemini/pkg/routingkey.(*Creator).GetHash(0xc00032f038, 0xc000812840?)
-//github.com/scylladb/gemini/pkg/routingkey/routing_key.go:75 +0x6c
-//github.com/scylladb/gemini/pkg/generators.(*Generator).createPartitionKeyValues(0xc0000d22c0)
-//github.com/scylladb/gemini/pkg/generators/generator.go:292 +0x11b
-//github.com/scylladb/gemini/pkg/generators.(*Generator).FindAndMarkStalePartitions(0xc0000d22c0)
-//github.com/scylladb/gemini/pkg/generators/generator.go:186 +0x98
-//github.com/scylladb/gemini/pkg/generators.New(0xc0001800f0, 0xc000272840?, 0x174a7e0?, 0x0?, 0x0?, 0xc000194080, 0xc0003023c0)
-//github.com/scylladb/gemini/pkg/generators/generators.go:57 +0x308
-//main.run(0x16c63c0, {0xf6034a?, 0x4?, 0xf6030e?})
-//github.com/scylladb/gemini/pkg/cmd/root.go:181 +0x9c8
-//github.com/spf13/cobra.(*Command).execute(0x16c63c0, {0xc000036190, 0x16, 0x17})
-//github.com/spf13/cobra@v1.9.1/command.go:1015 +0xaaa
-//github.com/spf13/cobra.(*Command).ExecuteC(0x16c63c0)
-//github.com/spf13/cobra@v1.9.1/command.go:1148 +0x46f
-//github.com/spf13/cobra.(*Command).Execute(...)
-//github.com/spf13/cobra@v1.9.1/command.go:1071
-//main.main()
-//github.com/scylladb/gemini/pkg/cmd/main.go:31 +0x34
-//make: *** [Makefile:200: integration-test] Error 2
 
 func (rc *Creator) CreateRoutingKey(values map[string][]any) ([]byte, error) {
 	if len(rc.table.PartitionKeys) == 1 && len(values[rc.table.PartitionKeys[0].Name]) == 1 {
@@ -94,12 +68,13 @@ func (rc *Creator) GetHash(values map[string][]any) (uint32, error) {
 		return 0, err
 	}
 
-	if _, err = rc.hasher.Write(b); err != nil {
+	hasher := murmur3.New32()
+
+	if _, err = hasher.Write(b); err != nil {
 		return 0, err
 	}
 
-	result := rc.hasher.Sum32()
-	rc.hasher.Reset()
+	result := hasher.Sum32()
 
 	return result, nil
 }

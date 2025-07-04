@@ -38,10 +38,11 @@ const (
 )
 
 type List struct {
-	name     string
-	modes    []string
-	duration time.Duration
-	workers  uint64
+	name                string
+	modes               []string
+	duration            time.Duration
+	mutationConcurrency uint64
+	readConcurrency     uint64
 }
 
 var ErrNoStatement = errors.New("no statement generated")
@@ -51,7 +52,11 @@ type Worker interface {
 	Do(context.Context) error
 }
 
-func ListFromMode(mode string, duration time.Duration, workers uint64) List {
+func ListFromMode(
+	mode string,
+	duration time.Duration,
+	mutationConcurrency, readConcurrency uint64,
+) List {
 	var modes []string
 	switch mode {
 	case MixedMode:
@@ -65,9 +70,10 @@ func ListFromMode(mode string, duration time.Duration, workers uint64) List {
 	}
 
 	return List{
-		modes:    modes,
-		duration: duration,
-		workers:  workers,
+		modes:               modes,
+		duration:            duration,
+		readConcurrency:     readConcurrency,
+		mutationConcurrency: mutationConcurrency,
 	}
 }
 
@@ -98,7 +104,7 @@ func (l List) Run(
 		for _, mode := range l.modes {
 			switch mode {
 			case WriteMode, WarmupMode:
-				for range l.workers {
+				for range l.mutationConcurrency {
 					newSrc := [32]byte{}
 					_, _ = src.Read(newSrc[:])
 
@@ -118,7 +124,7 @@ func (l List) Run(
 					})
 				}
 			case ReadMode:
-				for range l.workers {
+				for range l.readConcurrency {
 					newSrc := [32]byte{}
 					_, _ = src.Read(newSrc[:])
 

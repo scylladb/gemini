@@ -20,6 +20,7 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/multierr"
 
 	"github.com/scylladb/gemini/pkg/generators"
@@ -87,7 +88,7 @@ func NewValidation(
 	}
 }
 
-func (v *Validation) run(ctx context.Context) error {
+func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 	var acc error
 
 	stmt, stmtErr := v.statement.Select(ctx)
@@ -103,8 +104,10 @@ func (v *Validation) run(ctx context.Context) error {
 	}
 
 	for attempt := 1; attempt <= v.maxAttempts; attempt++ {
-		err := v.store.Check(ctx, v.table, stmt, attempt)
+		validatedRows, err := v.store.Check(ctx, v.table, stmt, attempt)
 		if err == nil {
+			metric.Add(float64(validatedRows))
+			v.status.AddValidatedRows(validatedRows)
 			v.status.ReadOp()
 			return nil
 		}
@@ -142,9 +145,11 @@ func (v *Validation) Do(ctx context.Context) error {
 	metrics.GeminiInformation.WithLabelValues("validation_" + v.table.Name).Inc()
 	defer metrics.GeminiInformation.WithLabelValues("validation_" + v.table.Name).Dec()
 
+	validatedRowsMetric := metrics.ValidatedRows.WithLabelValues(v.table.Name)
+
 	for !v.stopFlag.IsHardOrSoft() {
 		err := executionTime.RunFuncE(func() error {
-			return v.run(ctx)
+			return v.run(ctx, validatedRowsMetric)
 		})
 
 		if errors.Is(err, utils.ErrNoPartitionKeyValues) {

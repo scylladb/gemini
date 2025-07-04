@@ -36,11 +36,12 @@ func (u *Uint64) MarshalJSON() ([]byte, error) {
 }
 
 type GlobalStatus struct {
-	Errors      *joberror.ErrorList `json:"errors,omitempty"`
-	WriteOps    Uint64              `json:"write_ops"`
-	WriteErrors Uint64              `json:"write_errors"`
-	ReadOps     Uint64              `json:"read_ops"`
-	ReadErrors  Uint64              `json:"read_errors"`
+	Errors        *joberror.ErrorList `json:"errors,omitempty"`
+	WriteOps      Uint64              `json:"write_ops"`
+	WriteErrors   Uint64              `json:"write_errors"`
+	ReadOps       Uint64              `json:"read_ops"`
+	ValidatedRows Uint64              `json:"validated_rows,omitempty"`
+	ReadErrors    Uint64              `json:"read_errors"`
 }
 
 func (gs *GlobalStatus) AddWriteError(err joberror.JobError) {
@@ -98,12 +99,13 @@ func (gs *GlobalStatus) PrintResult(
 	versionData any,
 ) {
 	if err := gs.PrintResultAsJSON(w, schema, version, versionData); err != nil {
-		// In case there has been it has been a long run we want to display it anyway...
+		// In case there has been, it has been a long run we want to display it anyway...
 		fmt.Printf("Unable to print result as json, using plain text to stdout, error=%s\n", err)
 		fmt.Printf("Gemini version: %s\n", version)
 		fmt.Printf("Results:\n")
 		fmt.Printf("\twrite ops:    %v\n", gs.WriteOps.Load())
 		fmt.Printf("\tread ops:     %v\n", gs.ReadOps.Load())
+		fmt.Printf("\tvalidated rows:     %v\n", gs.ValidatedRows.Load())
 		fmt.Printf("\twrite errors: %v\n", gs.WriteErrors.Load())
 		fmt.Printf("\tread errors:  %v\n", gs.ReadErrors.Load())
 		for i, err := range gs.Errors.Errors() {
@@ -120,6 +122,10 @@ func (gs *GlobalStatus) WriteOp() {
 
 func (gs *GlobalStatus) ReadOp() {
 	gs.ReadOps.Add(1)
+}
+
+func (gs *GlobalStatus) AddValidatedRows(rows int) {
+	gs.ValidatedRows.Add(uint64(rows))
 }
 
 func NewGlobalStatus(limit int) *GlobalStatus {

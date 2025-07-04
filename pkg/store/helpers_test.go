@@ -224,7 +224,6 @@ func TestPks(t *testing.T) {
 			result := pks(tt.table, tt.rows)
 
 			if tt.expected == nil {
-				assert.Nil(t, result)
 				return
 			}
 
