@@ -94,6 +94,15 @@ func preRun(cmd *cobra.Command, _ []string) {
 //nolint:gocyclo
 func run(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
+	stopFlag := stop.NewFlag("main")
+	time.AfterFunc(warmup+duration+2*time.Second, func() {
+		stopFlag.SetSoft(true)
+	})
+	go func() {
+		<-ctx.Done()
+		stopFlag.SetHard(true)
+	}()
+
 	logger := createLogger(level)
 
 	versionJSON, err := cmd.PersistentFlags().GetBool("version-json")
@@ -194,7 +203,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		UseServerSideTimestamps: useServerSideTimestamps,
 		OracleStatementFile:     oracleStatementLogFile,
 		TestStatementFile:       testStatementLogFile,
-		Compression:             stmtlogger.NoCompression,
+		Compression:             stmtlogger.CompressionNone,
 		TestClusterConfig: store.ScyllaClusterConfig{
 			Name:                    stmtlogger.TypeTest,
 			Hosts:                   testClusterHost,
@@ -222,7 +231,12 @@ func run(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	st, err := store.New(gens.Gens[schema.Tables[0].Name].Get(ctx), pool, schema, storeConfig, logger.Named("store"), globalStatus.Errors)
+	schemaChanges, err := gens.Gens[schema.Tables[0].Name].Get(ctx)
+	if err != nil {
+		return errors.Wrapf(err, "failed to get schema changes for %s", schema.Tables[0].Name)
+	}
+
+	st, err := store.New(schemaChanges, pool, schema, storeConfig, logger.Named("store"), globalStatus.Errors)
 	if err != nil {
 		return err
 	}
@@ -261,34 +275,30 @@ func run(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	stopFlag := stop.NewFlag("main")
-	warmupStopFlag := stop.NewFlag("warmup")
-	go func() {
-		<-ctx.Done()
-		stopFlag.SetHard(true)
-		warmupStopFlag.SetHard(true)
-	}()
+	stop.StartOsSignalsTransmitter(logger, stopFlag)
 
 	if warmup > 0 && !stopFlag.IsHardOrSoft() {
+		warmupStopFlag := stopFlag.CreateChild("warmup")
+
 		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, concurrency)
 		time.AfterFunc(warmup, func() {
-			warmupStopFlag.SetSoft(false)
+			warmupStopFlag.SetHard(false)
 		})
 		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, warmupStopFlag, randSrc); err != nil {
 			logger.Error("warmup encountered an error", zap.Error(err))
-			warmupStopFlag.SetHard(true)
-			stopFlag.SetHard(true)
 		}
 	}
 
 	if !stopFlag.IsHardOrSoft() {
+		work := stopFlag.CreateChild("work")
+
 		jobsList := jobs.ListFromMode(mode, duration, concurrency)
 		time.AfterFunc(duration, func() {
-			stopFlag.SetHard(true)
+			work.SetHard(false)
 		})
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, stopFlag, randSrc); err != nil {
-			logger.Debug("error detected", zap.Error(err))
-			stopFlag.SetHard(true)
+		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, work, randSrc); err != nil {
+			logger.Error("error detected", zap.Error(err))
+			work.SetHard(true)
 		}
 	}
 

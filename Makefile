@@ -27,16 +27,12 @@ define get_scylla_ip
 	$(shell docker inspect --format "{{ .NetworkSettings.Networks.$(GEMINI_DOCKER_NETWORK).IPAddress }}" "$(1)")
 endef
 
-GEMINI_FLAGS ?= --level=info \
+GEMINI_FLAGS ?= --level=debug \
 	--consistency=QUORUM \
 	--test-host-selection-policy=token-aware \
 	--oracle-host-selection-policy=token-aware \
 	--mode=$(MODE) \
-	--request-timeout=5s \
-	--connect-timeout=15s \
-	--use-server-timestamps=true \
 	--async-objects-stabilization-attempts=10 \
-	--max-mutation-retries=10 \
 	--oracle-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 	--concurrency=$(CONCURRENCY) \
 	--dataset-size=$(DATASET_SIZE) \
@@ -45,10 +41,7 @@ GEMINI_FLAGS ?= --level=info \
 	--cql-features=$(CQL_FEATURES) \
 	--duration=$(DURATION) \
 	--warmup=$(WARMUP) \
-	--profiling-port=6060 \
-	--drop-schema=true \
-	--token-range-slices=10000 \
-	--partition-key-buffer-reuse-size=256 \
+	--partition-key-buffer-reuse-size=50 \
 	--partition-key-distribution=uniform \
 	--io-worker-pool=$(GEMINI_IO_WORKER_POOL) \
 	--oracle-statement-log-file=$(PWD)/results/oracle-statements.json \

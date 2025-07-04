@@ -105,7 +105,7 @@ var (
 			Name: "cql_query_errors",
 			Help: "Number of CQL query errors.",
 		},
-		[]string{"cluster", "host"},
+		[]string{"cluster", "host", "error"},
 	)
 
 	GoCQLBatchQueries = prometheus.NewCounterVec(

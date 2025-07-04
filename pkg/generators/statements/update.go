@@ -22,7 +22,7 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func (g *Generator) Update(ctx context.Context) *typedef.Stmt {
+func (g *Generator) Update(ctx context.Context) (*typedef.Stmt, error) {
 	builder := qb.Update(g.keyspaceAndTable)
 	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
 
@@ -39,9 +39,9 @@ func (g *Generator) Update(ctx context.Context) *typedef.Stmt {
 		}
 	}
 
-	pks := g.generator.Get(ctx)
-	if pks.Token == 0 {
-		return nil
+	pks, err := g.generator.Get(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	for _, pk := range g.table.PartitionKeys {
@@ -61,5 +61,5 @@ func (g *Generator) Update(ctx context.Context) *typedef.Stmt {
 		Values:        values,
 		QueryType:     typedef.UpdateStatementType,
 		Query:         query,
-	}
+	}, nil
 }

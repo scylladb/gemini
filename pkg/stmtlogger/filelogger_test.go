@@ -37,7 +37,7 @@ var CompressionTests = []struct {
 	Compression Compression
 }{
 	{
-		Compression: NoCompression,
+		Compression: CompressionNone,
 		ReadData: func(tb testing.TB, f io.Reader) string {
 			tb.Helper()
 
@@ -50,7 +50,7 @@ var CompressionTests = []struct {
 		},
 	},
 	{
-		Compression: GZIPCompression,
+		Compression: CompressionGZIP,
 		ReadData: func(tb testing.TB, f io.Reader) string {
 			tb.Helper()
 
@@ -68,7 +68,7 @@ var CompressionTests = []struct {
 		},
 	},
 	{
-		Compression: ZSTDCompression,
+		Compression: CompressionZSTD,
 		ReadData: func(tb testing.TB, f io.Reader) string {
 			tb.Helper()
 			reader, err := zstd.NewReader(f)
@@ -132,9 +132,9 @@ func TestOutputToFile(t *testing.T) {
 
 func BenchmarkLogger(b *testing.B) {
 	runs := []Compression{
-		NoCompression,
-		GZIPCompression,
-		ZSTDCompression,
+		CompressionNone,
+		CompressionGZIP,
+		CompressionZSTD,
 	}
 
 	for _, compression := range runs {

@@ -21,7 +21,7 @@ services:
     image: scylladb/scylla:${SCYLLA_TEST_VERSION:-6.2}
     container_name: gemini-test
     restart: unless-stopped
-    command: --smp 2 --memory 1024M --api-address 0.0.0.0
+    command: --smp 1 --memory 1024M --api-address 0.0.0.0
     networks:
       gemini:
         ipv4_address: 192.168.100.3

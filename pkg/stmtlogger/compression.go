@@ -23,46 +23,25 @@ import (
 	"github.com/pkg/errors"
 )
 
+//go:generate go tool stringer -type Compression -trimprefix Compression
 type Compression int
 
 const (
-	NoCompression Compression = iota
-	ZSTDCompression
-	GZIPCompression
+	CompressionNone Compression = iota
+	CompressionZSTD
+	CompressionGZIP
 )
-
-func (c Compression) String() string {
-	switch c {
-	case NoCompression:
-		return "none"
-	case ZSTDCompression:
-		return "zstd"
-	case GZIPCompression:
-		return "gzip"
-	default:
-		panic("unknown compression")
-	}
-}
-
-func MustParseCompression(value string) Compression {
-	c, err := ParseCompression(value)
-	if err != nil {
-		panic(err)
-	}
-
-	return c
-}
 
 func ParseCompression(value string) (Compression, error) {
 	switch value {
 	case "none", "":
-		return NoCompression, nil
+		return CompressionNone, nil
 	case "zstd":
-		return ZSTDCompression, nil
+		return CompressionZSTD, nil
 	case "gzip":
-		return GZIPCompression, nil
+		return CompressionGZIP, nil
 	default:
-		return NoCompression, errors.Errorf("unknown compression %q", value)
+		return CompressionNone, errors.Errorf("unknown compression %q", value)
 	}
 }
 
@@ -70,7 +49,7 @@ func (c Compression) newWriter(input io.Writer) (flusher, io.Closer, error) {
 	var writer flusher
 	var closer io.Closer
 	switch c {
-	case ZSTDCompression:
+	case CompressionZSTD:
 		zstdWriter, err := zstd.NewWriter(
 			input,
 			zstd.WithEncoderLevel(zstd.SpeedBestCompression),
@@ -84,7 +63,7 @@ func (c Compression) newWriter(input io.Writer) (flusher, io.Closer, error) {
 
 		writer = zstdWriter
 		closer = zstdWriter
-	case GZIPCompression:
+	case CompressionGZIP:
 		gzipWriter, err := gzip.NewWriterLevel(input, gzip.BestSpeed)
 		if err != nil {
 			return nil, nil, err

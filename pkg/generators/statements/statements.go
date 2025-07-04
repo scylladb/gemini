@@ -23,8 +23,8 @@ import (
 )
 
 type ValueGenerator interface {
-	Get(context.Context) typedef.PartitionKeys
-	GetOld(context.Context) typedef.PartitionKeys
+	Get(context.Context) (typedef.PartitionKeys, error)
+	GetOld(context.Context) (typedef.PartitionKeys, error)
 	GiveOlds(ctx context.Context, tokens ...typedef.PartitionKeys)
 }
 

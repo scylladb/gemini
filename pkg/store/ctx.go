@@ -29,22 +29,22 @@ type ContextData struct {
 	GeminiAttempt int
 }
 
-func WithContextData(ctx context.Context, data ContextData) context.Context {
+func WithContextData(ctx context.Context, data *ContextData) context.Context {
 	return context.WithValue(ctx, ContextDataKey, data)
 }
 
-func GetContextData(ctx context.Context) (ContextData, bool) {
-	data, ok := ctx.Value(ContextDataKey).(ContextData)
+func GetContextData(ctx context.Context) (*ContextData, bool) {
+	data, ok := ctx.Value(ContextDataKey).(*ContextData)
 
 	if !ok {
-		return ContextData{}, false
+		return nil, false
 	}
 
 	return data, true
 }
 
-func MustGetContextData(ctx context.Context) ContextData {
-	data, ok := ctx.Value(ContextDataKey).(ContextData)
+func MustGetContextData(ctx context.Context) *ContextData {
+	data, ok := ctx.Value(ContextDataKey).(*ContextData)
 
 	if !ok {
 		panic("context does not contain QueryContextData")

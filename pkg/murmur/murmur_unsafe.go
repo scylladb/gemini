@@ -13,7 +13,6 @@
 // limitations under the License.
 
 //go:build !appengine
-// +build !appengine
 
 package murmur
 
@@ -22,9 +21,9 @@ import (
 )
 
 func getBlock(data []byte, n int) (int64, int64) {
-	block := (*[2]int64)(unsafe.Pointer(&data[n*16]))
+	b := (*[2]int64)(unsafe.Pointer(&data[n*16]))
 
-	k1 := block[0]
-	k2 := block[1]
+	k1 := b[0]
+	k2 := b[1]
 	return k1, k2
 }

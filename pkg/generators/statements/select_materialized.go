@@ -25,7 +25,7 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
-func (g *Generator) SelectFromMaterializedView(ctx context.Context) *typedef.Stmt {
+func (g *Generator) SelectFromMaterializedView(ctx context.Context) (*typedef.Stmt, error) {
 	mv := &g.table.MaterializedViews[utils.RandInt2(g.random, 0, len(g.table.MaterializedViews))]
 
 	switch val := g.random.IntN(SelectStatementsCount - 1); val {
@@ -42,8 +42,11 @@ func (g *Generator) SelectFromMaterializedView(ctx context.Context) *typedef.Stm
 	}
 }
 
-func (g *Generator) genSinglePartitionQueryMv(ctx context.Context, mv *typedef.MaterializedView) *typedef.Stmt {
-	pk := g.generator.GetOld(ctx)
+func (g *Generator) genSinglePartitionQueryMv(ctx context.Context, mv *typedef.MaterializedView) (*typedef.Stmt, error) {
+	pk, err := g.generator.GetOld(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	builder := qb.Select(g.keyspace + "." + mv.Name)
 
@@ -58,10 +61,10 @@ func (g *Generator) genSinglePartitionQueryMv(ctx context.Context, mv *typedef.M
 		Values:        pk.Values.ToCQLValues(mv.PartitionKeys),
 		QueryType:     typedef.SelectFromMaterializedViewStatementType,
 		Query:         query,
-	}
+	}, nil
 }
 
-func (g *Generator) genMultiplePartitionQueryMv(ctx context.Context, mv *typedef.MaterializedView) *typedef.Stmt {
+func (g *Generator) genMultiplePartitionQueryMv(ctx context.Context, mv *typedef.MaterializedView) (*typedef.Stmt, error) {
 	numQueryPKs := utils.RandInt2(g.random, 2, mv.PartitionKeys.Len())
 	values := make([]any, 0, numQueryPKs*mv.PartitionKeys.LenValues())
 	builder := qb.Select(g.keyspace + "." + mv.Name)
@@ -73,7 +76,10 @@ func (g *Generator) genMultiplePartitionQueryMv(ctx context.Context, mv *typedef
 	pks := typedef.NewValues(mv.PartitionKeys.Len())
 
 	for range numQueryPKs {
-		pk := g.generator.GetOld(ctx)
+		pk, err := g.generator.GetOld(ctx)
+		if err != nil {
+			return nil, err
+		}
 		// TODO: Handle return value with token
 		//	if vs.Token == 0 {
 		//		g.GiveOlds(ctx, tokens...)
@@ -90,14 +96,17 @@ func (g *Generator) genMultiplePartitionQueryMv(ctx context.Context, mv *typedef
 		Values:        nil,
 		QueryType:     typedef.SelectFromMaterializedViewStatementType,
 		Query:         query,
-	}
+	}, nil
 }
 
-func (g *Generator) genMultiplePartitionClusteringRangeQueryMv(ctx context.Context, mv *typedef.MaterializedView) *typedef.Stmt {
+func (g *Generator) genMultiplePartitionClusteringRangeQueryMv(
+	ctx context.Context,
+	mv *typedef.MaterializedView,
+) (*typedef.Stmt, error) {
 	// numQueryPKs := utils.RandInt2(g.random, 2, mv.PartitionKeys.Len())
 	// maxClusteringRels := utils.RandInt2(g.random, 1, mv.ClusteringKeys.Len())
 
-	return nil
+	return nil, nil
 	//clusteringKeys := mv.ClusteringKeys
 	//pkValues := mv.PartitionKeysLenValues()
 	//valuesCount := pkValues*numQueryPKs + clusteringKeys[:maxClusteringRels].LenValues() + clusteringKeys[maxClusteringRels].Type.LenValue()*2
@@ -167,9 +176,9 @@ func (g *Generator) genMultiplePartitionClusteringRangeQueryMv(ctx context.Conte
 	//}
 }
 
-func (g *Generator) genClusteringRangeQueryMv(ctx context.Context, mv *typedef.MaterializedView) *typedef.Stmt {
+func (g *Generator) genClusteringRangeQueryMv(ctx context.Context, mv *typedef.MaterializedView) (*typedef.Stmt, error) {
 	// maxClusteringRels := utils.RandInt2(g.random, 1, mv.ClusteringKeys.Len())
-	return nil
+	return nil, nil
 	//t.RLock()
 	//defer t.RUnlock()
 	//valuesWithToken := g.GetOld(ctx)

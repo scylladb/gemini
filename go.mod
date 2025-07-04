@@ -296,6 +296,7 @@ require (
 tool (
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt
+	golang.org/x/tools/cmd/stringer
 	golang.org/x/tools/go/analysis/passes/fieldalignment/cmd/fieldalignment
 	mvdan.cc/gofumpt
 )

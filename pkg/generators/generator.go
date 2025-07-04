@@ -40,8 +40,8 @@ import (
 // approximate different token distributions from a sparse set of tokens.
 
 type Interface interface {
-	Get(context.Context) typedef.PartitionKeys
-	GetOld(context.Context) typedef.PartitionKeys
+	Get(context.Context) (typedef.PartitionKeys, error)
+	GetOld(context.Context) (typedef.PartitionKeys, error)
 	GiveOlds(context.Context, ...typedef.PartitionKeys)
 	ReleaseToken(uint32)
 }
@@ -107,15 +107,17 @@ func NewGenerator(
 	return g
 }
 
-func (g *Generator) Get(ctx context.Context) typedef.PartitionKeys {
+func (g *Generator) Get(ctx context.Context) (typedef.PartitionKeys, error) {
 	targetPart := g.GetPartitionForToken(g.idxFunc())
 	for targetPart.Stale() {
 		targetPart = g.GetPartitionForToken(g.idxFunc())
 	}
 
-	v := targetPart.get(ctx)
-	g.valuesMetrics.Dec()
-	return v
+	v, err := targetPart.get(ctx)
+	if err != nil {
+		g.valuesMetrics.Dec()
+	}
+	return v, err
 }
 
 func (g *Generator) GetPartitionForToken(token uint32) *Partition {
@@ -124,17 +126,18 @@ func (g *Generator) GetPartitionForToken(token uint32) *Partition {
 
 // GetOld returns a previously used value and token or a new if
 // the old queue is empty.
-func (g *Generator) GetOld(ctx context.Context) typedef.PartitionKeys {
+func (g *Generator) GetOld(ctx context.Context) (typedef.PartitionKeys, error) {
 	targetPart := g.GetPartitionForToken(g.idxFunc())
 	for targetPart.Stale() {
 		targetPart = g.GetPartitionForToken(g.idxFunc())
 	}
-	v, exists := targetPart.getOld(ctx)
-	if exists {
+
+	v, err := targetPart.getOld(ctx)
+	if err == nil {
 		g.oldValuesMetrics.Dec()
 	}
 
-	return v
+	return v, err
 }
 
 // GiveOlds returns the supplied values for later reuse unless
@@ -243,7 +246,7 @@ func (g *Generator) fillAllPartitions() {
 
 			idx := g.shardOf(token)
 			partition := g.partitions.Get(idx)
-			if partition.Stale() {
+			if partition == nil { // stale partition
 				return nil
 			}
 
@@ -279,17 +282,11 @@ func (g *Generator) shardOf(token uint32) int {
 	return int(token % uint32(g.partitionCount))
 }
 
-func (g *Generator) createPartitionKeyValues(r ...*rand.Rand) (uint32, map[string][]any, error) {
-	rnd := g.r
-
-	if len(r) > 0 && r[0] != nil {
-		rnd = r[0]
-	}
-
+func (g *Generator) createPartitionKeyValues() (uint32, map[string][]any, error) {
 	values := make(map[string][]any, g.table.PartitionKeys.Len())
 
 	for _, pk := range g.table.PartitionKeys {
-		values[pk.Name] = append(values[pk.Name], pk.Type.GenValue(rnd, &g.partitionsConfig)...)
+		values[pk.Name] = pk.Type.GenValue(g.r, &g.partitionsConfig)
 	}
 
 	token, err := g.routingKeyCreator.GetHash(values)

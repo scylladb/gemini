@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/generators"
@@ -28,11 +29,13 @@ import (
 //go:norace
 func TestGenerator(t *testing.T) {
 	t.Parallel()
+	assert := require.New(t)
+
 	table := &typedef.Table{
 		Name:          "tbl",
 		PartitionKeys: generators.CreatePkColumns(1, "pk"),
 	}
-	var current uint32
+	var current atomic.Int32
 	cfg := generators.Config{
 		PartitionsRangeConfig: typedef.PartitionRangeConfig{
 			MaxStringLength: 10,
@@ -43,17 +46,17 @@ func TestGenerator(t *testing.T) {
 		PkUsedBufferSize: 100,
 		PartitionsCount:  10000,
 		PartitionsDistributionFunc: func() uint32 {
-			return atomic.LoadUint32(&current)
+			return uint32(current.Load())
 		},
 	}
 	logger, _ := zap.NewDevelopment()
 	generator := generators.NewGenerator(table, cfg, logger, rand.NewChaCha8([32]byte{}))
-	for i := int32(0); i < cfg.PartitionsCount; i++ {
-		atomic.StoreUint32(&current, uint32(i))
-		v := generator.Get(t.Context())
-		n := generator.Get(t.Context())
-		if v.Token%uint32(generator.PartitionCount()) != n.Token%uint32(generator.PartitionCount()) {
-			t.Errorf("expected %v, got %v", v, n)
-		}
+	for i := range cfg.PartitionsCount {
+		current.Store(i)
+		v, err := generator.Get(t.Context())
+		assert.NoError(err)
+		n, err := generator.Get(t.Context())
+		assert.NoError(err)
+		assert.Equal(v.Token%uint32(generator.PartitionCount()), n.Token%uint32(generator.PartitionCount()))
 	}
 }

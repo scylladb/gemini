@@ -22,10 +22,10 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func (g *Generator) Delete(ctx context.Context) *typedef.Stmt {
-	pks := g.generator.GetOld(ctx)
-	if pks.Token == 0 {
-		return nil
+func (g *Generator) Delete(ctx context.Context) (*typedef.Stmt, error) {
+	pks, err := g.generator.GetOld(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	builder := qb.Delete(g.keyspaceAndTable)
@@ -50,5 +50,5 @@ func (g *Generator) Delete(ctx context.Context) *typedef.Stmt {
 		Values:        values,
 		QueryType:     typedef.DeleteStatementType,
 		Query:         query,
-	}
+	}, nil
 }

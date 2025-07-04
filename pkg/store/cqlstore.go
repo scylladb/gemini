@@ -132,12 +132,16 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 		query.WithTimestamp(ts.MustGet().UnixMicro())
 	}
 
-	for range c.maxRetriesMutate {
+	for i := range c.maxRetriesMutate {
 		mutateErr := query.Exec()
 		c.cqlRequestsMetric[stmt.QueryType].Inc()
 
-		if mutateErr == nil || errors.Is(mutateErr, gocql.ErrNotFound) || errors.Is(mutateErr, context.Canceled) {
+		if mutateErr == nil || errors.Is(mutateErr, gocql.ErrNotFound) {
 			return nil
+		}
+
+		if errors.Is(mutateErr, context.Canceled) {
+			return context.Canceled
 		}
 
 		if errors.Is(mutateErr, context.DeadlineExceeded) {
@@ -149,6 +153,9 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 			Inner:         mutateErr,
 			PartitionKeys: stmt.PartitionKeys.Values,
 		})
+
+		data, _ := GetContextData(ctx)
+		data.GeminiAttempt = i
 		c.cqlErrorRequestsMetric[stmt.QueryType].Inc()
 		time.Sleep(c.maxRetriesMutateSleep)
 	}
@@ -194,7 +201,6 @@ func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionP
 		p := gocql.TokenAwareHostPolicy(
 			gocql.RoundRobinHostPolicy(),
 			gocql.ShuffleReplicas(),
-			gocql.AvoidSlowReplicas(2000),
 		)
 		return p, nil
 	default:

@@ -29,6 +29,8 @@ import (
 	"gopkg.in/inf.v0"
 )
 
+var ErrNoPartitionKeyValues = errors.New("no partition keys available")
+
 type Random interface {
 	Uint32() uint32
 	IntN(int) int

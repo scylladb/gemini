@@ -29,7 +29,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
   test:
-    timeout-minutes: 20
+    timeout-minutes: 10
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}-${{ matrix.duration }}-${{ matrix.warmup }}-${{ matrix.dataset-size }}-${{ matrix.test-scylla-version }}-${{ matrix.oracle-scylla-version }}
     needs: [build]
@@ -38,7 +38,7 @@ jobs:
       max-parallel: 1
       matrix:
         gemini-features: ["basic", "normal"]
-        gemini-concurrency: [2]
+        gemini-concurrency: [1]
         duration: ["4m"]
         warmup: ["1m"]
         dataset-size: [large]
@@ -68,7 +68,7 @@ jobs:
           SEED=$(python3 -c "import random; print(random.randint(1, 100))")
 
           make integration-test \
-          	GEMINI_IO_WORKER_POOL=2 \
+          	GEMINI_IO_WORKER_POOL=${{ matrix.gemini-concurrency }} \
             GEMINI_SEED=$SEED \
             CONCURRENCY=${{ matrix.gemini-concurrency }} \
             CQL_FEATURES=${{ matrix.gemini-features }} \

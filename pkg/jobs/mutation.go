@@ -29,6 +29,7 @@ import (
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type Mutation struct {
@@ -75,6 +76,40 @@ func NewMutation(
 	}
 }
 
+func (m *Mutation) run(ctx context.Context) error {
+	mutateStmt, err := m.statement.MutateStatement(ctx, m.delete)
+	if err != nil {
+		return err
+	}
+
+	defer m.generator.ReleaseToken(mutateStmt.PartitionKeys.Token)
+
+	err = m.store.Mutate(ctx, mutateStmt)
+
+	if err == nil {
+		m.status.WriteOp()
+		m.generator.GiveOlds(ctx, mutateStmt.PartitionKeys)
+		return nil
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+
+	return joberror.JobError{
+		Err:           err,
+		Timestamp:     time.Now(),
+		StmtType:      mutateStmt.QueryType,
+		Message:       "Mutation failed: " + err.Error(),
+		Query:         mutateStmt.Query,
+		PartitionKeys: mutateStmt.PartitionKeys.Values,
+	}
+}
+
 func (m *Mutation) Do(ctx context.Context) error {
 	name := m.Name()
 	executionTime := metrics.ExecutionTimeStart(name)
@@ -83,38 +118,19 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 	for !m.stopFlag.IsHardOrSoft() {
 		err := executionTime.RunFuncE(func() error {
-			mutateStmt := m.statement.MutateStatement(ctx, m.delete)
-
-			if mutateStmt == nil {
-				return ErrNoStatement
-			}
-
-			defer m.generator.ReleaseToken(mutateStmt.PartitionKeys.Token)
-
-			err := m.store.Mutate(ctx, mutateStmt)
-
-			if err == nil {
-				m.status.WriteOp()
-				m.generator.GiveOlds(ctx, mutateStmt.PartitionKeys)
-				return nil
-			}
-
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-				return nil
-			}
-
-			return joberror.JobError{
-				Err:           err,
-				Timestamp:     time.Now(),
-				StmtType:      mutateStmt.QueryType,
-				Message:       "Mutation failed: " + err.Error(),
-				Query:         mutateStmt.Query,
-				PartitionKeys: mutateStmt.PartitionKeys.Values,
-			}
+			return m.run(ctx)
 		})
 
+		if errors.Is(err, utils.ErrNoPartitionKeyValues) {
+			continue
+		}
+
+		if errors.Is(err, context.Canceled) {
+			return context.Canceled
+		}
+
 		if errors.Is(err, ErrNoStatement) {
-			time.Sleep(m.schema.Config.AsyncObjectStabilizationDelay)
+			return nil
 		}
 
 		var jobErr joberror.JobError

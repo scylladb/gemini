@@ -82,42 +82,52 @@ func (l List) Run(
 	stopFlag *stop.Flag,
 	src *rand.ChaCha8,
 ) error {
-	ctx, cancel := context.WithTimeout(base, l.duration)
-	defer cancel()
 	logger = logger.Named(l.name)
+	ctx, cancel := context.WithDeadline(base, time.Now().Add(l.duration))
 	g, gCtx := errgroup.WithContext(ctx)
 
 	logger.Info("start jobs")
+	defer func() {
+		logger.Info("stop jobs")
+		cancel()
+	}()
+
 	for _, table := range schema.Tables {
-		newSrc := [32]byte{}
-		_, _ = src.Read(newSrc[:])
+		generator := gens.Get(table)
 
 		for _, mode := range l.modes {
 			switch mode {
 			case WriteMode, WarmupMode:
 				for range l.workers {
+					newSrc := [32]byte{}
+					_, _ = src.Read(newSrc[:])
+
+					warmup := mode == WarmupMode
 					g.Go(func() error {
 						return NewMutation(
 							schema,
 							schemaConfig,
 							table,
-							gens.Get(table),
+							generator,
 							globalStatus,
 							stopFlag,
 							s,
-							mode != WarmupMode,
+							!warmup,
 							newSrc,
 						).Do(gCtx)
 					})
 				}
 			case ReadMode:
 				for range l.workers {
+					newSrc := [32]byte{}
+					_, _ = src.Read(newSrc[:])
+
 					g.Go(func() error {
 						return NewValidation(
 							schema.Keyspace.Name,
 							table,
 							schemaConfig,
-							gens.Get(table),
+							generator,
 							globalStatus,
 							stopFlag,
 							s,

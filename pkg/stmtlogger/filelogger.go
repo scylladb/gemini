@@ -115,6 +115,8 @@ func (i *IOWriterLogger) committer(
 		timer.Stop()
 	}
 
+	fileSize := metrics.FileSizeMetrics.WithLabelValues(name)
+
 	for {
 		select {
 		case <-timer.C:
@@ -127,7 +129,7 @@ func (i *IOWriterLogger) committer(
 				continue
 			}
 
-			metrics.FileSizeMetrics.WithLabelValues(name).Set(float64(info.Size()))
+			fileSize.Set(float64(info.Size()))
 		case rec, more := <-i.ch:
 			if !more {
 				return

@@ -15,12 +15,9 @@
 package main
 
 import (
-	"context"
 	"os"
-	"os/signal"
 	"runtime"
 	"runtime/debug"
-	"syscall"
 
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -29,17 +26,13 @@ func main() {
 	runtime.SetMutexProfileFraction(1)
 	runtime.SetBlockProfileRate(1)
 
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer cancel()
-
 	status := 0
 
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	if err := rootCmd.Execute(); err != nil {
 		status = 1
 	}
 
 	utils.ExecuteFinalizers()
-	cancel()
 	os.Exit(status) //nolint:gocritic
 }
 

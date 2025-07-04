@@ -184,7 +184,7 @@ type delegatingStore struct {
 }
 
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef.Stmt) error {
-	ctx = WithContextData(ctx, ContextData{
+	ctx = WithContextData(ctx, &ContextData{
 		GeminiAttempt: 0,
 		Statement:     stmt,
 	})
@@ -210,19 +210,20 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef
 }
 
 func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error {
-	doCtx := WithContextData(ctx, ContextData{
-		GeminiAttempt: 0,
-		Statement:     stmt,
-	})
-
 	var oracleCh chan mo.Result[any]
 
 	if ds.oracleStore != nil {
+		doCtx := WithContextData(ctx, &ContextData{
+			Statement: stmt,
+		})
 		oracleCh = ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
 			return nil, ds.oracleStore.mutate(ctx, stmt, mo.None[time.Time]())
 		})
 	}
 
+	doCtx := WithContextData(ctx, &ContextData{
+		Statement: stmt,
+	})
 	testCh := ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
 		return nil, ds.testStore.mutate(ctx, stmt, mo.None[time.Time]())
 	})
@@ -230,12 +231,6 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	result := <-testCh
 	ds.workers.Release(testCh)
 	if result.IsError() {
-		// Test store failed, transition cannot take place
-		ds.logger.Error(
-			"test store failed mutation, transition to next state impossible so continuing with next mutation",
-			zap.Error(result.Error()),
-		)
-
 		return result.Error()
 	}
 
@@ -243,12 +238,6 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		result = <-oracleCh
 		ds.workers.Release(oracleCh)
 		if result.IsError() {
-			// Oracle store failed, transition cannot take place
-			ds.logger.Error(
-				"oracle store failed mutation, transition to next state impossible so continuing with next mutation",
-				zap.Error(result.Error()),
-			)
-
 			return result.Error()
 		}
 	}
@@ -264,16 +253,21 @@ func (ds delegatingStore) Check(
 ) error {
 	var oracleCh chan mo.Result[any]
 
-	doCtx := WithContextData(ctx, ContextData{
-		GeminiAttempt: attempt,
-		Statement:     stmt,
-	})
-
 	if ds.oracleStore != nil {
+		doCtx := WithContextData(ctx, &ContextData{
+			GeminiAttempt: attempt,
+			Statement:     stmt,
+		})
+
 		oracleCh = ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
 			return ds.oracleStore.load(ctx, stmt)
 		})
 	}
+
+	doCtx := WithContextData(ctx, &ContextData{
+		GeminiAttempt: attempt,
+		Statement:     stmt,
+	})
 
 	testCh := ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
 		return ds.testStore.load(ctx, stmt)

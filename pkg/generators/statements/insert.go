@@ -26,7 +26,7 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
-func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) *typedef.Stmt {
+func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) (*typedef.Stmt, error) {
 	g.table.RLock()
 	defer g.table.RUnlock()
 
@@ -43,10 +43,12 @@ func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) *t
 	}
 
 	switch g.random.IntN(MutationStatements) {
-	case InsertStatements, UpdateStatement:
+
+	case InsertStatements:
 		if g.table.IsCounterTable() {
 			return g.Update(ctx)
 		}
+
 		return g.Insert(ctx)
 	case InsertJSONStatement:
 		if g.table.IsCounterTable() {
@@ -58,20 +60,30 @@ func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) *t
 		}
 
 		return g.InsertJSON(ctx)
-	// case UpdateStatement:
-	//	return g.Update(ctx)
+	case UpdateStatement:
+		// TODO(CodeLieutenant): Update statement support expected in v2.1.0
+		//       Falling back to Insert for now, until everything else is stable
+
+		if g.table.IsCounterTable() {
+			return g.Update(ctx)
+		}
+		return g.Insert(ctx)
 	default:
 		panic("Invalid mutation statement type")
 	}
 }
 
-func (g *Generator) Insert(ctx context.Context) *typedef.Stmt {
+func (g *Generator) Insert(ctx context.Context) (*typedef.Stmt, error) {
 	builder := qb.Insert(g.keyspaceAndTable)
+	if g.useLWT && g.random.Uint32()%10 == 0 {
+		builder.Unique()
+	}
+
 	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
 
-	pks := g.generator.Get(ctx)
-	if pks.Token == 0 {
-		return nil
+	pks, err := g.generator.Get(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	for _, pk := range g.table.PartitionKeys {
@@ -95,10 +107,6 @@ func (g *Generator) Insert(ctx context.Context) *typedef.Stmt {
 		}
 	}
 
-	if g.useLWT && g.random.Uint32()%10 == 0 {
-		builder.Unique()
-	}
-
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
@@ -106,17 +114,17 @@ func (g *Generator) Insert(ctx context.Context) *typedef.Stmt {
 		Values:        values,
 		QueryType:     typedef.InsertStatementType,
 		Query:         query,
-	}
+	}, nil
 }
 
-func (g *Generator) InsertJSON(ctx context.Context) *typedef.Stmt {
+func (g *Generator) InsertJSON(ctx context.Context) (*typedef.Stmt, error) {
 	if g.table.IsCounterTable() {
-		return nil
+		return nil, nil
 	}
 
-	pks := g.generator.Get(ctx)
-	if pks.Token == 0 {
-		return nil
+	pks, err := g.generator.Get(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	values := make(map[string]any, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
@@ -141,7 +149,7 @@ func (g *Generator) InsertJSON(ctx context.Context) *typedef.Stmt {
 
 	jsonString, err := json.Marshal(values)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	query, _ := qb.Insert(g.keyspaceAndTable).Json().ToCql()
@@ -149,7 +157,7 @@ func (g *Generator) InsertJSON(ctx context.Context) *typedef.Stmt {
 		PartitionKeys: pks,
 		Query:         query,
 		Values:        []any{utils.UnsafeString(jsonString)},
-	}
+	}, nil
 }
 
 func convertForJSON(vType typedef.Type, value any) any {

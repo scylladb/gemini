@@ -30,6 +30,7 @@ import (
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type Validation struct {
@@ -86,6 +87,54 @@ func NewValidation(
 	}
 }
 
+func (v *Validation) run(ctx context.Context) error {
+	var acc error
+
+	stmt, stmtErr := v.statement.Select(ctx)
+	if errors.Is(stmtErr, utils.ErrNoPartitionKeyValues) {
+		return utils.ErrNoPartitionKeyValues
+	}
+
+	if stmt == nil {
+		if v.status.HasErrors() {
+			v.stopFlag.SetSoft(true)
+		}
+		return ErrNoStatement
+	}
+
+	for attempt := 1; attempt <= v.maxAttempts; attempt++ {
+		err := v.store.Check(ctx, v.table, stmt, attempt)
+		if err == nil {
+			v.status.ReadOp()
+			return nil
+		}
+
+		if errors.Is(err, context.DeadlineExceeded) {
+			continue
+		}
+
+		if errors.Is(err, context.Canceled) {
+			return context.Canceled
+		}
+
+		if attempt == v.maxAttempts {
+			return joberror.JobError{
+				Timestamp:     time.Now(),
+				Err:           acc,
+				StmtType:      stmt.QueryType,
+				Message:       "Validation failed:" + err.Error(),
+				Query:         stmt.Query,
+				PartitionKeys: stmt.PartitionKeys.Values,
+			}
+		}
+
+		acc = multierr.Append(acc, err)
+		time.Sleep(v.delay)
+	}
+
+	return nil
+}
+
 func (v *Validation) Do(ctx context.Context) error {
 	name := v.Name()
 
@@ -95,52 +144,20 @@ func (v *Validation) Do(ctx context.Context) error {
 
 	for !v.stopFlag.IsHardOrSoft() {
 		err := executionTime.RunFuncE(func() error {
-			var acc error
-
-			stmt := v.statement.Select(ctx)
-			if stmt == nil {
-				if v.status.HasErrors() {
-					v.stopFlag.SetSoft(true)
-				}
-				return ErrNoStatement
-			}
-
-			for attempt := 1; attempt <= v.maxAttempts; attempt++ {
-				err := v.store.Check(ctx, v.table, stmt, attempt)
-				if err == nil {
-					v.status.ReadOp()
-					return nil
-				}
-
-				if errors.Is(err, context.DeadlineExceeded) {
-					continue
-				}
-
-				if errors.Is(err, context.Canceled) {
-					return nil
-				}
-
-				if attempt == v.maxAttempts {
-					return joberror.JobError{
-						Timestamp:     time.Now(),
-						Err:           acc,
-						StmtType:      stmt.QueryType,
-						Message:       "Validation failed:" + err.Error(),
-						Query:         stmt.Query,
-						PartitionKeys: stmt.PartitionKeys.Values,
-					}
-				}
-
-				acc = multierr.Append(acc, err)
-				time.Sleep(v.delay)
-			}
-
-			return nil
+			return v.run(ctx)
 		})
 
-		if errors.Is(err, ErrNoStatement) {
+		if errors.Is(err, utils.ErrNoPartitionKeyValues) {
 			time.Sleep(v.delay)
 			continue
+		}
+
+		if errors.Is(err, context.Canceled) {
+			return context.Canceled
+		}
+
+		if errors.Is(err, ErrNoStatement) {
+			return nil
 		}
 
 		var jobErr joberror.JobError

@@ -111,7 +111,7 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		StringVarP(&schemaSeed, "schema-seed", "", "random", "Schema seed value")
 	cmd.Flags().
-		BoolVarP(&dropSchema, "drop-schema", "d", false, "Drop schema before starting tests run")
+		BoolVarP(&dropSchema, "drop-schema", "d", true, "Drop schema before starting tests run")
 	cmd.Flags().
 		BoolVarP(&verbose, "verbose", "v", false, "Verbose output during test run")
 	cmd.Flags().
@@ -139,32 +139,32 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		IntVarP(&maxTables, "max-tables", "", 1, "Maximum number of generated tables")
 	cmd.Flags().
-		IntVarP(&maxPartitionKeys, "max-partition-keys", "", 6, "Maximum number of generated partition keys")
+		IntVarP(&maxPartitionKeys, "max-partition-keys", "", 5, "Maximum number of generated partition keys")
 	cmd.Flags().
-		IntVarP(&minPartitionKeys, "min-partition-keys", "", 2, "Minimum number of generated partition keys")
+		IntVarP(&minPartitionKeys, "min-partition-keys", "", 1, "Minimum number of generated partition keys")
 	cmd.Flags().
-		IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 4, "Maximum number of generated clustering keys")
+		IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 3, "Maximum number of generated clustering keys")
 	cmd.Flags().
-		IntVarP(&minClusteringKeys, "min-clustering-keys", "", 2, "Minimum number of generated clustering keys")
+		IntVarP(&minClusteringKeys, "min-clustering-keys", "", 1, "Minimum number of generated clustering keys")
 	cmd.Flags().
-		IntVarP(&maxColumns, "max-columns", "", 16, "Maximum number of generated columns")
+		IntVarP(&maxColumns, "max-columns", "", 12, "Maximum number of generated columns")
 	cmd.Flags().
-		IntVarP(&minColumns, "min-columns", "", 8, "Minimum number of generated columns")
+		IntVarP(&minColumns, "min-columns", "", 5, "Minimum number of generated columns")
 	cmd.Flags().
 		StringVarP(&datasetSize, "dataset-size", "", "large", "Specify the type of dataset size to use, small|large")
 	cmd.Flags().
-		StringVarP(&cqlFeatures, "cql-features", "", "basic", "Specify the type of cql features to use, basic|normal|all")
+		StringVarP(&cqlFeatures, "cql-features", "", "normal", "Specify the type of cql features to use, basic|normal|all")
 	cmd.Flags().
 		BoolVarP(&useMaterializedViews, "materialized-views", "", false, "Run gemini with materialized views support")
 	cmd.Flags().
 		StringVarP(&level, "level", "", "info", "Specify the logging level, debug|info|warn|error|dpanic|panic|fatal")
 	cmd.Flags().
-		IntVarP(&maxRetriesMutate, "max-mutation-retries", "", 2, "Maximum number of attempts to apply a mutation")
+		IntVarP(&maxRetriesMutate, "max-mutation-retries", "", 10, "Maximum number of attempts to apply a mutation")
 	cmd.Flags().
 		DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond,
 			"Duration between attempts to apply a mutation for example 10ms or 1s")
 	cmd.Flags().
-		Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 100, "Number of reused buffered partition keys")
+		Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 256, "Number of reused buffered partition keys")
 	cmd.Flags().
 		Int32VarP(&partitionCount, "token-range-slices", "", 10000, "Number of slices to divide the token space into")
 	cmd.Flags().
@@ -194,13 +194,13 @@ func setupFlags(cmd *cobra.Command) {
 		StringVarP(&testClusterHostSelectionPolicy, "test-host-selection-policy", "", "token-aware",
 			"Host selection policy used by the driver for the test cluster: round-robin|host-pool|token-aware")
 	cmd.Flags().
-		BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
+		BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", true, "Use server-side generated timestamps for writes")
 	cmd.Flags().
 		DurationVarP(&requestTimeout, "request-timeout", "", 30*time.Second, "Duration of waiting request execution")
 	cmd.Flags().
 		DurationVarP(&connectTimeout, "connect-timeout", "", 30*time.Second, "Duration of waiting connection established")
 	cmd.Flags().
-		IntVarP(&profilingPort, "profiling-port", "", 0, "If non-zero starts pprof profiler on given port at 'http://0.0.0.0:<port>/profile'")
+		IntVarP(&profilingPort, "profiling-port", "", 6060, "If non-zero starts pprof profiler on given port at 'http://0.0.0.0:<port>/profile'")
 	cmd.Flags().
 		IntVarP(&maxErrorsToStore, "max-errors-to-store", "", 1000, "Maximum number of errors to store and output at the end")
 	cmd.Flags().
@@ -208,5 +208,5 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		StringVarP(&oracleStatementLogFile, "oracle-statement-log-file", "", "", "File to write statements flow to")
 	cmd.Flags().
-		StringVarP(&statementLogFileCompression, "statement-log-file-compression", "", "zstd", "Compression algorithm to use for statement log files")
+		StringVarP(&statementLogFileCompression, "statement-log-file-compression", "", "none", "Compression algorithm to use for statement log files")
 }
