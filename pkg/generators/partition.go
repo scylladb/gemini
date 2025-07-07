@@ -152,13 +152,7 @@ func (p *Partitions) Close() error {
 
 func (p *Partitions) Get(token int) *Partition {
 	idx := token % len(p.parts)
-	partition := &p.parts[idx]
-
-	if partition.Stale() {
-		return nil
-	}
-
-	return partition
+	return &p.parts[idx]
 }
 
 func (p *Partitions) Len() int {
