@@ -82,6 +82,33 @@ func New(
 	}
 }
 
+func (g *Generator) getMultiplePartitionKeys() int {
+	l := g.table.PartitionKeys.Len()
+	if l == 0 {
+		panic("table has no partition keys")
+	}
+
+	maximum := TotalCartesianProductCount(float64(g.random.IntN(l)), float64(l))
+
+	return max(1, maximum)
+}
+
+//nolint:unused
+func (g *Generator) getMultipleClusteringKeys() int {
+	l := g.table.ClusteringKeys.Len()
+	if l == 0 {
+		return 0
+	}
+
+	maximum := TotalCartesianProductCount(float64(g.random.IntN(l)), float64(l))
+	return max(1, maximum)
+}
+
+func (g *Generator) getIndex(initial int) int {
+	l := len(g.table.Indexes)
+	return min(initial, l) + g.random.IntN(l)
+}
+
 const MaxCartesianProductCount = float64(100.0)
 
 // TotalCartesianProductCount chooses the first number of partition keys that

@@ -199,7 +199,6 @@ func (l *Logger) LogStmt(item Item) error {
 func (l *Logger) Close() error {
 	old := l.channel.Swap(nil)
 	close(*old)
-
 	return l.closer.Close()
 }
 

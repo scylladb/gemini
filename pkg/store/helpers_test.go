@@ -423,12 +423,12 @@ func BenchmarkPks(b *testing.B) {
 	// Create test data
 	table := &typedef.Table{
 		PartitionKeys: typedef.Columns{
-			{Name: "pk0"},
-			{Name: "pk1"},
+			{Name: "pk0", Type: typedef.TypeText},
+			{Name: "pk1", Type: typedef.TypeInt},
 		},
 		ClusteringKeys: typedef.Columns{
-			{Name: "ck0"},
-			{Name: "ck1"},
+			{Name: "ck0", Type: typedef.TypeInt},
+			{Name: "ck1", Type: typedef.TypeFloat},
 		},
 	}
 

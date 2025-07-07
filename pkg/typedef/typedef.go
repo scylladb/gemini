@@ -122,8 +122,14 @@ func (st StatementType) String() string {
 		return "SelectByIndexStatement"
 	case SelectFromMaterializedViewStatementType:
 		return "SelectFromMaterializedViewStatement"
-	case DeleteStatementType:
-		return "DeleteStatement"
+	case DeleteSingleRowType:
+		return "DeleteSingleRow"
+	case DeleteSingleColumnType:
+		return "DeleteSingleColumn"
+	case DeleteMultiplePartitionsType:
+		return "DeleteMultiplePartitions"
+	case DeleteWholePartitionType:
+		return "DeleteWholePartition"
 	case InsertStatementType:
 		return "InsertStatement"
 	case InsertJSONStatementType:
@@ -207,7 +213,13 @@ func (st StatementType) IsUpdate() bool {
 }
 
 func (st StatementType) IsDelete() bool {
-	return st == DeleteStatementType
+	switch st {
+	case DeleteWholePartitionType, DeleteMultiplePartitionsType,
+		DeleteSingleColumnType, DeleteSingleRowType:
+		return true
+	default:
+		return false
+	}
 }
 
 func (st StatementType) IsSchema() bool {
@@ -235,7 +247,8 @@ func (st StatementType) OpType() OpType {
 		return OpInsert
 	case UpdateStatementType:
 		return OpUpdate
-	case DeleteStatementType:
+	case DeleteWholePartitionType, DeleteMultiplePartitionsType,
+		DeleteSingleColumnType, DeleteSingleRowType:
 		return OpDelete
 	case AlterColumnStatementType, DropColumnStatementType, AddColumnStatementType,
 		DropTableStatementType, CreateTableStatementType, DropTypeStatementType,

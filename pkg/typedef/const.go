@@ -31,7 +31,10 @@ const (
 	SelectMultiPartitionRangeStatementType
 	SelectByIndexStatementType
 	SelectFromMaterializedViewStatementType
-	DeleteStatementType
+	DeleteWholePartitionType
+	DeleteSingleRowType
+	DeleteSingleColumnType
+	DeleteMultiplePartitionsType
 	InsertStatementType
 	InsertJSONStatementType
 	UpdateStatementType

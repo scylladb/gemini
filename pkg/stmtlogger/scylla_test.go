@@ -129,7 +129,7 @@ func TestScyllaLogger(t *testing.T) {
 		session := utils.SingleScylla(t)
 
 		jobList := joberror.NewErrorList(1)
-		pool := workpool.New(50)
+		pool := workpool.New(1)
 		t.Cleanup(func() {
 			_ = pool.Close()
 		})

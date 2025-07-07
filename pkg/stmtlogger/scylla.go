@@ -52,7 +52,7 @@ var (
 type ScyllaLogger struct {
 	cancel               context.CancelFunc
 	session              *gocql.Session
-	channel              chan Item
+	channel              <-chan Item
 	errors               *joberror.ErrorList
 	wg                   *sync.WaitGroup
 	pool                 *workpool.Pool
@@ -260,12 +260,20 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 	}
 
 	for {
-		item, more := <-s.channel
-		if !more {
-			break
-		}
+		select {
+		case <-ctx.Done():
+			for item := range s.channel {
+				logStatement(item)
+			}
 
-		logStatement(item)
+			return
+		case item, more := <-s.channel:
+			if !more {
+				break
+			}
+
+			logStatement(item)
+		}
 	}
 }
 
@@ -359,7 +367,8 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 	switch jobError.StmtType {
 	case typedef.SelectStatementType, typedef.SelectRangeStatementType,
 		typedef.InsertStatementType, typedef.InsertJSONStatementType,
-		typedef.UpdateStatementType, typedef.DeleteStatementType:
+		typedef.UpdateStatementType, typedef.DeleteWholePartitionType,
+		typedef.DeleteSingleRowType, typedef.DeleteSingleColumnType:
 		builder := qb.Select("logs.statements").
 			Columns(additionalColumnsArr...).
 			OrderBy("ts", qb.ASC)
@@ -377,7 +386,8 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 
 		query, _ := builder.ToCql()
 		return []string{query}, [][]any{values}
-	case typedef.SelectMultiPartitionType, typedef.SelectMultiPartitionRangeStatementType:
+	case typedef.SelectMultiPartitionType, typedef.SelectMultiPartitionRangeStatementType,
+		typedef.DeleteMultiplePartitionsType:
 		// TODO: Optimization for multi-partition queries
 		// 	Calculate the Cartesian product of all partition keys
 		//  By this we can split the query into multiple queries
@@ -422,11 +432,42 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 	}
 }
 
-func (s *ScyllaLogger) fetchFailedPartitions(ch chan<- Item, ty Type, errs []joberror.JobError) {
-	defer close(ch)
-	schemaChangeValues := make([]any, 0, s.partitionKeysCount+1)
-	schemaChangeValues = append(schemaChangeValues, s.schemaChangeValues.Values.ToCQLValues(s.schemaPartitionKeys)...)
-	schemaChangeValues = append(schemaChangeValues, string(ty))
+func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) {
+	var (
+		file   io.Writer
+		closer func() error
+		err    error
+	)
+
+	switch ty {
+	case TypeOracle:
+		file, closer, err = s.openStatementFile(s.oracleStatementsFile)
+	case TypeTest:
+		file, closer, err = s.openStatementFile(s.testStatementsFile)
+	default:
+		s.logger.DPanic("unsupported type to fetch from statement logs", zap.String("type", string(ty)))
+	}
+
+	if err != nil {
+		if closer != nil {
+			if err = closer(); err != nil {
+				s.logger.Error("failed to close oracle statements file", zap.Error(err))
+			}
+		}
+
+		s.logger.Error("failed to open oracle statements file", zap.Error(err))
+
+		return
+	}
+
+	defer func() {
+		if err = closer(); err != nil {
+			s.logger.Error("failed to close oracle statements file", zap.Error(err))
+		}
+	}()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetEscapeHTML(false)
 
 	builder := qb.Select("logs.statements").
 		Columns(additionalColumnsArr...).
@@ -437,18 +478,24 @@ func (s *ScyllaLogger) fetchFailedPartitions(ch chan<- Item, ty Type, errs []job
 	}
 
 	ddlStatementsQuery, _ := builder.Where(qb.Eq("ty")).
-		Where(qb.EqLit("ddl", "true")).ToCql()
+		Where(qb.EqLit("ddl", "true")).
+		ToCql()
 
-	var wg sync.WaitGroup
+	ch := make(chan Item, 1000)
+	wg := &sync.WaitGroup{}
 
 	wg.Add(1)
-	s.pool.SendWithoutResult(context.Background(), func(_ context.Context) {
+	go func() {
 		defer wg.Done()
-		if err := s.fetchData(ch, ty, ddlStatementsQuery, schemaChangeValues); err != nil {
+		schemaChangeValues := make([]any, 0, s.partitionKeysCount+1)
+		schemaChangeValues = append(schemaChangeValues, s.schemaChangeValues.Values.ToCQLValues(s.schemaPartitionKeys)...)
+		schemaChangeValues = append(schemaChangeValues, string(ty))
+
+		if fetchErr := s.fetchData(ch, ty, ddlStatementsQuery, schemaChangeValues); fetchErr != nil {
 			metrics.ErrorMessages.WithLabelValues("statement_logger_fetch_ddl", err.Error()).Inc()
-			s.logger.Error("failed to fetch schema change data", zap.Error(err))
+			s.logger.Error("failed to fetch schema change data", zap.Error(fetchErr))
 		}
-	})
+	}()
 
 	for _, jobError := range errs {
 		queries, values := s.buildQuery(jobError, ty)
@@ -459,12 +506,12 @@ func (s *ScyllaLogger) fetchFailedPartitions(ch chan<- Item, ty Type, errs []job
 
 		for i, query := range queries {
 			wg.Add(1)
-			s.pool.SendWithoutResult(context.Background(), func(_ context.Context) {
+			go func(values []any) {
 				defer wg.Done()
-				if err := s.fetchData(ch, ty, query, values[i]); err != nil {
+				if fetchErr := s.fetchData(ch, ty, query, values); fetchErr != nil {
 					metrics.ErrorMessages.WithLabelValues("statement_logger_query",
 						fmt.Sprintf(
-							"failed to fetch data for job error %s: error=%v partition-keys=%v", jobError.Error(), err,
+							"failed to fetch data for job error %s: error=%v partition-keys=%v", jobError.Error(), fetchErr,
 							values,
 						)).Inc()
 					s.logger.Error("failed to fetch failed partition data",
@@ -472,118 +519,52 @@ func (s *ScyllaLogger) fetchFailedPartitions(ch chan<- Item, ty Type, errs []job
 						zap.Any("partition_keys", values),
 					)
 				}
-			})
+			}(values[i])
 		}
 	}
 
-	wg.Wait()
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	for item := range ch {
+		if encodeErr := encoder.Encode(item); encodeErr != nil {
+			s.logger.Error("failed to encode oracle statement", zap.Error(encodeErr))
+		}
+	}
 }
 
 func (s *ScyllaLogger) openStatementFile(name string) (io.Writer, func() error, error) {
-	testFileFd, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "failed to open test statements file %q", name)
 	}
 
-	testFile, closer, err := s.compression.newWriter(testFileFd)
-	if err != nil {
-		return nil, testFileFd.Close, errors.Wrapf(err, "failed to create test statements file writer %q", name)
-	}
-
-	return testFile, closer.Close, nil
-}
-
-func (s *ScyllaLogger) writeBrokenPartitionsToFile(errs []joberror.JobError) error {
-	testFile, testCloser, err := s.openStatementFile(s.testStatementsFile)
-	if err != nil {
-		if testCloser != nil {
-			if err = testCloser(); err != nil {
-				s.logger.Error("failed to close test statements file", zap.Error(err))
-			}
-		}
-		return errors.Wrapf(err, "failed to open test statements file %q", s.testStatementsFile)
-	}
-
-	defer func() {
-		if err = testCloser(); err != nil {
-			s.logger.Error("failed to close test statements file", zap.Error(err))
-		}
-	}()
-
-	oracleFile, oracleCloser, err := s.openStatementFile(s.oracleStatementsFile)
-	if err != nil {
-		if oracleCloser != nil {
-			if err = oracleCloser(); err != nil {
-				s.logger.Error("failed to close oracle statements file", zap.Error(err))
-			}
-		}
-		return errors.Wrapf(err, "failed to open oracle statements file %q", s.oracleStatementsFile)
-	}
-
-	defer func() {
-		if err = oracleCloser(); err != nil {
-			s.logger.Error("failed to close oracle statements file", zap.Error(err))
-		}
-	}()
-
-	oracleCh := make(chan Item, 1000)
-	testCh := make(chan Item, 1000)
-	s.pool.SendWithoutResult(context.Background(), func(_ context.Context) {
-		s.fetchFailedPartitions(oracleCh, TypeOracle, errs)
-	})
-
-	s.pool.SendWithoutResult(context.Background(), func(_ context.Context) {
-		s.fetchFailedPartitions(testCh, TypeTest, errs)
-	})
-
-	testJSONEncoder := json.NewEncoder(testFile)
-	testJSONEncoder.SetEscapeHTML(false)
-	oracleJSONEncoder := json.NewEncoder(oracleFile)
-	oracleJSONEncoder.SetEscapeHTML(false)
-
-	for {
-		select {
-		case item, more := <-oracleCh:
-			if !more {
-				oracleCh = nil
-				if testCh == nil {
-					return nil
-				}
-				continue
-			}
-
-			if err = oracleJSONEncoder.Encode(item); err != nil {
-				s.logger.Error("failed to encode oracle statement", zap.Error(err), zap.Any("item", item))
-			}
-		case item, more := <-testCh:
-			if !more {
-				testCh = nil
-				if oracleCh == nil {
-					return nil
-				}
-				continue
-			}
-
-			if err = testJSONEncoder.Encode(item); err != nil {
-				s.logger.Error("failed to encode test statement", zap.Error(err), zap.Any("item", item))
-			}
-		}
-	}
+	return file, func() error {
+		_ = file.Sync()
+		return file.Close()
+	}, nil
 }
 
 func (s *ScyllaLogger) Close() error {
 	s.cancel()
+	s.wg.Wait()
 
 	errs := s.errors.Errors()
 	if len(errs) == 0 {
 		return nil
 	}
 
-	if err := s.writeBrokenPartitionsToFile(errs); err != nil {
-		return errors.Wrap(err, "failed to write broken partitions to file")
+	wg := &sync.WaitGroup{}
+	for _, ty := range []Type{TypeOracle, TypeTest} {
+		wg.Add(1)
+		go func(errs []joberror.JobError) {
+			defer wg.Done()
+			s.fetchFailedPartitions(ty, errs)
+		}(slices.Clone(errs))
 	}
 
-	s.wg.Wait()
-
+	wg.Wait()
 	return nil
 }
