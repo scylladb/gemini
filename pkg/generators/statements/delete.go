@@ -31,7 +31,7 @@ func (g *Generator) Delete(ctx context.Context) (*typedef.Stmt, error) {
 	case DeleteSingleColumn:
 		return g.deleteSinglePartition(ctx)
 	case DeleteMultiplePartitions:
-		return g.deleteMultiplePartitions(ctx)
+		return g.deleteSinglePartition(ctx)
 	default:
 		panic("unknown delete statement type")
 	}
