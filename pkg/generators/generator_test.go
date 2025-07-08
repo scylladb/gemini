@@ -52,7 +52,7 @@ func TestGenerator(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	generator := generators.NewGenerator(table, cfg, logger, rand.NewChaCha8([32]byte{}))
 	for i := range cfg.PartitionsCount {
-		current.Store(i)
+		current.Store(int32(i))
 		v, err := generator.Get(t.Context())
 		assert.NoError(err)
 		n, err := generator.Get(t.Context())

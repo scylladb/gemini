@@ -45,7 +45,6 @@ type Mutation struct {
 
 func NewMutation(
 	schema *typedef.Schema,
-	config typedef.SchemaConfig,
 	table *typedef.Table,
 	generator generators.Interface,
 	status *status.GlobalStatus,
@@ -54,14 +53,14 @@ func NewMutation(
 	del bool,
 	seed [32]byte,
 ) *Mutation {
-	pc := config.GetPartitionRangeConfig()
+	pc := schema.Config.GetPartitionRangeConfig()
 	statementGenerator := statements.New(
 		schema.Keyspace.Name,
 		generator,
 		table,
 		rand.New(rand.NewChaCha8(seed)),
 		&pc,
-		config.UseLWT,
+		schema.Config.UseLWT,
 	)
 
 	return &Mutation{
@@ -169,7 +168,7 @@ func (m *Mutation) ddl(_ context.Context) error {
 	//	return nil
 	//}
 	//
-	//for _, ddlStmt := range ddlStmts.List {
+	//for _, ddlStmt := range ddlStmts.Jobs {
 	//	if err = w.store.Mutate(ctx, ddlStmt); err != nil {
 	//		w.status.AddWriteError(joberror.JobError{
 	//			Timestamp: time.Now(),

@@ -31,7 +31,7 @@ type Generators struct {
 func New(
 	schema *typedef.Schema,
 	distFunc distributions.DistributionFunc,
-	seed uint64, distributionSize int32, pkBufferReuseSize uint64,
+	seed uint64, distributionSize, pkBufferReuseSize int,
 	logger *zap.Logger,
 	source *rand.ChaCha8,
 ) *Generators {

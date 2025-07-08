@@ -58,8 +58,8 @@ var (
 	maxRetriesMutate                 int
 	maxRetriesMutateSleep            time.Duration
 	maxErrorsToStore                 int
-	pkBufferReuseSize                uint64
-	partitionCount                   int32
+	pkBufferReuseSize                int
+	partitionCount                   int
 	partitionKeyDistribution         string
 	normalDistMean                   float64
 	normalDistSigma                  float64
@@ -80,14 +80,14 @@ var (
 	versionFlag                      bool
 	iOWorkerPool                     int
 
-	concurrency         uint64
-	mutationConcurrency uint64
-	readConcurrency     uint64
+	concurrency         int
+	mutationConcurrency int
+	readConcurrency     int
 )
 
 func setupFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().Uint64VarP(&mutationConcurrency, "mutation-concurrency", "", 0, "Number of worker threads to use for IO operations")
-	cmd.PersistentFlags().Uint64VarP(&readConcurrency, "read-concurrency", "", 0, "Number of worker threads to use for IO operations")
+	cmd.PersistentFlags().IntVarP(&mutationConcurrency, "mutation-concurrency", "", 0, "Number of worker threads to use for IO operations")
+	cmd.PersistentFlags().IntVarP(&readConcurrency, "read-concurrency", "", 0, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().IntVarP(&iOWorkerPool, "io-worker-pool", "", 1024, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().BoolVarP(&versionFlag, "version", "", false, "Print version information")
 	cmd.PersistentFlags().
@@ -110,7 +110,7 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		StringVarP(&mode, "mode", "m", jobs.MixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	cmd.Flags().
-		Uint64VarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
+		IntVarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
 	cmd.Flags().
 		StringVarP(&seed, "seed", "s", "random", "Statement seed value")
 	cmd.Flags().
@@ -169,9 +169,9 @@ func setupFlags(cmd *cobra.Command) {
 		DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond,
 			"Duration between attempts to apply a mutation for example 10ms or 1s")
 	cmd.Flags().
-		Uint64VarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 256, "Number of reused buffered partition keys")
+		IntVarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 256, "Number of reused buffered partition keys")
 	cmd.Flags().
-		Int32VarP(&partitionCount, "token-range-slices", "", 10000, "Number of slices to divide the token space into")
+		IntVarP(&partitionCount, "token-range-slices", "", 10000, "Number of slices to divide the token space into")
 	cmd.Flags().
 		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "zipf",
 			"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")

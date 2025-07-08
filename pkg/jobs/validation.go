@@ -46,18 +46,17 @@ type Validation struct {
 }
 
 func NewValidation(
-	keyspace string,
+	schema *typedef.Schema,
 	table *typedef.Table,
-	schemaConfig typedef.SchemaConfig,
 	generator generators.Interface,
 	status *status.GlobalStatus,
 	stopFlag *stop.Flag,
 	store store.Store,
 	seed [32]byte,
 ) *Validation {
-	maxAttempts := schemaConfig.AsyncObjectStabilizationAttempts
-	delay := schemaConfig.AsyncObjectStabilizationDelay
-	pc := schemaConfig.GetPartitionRangeConfig()
+	maxAttempts := schema.Config.AsyncObjectStabilizationAttempts
+	delay := schema.Config.AsyncObjectStabilizationDelay
+	pc := schema.Config.GetPartitionRangeConfig()
 
 	if maxAttempts <= 1 {
 		maxAttempts = 10
@@ -68,12 +67,12 @@ func NewValidation(
 	}
 
 	statementGenerator := statements.New(
-		keyspace,
+		schema.Keyspace.Name,
 		generator,
 		table,
 		rand.New(rand.NewChaCha8(seed)),
 		&pc,
-		schemaConfig.UseLWT,
+		schema.Config.UseLWT,
 	)
 
 	return &Validation{

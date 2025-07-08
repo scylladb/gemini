@@ -17,7 +17,6 @@ package jobs
 import (
 	"context"
 	"math/rand/v2"
-	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
@@ -37,12 +36,16 @@ const (
 	WarmupMode = "warmup"
 )
 
-type List struct {
+type Jobs struct {
+	store               store.Store
+	schema              *typedef.Schema
+	generators          *generators.Generators
+	status              *status.GlobalStatus
+	logger              *zap.Logger
+	random              *rand.ChaCha8
 	name                string
-	modes               []string
-	duration            time.Duration
-	mutationConcurrency uint64
-	readConcurrency     uint64
+	mutationConcurrency int
+	readConcurrency     int
 }
 
 var ErrNoStatement = errors.New("no statement generated")
@@ -52,11 +55,28 @@ type Worker interface {
 	Do(context.Context) error
 }
 
-func ListFromMode(
-	mode string,
-	duration time.Duration,
-	mutationConcurrency, readConcurrency uint64,
-) List {
+func New(
+	mutationConcurrency, readConcurrency int,
+	schema *typedef.Schema,
+	st store.Store,
+	gens *generators.Generators,
+	globalStatus *status.GlobalStatus,
+	logger *zap.Logger,
+	src *rand.ChaCha8,
+) *Jobs {
+	return &Jobs{
+		schema:              schema,
+		store:               st,
+		generators:          gens,
+		status:              globalStatus,
+		logger:              logger,
+		random:              src,
+		readConcurrency:     readConcurrency,
+		mutationConcurrency: mutationConcurrency,
+	}
+}
+
+func (j *Jobs) parseMode(mode string) []string {
 	var modes []string
 	switch mode {
 	case MixedMode:
@@ -69,76 +89,58 @@ func ListFromMode(
 		modes = []string{WarmupMode}
 	}
 
-	return List{
-		modes:               modes,
-		duration:            duration,
-		readConcurrency:     readConcurrency,
-		mutationConcurrency: mutationConcurrency,
-	}
+	return modes
 }
 
-func (l List) Run(
-	base context.Context,
-	schema *typedef.Schema,
-	schemaConfig typedef.SchemaConfig,
-	s store.Store,
-	gens *generators.Generators,
-	globalStatus *status.GlobalStatus,
-	logger *zap.Logger,
-	stopFlag *stop.Flag,
-	src *rand.ChaCha8,
-) error {
-	logger = logger.Named(l.name)
-	ctx, cancel := context.WithDeadline(base, time.Now().Add(l.duration))
-	g, gCtx := errgroup.WithContext(ctx)
+func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error {
+	log := j.logger.Named(j.name)
+	log.Info("start jobs")
+	defer log.Info("stop jobs")
 
-	logger.Info("start jobs")
-	defer func() {
-		logger.Info("stop jobs")
-		cancel()
-	}()
+	g, gCtx := errgroup.WithContext(base)
 
-	for _, table := range schema.Tables {
-		generator := gens.Get(table)
+	for _, table := range j.schema.Tables {
+		generator := j.generators.Get(table)
 
-		for _, mode := range l.modes {
-			switch mode {
+		for _, m := range j.parseMode(mode) {
+			switch m {
 			case WriteMode, WarmupMode:
-				for range l.mutationConcurrency {
+				for range j.mutationConcurrency {
 					newSrc := [32]byte{}
-					_, _ = src.Read(newSrc[:])
+					_, _ = j.random.Read(newSrc[:])
 
-					warmup := mode == WarmupMode
+					mutation := NewMutation(
+						j.schema,
+						table,
+						generator,
+						j.status,
+						stopFlag,
+						j.store,
+						mode != WarmupMode,
+						newSrc,
+					)
+
 					g.Go(func() error {
-						return NewMutation(
-							schema,
-							schemaConfig,
-							table,
-							generator,
-							globalStatus,
-							stopFlag,
-							s,
-							!warmup,
-							newSrc,
-						).Do(gCtx)
+						return mutation.Do(gCtx)
 					})
 				}
 			case ReadMode:
-				for range l.readConcurrency {
+				for range j.readConcurrency {
 					newSrc := [32]byte{}
-					_, _ = src.Read(newSrc[:])
+					_, _ = j.random.Read(newSrc[:])
+
+					validation := NewValidation(
+						j.schema,
+						table,
+						generator,
+						j.status,
+						stopFlag,
+						j.store,
+						newSrc,
+					)
 
 					g.Go(func() error {
-						return NewValidation(
-							schema.Keyspace.Name,
-							table,
-							schemaConfig,
-							generator,
-							globalStatus,
-							stopFlag,
-							s,
-							newSrc,
-						).Do(gCtx)
+						return validation.Do(gCtx)
 					})
 				}
 			}

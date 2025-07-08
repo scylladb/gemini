@@ -45,6 +45,7 @@ func (g *Generator) Delete(ctx context.Context) (*typedef.Stmt, error) {
 	//
 }
 
+// nolint:unused
 func (g *Generator) deleteMultiplePartitions(ctx context.Context) (*typedef.Stmt, error) {
 	builder := qb.Delete(g.keyspaceAndTable)
 

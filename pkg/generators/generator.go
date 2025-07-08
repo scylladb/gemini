@@ -59,19 +59,19 @@ type Generator struct {
 	partitions        *Partitions
 	partitionsConfig  typedef.PartitionRangeConfig
 	wg                sync.WaitGroup
-	partitionCount    int32
+	partitionCount    int
 }
 
-func (g *Generator) PartitionCount() int32 {
+func (g *Generator) PartitionCount() int {
 	return g.partitionCount
 }
 
 type Config struct {
 	PartitionsDistributionFunc distributions.DistributionFunc
 	PartitionsRangeConfig      typedef.PartitionRangeConfig
-	PartitionsCount            int32
+	PartitionsCount            int
+	PkUsedBufferSize           int
 	Seed                       uint64
-	PkUsedBufferSize           uint64
 }
 
 func NewGenerator(

@@ -30,7 +30,7 @@ func TestNew(t *testing.T) {
 
 	data := []struct {
 		dist          string
-		size          int32
+		size          int
 		seed          uint64
 		mu, sigma     float64
 		maxSameValues int

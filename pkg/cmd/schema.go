@@ -63,7 +63,7 @@ func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Sc
 	return schemaBuilder.Build(), nil
 }
 
-func getSchema(seed uint64, logger *zap.Logger) (*typedef.Schema, typedef.SchemaConfig, error) {
+func getSchema(seed uint64, schemaSeed string, logger *zap.Logger) (*typedef.Schema, error) {
 	var (
 		err    error
 		schema *typedef.Schema
@@ -71,13 +71,13 @@ func getSchema(seed uint64, logger *zap.Logger) (*typedef.Schema, typedef.Schema
 
 	schemaConfig := createSchemaConfig(logger)
 	if err = schemaConfig.Valid(); err != nil {
-		return nil, typedef.SchemaConfig{}, errors.Wrap(err, "invalid schema configuration")
+		return nil, errors.Wrap(err, "invalid schema configuration")
 	}
 
 	if len(schemaFile) > 0 {
 		schema, err = readSchema(schemaFile, schemaConfig)
 		if err != nil {
-			return nil, typedef.SchemaConfig{}, errors.Wrap(err, "cannot create schema")
+			return nil, errors.Wrap(err, "cannot create schema")
 		}
 	} else {
 		src := rand.NewChaCha8(sha256.Sum256([]byte(schemaSeed)))
@@ -89,7 +89,7 @@ func getSchema(seed uint64, logger *zap.Logger) (*typedef.Schema, typedef.Schema
 	printSetup(seed, seedFromString(schemaSeed))
 	fmt.Printf("Schema: %v\n", string(jsonSchema)) //nolint:forbidigo
 
-	return schema, schemaConfig, nil
+	return schema, nil
 }
 
 func createSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {

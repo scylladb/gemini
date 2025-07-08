@@ -159,7 +159,7 @@ func (p *Partitions) Len() int {
 	return len(p.parts)
 }
 
-func NewPartitions(count int32, pkBufferSize uint64, wakeup chan<- struct{}) *Partitions {
+func NewPartitions(count, pkBufferSize int, wakeup chan<- struct{}) *Partitions {
 	partitions := make([]Partition, count)
 
 	for i := range len(partitions) {

@@ -26,26 +26,25 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/scylladb/gemini/pkg/distributions"
-	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/generators/statements"
-	"github.com/scylladb/gemini/pkg/jobs"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/realrandom"
-	"github.com/scylladb/gemini/pkg/status"
+	"github.com/scylladb/gemini/pkg/services"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
-	"github.com/scylladb/gemini/pkg/workpool"
+)
+
+const (
+	stdDistMean = math.MaxUint64 / 2
+	oneStdDev   = 0.341 * math.MaxUint64
 )
 
 var (
@@ -91,20 +90,7 @@ func preRun(cmd *cobra.Command, _ []string) {
 	cmd.Version = versionInfo.String()
 }
 
-//nolint:gocyclo
-func run(cmd *cobra.Command, _ []string) error {
-	ctx := cmd.Context()
-	stopFlag := stop.NewFlag("main")
-	time.AfterFunc(warmup+duration+2*time.Second, func() {
-		stopFlag.SetSoft(true)
-	})
-	go func() {
-		<-ctx.Done()
-		stopFlag.SetHard(true)
-	}()
-
-	logger := createLogger(level)
-
+func checkVersion(cmd *cobra.Command) (bool, error) {
 	versionJSON, err := cmd.PersistentFlags().GetBool("version-json")
 
 	if versionFlag || versionJSON {
@@ -121,17 +107,42 @@ func run(cmd *cobra.Command, _ []string) error {
 
 			//nolint:forbidigo
 			fmt.Println(string(data))
-			return nil
+			return true, nil
 		}
 
 		//nolint:forbidigo
 		fmt.Println(versionInfo.String())
 
+		return true, nil
+	}
+
+	return false, nil
+}
+
+//nolint:gocyclo
+func run(cmd *cobra.Command, _ []string) error {
+	shouldAbort, err := checkVersion(cmd)
+	if err != nil {
+		return err
+	}
+
+	if shouldAbort {
 		return nil
 	}
 
-	globalStatus := status.NewGlobalStatus(maxErrorsToStore)
+	logger := createLogger(level)
 	defer utils.IgnoreError(logger.Sync)
+
+	stopFlag := stop.NewFlag("main")
+	stop.StartOsSignalsTransmitter(logger, stopFlag)
+
+	if mutationConcurrency == 0 {
+		mutationConcurrency = concurrency
+	}
+
+	if readConcurrency == 0 {
+		readConcurrency = concurrency
+	}
 
 	for i := range len(testClusterHost) {
 		testClusterHost[i] = strings.TrimSpace(testClusterHost[i])
@@ -148,54 +159,11 @@ func run(cmd *cobra.Command, _ []string) error {
 		return errors.Wrapf(err, "failed to parse --schema-seed argument")
 	}
 
-	outFile, err := utils.CreateFile(outFileArg, true, os.Stdout)
-	if err != nil {
-		return err
-	}
-
-	pool := workpool.New(iOWorkerPool)
-	metrics.GeminiInformation.WithLabelValues("io_thread_pool").Set(float64(iOWorkerPool))
-
 	intSeed := seedFromString(seed)
-
-	randSrc, distFunc, err := distributions.New(
-		partitionKeyDistribution,
-		partitionCount,
-		intSeed,
-		stdDistMean,
-		oneStdDev,
-	)
-	if err != nil {
-		return errors.Wrapf(
-			err,
-			"Failed to create distribution function: %s",
-			partitionKeyDistribution,
-		)
-	}
-
-	schema, schemaConfig, err := getSchema(intSeed, logger)
+	schema, err := getSchema(intSeed, schemaSeed, logger)
 	if err != nil {
 		return errors.Wrap(err, "failed to get schema")
 	}
-
-	gens := generators.New(
-		schema,
-		distFunc,
-		intSeed,
-		partitionCount,
-		pkBufferReuseSize,
-		logger,
-		randSrc,
-	)
-	utils.AddFinalizer(func() {
-		logger.Info("closing generators")
-
-		if err = gens.Close(); err != nil {
-			logger.Error("failed to close generators", zap.Error(err))
-		} else {
-			logger.Info("generators closed")
-		}
-	})
 
 	storeConfig := store.Config{
 		MaxRetriesMutate:        maxRetriesMutate,
@@ -231,98 +199,44 @@ func run(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	schemaChanges, err := gens.Gens[schema.Tables[0].Name].Get(ctx)
-	if err != nil {
-		return errors.Wrapf(err, "failed to get schema changes for %s", schema.Tables[0].Name)
-	}
-
-	st, err := store.New(schemaChanges, pool, schema, storeConfig, logger.Named("store"), globalStatus.Errors)
+	workload, err := services.NewWorkload(&services.WorkloadConfig{
+		MaxErrorsToStore:      maxErrorsToStore,
+		OutputFile:            outFileArg,
+		PartitionDistribution: partitionKeyDistribution,
+		PartitionCount:        partitionCount,
+		PartitionBufferSize:   pkBufferReuseSize,
+		IOWorkerPoolSize:      iOWorkerPool,
+		Seed:                  intSeed,
+		MU:                    normalDistMean,
+		Sigma:                 normalDistSigma,
+		WarmupDuration:        warmup,
+		Duration:              duration,
+		RunningMode:           mode,
+		MutationConcurrency:   mutationConcurrency,
+		ReadConcurrency:       readConcurrency,
+		DropSchema:            dropSchema,
+	}, storeConfig, schema, logger, stopFlag)
 	if err != nil {
 		return err
 	}
 
-	utils.AddFinalizer(func() {
-		logger.Info("closing store")
-
-		if err = st.Close(); err != nil {
-			logger.Error("failed to close store", zap.Error(err))
-		} else {
-			logger.Info("store closed")
+	defer func() {
+		if err = workload.Close(); err != nil {
+			logger.Error("failed to close workload",
+				zap.Error(err),
+				zap.String("mode", mode),
+				zap.String("seed", seed),
+				zap.String("schemaSeed", schemaSeed),
+			)
 		}
-	})
+	}()
 
-	if dropSchema && mode != jobs.ReadMode {
-		for _, stmt := range statements.GetDropKeyspace(schema) {
-			logger.Debug(stmt)
-			if err = st.Mutate(ctx, typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
-				return errors.Wrap(err, "unable to drop schema")
-			}
-		}
+	if err = workload.Run(cmd.Context()); err != nil {
+		logger.Error("failed to run gemini workload", zap.Error(err))
 	}
 
-	testKeyspace, oracleKeyspace := statements.GetCreateKeyspaces(schema)
-	if err = st.Create(
-		ctx,
-		typedef.SimpleStmt(testKeyspace, typedef.CreateKeyspaceStatementType),
-		typedef.SimpleStmt(oracleKeyspace, typedef.CreateKeyspaceStatementType)); err != nil {
-		return errors.Wrap(err, "unable to create keyspace")
-	}
-
-	for _, stmt := range statements.GetCreateSchema(schema) {
-		logger.Debug(stmt)
-		if err = st.Mutate(ctx, typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
-			return errors.Wrap(err, "unable to create schema")
-		}
-	}
-
-	stop.StartOsSignalsTransmitter(logger, stopFlag)
-
-	if mutationConcurrency == 0 {
-		mutationConcurrency = concurrency
-	}
-
-	if readConcurrency == 0 {
-		readConcurrency = concurrency
-	}
-
-	if warmup > 0 && !stopFlag.IsHardOrSoft() {
-		warmupStopFlag := stopFlag.CreateChild("warmup")
-
-		jobsList := jobs.ListFromMode(jobs.WarmupMode, warmup, mutationConcurrency, readConcurrency)
-		time.AfterFunc(warmup, func() {
-			warmupStopFlag.SetHard(false)
-		})
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, warmupStopFlag, randSrc); err != nil {
-			logger.Error("warmup encountered an error", zap.Error(err))
-		}
-	}
-
-	if !stopFlag.IsHardOrSoft() {
-		work := stopFlag.CreateChild("work")
-
-		jobsList := jobs.ListFromMode(mode, duration, mutationConcurrency, readConcurrency)
-		time.AfterFunc(duration, func() {
-			work.SetHard(false)
-		})
-		if err = jobsList.Run(ctx, schema, schemaConfig, st, gens, globalStatus, logger, work, randSrc); err != nil {
-			logger.Error("error detected", zap.Error(err))
-			work.SetHard(true)
-		}
-	}
-
-	globalStatus.PrintResult(outFile, schema, versionInfo.Gemini.Version, versionInfo)
-	if globalStatus.HasErrors() {
-		return errors.New("gemini encountered errors, exiting with non zero status")
-	}
-
-	logger.Info("test finished")
-	return nil
+	return workload.PrintResults(versionInfo.Gemini.Version, versionInfo)
 }
-
-const (
-	stdDistMean = math.MaxUint64 / 2
-	oneStdDev   = 0.341 * math.MaxUint64
-)
 
 func createLogger(level string) *zap.Logger {
 	lvl := zap.NewAtomicLevel()

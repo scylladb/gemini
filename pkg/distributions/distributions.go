@@ -28,7 +28,7 @@ type (
 	DistributionFunc func() uint32
 )
 
-func New(distribution string, partitionCount int32, seed uint64, mu, sigma float64) (*rand.ChaCha8, DistributionFunc, error) {
+func New(distribution string, partitionCount int, seed uint64, mu, sigma float64) (*rand.ChaCha8, DistributionFunc, error) {
 	hash := sha256.Sum256(
 		[]byte(
 			distribution + strconv.FormatInt(

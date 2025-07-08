@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 
 	"github.com/samber/mo"
+
+	"github.com/scylladb/gemini/pkg/metrics"
 )
 
 const ChannelSizeMultiplier = 4
@@ -42,6 +44,8 @@ func New(count int) *Pool {
 	if count < 1 {
 		panic("count must be greater than 0")
 	}
+
+	metrics.GeminiInformation.WithLabelValues("io_thread_pool").Set(float64(count))
 
 	ch := make(chan item, count*ChannelSizeMultiplier)
 

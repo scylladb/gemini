@@ -88,7 +88,7 @@ func genAddColumnStmt(
 	//	},
 	//})
 	//return &typedef.Stmts{
-	//	List:      stmts,
+	//	Jobs:      stmts,
 	//	QueryType: typedef.AddColumnStatementType,
 	//	PostStmtHook: func() {
 	//		t.Columns = append(t.Columns, column)
@@ -114,7 +114,7 @@ func genDropColumnStmt(
 	//	},
 	//})
 	//return &typedef.Stmts{
-	//	List:      stmts,
+	//	Jobs:      stmts,
 	//	QueryType: typedef.DropColumnStatementType,
 	//	PostStmtHook: func() {
 	//		t.Columns = t.Columns.Remove(column)
