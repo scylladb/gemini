@@ -65,11 +65,10 @@ const (
 	OpCount
 )
 
-//nolint:revive
 const (
-	CQL_FEATURE_BASIC CQLFeature = iota + 1
-	CQL_FEATURE_NORMAL
-	CQL_FEATURE_ALL
+	CQLFeatureBasic CQLFeature = iota + 1
+	CQLFeatureNormal
+	CQLFeatureAll
 )
 
 const (

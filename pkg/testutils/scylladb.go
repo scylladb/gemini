@@ -14,7 +14,7 @@
 
 //go:build testing
 
-package utils
+package testutils
 
 import (
 	"fmt"
@@ -32,18 +32,27 @@ import (
 
 const ContainerNetworkName = "scylla-gemini"
 
-func IsUnderTest() bool {
-	return true
-}
+type (
+	ScyllaContainer struct {
+		Oracle *gocql.Session
+		Test   *gocql.Session
 
-type ipUsed struct {
-	sync.Mutex
-	data map[byte]bool
-}
+		OracleHosts []string
+		TestHosts   []string
+	}
 
-var usedIPs = &ipUsed{data: make(map[byte]bool, 256)}
+	ipUsed struct {
+		data map[byte]bool
+		sync.Mutex
+	}
+)
 
-func SingleScylla(tb testing.TB, timeouts ...time.Duration) *gocql.Session {
+var (
+	spawningScyllaMutex = &sync.Mutex{}
+	usedIPs             = &ipUsed{data: make(map[byte]bool, 256)}
+)
+
+func SingleScylla(tb testing.TB, timeouts ...time.Duration) *ScyllaContainer {
 	tb.Helper()
 
 	testVersion, exists := os.LookupEnv("GEMINI_SCYLLA_TEST")
@@ -61,7 +70,6 @@ func SingleScylla(tb testing.TB, timeouts ...time.Duration) *gocql.Session {
 			break
 		}
 	}
-	usedIPs.Unlock()
 
 	sharedNetwork, err := network.New(
 		tb.Context(),
@@ -77,32 +85,39 @@ func SingleScylla(tb testing.TB, timeouts ...time.Duration) *gocql.Session {
 			},
 		}),
 	)
+	usedIPs.Unlock()
+
 	if err != nil {
 		tb.Fatalf("failed to create shared network: %v", err)
 	}
 
 	tb.Cleanup(func() {
-		_ = sharedNetwork.Remove(tb.Context())
 		usedIPs.Lock()
-		delete(usedIPs.data, byte(ipPart))
+		_ = sharedNetwork.Remove(tb.Context())
+		delete(usedIPs.data, ipPart)
 		usedIPs.Unlock()
 	})
 
+	spawningScyllaMutex.Lock()
 	test, err := scylladb.Run(tb.Context(),
 		"scylladb/scylla:"+testVersion,
 		scylladb.WithCustomCommands("--memory=512M", "--smp=1", "--developer-mode=1", "--overprovisioned=1"),
 		scylladb.WithShardAwareness(),
 		network.WithNetwork([]string{ContainerNetworkName}, sharedNetwork),
 	)
+	spawningScyllaMutex.Unlock()
 	if err != nil {
 		tb.Fatalf("failed to start oracle ScyllaDB container: %v", err)
 	}
 
 	tb.Cleanup(func() {
+		spawningScyllaMutex.Lock()
 		_ = test.Terminate(tb.Context())
+		spawningScyllaMutex.Unlock()
 	})
 
-	testCluster := gocql.NewCluster(Must(test.ContainerIP(tb.Context())))
+	testHosts := Must(test.ContainerIP(tb.Context()))
+	testCluster := gocql.NewCluster(testHosts)
 	if len(timeouts) > 0 {
 		testCluster.Timeout = timeouts[0]
 	} else {
@@ -130,10 +145,13 @@ func SingleScylla(tb testing.TB, timeouts ...time.Duration) *gocql.Session {
 		testSession.Close()
 	})
 
-	return testSession
+	return &ScyllaContainer{
+		Test:      testSession,
+		TestHosts: []string{testHosts},
+	}
 }
 
-func TestContainers(tb testing.TB, timeouts ...time.Duration) (*gocql.Session, *gocql.Session) {
+func TestContainers(tb testing.TB, timeouts ...time.Duration) *ScyllaContainer {
 	tb.Helper()
 
 	oracleVersion, exists := os.LookupEnv("GEMINI_SCYLLA_ORACLE")
@@ -156,7 +174,6 @@ func TestContainers(tb testing.TB, timeouts ...time.Duration) (*gocql.Session, *
 			break
 		}
 	}
-	usedIPs.Unlock()
 
 	sharedNetwork, err := network.New(
 		tb.Context(),
@@ -172,43 +189,53 @@ func TestContainers(tb testing.TB, timeouts ...time.Duration) (*gocql.Session, *
 			},
 		}),
 	)
+	usedIPs.Unlock()
+
 	if err != nil {
 		tb.Fatalf("failed to create shared network: %v", err)
 	}
 
 	tb.Cleanup(func() {
-		_ = sharedNetwork.Remove(tb.Context())
 		usedIPs.Lock()
-		delete(usedIPs.data, byte(ipPart))
+		_ = sharedNetwork.Remove(tb.Context())
+		delete(usedIPs.data, ipPart)
 		usedIPs.Unlock()
 	})
 
+	spawningScyllaMutex.Lock()
 	oracle, err := scylladb.Run(tb.Context(),
 		"scylladb/scylla:"+oracleVersion,
 		scylladb.WithCustomCommands("--memory=512M", "--smp=1", "--developer-mode=1", "--overprovisioned=1"),
 		scylladb.WithShardAwareness(),
 		network.WithNetwork([]string{ContainerNetworkName}, sharedNetwork),
 	)
+	spawningScyllaMutex.Unlock()
 	if err != nil {
 		tb.Fatalf("failed to start oracle ScyllaDB container: %v", err)
 	}
 
 	tb.Cleanup(func() {
+		spawningScyllaMutex.Lock()
 		_ = oracle.Terminate(tb.Context())
+		spawningScyllaMutex.Unlock()
 	})
 
+	spawningScyllaMutex.Lock()
 	test, err := scylladb.Run(tb.Context(),
 		"scylladb/scylla:"+testVersion,
 		scylladb.WithCustomCommands("--memory=512M", "--smp=1", "--developer-mode=1", "--overprovisioned=1"),
 		scylladb.WithShardAwareness(),
 		network.WithNetwork([]string{ContainerNetworkName}, sharedNetwork),
 	)
+	spawningScyllaMutex.Unlock()
 	if err != nil {
 		tb.Fatalf("failed to start oracle ScyllaDB container: %v", err)
 	}
 
 	tb.Cleanup(func() {
+		spawningScyllaMutex.Lock()
 		_ = test.Terminate(tb.Context())
+		spawningScyllaMutex.Unlock()
 	})
 
 	testCluster := gocql.NewCluster(Must(test.ContainerIP(tb.Context())))
@@ -267,5 +294,10 @@ func TestContainers(tb testing.TB, timeouts ...time.Duration) (*gocql.Session, *
 		testSession.Close()
 	})
 
-	return testSession, oracleSession
+	return &ScyllaContainer{
+		Oracle:      oracleSession,
+		Test:        testSession,
+		OracleHosts: []string{Must(oracle.ContainerIP(tb.Context()))},
+		TestHosts:   []string{Must(test.ContainerIP(tb.Context()))},
+	}
 }

@@ -39,28 +39,34 @@ import (
 	"github.com/scylladb/gemini/pkg/workpool"
 )
 
-const (
-	additionalColumns       = "ddl,ts,ty,statement,values,host,attempt,gemini_attempt,error,dur"
-	additionalSelectColumns = "ts,ty,statement,values,host,attempt,gemini_attempt,error,dur"
-)
+const additionalColumns = "ddl,ts,ty,statement,values,host,attempt,gemini_attempt,error,dur"
 
 var (
 	additionalColumnsArr   = strings.Split(additionalColumns, ",")
 	additionalColumnsCount = len(additionalColumnsArr)
 )
 
+func GetScyllaStatementLogsKeyspace(originalKeyspace string) string {
+	return fmt.Sprintf("%s_logs", originalKeyspace)
+}
+
+func GetScyllaStatementLogsTable(originalTable string) string {
+	return fmt.Sprintf("%s_statements", originalTable)
+}
+
 type ScyllaLogger struct {
-	cancel               context.CancelFunc
-	session              *gocql.Session
+	metrics              metrics.ChannelMetrics
+	logger               *zap.Logger
 	channel              <-chan Item
 	errors               *joberror.ErrorList
 	wg                   *sync.WaitGroup
 	pool                 *workpool.Pool
-	logger               *zap.Logger
-	metrics              metrics.ChannelMetrics
+	cancel               context.CancelFunc
+	session              *gocql.Session
 	oracleStatementsFile string
 	testStatementsFile   string
 	schemaChangeValues   typedef.PartitionKeys
+	keyspaceAndTable     string
 	schemaPartitionKeys  typedef.Columns
 	compression          Compression
 	partitionKeysCount   int
@@ -93,6 +99,8 @@ func newSession(hosts []string, username, password string, logger *zap.Logger) (
 }
 
 func NewScyllaLoggerWithSession(
+	originalKeyspace string,
+	originalTable string,
 	schemaChangeValues typedef.PartitionKeys,
 	session *gocql.Session,
 	partitionKeys typedef.Columns,
@@ -106,9 +114,12 @@ func NewScyllaLoggerWithSession(
 	l *zap.Logger,
 	chMetrics metrics.ChannelMetrics,
 ) (*ScyllaLogger, error) {
-	createKeyspace, createTable := buildCreateTableQuery(partitionKeys, repl)
+	keyspace := GetScyllaStatementLogsKeyspace(originalKeyspace)
+	table := GetScyllaStatementLogsTable(originalTable)
 
-	if err := session.Query("DROP KEYSPACE IF EXISTS logs;").Exec(); err != nil {
+	createKeyspace, createTable := buildCreateTableQuery(keyspace, table, partitionKeys, repl)
+
+	if err := session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec(); err != nil {
 		return nil, err
 	}
 
@@ -142,6 +153,7 @@ func NewScyllaLoggerWithSession(
 		testStatementsFile:   testStatementsFile,
 		partitionKeysCount:   partitionKeys.LenValues(),
 		schemaPartitionKeys:  partitionKeys,
+		keyspaceAndTable:     fmt.Sprintf("%s.%s", keyspace, table),
 	}
 
 	logger.wg.Add(1)
@@ -151,6 +163,8 @@ func NewScyllaLoggerWithSession(
 }
 
 func NewScyllaLogger(
+	originalKeyspace string,
+	originalTable string,
 	ch chan Item,
 	schemaChangeValues typedef.PartitionKeys,
 	schema *typedef.Schema,
@@ -170,6 +184,8 @@ func NewScyllaLogger(
 	}
 
 	return NewScyllaLoggerWithSession(
+		originalKeyspace,
+		originalTable,
 		schemaChangeValues,
 		session,
 		schema.Tables[0].PartitionKeys,
@@ -185,7 +201,7 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 	schemaChangeValues := s.schemaChangeValues.Values.ToCQLValues(s.schemaPartitionKeys)
 	schemaChangeValues = append(schemaChangeValues, true)
 
-	insertBuilder := qb.Insert("logs.statements")
+	insertBuilder := qb.Insert(s.keyspaceAndTable)
 
 	for _, col := range s.schemaPartitionKeys {
 		switch colType := col.Type.(type) {
@@ -210,46 +226,48 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 			values = append(values, false)
 		}
 
-		s.pool.SendWithoutResult(ctx, func(_ context.Context) {
-			var itemErr string
-			if item.Error.IsLeft() {
-				if errVal := item.Error.MustLeft(); errVal != nil {
-					itemErr = errVal.Error()
-				}
-			} else {
-				itemErr = item.Error.MustRight()
+		var itemErr string
+		if item.Error.IsLeft() {
+			if errVal := item.Error.MustLeft(); errVal != nil {
+				itemErr = errVal.Error()
 			}
+		} else {
+			itemErr = item.Error.MustRight()
+		}
 
-			values = append(values,
-				item.Start.Time,
-				string(item.Type),
-				item.Statement,
-				prepareValues(item.Values),
-				item.Host,
-				item.Attempt,
-				item.GeminiAttempt,
-				itemErr,
-				item.Duration.Duration,
+		values = append(values,
+			item.Start.Time,
+			string(item.Type),
+			item.Statement,
+			prepareValues(item.Values),
+			item.Host,
+			item.Attempt,
+			item.GeminiAttempt,
+			itemErr,
+			item.Duration.Duration,
+		)
+
+		if len(values) != partitionKeysCount+additionalColumnsCount {
+			metrics.ErrorMessages.WithLabelValues(
+				"statement_logger",
+				fmt.Sprintf("invalid number of values for Scylla insert: expected=%d actual=%d, values=%v, statement=%s",
+					partitionKeysCount+additionalColumnsCount, len(values), values, item.StatementType,
+				),
+			).Inc()
+			s.logger.Error(
+				"invalid number of values for Scylla insert",
+				zap.Int("expected", partitionKeysCount+additionalColumnsCount),
+				zap.Int("actual", len(values)),
+				zap.Any("values", values),
+				zap.Stringer("statement", item.StatementType),
 			)
+			return
+		}
 
-			if len(values) != partitionKeysCount+additionalColumnsCount {
-				metrics.ErrorMessages.WithLabelValues(
-					"statement_logger",
-					fmt.Sprintf("invalid number of values for Scylla insert: expected=%d actual=%d, values=%v, statement=%s",
-						partitionKeysCount+additionalColumnsCount, len(values), values, item.StatementType,
-					),
-				).Inc()
-				s.logger.Error(
-					"invalid number of values for Scylla insert",
-					zap.Int("expected", partitionKeysCount+additionalColumnsCount),
-					zap.Int("actual", len(values)),
-					zap.Any("values", values),
-					zap.Stringer("statement", item.StatementType),
-				)
-				return
-			}
-
-			q := s.session.Query(query, values...)
+		s.pool.SendWithoutResult(ctx, func(_ context.Context) {
+			q := s.session.Bind(query, func(_ *gocql.QueryInfo) ([]any, error) {
+				return values, nil
+			})
 			defer q.Release()
 
 			if err := q.Exec(); err != nil {
@@ -287,19 +305,25 @@ func prepareValues(values mo.Either[[]any, []byte]) []byte {
 }
 
 func buildCreateTableQuery(
+	keyspace string,
+	table string,
 	partitionKeys typedef.Columns,
 	replication replication.Replication,
 ) (string, string) {
 	createKeyspace := fmt.Sprintf(
-		"CREATE KEYSPACE IF NOT EXISTS logs WITH replication=%s AND durable_writes = true;",
-		replication.ToCQL(),
+		"CREATE KEYSPACE IF NOT EXISTS %s WITH replication=%s AND durable_writes = true;",
+		keyspace, replication.ToCQL(),
 	)
 
 	var builder bytes.Buffer
 
 	partitions := strings.Join(partitionKeys.Names(), ",")
 
-	builder.WriteString("CREATE TABLE IF NOT EXISTS logs.statements(")
+	builder.WriteString("CREATE TABLE IF NOT EXISTS ")
+	builder.WriteString(keyspace)
+	builder.WriteRune('.')
+	builder.WriteString(table)
+	builder.WriteString("(")
 
 	for _, col := range partitionKeys {
 		builder.WriteString(col.Name)
@@ -369,7 +393,7 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 		typedef.InsertStatementType, typedef.InsertJSONStatementType,
 		typedef.UpdateStatementType, typedef.DeleteWholePartitionType,
 		typedef.DeleteSingleRowType, typedef.DeleteSingleColumnType:
-		builder := qb.Select("logs.statements").
+		builder := qb.Select(s.keyspaceAndTable).
 			Columns(additionalColumnsArr...).
 			OrderBy("ts", qb.ASC)
 
@@ -399,7 +423,7 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 		values := make([][]any, 0, iterations)
 
 		for i := range iterations {
-			builder := qb.Select("logs.statements").
+			builder := qb.Select(s.keyspaceAndTable).
 				Columns(additionalColumnsArr...).
 				OrderBy("ts", qb.ASC)
 
@@ -469,7 +493,7 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 	encoder := json.NewEncoder(file)
 	encoder.SetEscapeHTML(false)
 
-	builder := qb.Select("logs.statements").
+	builder := qb.Select(s.keyspaceAndTable).
 		Columns(additionalColumnsArr...).
 		OrderBy("ts", qb.ASC)
 
@@ -492,7 +516,7 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 		schemaChangeValues = append(schemaChangeValues, string(ty))
 
 		if fetchErr := s.fetchData(ch, ty, ddlStatementsQuery, schemaChangeValues); fetchErr != nil {
-			metrics.ErrorMessages.WithLabelValues("statement_logger_fetch_ddl", err.Error()).Inc()
+			metrics.ErrorMessages.WithLabelValues("statement_logger_fetch_ddl", fetchErr.Error()).Inc()
 			s.logger.Error("failed to fetch schema change data", zap.Error(fetchErr))
 		}
 	}()
@@ -515,7 +539,7 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 							values,
 						)).Inc()
 					s.logger.Error("failed to fetch failed partition data",
-						zap.Error(err),
+						zap.Error(fetchErr),
 						zap.Any("partition_keys", values),
 					)
 				}

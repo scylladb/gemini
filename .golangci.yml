@@ -6,6 +6,8 @@ run:
   issues-exit-code: 1
   tests: true
   allow-parallel-runners: true
+  build-tags:
+    - testing
 linters:
   enable:
     - asasalint

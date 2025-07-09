@@ -39,7 +39,7 @@ type (
 	WorkloadConfig struct {
 		RunningMode           string
 		OutputFile            string
-		PartitionDistribution string
+		PartitionDistribution distributions.Distribution
 		Seed                  uint64
 		PartitionBufferSize   int
 		IOWorkerPoolSize      int
@@ -68,16 +68,13 @@ type (
 )
 
 func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typedef.Schema, logger *zap.Logger, flag *stop.Flag) (*Workload, error) {
-	randSrc, distFunc, err := distributions.New(
+	randSrc, distFunc := distributions.New(
 		config.PartitionDistribution,
 		config.PartitionCount,
 		config.Seed,
 		config.MU,
 		config.Sigma,
 	)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to create distribution function for %s", config.PartitionDistribution)
-	}
 
 	gens := generators.New(
 		schema,

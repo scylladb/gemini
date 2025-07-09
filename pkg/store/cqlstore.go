@@ -197,20 +197,29 @@ func (c *cqlStore) Close() error {
 	return nil
 }
 
-func getHostSelectionPolicy(policy string, hosts []string) (gocql.HostSelectionPolicy, error) {
+type HostSelectionPolicy string
+
+const (
+	HostSelectionTokenAware HostSelectionPolicy = "token-aware"
+	HostSelectionRoundRobin HostSelectionPolicy = "round-robin"
+	HostSelectionHostPool   HostSelectionPolicy = "host-pool"
+	HostSelectionDefault    HostSelectionPolicy = ""
+)
+
+func getHostSelectionPolicy(policy HostSelectionPolicy, hosts []string) gocql.HostSelectionPolicy {
 	switch policy {
-	case "round-robin":
-		return gocql.RoundRobinHostPolicy(), nil
-	case "host-pool":
-		return hostpolicy.HostPool(hostpool.New(slices.Clone(hosts))), nil
-	case "token-aware":
+	case HostSelectionRoundRobin:
+		return gocql.RoundRobinHostPolicy()
+	case HostSelectionHostPool:
+		return hostpolicy.HostPool(hostpool.New(slices.Clone(hosts)))
+	case HostSelectionDefault, HostSelectionTokenAware:
 		p := gocql.TokenAwareHostPolicy(
 			gocql.RoundRobinHostPolicy(),
 			gocql.ShuffleReplicas(),
 		)
-		return p, nil
+		return p
 	default:
-		return nil, fmt.Errorf("unknown host selection policy \"%s\"", policy)
+		panic(fmt.Sprintf("unknown host selection policy: %s", policy))
 	}
 }
 
@@ -221,11 +230,6 @@ func createCluster(
 	enableObserver bool,
 ) (*gocql.Session, error) {
 	c, err := gocql.ParseConsistencyWrapper(config.Consistency)
-	if err != nil {
-		return nil, err
-	}
-
-	hp, err := getHostSelectionPolicy(config.HostSelectionPolicy, config.Hosts)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +266,7 @@ func createCluster(
 	}
 	cluster.Consistency = c
 	cluster.DefaultTimestamp = !config.UseServerSideTimestamps
-	cluster.PoolConfig.HostSelectionPolicy = hp
+	cluster.PoolConfig.HostSelectionPolicy = getHostSelectionPolicy(config.HostSelectionPolicy, config.Hosts)
 
 	if config.Username != "" && config.Password != "" {
 		cluster.Authenticator = gocql.PasswordAuthenticator{

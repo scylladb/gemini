@@ -29,7 +29,7 @@ import (
 	"github.com/samber/mo"
 	"go.uber.org/zap"
 
-	"github.com/scylladb/gemini/pkg/utils"
+	"github.com/scylladb/gemini/pkg/testutils"
 )
 
 var CompressionTests = []struct {
@@ -120,9 +120,9 @@ func TestOutputToFile(t *testing.T) {
 				t.Fatalf("Failed to close logger %s", err)
 			}
 
-			toCompare := strings.Trim(item.ReadData(t, utils.Must(os.Open(file))), "\n")
+			toCompare := strings.Trim(item.ReadData(t, testutils.Must(os.Open(file))), "\n")
 
-			expected := string(utils.Must(json.Marshal(data)))
+			expected := string(testutils.Must(json.Marshal(data)))
 			if toCompare != expected {
 				t.Fatalf("Query not expected\nExpected: %s\nActual: %s\n", toCompare, expected)
 			}
@@ -141,7 +141,7 @@ func BenchmarkLogger(b *testing.B) {
 		b.Run(compression.String(), func(b *testing.B) {
 			b.ReportAllocs()
 			file := filepath.Join(b.TempDir(), "test.json")
-			logger := utils.Must(NewLogger(WithFileLogger(file, compression, zap.NewNop())))
+			logger := testutils.Must(NewLogger(WithFileLogger(file, compression, zap.NewNop())))
 			rows := &atomic.Int64{}
 
 			data := Item{

@@ -169,8 +169,8 @@ func (st StatementType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(st.String())
 }
 
-func (o OpType) String() string {
-	switch o {
+func (op OpType) String() string {
+	switch op {
 	case OpSelect:
 		return "Select"
 	case OpInsert:
@@ -186,7 +186,7 @@ func (o OpType) String() string {
 	case OpSchemaCreate:
 		return "SchemaCreate"
 	default:
-		panic(fmt.Sprintf("unknown operation type %d", o))
+		panic(fmt.Sprintf("unknown operation type %d", op))
 	}
 }
 

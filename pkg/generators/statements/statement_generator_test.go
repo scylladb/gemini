@@ -274,7 +274,7 @@ var testSchemaConfig = typedef.SchemaConfig{
 	MinStringLength:                  0,
 	UseCounters:                      false,
 	UseLWT:                           false,
-	CQLFeature:                       typedef.CQL_FEATURE_NORMAL,
+	CQLFeature:                       typedef.CQLFeatureNormal,
 	AsyncObjectStabilizationAttempts: 10,
 	AsyncObjectStabilizationDelay:    100000,
 }

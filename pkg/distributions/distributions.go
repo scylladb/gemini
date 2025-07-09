@@ -16,22 +16,30 @@ package distributions
 
 import (
 	"crypto/sha256"
+	"fmt"
 	"math/rand/v2"
 	"strconv"
-	"strings"
 
-	"github.com/pkg/errors"
 	"gonum.org/v1/gonum/stat/distuv"
 )
 
 type (
+	Distribution string
+
 	DistributionFunc func() uint32
 )
 
-func New(distribution string, partitionCount int, seed uint64, mu, sigma float64) (*rand.ChaCha8, DistributionFunc, error) {
+const (
+	DistributionZipf      Distribution = "zipf"
+	DistributionLogNormal Distribution = "lognormal"
+	DistributionNormal    Distribution = "normal"
+	DistributionUniform   Distribution = "uniform"
+)
+
+func New(distribution Distribution, partitionCount int, seed uint64, mu, sigma float64) (*rand.ChaCha8, DistributionFunc) {
 	hash := sha256.Sum256(
 		[]byte(
-			distribution + strconv.FormatInt(
+			string(distribution) + strconv.FormatInt(
 				int64(partitionCount),
 				10,
 			) + strconv.FormatUint(
@@ -53,14 +61,14 @@ func New(distribution string, partitionCount int, seed uint64, mu, sigma float64
 
 	src := rand.NewChaCha8(hash)
 
-	switch strings.ToLower(distribution) {
-	case "zipf":
+	switch distribution {
+	case DistributionZipf:
 		zipf := rand.NewZipf(rand.New(src), 1.001, float64(partitionCount), uint64(partitionCount))
 
 		return src, func() uint32 {
 			return uint32(zipf.Uint64())
-		}, nil
-	case "lognormal":
+		}
+	case DistributionLogNormal:
 		d := distuv.LogNormal{
 			Src:   src,
 			Mu:    mu,
@@ -69,8 +77,8 @@ func New(distribution string, partitionCount int, seed uint64, mu, sigma float64
 
 		return src, func() uint32 {
 			return uint32(d.Rand())
-		}, nil
-	case "normal":
+		}
+	case DistributionNormal:
 		d := distuv.Normal{
 			Src:   src,
 			Mu:    mu,
@@ -79,8 +87,8 @@ func New(distribution string, partitionCount int, seed uint64, mu, sigma float64
 
 		return src, func() uint32 {
 			return uint32(d.Rand())
-		}, nil
-	case "uniform":
+		}
+	case DistributionUniform:
 		d := distuv.Uniform{
 			Min: 0,
 			Max: float64(partitionCount),
@@ -89,8 +97,8 @@ func New(distribution string, partitionCount int, seed uint64, mu, sigma float64
 
 		return src, func() uint32 {
 			return uint32(d.Rand())
-		}, nil
+		}
 	default:
-		return nil, nil, errors.Errorf("unsupported distribution: %s", distribution)
+		panic(fmt.Sprintf("unsupported distribution: %s", string(distribution)))
 	}
 }

@@ -21,6 +21,7 @@ import (
 
 	"github.com/gocql/gocql"
 
+	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
@@ -219,14 +220,14 @@ func (ct *CounterType) CQLHolder() string {
 }
 
 func (ct *CounterType) GenJSONValue(r utils.Random, _ *PartitionRangeConfig) any {
-	if utils.IsUnderTest() {
+	if testutils.IsUnderTest() {
 		return r.Int64()
 	}
 	return atomic.AddInt64(&ct.Value, 1)
 }
 
 func (ct *CounterType) GenValue(r utils.Random, _ *PartitionRangeConfig) []any {
-	if utils.IsUnderTest() {
+	if testutils.IsUnderTest() {
 		return []any{r.Int64()}
 	}
 	return []any{atomic.AddInt64(&ct.Value, 1)}

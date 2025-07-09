@@ -27,6 +27,8 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"gopkg.in/inf.v0"
+
+	"github.com/scylladb/gemini/pkg/testutils"
 )
 
 var ErrNoPartitionKeyValues = errors.New("no partition keys available")
@@ -112,7 +114,7 @@ func IgnoreError(fn func() error) {
 }
 
 func UUIDFromTime(rnd Random) string {
-	if IsUnderTest() {
+	if testutils.IsUnderTest() {
 		return gocql.TimeUUIDWith(rnd.Int64(), 0, []byte("127.0.0.1")).String()
 	}
 	return gocql.UUIDFromTime(RandDate(rnd)).String()
@@ -188,12 +190,4 @@ func Sizeof(v any) uint64 {
 	default:
 		return uint64(unsafe.Sizeof(v))
 	}
-}
-
-func Must[T any](val T, err error) T {
-	if err != nil {
-		panic(fmt.Sprintf("unexpected error: %+v", err))
-	}
-
-	return val
 }

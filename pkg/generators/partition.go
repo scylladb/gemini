@@ -121,7 +121,6 @@ func (p *Partition) pick(ctx context.Context) (typedef.PartitionKeys, error) {
 	}
 }
 
-//go:norace
 func (p *Partition) Close() error {
 	close(p.oldValues)
 	close(p.values)

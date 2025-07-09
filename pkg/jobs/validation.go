@@ -116,7 +116,7 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 		}
 
 		if errors.Is(err, context.Canceled) {
-			return context.Canceled
+			return nil
 		}
 
 		if attempt == v.maxAttempts {

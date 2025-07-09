@@ -29,7 +29,7 @@ func TestNew(t *testing.T) {
 	t.Parallel()
 
 	data := []struct {
-		dist          string
+		dist          Distribution
 		size          int
 		seed          uint64
 		mu, sigma     float64
@@ -37,7 +37,7 @@ func TestNew(t *testing.T) {
 	}{
 		{dist: "zipf", seed: uint64(time.Now().UnixNano()), size: 10000, maxSameValues: 10},
 		{
-			dist:          "normal",
+			dist:          DistributionNormal,
 			seed:          uint64(time.Now().UnixNano()),
 			size:          10000,
 			mu:            stdDistMean,
@@ -45,7 +45,7 @@ func TestNew(t *testing.T) {
 			maxSameValues: 3000,
 		},
 		{
-			dist:          "uniform",
+			dist:          DistributionUniform,
 			seed:          uint64(time.Now().UnixNano()),
 			size:          10000,
 			mu:            stdDistMean,
@@ -55,13 +55,10 @@ func TestNew(t *testing.T) {
 	}
 
 	for _, item := range data {
-		t.Run("test-"+item.dist, func(t *testing.T) {
+		t.Run("test-"+string(item.dist), func(t *testing.T) {
 			t.Parallel()
 
-			_, distFunc, err := New(item.dist, item.size, item.seed, stdDistMean, oneStdDev)
-			if err != nil {
-				t.Errorf("failed to create distribution function: %s", item.dist)
-			}
+			_, distFunc := New(item.dist, item.size, item.seed, stdDistMean, oneStdDev)
 
 			same := 0
 

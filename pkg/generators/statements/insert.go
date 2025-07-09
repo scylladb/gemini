@@ -132,7 +132,7 @@ func (g *Generator) InsertJSON(ctx context.Context) (*typedef.Stmt, error) {
 	for _, pk := range g.table.PartitionKeys {
 		switch t := pk.Type.(type) {
 		case typedef.SimpleType:
-			values[pk.Name] = convertForJSON(t, pks.Values.Get(pk.Name))
+			values[pk.Name] = convertForJSON(t, pks.Values.Get(pk.Name)[0])
 		case *typedef.TupleType:
 			tupVals := make([]any, 0, len(t.ValueTypes))
 			for _, value := range t.ValueTypes {

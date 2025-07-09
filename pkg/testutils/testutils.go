@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2025 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 //go:build !testing
 
-package utils
+package testutils
 
 import (
 	"testing"
@@ -23,18 +23,22 @@ import (
 	"github.com/gocql/gocql"
 )
 
-func IsUnderTest() bool {
-	return false
+type ScyllaContainer struct {
+	Oracle *gocql.Session
+	Test   *gocql.Session
+
+	OracleHosts []string
+	TestHosts   []string
 }
 
-func SingleScylla(tb testing.TB, _ ...time.Duration) *gocql.Session {
-	tb.Helper()
-	tb.Fatal("TestContainers is not supported outside of testing build tag")
-	return nil
+func Must[T any](T, error) T {
+	panic("this function should not be used in production code, only for testing purposes")
 }
 
-func TestContainers(tb testing.TB, _ ...time.Duration) (*gocql.Session, *gocql.Session) {
-	tb.Helper()
-	tb.Fatal("TestContainers is not supported outside of testing build tag")
-	return nil, nil
+func SingleScylla(tb testing.TB, timeouts ...time.Duration) *ScyllaContainer {
+	panic("this function should not be used in production code, only for testing purposes")
+}
+
+func TestContainers(_ testing.TB, timeouts ...time.Duration) *ScyllaContainer {
+	panic("this function should not be used in production code, only for testing purposes")
 }

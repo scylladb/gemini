@@ -104,6 +104,8 @@ func WithScyllaLogger(
 ) Option {
 	return func(o *options, ch chan Item, chMetrics metrics.ChannelMetrics) error {
 		logger, err := NewScyllaLogger(
+			schema.Keyspace.Name,
+			schema.Tables[0].Name,
 			ch,
 			schemaChangesValues,
 			schema,
@@ -204,25 +206,27 @@ func (l *Logger) Close() error {
 
 type itemMarshal struct {
 	Values        any             `json:"values"`
-	PartitionKeys *typedef.Values `json:"partition_keys,omitempty"`
-	Start         string          `json:"time"`
-	Error         string          `json:"error"`
+	PartitionKeys *typedef.Values `json:"partition_keys"`
+	Start         Time            `json:"time"`
+	Error         *string         `json:"error,omitempty"`
 	Statement     string          `json:"query"`
 	Host          string          `json:"host"`
-	Duration      string          `json:"duration"`
+	Duration      Duration        `json:"duration"`
 	Attempt       int             `json:"driver_attempt"`
 	GeminiAttempt int             `json:"gemini_attempt"`
 }
 
 func (i Item) MarshalJSON() ([]byte, error) {
-	var errorString string
+	var errorString *string
 
 	if i.Error.IsLeft() {
-		if i.Error.MustLeft() != nil {
-			errorString = i.Error.MustLeft().Error()
+		if val := i.Error.MustLeft(); val != nil {
+			str := val.Error()
+			errorString = &str
 		}
 	} else {
-		errorString = i.Error.MustRight()
+		str := i.Error.MustRight()
+		errorString = &str
 	}
 
 	var values any
@@ -234,24 +238,84 @@ func (i Item) MarshalJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(itemMarshal{
-		Start:         i.Start.Time.Format(time.RFC3339Nano),
+		Start:         i.Start,
 		Values:        values,
 		Error:         errorString,
 		Statement:     i.Statement,
 		Host:          i.Host,
-		Duration:      i.Duration.Duration.String(),
+		Duration:      i.Duration,
 		Attempt:       i.Attempt,
 		GeminiAttempt: i.GeminiAttempt,
 		PartitionKeys: i.PartitionKeys,
 	})
 }
 
+func (i *Item) UnmarshalJSON(data []byte) error {
+	var im itemMarshal
+	if err := json.Unmarshal(data, &im); err != nil {
+		return errors.Wrap(err, "failed to unmarshal item")
+	}
+
+	i.Start = im.Start
+	i.PartitionKeys = im.PartitionKeys
+
+	if im.Error != nil {
+		i.Error = mo.Right[error, string](*im.Error)
+	} else {
+		i.Error = mo.Left[error, string](nil)
+	}
+
+	i.Statement = im.Statement
+	i.Host = im.Host
+	i.Duration = im.Duration
+	i.Attempt = im.Attempt
+	i.GeminiAttempt = im.GeminiAttempt
+
+	if values, ok := im.Values.([]any); ok {
+		i.Values = mo.Left[[]any, []byte](values)
+	} else {
+		i.Values = mo.Right[[]any, []byte]([]byte(im.Values.(string)))
+	}
+
+	return nil
+}
+
 func (t Time) MarshalJSON() ([]byte, error) {
-	return json.Marshal(t.Time.UnixMicro())
+	return json.Marshal(t.Time.Format(time.RFC3339Nano))
+}
+
+func (t *Time) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+
+	parsedTime, err := time.Parse(time.RFC3339Nano, str)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse time")
+	}
+
+	t.Time = parsedTime
+	return nil
 }
 
 func (d Duration) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.Duration.String())
+}
+
+func (d *Duration) UnmarshalJSON(data []byte) error {
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		return err
+	}
+
+	parsedDuration, err := time.ParseDuration(str)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse duration")
+	}
+
+	d.Duration = parsedDuration
+	return nil
 }
 
 func (i Item) MemoryFootprint() uint64 {

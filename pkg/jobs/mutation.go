@@ -125,7 +125,7 @@ func (m *Mutation) Do(ctx context.Context) error {
 		}
 
 		if errors.Is(err, context.Canceled) {
-			return context.Canceled
+			return nil
 		}
 
 		if errors.Is(err, ErrNoStatement) {

@@ -100,11 +100,11 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 		})
 	}
 
-	if sc.CQLFeature > typedef.CQL_FEATURE_NORMAL && sc.UseMaterializedViews && columns > 0 {
+	if sc.CQLFeature > typedef.CQLFeatureNormal && sc.UseMaterializedViews && columns > 0 {
 		table.Indexes = CreateIndexesForColumn(&table, utils.RandInt2(r, 1, columns))
 	}
 
-	if sc.CQLFeature > typedef.CQL_FEATURE_NORMAL && sc.UseMaterializedViews &&
+	if sc.CQLFeature > typedef.CQLFeatureNormal && sc.UseMaterializedViews &&
 		len(clusteringKeys) > 0 &&
 		table.Columns.ValidColumnsForPrimaryKey().Len() != 0 {
 		table.MaterializedViews = CreateMaterializedViews(table.Columns, table.Name, partitionKeys, clusteringKeys, r)

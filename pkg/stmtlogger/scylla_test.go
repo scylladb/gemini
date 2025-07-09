@@ -15,6 +15,7 @@
 package stmtlogger
 
 import (
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -30,15 +31,15 @@ import (
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gemini/pkg/workpool"
 )
 
 func TestBuildQueriesCreation(t *testing.T) {
 	t.Parallel()
 
-	createKeyspace, createTable := buildCreateTableQuery([]typedef.ColumnDef{
+	createKeyspace, createTable := buildCreateTableQuery("ks1_logs", "table1_statements", []typedef.ColumnDef{
 		{Name: "col1", Type: typedef.TypeInt},
 		{Name: "col2", Type: typedef.TypeAscii},
 	}, replication.NewNetworkTopologyStrategy())
@@ -51,15 +52,15 @@ func TestBuildQueriesExecution(t *testing.T) {
 	t.Parallel()
 	assert := require.New(t)
 
-	session := utils.SingleScylla(t)
+	scyllaContainer := testutils.SingleScylla(t)
 
-	createKeyspace, createTable := buildCreateTableQuery([]typedef.ColumnDef{
+	createKeyspace, createTable := buildCreateTableQuery("ks1_logs", "table1_statements", []typedef.ColumnDef{
 		{Name: "col1", Type: typedef.TypeInt},
 		{Name: "col2", Type: typedef.TypeAscii},
 	}, replication.NewNetworkTopologyStrategy())
 
-	assert.NoError(session.Query(createKeyspace).Exec())
-	assert.NoError(session.Query(createTable).Exec())
+	assert.NoError(scyllaContainer.Test.Query(createKeyspace).Exec())
+	assert.NoError(scyllaContainer.Test.Query(createTable).Exec())
 }
 
 func successStatement(ty Type) Item {
@@ -126,7 +127,7 @@ func TestScyllaLogger(t *testing.T) {
 		testFile := dir + "/test_statements.json"
 
 		assert := require.New(t)
-		session := utils.SingleScylla(t)
+		scyllaContainer := testutils.SingleScylla(t)
 
 		jobList := joberror.NewErrorList(1)
 		pool := workpool.New(1)
@@ -140,11 +141,13 @@ func TestScyllaLogger(t *testing.T) {
 		}
 
 		ch := make(chan Item, 10)
-		zapLogger := utils.Must(zap.NewDevelopment())
+		zapLogger := testutils.Must(zap.NewDevelopment())
 
 		logger, err := NewScyllaLoggerWithSession(
+			"ks1",
+			"table1",
 			typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{"col1": {5}, "col2": {"test_ddl"}})},
-			session,
+			scyllaContainer.Test,
 			partitionKeys,
 			replication.NewNetworkTopologyStrategy(),
 			ch,
@@ -170,11 +173,15 @@ func TestScyllaLogger(t *testing.T) {
 		assert.NoError(logger.Close())
 
 		var count int
-		assert.NoError(session.Query("SELECT COUNT(*) FROM logs.statements").Scan(&count))
+		assert.NoError(scyllaContainer.Test.Query(
+			fmt.Sprintf("SELECT COUNT(*) FROM %s.%s",
+				GetScyllaStatementLogsKeyspace("ks1"),
+				GetScyllaStatementLogsTable("table1")),
+		).Scan(&count))
 		assert.Equal(6, count)
 
-		oracleData := item.ReadData(t, utils.Must(os.Open(oracleFile)))
-		testData := item.ReadData(t, utils.Must(os.Open(testFile)))
+		oracleData := item.ReadData(t, testutils.Must(os.Open(oracleFile)))
+		testData := item.ReadData(t, testutils.Must(os.Open(testFile)))
 
 		oracleStatements := strings.SplitSeq(strings.TrimRight(oracleData, "\n"), "\n")
 		testStatements := strings.SplitSeq(strings.TrimRight(testData, "\n"), "\n")

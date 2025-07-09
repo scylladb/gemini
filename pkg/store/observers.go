@@ -127,8 +127,10 @@ func NewClusterObserver(
 func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedBatch) {
 	instance := batch.Host.ConnectAddressAndPort()
 	data := MustGetContextData(ctx)
+	var errStr string
 
 	if batch.Err != nil {
+		errStr = batch.Err.Error()
 		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, batch.Err.Error()).Inc()
 
 		switch {
@@ -143,7 +145,7 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 	for i, query := range batch.Statements {
 		if c.logger != nil && !data.Statement.QueryType.IsSelect() {
 			err := c.logger.LogStmt(stmtlogger.Item{
-				Error:         mo.Left[error, string](batch.Err),
+				Error:         mo.Right[error, string](errStr),
 				Statement:     query,
 				Values:        mo.Left[[]any, []byte](slices.Clone(batch.Values[i])),
 				Start:         stmtlogger.Time{Time: batch.Start},
@@ -169,9 +171,10 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQuery) {
 	instance := query.Host.ConnectAddressAndPort()
 	data := MustGetContextData(ctx)
-
+	var errStr string
 	if query.Err != nil {
 		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, query.Err.Error()).Inc()
+		errStr = query.Err.Error()
 
 		switch {
 		case errors.Is(query.Err, gocql.ErrConnectionClosed) || errors.Is(query.Err, gocql.ErrHostDown):
@@ -186,7 +189,7 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 
 	if c.logger != nil && !data.Statement.QueryType.IsSelect() {
 		err := c.logger.LogStmt(stmtlogger.Item{
-			Error:         mo.Left[error, string](query.Err),
+			Error:         mo.Right[error, string](errStr),
 			Statement:     query.Statement,
 			Values:        mo.Left[[]any, []byte](slices.Clone(query.Values)),
 			Start:         stmtlogger.Time{Time: query.Start},

@@ -75,7 +75,7 @@ type Store interface {
 type (
 	ScyllaClusterConfig struct {
 		Name                    stmtlogger.Type
-		HostSelectionPolicy     string
+		HostSelectionPolicy     HostSelectionPolicy
 		Consistency             string
 		Username                string
 		Password                string

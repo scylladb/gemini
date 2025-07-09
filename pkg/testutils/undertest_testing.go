@@ -12,31 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package utils
+//go:build testing
 
-import (
-	"unsafe"
-)
+package testutils
 
-const (
-	uint64Size = int(unsafe.Sizeof(uint64(0)))
-	hextable   = "0123456789abcdef"
-)
+func IsUnderTest() bool {
+	return true
+}
 
-func RandString(rnd Random, ln int) string {
-	length := ln
-	if val := length % uint64Size; val != 0 {
-		length += uint64Size - val
+func Must[T any](val T, err error) T {
+	if err != nil {
+		panic(err)
 	}
 
-	binBuff := make([]byte, length)
-
-	for i := 0; i < length; i += uint64Size {
-		number := rnd.Int64()
-		for j := 0; j < uint64Size; j++ {
-			binBuff[i+j] = hextable[(number>>j)&0x0f]
-		}
-	}
-
-	return unsafe.String(unsafe.SliceData(binBuff), length)[:ln]
+	return val
 }

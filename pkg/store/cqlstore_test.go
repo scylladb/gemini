@@ -25,8 +25,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gemini/pkg/workpool"
 )
 
@@ -34,18 +34,18 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 	t.Parallel()
 
 	assert := require.New(t)
-	testSession, oracleSession := utils.TestContainers(t)
+	scyllaContainer := testutils.TestContainers(t)
 
-	assert.NoError(testSession.Query(
+	assert.NoError(scyllaContainer.Test.Query(
 		"CREATE KEYSPACE ks1 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
 	).Exec())
-	assert.NoError(testSession.Query(
+	assert.NoError(scyllaContainer.Test.Query(
 		"CREATE TABLE ks1.table_1 (id timeuuid PRIMARY KEY, value list<text>)",
 	).Exec())
-	assert.NoError(oracleSession.Query(
+	assert.NoError(scyllaContainer.Oracle.Query(
 		"CREATE KEYSPACE ks1 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
 	).Exec())
-	assert.NoError(oracleSession.Query(
+	assert.NoError(scyllaContainer.Oracle.Query(
 		"CREATE TABLE ks1.table_1 (id timeuuid PRIMARY KEY, value list<text>)",
 	).Exec())
 
@@ -55,14 +55,13 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 			ReplicationStrategy:              replication.NewSimpleStrategy(),
 			OracleReplicationStrategy:        replication.NewSimpleStrategy(),
 			AsyncObjectStabilizationAttempts: 10,
-			UseMaterializedViews:             false,
 			AsyncObjectStabilizationDelay:    10 * time.Millisecond,
 		},
 		Tables: []*typedef.Table{{
 			Name: "table_1",
 			Columns: typedef.Columns{
 				{Name: "id", Type: typedef.TypeUuid},
-				{Name: "id", Type: &typedef.BagType{
+				{Name: "values", Type: &typedef.BagType{
 					ComplexType: typedef.TypeList,
 					ValueType:   typedef.TypeText,
 					Frozen:      false,
@@ -73,8 +72,8 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 
 	store := &delegatingStore{
 		workers:     workpool.New(2),
-		oracleStore: newCQLStoreWithSession(oracleSession, schema, zap.NewNop(), "oracle", 1, 10*time.Millisecond, false),
-		testStore:   newCQLStoreWithSession(testSession, schema, zap.NewNop(), "test", 5, 1*time.Millisecond, false),
+		oracleStore: newCQLStoreWithSession(scyllaContainer.Oracle, schema, zap.NewNop(), "oracle", 1, 10*time.Millisecond, false),
+		testStore:   newCQLStoreWithSession(scyllaContainer.Test, schema, zap.NewNop(), "test", 5, 1*time.Millisecond, false),
 		logger:      zap.NewNop(),
 	}
 

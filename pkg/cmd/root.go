@@ -32,6 +32,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/realrandom"
 	"github.com/scylladb/gemini/pkg/services"
@@ -175,7 +176,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		TestClusterConfig: store.ScyllaClusterConfig{
 			Name:                    stmtlogger.TypeTest,
 			Hosts:                   testClusterHost,
-			HostSelectionPolicy:     testClusterHostSelectionPolicy,
+			HostSelectionPolicy:     store.HostSelectionPolicy(testClusterHostSelectionPolicy),
 			Consistency:             consistency,
 			RequestTimeout:          requestTimeout,
 			ConnectTimeout:          connectTimeout,
@@ -189,7 +190,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		storeConfig.OracleClusterConfig = &store.ScyllaClusterConfig{
 			Name:                    stmtlogger.TypeOracle,
 			Hosts:                   oracleClusterHost,
-			HostSelectionPolicy:     oracleClusterHostSelectionPolicy,
+			HostSelectionPolicy:     store.HostSelectionPolicy(oracleClusterHostSelectionPolicy),
 			Consistency:             consistency,
 			RequestTimeout:          requestTimeout,
 			ConnectTimeout:          connectTimeout,
@@ -202,7 +203,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	workload, err := services.NewWorkload(&services.WorkloadConfig{
 		MaxErrorsToStore:      maxErrorsToStore,
 		OutputFile:            outFileArg,
-		PartitionDistribution: partitionKeyDistribution,
+		PartitionDistribution: distributions.Distribution(partitionKeyDistribution),
 		PartitionCount:        partitionCount,
 		PartitionBufferSize:   pkBufferReuseSize,
 		IOWorkerPoolSize:      iOWorkerPool,
@@ -266,11 +267,11 @@ func createLogger(level string) *zap.Logger {
 func getCQLFeature(feature string) typedef.CQLFeature {
 	switch strings.ToLower(feature) {
 	case "all":
-		return typedef.CQL_FEATURE_ALL
+		return typedef.CQLFeatureAll
 	case "normal":
-		return typedef.CQL_FEATURE_NORMAL
+		return typedef.CQLFeatureNormal
 	default:
-		return typedef.CQL_FEATURE_BASIC
+		return typedef.CQLFeatureBasic
 	}
 }
 

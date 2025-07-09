@@ -434,7 +434,7 @@ var fullSchema = Schema{
 		MinStringLength:                  0,
 		UseCounters:                      false,
 		UseLWT:                           false,
-		CQLFeature:                       CQL_FEATURE_NORMAL,
+		CQLFeature:                       CQLFeatureNormal,
 		AsyncObjectStabilizationAttempts: 10,
 		AsyncObjectStabilizationDelay:    100000,
 	},
