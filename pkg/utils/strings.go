@@ -15,6 +15,7 @@
 package utils
 
 import (
+	"sync"
 	"unsafe"
 )
 
@@ -23,20 +24,32 @@ const (
 	hextable   = "0123456789abcdef"
 )
 
-func RandString(rnd Random, ln int) string {
-	length := ln
-	if val := length % uint64Size; val != 0 {
-		length += uint64Size - val
-	}
+var (
+	randomString     string
+	randomStringOnce sync.Once
+)
 
-	binBuff := make([]byte, length)
-
-	for i := 0; i < length; i += uint64Size {
-		number := rnd.Int64()
-		for j := 0; j < uint64Size; j++ {
-			binBuff[i+j] = hextable[(number>>j)&0x0f]
+func PreallocateRandomString(rnd Random, ln int) {
+	randomStringOnce.Do(func() {
+		length := ln
+		if val := length % uint64Size; val != 0 {
+			length += uint64Size - val
 		}
-	}
 
-	return unsafe.String(unsafe.SliceData(binBuff), length)[:ln]
+		data := make([]byte, ln)
+
+		for i := 0; i < length; i += uint64Size {
+			number := rnd.Uint64()
+			for j := range uint64Size {
+				data[i+j] = hextable[(number>>j)&0x0f]
+			}
+		}
+
+		randomString = unsafe.String(unsafe.SliceData(data), length)
+	})
+}
+
+func RandString(rnd Random, ln int) string {
+	start := rnd.IntN(len(randomString) - ln - 1)
+	return randomString[start : start+ln]
 }

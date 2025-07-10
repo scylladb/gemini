@@ -16,6 +16,7 @@ package services
 
 import (
 	"context"
+	"math/rand/v2"
 	"os"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
+	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gemini/pkg/workpool"
@@ -37,14 +39,15 @@ import (
 
 type (
 	WorkloadConfig struct {
+		PartitionDistribution distributions.Distribution
 		RunningMode           string
 		OutputFile            string
-		PartitionDistribution distributions.Distribution
+		MU                    float64
 		Seed                  uint64
 		PartitionBufferSize   int
 		IOWorkerPoolSize      int
 		MaxErrorsToStore      int
-		MU                    float64
+		RandomStringBuffer    int
 		Sigma                 float64
 		WarmupDuration        time.Duration
 		Duration              time.Duration
@@ -75,6 +78,16 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 		config.MU,
 		config.Sigma,
 	)
+
+	if config.RandomStringBuffer <= 0 {
+		if testutils.IsUnderTest() {
+			config.RandomStringBuffer = 65 * 1024 // 65 KiB
+		} else {
+			config.RandomStringBuffer = 32 * 1024 * 1024 // 32 MiB
+		}
+	}
+
+	utils.PreallocateRandomString(rand.New(randSrc), config.RandomStringBuffer)
 
 	gens := generators.New(
 		schema,
