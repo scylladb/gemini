@@ -15,6 +15,7 @@
 package utils
 
 import (
+	"math"
 	"sync"
 	"unsafe"
 )
@@ -50,6 +51,10 @@ func PreallocateRandomString(rnd Random, ln int) {
 }
 
 func RandString(rnd Random, ln int) string {
-	start := rnd.IntN(len(randomString) - ln - 1)
+	val := len(randomString) - ln - 1
+	if val < 1 {
+		val = int(math.Abs(float64(val)))
+	}
+	start := rnd.IntN(val)
 	return randomString[start : start+ln]
 }

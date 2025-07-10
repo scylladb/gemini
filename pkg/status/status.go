@@ -87,8 +87,12 @@ func (gs *GlobalStatus) String() string {
 		gs.WriteOps.Load(), gs.ReadOps.Load(), gs.WriteErrors.Load(), gs.ReadErrors.Load())
 }
 
-func (gs *GlobalStatus) HasErrors() bool {
+func (gs *GlobalStatus) HasReachedErrorCount() bool {
 	return (gs.ReadErrors.Load() + gs.WriteErrors.Load()) >= uint64(gs.Errors.Cap())
+}
+
+func (gs *GlobalStatus) HasErrors() bool {
+	return gs.WriteErrors.Load() > 0 || gs.ReadErrors.Load() > 0
 }
 
 //nolint:forbidigo

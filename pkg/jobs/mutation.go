@@ -137,7 +137,7 @@ func (m *Mutation) Do(ctx context.Context) error {
 			m.status.AddReadError(jobErr)
 		}
 
-		if m.status.HasErrors() {
+		if m.status.HasReachedErrorCount() {
 			m.stopFlag.SetSoft(true)
 			return errors.New("mutation job stopped due to errors")
 		}

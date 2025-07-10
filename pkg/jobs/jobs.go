@@ -164,7 +164,7 @@ func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error
 //			_ = mutation(ctx, globalStatus, true, logger)
 //		})
 //
-//		if globalStatus.HasErrors() {
+//		if globalStatus.HasReachedErrorCount() {
 //			stopFlag.SetSoft(true)
 //			return nil
 //		}
