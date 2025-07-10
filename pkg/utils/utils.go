@@ -53,8 +53,8 @@ var maxDateMs = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC).UTC().U
 // RandDateStr generates time in string representation
 // it is done in such way because we wanted to make JSON statement to work
 // but scylla supports only string representation of date in JSON format
-func RandDateStr(rnd Random) string {
-	return time.UnixMilli(rnd.Int64N(maxDateMs)).UTC().Format(time.DateOnly)
+func RandDateStr(rnd Random) time.Time {
+	return time.UnixMilli(rnd.Int64N(maxDateMs)).UTC()
 }
 
 // RandTimestamp generates timestamp in nanoseconds
@@ -69,7 +69,7 @@ func RandDate(rnd Random) time.Time {
 	return time.Unix(rnd.Int64N(1<<63-2), rnd.Int64N(999999999)).UTC()
 }
 
-// According to the CQL binary protocol, time is an int64 in range [0;86399999999999]
+// RandTime - According to the CQL binary protocol, time is an int64 in range [0;86399999999999]
 // https://github.com/apache/cassandra/blob/f5df4b219e063cb24b9cc0c22b6e614506b8d903/doc/native_protocol_v4.spec#L941
 // An 8 byte two's complement long representing nanoseconds since midnight.
 // Valid values are in the range 0 to 86399999999999
@@ -92,7 +92,7 @@ func RandIPV4Address(rnd Random, v, pos int) string {
 		)
 	}
 	var blocks []string
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if i == pos {
 			blocks = append(blocks, strconv.Itoa(v))
 		} else {
@@ -113,11 +113,11 @@ func IgnoreError(fn func() error) {
 	_ = fn()
 }
 
-func UUIDFromTime(rnd Random) string {
+func UUIDFromTime(rnd Random) gocql.UUID {
 	if testutils.IsUnderTest() {
-		return gocql.TimeUUIDWith(rnd.Int64(), 0, []byte("127.0.0.1")).String()
+		return gocql.TimeUUIDWith(rnd.Int64(), 0, []byte("127.0.0.1"))
 	}
-	return gocql.UUIDFromTime(RandDate(rnd)).String()
+	return gocql.UUIDFromTime(RandDate(rnd))
 }
 
 func CreateFile(input string, closeOnExit bool, def ...io.Writer) (io.Writer, error) {

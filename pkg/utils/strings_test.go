@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package utils
+package utils_test
 
 import (
 	"encoding/hex"
@@ -20,8 +20,27 @@ import (
 	randv2 "math/rand/v2"
 	"strconv"
 	"testing"
+	"time"
 	"unsafe"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
+
+func TestRandString(t *testing.T) {
+	t.Parallel()
+
+	currentTime := uint64(time.Now().UnixNano())
+	rnd := randv2.New(randv2.NewPCG(currentTime, currentTime))
+
+	utils.PreallocateRandomString(rnd, 3*1024*1024)
+
+	for _, ln := range []int{1, 3, 5, 16, 45, 100, 1000} {
+		out := utils.RandString(rnd, ln)
+		if len(out) != ln {
+			t.Fatalf("%d != %d", ln, len(out))
+		}
+	}
+}
 
 func RandomStringGeminiV186(rnd *randv1.Rand, ln int) string {
 	buffLen := ln
@@ -41,7 +60,12 @@ func RandomStringGeminiV186(rnd *randv1.Rand, ln int) string {
 	return string(out[:ln])
 }
 
-func CurrentImplementation(rnd Random, ln int) string {
+const (
+	uint64Size = int(unsafe.Sizeof(uint64(0)))
+	hextable   = "0123456789abcdef"
+)
+
+func CurrentImplementation(rnd utils.Random, ln int) string {
 	length := ln
 	if val := length % uint64Size; val != 0 {
 		length += uint64Size - val
@@ -57,11 +81,6 @@ func CurrentImplementation(rnd Random, ln int) string {
 	}
 
 	return unsafe.String(unsafe.SliceData(binBuff), length)[:ln]
-}
-
-func FastRandomString(rnd Random, ln int) string {
-	start := rnd.IntN(len(randomString) - ln - 1)
-	return randomString[start : start+ln]
 }
 
 func BenchmarkRandString(b *testing.B) {
@@ -101,7 +120,7 @@ func BenchmarkRandString(b *testing.B) {
 	})
 
 	b.Run("Fast_Implementation", func(b *testing.B) {
-		PreallocateRandomString(randv2.New(randv2.NewChaCha8([32]byte{})), 100*1024*1024) // Preallocate a large enough string
+		utils.PreallocateRandomString(randv2.New(randv2.NewChaCha8([32]byte{})), 100*1024*1024) // Preallocate a large enough string
 		b.ReportAllocs()
 		b.ResetTimer()
 		for _, size := range sizes {
@@ -110,7 +129,7 @@ func BenchmarkRandString(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for b.Loop() {
-					FastRandomString(rand, size)
+					utils.RandString(rand, size)
 				}
 			})
 		}

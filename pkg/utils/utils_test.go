@@ -14,37 +14,3 @@
 
 package utils_test
 
-import (
-	"math/rand/v2"
-	"testing"
-	"time"
-
-	"github.com/scylladb/gemini/pkg/utils"
-)
-
-var currentTime = uint64(time.Now().UnixNano())
-
-var rnd = rand.New(rand.NewPCG(currentTime, currentTime))
-
-func BenchmarkUtilsRandString100(t *testing.B) {
-	for x := 0; x < t.N; x++ {
-		utils.RandString(rnd, 100)
-	}
-}
-
-func BenchmarkUtilsRandString1000(t *testing.B) {
-	for x := 0; x < t.N; x++ {
-		utils.RandString(rnd, 1000)
-	}
-}
-
-func TestRandString(t *testing.T) {
-	t.Parallel()
-
-	for _, ln := range []int{1, 3, 5, 16, 45, 100, 1000} {
-		out := utils.RandString(rnd, ln)
-		if len(out) != ln {
-			t.Fatalf("%d != %d", ln, len(out))
-		}
-	}
-}
