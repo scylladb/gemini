@@ -1,4 +1,24 @@
 # Changelog
+
+## [2.0.0] - 2025-07-10
+
+- Go Version 1.24 as default
+- Running the optimized build in docker with AMD v3 and all optimization enabled
+- Updated Driver to 1.15.0
+- New feature - Statement logger inside Oracle Cluster for better traceability
+- IO Worker Pool - Sending Scylla queries does not spawn new goroutines, but used IO Pool that has fixed number of workers
+- Tracing which partition failed to validated is reported in output logs
+- Cancellation improved - better OS signal handling and graceful exits
+- New Metrics reporting to give us insights what Gemini is doing
+- New Dashboard for Gemini
+- No more double entries in the scylla list
+- Taking into account the cartesian product to validate multiple partitions if the generated number of keys exceeds (finds the closest number of partitions that can be hit and not exceed the cartesian product)
+- Delete statements now operate on existing partitions, deleting the whole partition instead of deleting just one part of
+- Randomness fixed for each validation and mutation thread, each thread has its own sequence of instructions that will execute and no overlap between threads
+- Improving load balancing between Scylla Nodes
+- Removing unnecessary memory allocation, reducing the memory footprint and removing memory leaks
+- Migrated to new `math/rand/v2` package, and distribution function does take it into account 
+
 ## [1.8.7] - 2023-07-20
 - Introduce `--schema-seed` ([#376](https://github.com/scylladb/gemini/pull/376))
 - Make `--seed` and `--schema-seed` random by default ([#394](https://github.com/scylladb/gemini/pull/394))
