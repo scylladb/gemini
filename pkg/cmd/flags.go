@@ -79,6 +79,7 @@ var (
 	statementLogFileCompression      string
 	versionFlag                      bool
 	iOWorkerPool                     int
+	randomStringBuffer               int
 
 	concurrency         int
 	mutationConcurrency int
@@ -86,6 +87,7 @@ var (
 )
 
 func setupFlags(cmd *cobra.Command) {
+	cmd.PersistentFlags().IntVarP(&randomStringBuffer, "random-string-buffer-size", "", 100*1024*1024, "Size of the buffer used for random strings")
 	cmd.PersistentFlags().IntVarP(&mutationConcurrency, "mutation-concurrency", "", 0, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().IntVarP(&readConcurrency, "read-concurrency", "", 0, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().IntVarP(&iOWorkerPool, "io-worker-pool", "", 1024, "Number of worker threads to use for IO operations")

@@ -19,7 +19,6 @@ import (
 	"math"
 	"math/big"
 	"math/rand/v2"
-	"net"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -138,8 +137,7 @@ func (st SimpleType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 func (st SimpleType) genValue(r utils.Random, p *PartitionRangeConfig) any {
 	switch st {
 	case TypeAscii, TypeText, TypeVarchar, TypeBlob:
-		ln := r.IntN(p.MaxStringLength) + p.MinStringLength
-		return utils.RandString(r, ln)
+		return utils.RandString(r, r.IntN(p.MaxStringLength)+p.MinStringLength)
 	case TypeBigint:
 		return r.Int64()
 	case TypeBoolean:
@@ -155,16 +153,19 @@ func (st SimpleType) genValue(r utils.Random, p *PartitionRangeConfig) any {
 	case TypeDouble:
 		return float64(r.Uint64()<<11>>11) / (1 << 53)
 	case TypeDuration:
-		return (time.Minute * time.Duration(r.IntN(100))).String()
+		return time.Minute * time.Duration(r.IntN(100))
 	case TypeFloat:
 		return float32(r.Uint32()<<8>>8) / (1 << 24)
 	case TypeInet:
-		return net.ParseIP(utils.RandIPV4Address(r, r.IntN(math.MaxUint8), 2)).String()
+		return utils.RandIPV4Address(r, r.IntN(math.MaxUint8), 1+r.IntN(3))
 	case TypeInt:
 		return int32(r.Int64N(math.MaxInt32))
 	case TypeSmallint:
 		return int16(r.Uint64N(math.MaxUint16))
-	case TypeTimeuuid, TypeUuid:
+	case TypeUuid:
+		uuid, _ := gocql.RandomUUID()
+		return uuid
+	case TypeTimeuuid:
 		return utils.UUIDFromTime(r)
 	case TypeTinyint:
 		return int8(r.Uint64N(math.MaxUint8))
