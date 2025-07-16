@@ -96,7 +96,7 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 	}
 
 	if stmt == nil {
-		if v.status.HasErrors() {
+		if v.status.HasReachedErrorCount() {
 			v.stopFlag.SetSoft(true)
 		}
 		return ErrNoStatement
@@ -169,7 +169,7 @@ func (v *Validation) Do(ctx context.Context) error {
 			v.status.AddReadError(jobErr)
 		}
 
-		if v.status.HasErrors() {
+		if v.status.HasReachedErrorCount() {
 			v.stopFlag.SetSoft(true)
 			return errors.New("validation job stopped due to errors")
 		}

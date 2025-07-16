@@ -16,10 +16,13 @@ package services
 
 import (
 	"flag"
+	"math/rand/v2"
 	"os"
 	"testing"
 
 	"go.uber.org/zap"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 var (
@@ -30,6 +33,7 @@ var (
 func TestMain(m *testing.M) {
 	flag.BoolVar(&NoopLogger, "noop-logger", true, "Use noop logger for tests")
 	flag.StringVar(&LoggingLevel, "logging-level", "error", "Logging level for the tests")
+	utils.PreallocateRandomString(rand.New(rand.NewPCG(1, 1)), 1<<20)
 
 	flag.Parse()
 	os.Exit(m.Run())

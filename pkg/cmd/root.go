@@ -201,6 +201,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	workload, err := services.NewWorkload(&services.WorkloadConfig{
+		RandomStringBuffer:    randomStringBuffer,
 		MaxErrorsToStore:      maxErrorsToStore,
 		OutputFile:            outFileArg,
 		PartitionDistribution: distributions.Distribution(partitionKeyDistribution),

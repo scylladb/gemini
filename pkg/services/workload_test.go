@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/scylladb/gemini/pkg/distributions"
-	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/jobs"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
@@ -76,8 +75,27 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string) store.Config
 	}
 }
 
-func getSchema(tb testing.TB) *typedef.Schema {
+func getSchema(tb testing.TB, table ...*typedef.Table) *typedef.Schema {
 	tb.Helper()
+
+	tables := make([]*typedef.Table, 0, 1)
+	if len(table) > 0 {
+		tables = append(tables, table[0])
+	} else {
+		tables = append(tables, &typedef.Table{
+			Name: "table_1",
+			PartitionKeys: typedef.Columns{
+				{Name: "pk1", Type: typedef.TypeText},
+				{Name: "pk2", Type: typedef.TypeInt},
+			},
+			ClusteringKeys: typedef.Columns{
+				{Name: "ck1", Type: typedef.TypeInt},
+			},
+			Columns: typedef.Columns{
+				{Name: "col1", Type: typedef.TypeText},
+			},
+		})
+	}
 
 	keyspace := strings.ToLower(strings.ReplaceAll(tb.Name(), "/", "_"))
 
@@ -87,21 +105,7 @@ func getSchema(tb testing.TB) *typedef.Schema {
 			OracleReplication: replication.NewSimpleStrategy(),
 			Name:              keyspace,
 		},
-		Tables: []*typedef.Table{
-			{
-				Name: "table_1",
-				PartitionKeys: typedef.Columns{
-					{Name: "pk1", Type: typedef.TypeText},
-					{Name: "pk2", Type: typedef.TypeInt},
-				},
-				ClusteringKeys: typedef.Columns{
-					{Name: "ck1", Type: typedef.TypeInt},
-				},
-				Columns: typedef.Columns{
-					{Name: "col1", Type: typedef.TypeText},
-				},
-			},
-		},
+		Tables: tables,
 		Config: typedef.SchemaConfig{
 			ReplicationStrategy:              replication.NewSimpleStrategy(),
 			OracleReplicationStrategy:        replication.NewSimpleStrategy(),
@@ -327,31 +331,6 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 		maxErrorsCount      = 4
 	)
 
-	random, distFunc := distributions.New(distributions.DistributionUniform, partitionCount, seed, 0, 0)
-	gens := generators.New(schema, distFunc, seed, partitionCount, partitionBufferSize, logger, random)
-
-	values := make([]typedef.PartitionKeys, 0, maxErrorsCount+1)
-
-	for range maxErrorsCount + 1 {
-		pk, err := gens.Get(schema.Tables[0]).Get(t.Context())
-		assert.NoError(err)
-		values = append(values, pk)
-	}
-
-	// Delete some data to cause validation errors from the TEST cluster
-	time.AfterFunc(4*time.Second, func() {
-		for _, value := range values {
-			assert.NoError(scyllaContainer.Test.Query(
-				fmt.Sprintf(
-					"DELETE FROM %s.%s WHERE pk1 = ? AND pk2 = ?",
-					schema.Keyspace.Name,
-					schema.Tables[0].Name,
-				),
-				value.Values.ToCQLValues(schema.Tables[0].PartitionKeys)...,
-			).Exec())
-		}
-	})
-
 	workload, err := NewWorkload(&WorkloadConfig{
 		RunningMode:           jobs.MixedMode,
 		PartitionDistribution: distributions.DistributionUniform,
@@ -359,13 +338,24 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 		PartitionBufferSize:   partitionBufferSize,
 		IOWorkerPoolSize:      2,
 		MaxErrorsToStore:      maxErrorsCount,
-		WarmupDuration:        5 * time.Second,
+		WarmupDuration:        0,
 		Duration:              10 * time.Second,
 		PartitionCount:        partitionCount,
 		MutationConcurrency:   1,
 		ReadConcurrency:       1,
 		DropSchema:            true,
 	}, storeConfig, schema, logger, stopFlag)
+
+	// Delete some data to cause validation errors from the TEST cluster
+	time.AfterFunc(1*time.Second, func() {
+		assert.NoError(scyllaContainer.Test.Query(
+			fmt.Sprintf(
+				"TRUNCATE TABLE %s.%s",
+				schema.Keyspace.Name,
+				schema.Tables[0].Name,
+			),
+		).Exec())
+	})
 
 	assert.NoError(err)
 	assert.Error(workload.Run(t.Context()))
@@ -414,4 +404,88 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	}
 
 	assert.Equal(len(contents[storeConfig.TestStatementFile]), len(contents[storeConfig.OracleStatementFile]), "test and oracle files should have the same number of items")
+}
+
+func TestWorkloadWithAllSchemaTypes(t *testing.T) {
+	t.Parallel()
+	scyllaContainer := testutils.TestContainers(t)
+
+	assert := require.New(t)
+	logger := getLogger(t)
+	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts)
+	schema := getSchema(t, &typedef.Table{
+		Name: "table_all",
+		PartitionKeys: typedef.Columns{
+			{Name: "pk1", Type: typedef.TypeText},
+			{Name: "pk2", Type: typedef.TypeInt},
+		},
+		ClusteringKeys: typedef.Columns{
+			{Name: "ck1", Type: typedef.TypeInt},
+		},
+		Columns: typedef.Columns{
+			{Name: "col1", Type: typedef.TypeAscii},
+			{Name: "col2", Type: typedef.TypeBigint},
+			{Name: "col3", Type: typedef.TypeBlob},
+			{Name: "col4", Type: typedef.TypeBoolean},
+			{Name: "col5", Type: typedef.TypeDate},
+			{Name: "col6", Type: typedef.TypeDecimal},
+			{Name: "col7", Type: typedef.TypeDouble},
+			{Name: "col8", Type: typedef.TypeDuration},
+			{Name: "col9", Type: typedef.TypeFloat},
+			{Name: "col10", Type: typedef.TypeInet},
+			{Name: "col11", Type: typedef.TypeInt},
+			{Name: "col12", Type: typedef.TypeSmallint},
+			{Name: "col13", Type: typedef.TypeText},
+			{Name: "col14", Type: typedef.TypeTime},
+			{Name: "col15", Type: typedef.TypeTimestamp},
+			{Name: "col16", Type: typedef.TypeTimeuuid},
+			{Name: "col17", Type: typedef.TypeTinyint},
+			{Name: "col18", Type: typedef.TypeUuid},
+			{Name: "col19", Type: typedef.TypeVarchar},
+			{Name: "col20", Type: typedef.TypeVarint},
+		},
+	})
+	stopFlag := stop.NewFlag(t.Name())
+	t.Cleanup(func() {
+		stopFlag.SetHard(true)
+	})
+
+	const (
+		partitionCount      = 100
+		partitionBufferSize = 10
+		seed                = 1
+		maxErrorsCount      = 4
+	)
+
+	workload, err := NewWorkload(&WorkloadConfig{
+		RunningMode:           jobs.MixedMode,
+		PartitionDistribution: distributions.DistributionUniform,
+		Seed:                  seed,
+		PartitionBufferSize:   partitionBufferSize,
+		IOWorkerPoolSize:      2,
+		MaxErrorsToStore:      maxErrorsCount,
+		WarmupDuration:        5 * time.Second,
+		Duration:              10 * time.Second,
+		PartitionCount:        partitionCount,
+		MutationConcurrency:   1,
+		ReadConcurrency:       1,
+		DropSchema:            true,
+	}, storeConfig, schema, logger, stopFlag)
+
+	assert.NoError(err)
+	assert.NoError(workload.Run(t.Context()))
+	assert.NoError(workload.Close())
+
+	assert.NoFileExists(storeConfig.OracleStatementFile)
+	assert.NoFileExists(storeConfig.TestStatementFile)
+
+	status := workload.GetGlobalStatus()
+
+	assert.Equal(uint64(0), status.WriteErrors.Load())
+	assert.Equal(0, status.Errors.Len())
+	assert.Equal(uint64(0), status.ReadErrors.Load())
+
+	assert.Greater(status.WriteOps.Load(), uint64(0))
+	assert.Greater(status.ReadOps.Load(), uint64(0))
+	assert.Greater(status.ValidatedRows.Load(), uint64(0))
 }

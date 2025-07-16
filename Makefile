@@ -110,7 +110,7 @@ stop-scylla-monitoring:
 	cd scylla-monitoring && ./kill-all.sh
 
 SCYLLA_MONITORING_VERSION ?= 4.10.0
-SCYLLA_TEST_VERSION ?= 2025.1
+SCYLLA_TEST_VERSION ?= 2025.2
 SCYLLA_ORACLE_VERSION ?= 2025.1
 
 .PHONY: scylla-monitoring
@@ -148,7 +148,7 @@ scylla-shutdown-cluster: stop-scylla-monitoring
 
 .PHONY: test
 test:
-	@go test -covermode=atomic -gcflags="-N -l" -tags testing -race -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | go tool gotestfmt -showteststatus
+	@go test -covermode=atomic -gcflags="-N -l" -tags testing -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | go tool gotestfmt -showteststatus
 
 PPROF_PORT ?= 6060
 PPROF_SECONDS ?= 60

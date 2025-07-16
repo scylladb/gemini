@@ -16,6 +16,7 @@ package services
 
 import (
 	"context"
+	"math/rand/v2"
 	"os"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
+	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gemini/pkg/workpool"
@@ -37,14 +39,15 @@ import (
 
 type (
 	WorkloadConfig struct {
+		PartitionDistribution distributions.Distribution
 		RunningMode           string
 		OutputFile            string
-		PartitionDistribution distributions.Distribution
+		MU                    float64
 		Seed                  uint64
 		PartitionBufferSize   int
 		IOWorkerPoolSize      int
 		MaxErrorsToStore      int
-		MU                    float64
+		RandomStringBuffer    int
 		Sigma                 float64
 		WarmupDuration        time.Duration
 		Duration              time.Duration
@@ -76,6 +79,16 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 		config.Sigma,
 	)
 
+	if config.RandomStringBuffer <= 0 {
+		if testutils.IsUnderTest() {
+			config.RandomStringBuffer = 65 * 1024 // 65 KiB
+		} else {
+			config.RandomStringBuffer = 32 * 1024 * 1024 // 32 MiB
+		}
+	}
+
+	utils.PreallocateRandomString(rand.New(randSrc), config.RandomStringBuffer)
+
 	gens := generators.New(
 		schema,
 		distFunc,
@@ -99,7 +112,7 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 		return nil, errors.Wrap(err, "failed to create store")
 	}
 
-	return &Workload{
+	w := &Workload{
 		config:     config,
 		status:     globalStatus,
 		logger:     logger,
@@ -118,14 +131,20 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 			logger.Named("jobs"),
 			randSrc,
 		),
-	}, nil
+	}
+
+	if err = w.createSchemaAndTables(context.Background()); err != nil {
+		return nil, errors.Wrap(err, "failed to create schema and tables")
+	}
+
+	return w, nil
 }
 
 func (w *Workload) GetGlobalStatus() *status.GlobalStatus {
 	return w.status
 }
 
-func (w *Workload) Run(base context.Context) error {
+func (w *Workload) createSchemaAndTables(base context.Context) error {
 	if w.config.DropSchema && w.config.RunningMode != jobs.ReadMode {
 		for _, stmt := range statements.GetDropKeyspace(w.schema) {
 			w.logger.Debug(stmt)
@@ -150,11 +169,15 @@ func (w *Workload) Run(base context.Context) error {
 		}
 	}
 
+	return nil
+}
+
+func (w *Workload) Run(base context.Context) error {
 	if w.config.WarmupDuration > 0 {
 		stopFlag := w.stopFlag.CreateChild("warmup")
 		ctx, cancel := context.WithTimeout(base, w.config.WarmupDuration+2*time.Second)
 		defer cancel()
-		time.AfterFunc(w.config.WarmupDuration, func() {
+		time.AfterFunc(w.config.WarmupDuration+1*time.Second, func() {
 			stopFlag.SetSoft(false)
 			cancel()
 		})
@@ -168,7 +191,7 @@ func (w *Workload) Run(base context.Context) error {
 		stopFlag := w.stopFlag.CreateChild("gemini")
 		ctx, cancel := context.WithTimeout(base, w.config.Duration+2*time.Second)
 		defer cancel()
-		time.AfterFunc(w.config.Duration, func() {
+		time.AfterFunc(w.config.Duration+1*time.Second, func() {
 			stopFlag.SetSoft(false)
 			cancel()
 		})
