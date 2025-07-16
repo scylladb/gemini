@@ -532,6 +532,8 @@ github.com/scylladb/go-set v1.0.2 h1:SkvlMCKhP0wyyct6j+0IHJkBkSZL+TDzZ4E7f7BCcRE
 github.com/scylladb/go-set v1.0.2/go.mod h1:DkpGd78rljTxKAnTDPFqXSGxvETQnJyuSOQwsHycqfs=
 github.com/scylladb/gocql v1.15.0 h1:UZvfttXqNUm4m28KF1PzyJ7WAEJNYOP2sauUqYD2obg=
 github.com/scylladb/gocql v1.15.0/go.mod h1:+I2gRPugWIC/TmRxCRvyP47nB2yxAFuEJFsSSP4A10o=
+github.com/scylladb/gocql v1.15.1 h1:t75NkDFys0XxipPsnTrSEbwx8B8R/jTUt5OAY9W7i+c=
+github.com/scylladb/gocql v1.15.1/go.mod h1:+rInt+HjERaMEYC4N8LocQQEAdREhYKU4QPkE00K5dA=
 github.com/scylladb/gocqlx/v3 v3.0.1 h1:JBvOUBz62LQ2lbIgJqQbwVMiDftbtrJSi63KVxvRYOQ=
 github.com/scylladb/gocqlx/v3 v3.0.1/go.mod h1:EjbSZM0VR2a57ZUxCRQ3v3CSoWIkH1WTMwxeDbFQorY=
 github.com/scylladb/gocqlx/v3 v3.0.2 h1:eviQVtrntZnp/LXQ37yFamxyS4KZeNbRRuyn1wzypSg=
