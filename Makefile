@@ -22,6 +22,7 @@ GEMINI_SEED := $(shell echo $$((RANDOM % 100 + 1)))
 GEMINI_BINARY ?= $(PWD)/bin/gemini
 GEMINI_DOCKER_NETWORK ?= gemini
 GEMINI_IO_WORKER_POOL ?= 1024
+GEMINI_PARTITION_KEY_REUSE_BUFFER_SIZE ?= 50
 
 define get_scylla_ip
 	$(shell docker inspect --format "{{ .NetworkSettings.Networks.$(GEMINI_DOCKER_NETWORK).IPAddress }}" "$(1)")
@@ -41,7 +42,7 @@ GEMINI_FLAGS ?= --level=debug \
 	--cql-features=$(CQL_FEATURES) \
 	--duration=$(DURATION) \
 	--warmup=$(WARMUP) \
-	--partition-key-buffer-reuse-size=50 \
+	--partition-key-buffer-reuse-size=$(GEMINI_PARTITION_KEY_REUSE_BUFFER_SIZE) \
 	--partition-key-distribution=uniform \
 	--io-worker-pool=$(GEMINI_IO_WORKER_POOL) \
 	--oracle-statement-log-file=$(PWD)/results/oracle-statements.json \
@@ -66,6 +67,30 @@ fieldalign:
 .PHONY: fmt
 fmt:
 	@go tool golangci-lint fmt
+
+.PHONY: prebuild
+prebuild:
+	@mkdir -p bin
+	@go build \
+		-a -installsuffix cgo \
+		-trimpath \
+		-tags="production,!debug,netgo,osusergo,static_build" \
+		-gcflags="-wb=false -l=4 -B -C -live -d=ssa/check/on" \
+		-ldflags="-linkmode=external -extldflags '-static' $(LDFLAGS_VERSION)" \
+		-o bin/gemini ./pkg/cmd
+	@./bin/gemini --version --version-json > bin/version.json
+
+.PHONY: profile-build
+profile-build:
+	@mkdir -p bin
+	@go build \
+		-a -installsuffix cgo \
+		-trimpath \
+		-tags="production,!debug,netgo,osusergo,static_build" \
+		-gcflags="-wb=false -l=4 -B -C -live -d=ssa/check/on" \
+		-ldflags="-linkmode=external -extldflags '-static' $(LDFLAGS_VERSION)" \
+		-o bin/gemini ./pkg/cmd
+	@./bin/gemini --version --version-json > bin/version.json
 
 .PHONY: build
 build:
@@ -152,6 +177,34 @@ test:
 
 PPROF_PORT ?= 6060
 PPROF_SECONDS ?= 60
+
+.PHONY: pprof-proto
+pprof-proto:
+	@go tool pprof -proto \
+		-output=cpu.pprof \
+		-sample_index=cpu \
+		-trim=true \
+		-nodecount=0 \
+		-nodefraction=0.001 \
+		-edgefraction=0.001 \
+		-compact_labels=false \
+		-seconds=$(PPROF_SECONDS) \
+		"http://localhost:$(PPROF_PORT)/debug/pprof/profile"
+
+.PHONY: pprof-alloc
+pprof-alloc:
+	go tool pprof -proto \
+		-output=allocs.pprof \
+		-sample_index=alloc_objects \
+		-seconds=$(PPROF_SECONDS) \
+		-nodecount=0 \
+		-nodefraction=0.001 \
+		http://localhost:6060/debug/pprof/allocs
+
+.PHONY: pprof-merge
+pprof-merge:
+	 go tool pprof -proto -output=merged.pgo cpu.pprof allocs.pprof
+
 .PHONY: pprof-profile
 pprof-profile:
 	@go tool pprof -http=:8080 'http://localhost:$(PPROF_PORT)/debug/pprof/profile?seconds=$(PPROF_SECONDS)'
@@ -202,6 +255,18 @@ integration-test:
 		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
 		--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 		$(GEMINI_FLAGS)
+
+.PHONY: profile-run
+profile-run:
+	@mkdir -p $(PWD)/results
+	@touch $(PWD)/results/gemini_seed
+	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
+	$(GEMINI_BINARY) \
+		--test-cluster="$(call get_scylla_ip,gemini-test)" \
+		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
+		--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
+		$(GEMINI_FLAGS)
+
 
 .PHONY: integration-cluster-test
 integration-cluster-test:

@@ -12,13 +12,74 @@ permissions:
   id-token: write
 
 jobs:
-  goreleaser:
+  run_pgo:
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        oracle-scylla-version: ["6.2"]
+        test-scylla-version: ["2025.1"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - name: Prepare
+        shell: bash
+        run: |
+          make profile-build
+          ulimit -n 65536
+          sudo sysctl -w fs.aio-max-nr=30000000
+          sudo sysctl -w fs.file-max=30000000
+
+          chmod +x ./bin/gemini
+          make scylla-setup \
+            SCYLLA_TEST_VERSION=${{ matrix.test-scylla-version }} \
+            SCYLLA_ORACLE_VERSION=${{ matrix.oracle-scylla-version }}
+      - name: Run Gemini with profiler
+        shell: bash
+        env:
+          GODEBUG: "default=go1.24,netdns=go,gctrace=1,cgocheck=0,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=1"
+          GOGC: "95"
+          GOMAXPROCS: 8
+        run: |
+          make profile-run \
+            GEMINI_PARTITION_KEY_REUSE_BUFFER_SIZE=128 \
+            GEMINI_SEED=60 \
+            CONCURRENCY=4 \
+            CQL_FEATURES=normal \
+            DURATION=10m \
+            WARMUP=10s \
+            DATASET_SIZE=large &
+          sleep 10
+          make PPROF_SECONDS=240 pprof-proto
+          make PPROF_SECONDS=240 pprof-alloc
+          make pprof-merge
+      - name: Upload PGO profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgo-profile
+          path: merged.pgo
+          retention-days: 1
+
+  goreleaser:
+    runs-on: ubuntu-24.04
+    needs: ['run_pgo']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download PGO profile
+        uses: actions/download-artifact@v4
+        with:
+          name: pgo-profile
+          path: .
 
       - name: Set up Go
         uses: actions/setup-go@v5
