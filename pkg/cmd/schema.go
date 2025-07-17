@@ -17,7 +17,6 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"math/rand/v2"
 	"os"
 	"strings"
@@ -30,6 +29,7 @@ import (
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 const (
@@ -63,7 +63,7 @@ func readSchema(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Sc
 	return schemaBuilder.Build(), nil
 }
 
-func getSchema(seed uint64, schemaSeed string, logger *zap.Logger) (*typedef.Schema, error) {
+func getSchema(schemaSeed string, logger *zap.Logger) (*typedef.Schema, error) {
 	var (
 		err    error
 		schema *typedef.Schema
@@ -83,11 +83,6 @@ func getSchema(seed uint64, schemaSeed string, logger *zap.Logger) (*typedef.Sch
 		src := rand.NewChaCha8(sha256.Sum256([]byte(schemaSeed)))
 		schema = statements.GenSchema(schemaConfig, src)
 	}
-
-	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
-
-	printSetup(seed, seedFromString(schemaSeed))
-	fmt.Printf("Schema: %v\n", string(jsonSchema)) //nolint:forbidigo
 
 	return schema, nil
 }
@@ -135,7 +130,8 @@ func getReplicationStrategy(
 		return replication.NewSimpleStrategy()
 	default:
 		strategy := replication.Replication{}
-		if err := json.Unmarshal([]byte(strings.ReplaceAll(rs, "'", "\"")), &strategy); err != nil {
+		data := utils.UnsafeBytes(utils.SingleToDoubleQuoteReplacer.Replace(rs))
+		if err := json.Unmarshal(data, &strategy); err != nil {
 			logger.Error(
 				"unable to parse replication strategy",
 				zap.String("strategy", rs),

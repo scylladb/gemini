@@ -26,53 +26,6 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
-func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) (*typedef.Stmt, error) {
-	g.table.RLock()
-	defer g.table.RUnlock()
-
-	if !generateDelete {
-		if g.table.IsCounterTable() {
-			return g.Update(ctx)
-		}
-
-		return g.Insert(ctx)
-	}
-
-	if n := g.random.IntN(1000); n == 10 || n == 100 {
-		return g.Delete(ctx)
-	}
-
-	switch g.random.IntN(MutationStatements) {
-
-	case InsertStatements:
-		if g.table.IsCounterTable() {
-			return g.Update(ctx)
-		}
-
-		return g.Insert(ctx)
-	case InsertJSONStatement:
-		if g.table.IsCounterTable() {
-			return g.Update(ctx)
-		}
-
-		if g.table.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
-			return g.Insert(ctx)
-		}
-
-		return g.InsertJSON(ctx)
-	case UpdateStatement:
-		// TODO(CodeLieutenant): Update statement support expected in v2.1.0
-		//       Falling back to Insert for now, until everything else is stable
-
-		if g.table.IsCounterTable() {
-			return g.Update(ctx)
-		}
-		return g.Insert(ctx)
-	default:
-		panic("Invalid mutation statement type")
-	}
-}
-
 func (g *Generator) Insert(ctx context.Context) (*typedef.Stmt, error) {
 	builder := qb.Insert(g.keyspaceAndTable)
 	if g.useLWT && g.random.Uint32()%10 == 0 {

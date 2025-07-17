@@ -50,6 +50,7 @@ func NewValidation(
 	table *typedef.Table,
 	generator generators.Interface,
 	status *status.GlobalStatus,
+	statementRatioController *statements.RatioController,
 	stopFlag *stop.Flag,
 	store store.Store,
 	seed [32]byte,
@@ -72,6 +73,7 @@ func NewValidation(
 		table,
 		rand.New(rand.NewChaCha8(seed)),
 		&pc,
+		statementRatioController,
 		schema.Config.UseLWT,
 	)
 

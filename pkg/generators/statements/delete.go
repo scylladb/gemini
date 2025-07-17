@@ -23,7 +23,7 @@ import (
 )
 
 func (g *Generator) Delete(ctx context.Context) (*typedef.Stmt, error) {
-	switch g.random.IntN(DeleteStatements) {
+	switch g.ratioController.GetDeleteSubtype() {
 	case DeleteWholePartition:
 		return g.deleteSinglePartition(ctx)
 	case DeleteSingleRow:
