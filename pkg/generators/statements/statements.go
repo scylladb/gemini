@@ -42,22 +42,28 @@ const (
 	DeleteSingleRow
 	DeleteSingleColumn
 	DeleteMultiplePartitions
-	DeleteStatements
+	DeleteStatementCount
 )
 
 const (
 	InsertStatements = iota
 	InsertJSONStatement
-	UpdateStatement
-
-	MutationStatements
+	InsertStatementCount
 )
+
+const (
+	UpdateStatement = iota
+	UpdateStatementCount
+)
+
+const MutationStatementsCount = 3
 
 type Generator struct {
 	generator        ValueGenerator
-	table            *typedef.Table
 	random           utils.Random
+	table            *typedef.Table
 	partitionConfig  *typedef.PartitionRangeConfig
+	ratioController  *RatioController
 	keyspace         string
 	keyspaceAndTable string
 	useLWT           bool
@@ -69,6 +75,7 @@ func New(
 	table *typedef.Table,
 	random utils.Random,
 	partitionConfig *typedef.PartitionRangeConfig,
+	ratioController *RatioController,
 	useLWT bool,
 ) *Generator {
 	return &Generator{
@@ -79,6 +86,7 @@ func New(
 		partitionConfig:  partitionConfig,
 		useLWT:           useLWT,
 		generator:        valueGenerator,
+		ratioController:  ratioController,
 	}
 }
 

@@ -33,6 +33,8 @@ import (
 
 var ErrNoPartitionKeyValues = errors.New("no partition keys available")
 
+var SingleToDoubleQuoteReplacer = strings.NewReplacer("'", "\"")
+
 type Random interface {
 	Uint32() uint32
 	IntN(int) int
@@ -40,6 +42,7 @@ type Random interface {
 	Uint64() uint64
 	Uint64N(uint64) uint64
 	Int64N(int64) int64
+	Float64() float64
 }
 
 type QueryContextKey string

@@ -48,6 +48,7 @@ func NewMutation(
 	table *typedef.Table,
 	generator generators.Interface,
 	status *status.GlobalStatus,
+	statementRatioController *statements.RatioController,
 	stopFlag *stop.Flag,
 	store store.Store,
 	del bool,
@@ -60,6 +61,7 @@ func NewMutation(
 		table,
 		rand.New(rand.NewChaCha8(seed)),
 		&pc,
+		statementRatioController,
 		schema.Config.UseLWT,
 	)
 

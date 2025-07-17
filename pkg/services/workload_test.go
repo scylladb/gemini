@@ -462,7 +462,7 @@ func TestWorkloadWithAllSchemaTypes(t *testing.T) {
 		PartitionDistribution: distributions.DistributionUniform,
 		Seed:                  seed,
 		PartitionBufferSize:   partitionBufferSize,
-		IOWorkerPoolSize:      2,
+		IOWorkerPoolSize:      16,
 		MaxErrorsToStore:      maxErrorsCount,
 		WarmupDuration:        5 * time.Second,
 		Duration:              10 * time.Second,

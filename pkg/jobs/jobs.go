@@ -23,6 +23,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/scylladb/gemini/pkg/generators"
+	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -43,6 +44,7 @@ type Jobs struct {
 	status              *status.GlobalStatus
 	logger              *zap.Logger
 	random              *rand.ChaCha8
+	ratioController     *statements.RatioController
 	name                string
 	mutationConcurrency int
 	readConcurrency     int
@@ -61,6 +63,7 @@ func New(
 	st store.Store,
 	gens *generators.Generators,
 	globalStatus *status.GlobalStatus,
+	ratioController *statements.RatioController,
 	logger *zap.Logger,
 	src *rand.ChaCha8,
 ) *Jobs {
@@ -73,6 +76,7 @@ func New(
 		random:              src,
 		readConcurrency:     readConcurrency,
 		mutationConcurrency: mutationConcurrency,
+		ratioController:     ratioController,
 	}
 }
 
@@ -114,6 +118,7 @@ func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error
 						table,
 						generator,
 						j.status,
+						j.ratioController,
 						stopFlag,
 						j.store,
 						mode != WarmupMode,
@@ -134,6 +139,7 @@ func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error
 						table,
 						generator,
 						j.status,
+						j.ratioController,
 						stopFlag,
 						j.store,
 						newSrc,

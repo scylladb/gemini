@@ -84,8 +84,11 @@ var (
 	concurrency         int
 	mutationConcurrency int
 	readConcurrency     int
+
+	statementRatios string
 )
 
+//nolint:lll
 func setupFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().IntVarP(&randomStringBuffer, "random-string-buffer-size", "", 100*1024*1024, "Size of the buffer used for random strings")
 	cmd.PersistentFlags().IntVarP(&mutationConcurrency, "mutation-concurrency", "", 0, "Number of worker threads to use for IO operations")
@@ -216,4 +219,6 @@ func setupFlags(cmd *cobra.Command) {
 		StringVarP(&oracleStatementLogFile, "oracle-statement-log-file", "", "", "File to write statements flow to")
 	cmd.Flags().
 		StringVarP(&statementLogFileCompression, "statement-log-file-compression", "", "none", "Compression algorithm to use for statement log files")
+	cmd.Flags().
+		StringVarP(&statementRatios, "statement-ratios", "", "", "Statement ratios configuration in JSON format (e.g., '{\"mutation_ratios\":{\"insert_ratio\":0.7,\"update_ratio\":0.2,\"delete_ratio\":0.1}}')")
 }

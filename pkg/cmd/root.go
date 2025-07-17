@@ -33,6 +33,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/scylladb/gemini/pkg/distributions"
+	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/realrandom"
 	"github.com/scylladb/gemini/pkg/services"
@@ -160,8 +161,13 @@ func run(cmd *cobra.Command, _ []string) error {
 		return errors.Wrapf(err, "failed to parse --schema-seed argument")
 	}
 
+	statementRatio, err := parseStatementRatiosJSON(statementRatios)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse statement ratios JSON")
+	}
+
 	intSeed := seedFromString(seed)
-	schema, err := getSchema(intSeed, schemaSeed, logger)
+	schema, err := getSchema(schemaSeed, logger)
 	if err != nil {
 		return errors.Wrap(err, "failed to get schema")
 	}
@@ -217,6 +223,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		MutationConcurrency:   mutationConcurrency,
 		ReadConcurrency:       readConcurrency,
 		DropSchema:            dropSchema,
+		StatementRatios:       statementRatio,
 	}, storeConfig, schema, logger, stopFlag)
 	if err != nil {
 		return err
@@ -232,6 +239,8 @@ func run(cmd *cobra.Command, _ []string) error {
 			)
 		}
 	}()
+
+	printSetup(schema, statementRatio, intSeed, seedFromString(schemaSeed))
 
 	if err = workload.Run(cmd.Context()); err != nil {
 		logger.Error("failed to run gemini workload", zap.Error(err))
@@ -276,7 +285,7 @@ func getCQLFeature(feature string) typedef.CQLFeature {
 	}
 }
 
-func printSetup(seed, schemaSeed uint64) {
+func printSetup(schema *typedef.Schema, ratio statements.Ratios, seed, schemaSeed uint64) {
 	tw := new(tabwriter.Writer)
 	tw.Init(os.Stdout, 0, 8, 2, '\t', tabwriter.AlignRight)
 	_, _ = fmt.Fprintf(tw, "Seed:\t%d\n", seed)
@@ -292,6 +301,12 @@ func printSetup(seed, schemaSeed uint64) {
 		_, _ = fmt.Fprintf(tw, "Output file:\t%s\n", outFileArg)
 	}
 	_ = tw.Flush()
+
+	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
+	fmt.Printf("Schema: %v\n", string(jsonSchema)) //nolint:forbidigo
+
+	jsonStatementsRatio, _ := json.MarshalIndent(ratio, "", "    ")
+	fmt.Printf("Statement Ratios: %v\n", string(jsonStatementsRatio)) //nolint:forbidigo
 }
 
 func RealRandom() uint64 {
