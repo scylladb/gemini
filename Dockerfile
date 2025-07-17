@@ -17,7 +17,7 @@ RUN apt-get update \
     && apt-get install -y build-essential ca-certificates libc-dev \
     && make build
 
-FROM debian:12-slim AS base-production
+FROM debian:bookworm-slim AS base-production
 
 WORKDIR /
 
@@ -25,11 +25,7 @@ ENV DEBIAN_FRONTEND="noninteractive"
 ENV GODEBUG="default=go1.24,netdns=go,gctrace=0,cgocheck=0,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=1"
 ENV PATH="/usr/local/bin:${PATH}"
 
-RUN apt-get update && apt-get upgrade -y \
-	&& apt-get install -y ca-certificates \
-    && apt-get autoremove -y \
-    && apt-get clean \
-	&& rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get upgrade -y && apt-get install -y ca-certificates
 
 EXPOSE 6060
 EXPOSE 2112
@@ -41,11 +37,13 @@ FROM base-production AS production
 COPY --from=build /gemini/bin/gemini /usr/local/bin/gemini
 COPY --from=build /gemini/version.json /version.json
 
+RUN gemini --version-json
+
 FROM base-production AS production-goreleaser
 
 COPY gemini /usr/local/bin/gemini
 
-RUN gemini --version
+RUN gemini --version-json
 
 FROM build AS debug
 
