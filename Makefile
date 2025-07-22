@@ -75,7 +75,7 @@ build:
 		-trimpath \
 		-tags="production,!debug,netgo,osusergo,static_build" \
 		-gcflags="-wb=false -l=4 -B -C -live -d=ssa/check/on" \
-		-ldflags="-linkmode=external -extldflags '-static' -s -w $(LDFLAGS_VERSION)" \
+		-ldflags="-s -w $(LDFLAGS_VERSION)" \
 		-o bin/gemini ./pkg/cmd
 	@./bin/gemini --version --version-json > bin/version.json
 
