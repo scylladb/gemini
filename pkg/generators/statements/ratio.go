@@ -52,17 +52,17 @@ func (s StatementType) String() string {
 // Mutations and validation are separate systems that each sum to 1.0
 type Ratios struct {
 	// Mutation ratios (Insert, Update, Delete) - sum should be 1.0
-	MutationRatios MutationRatios `json:"mutation_ratios"`
+	MutationRatios MutationRatios `json:"mutation"`
 
 	// Validation ratios (Select statements) - sum should be 1.0
-	ValidationRatios ValidationRatios `json:"validation_ratios"`
+	ValidationRatios ValidationRatios `json:"validation"`
 }
 
 // MutationRatios defines the distribution ratios for mutation operations
 type MutationRatios struct {
-	InsertRatio float64 `json:"insert_ratio"`
-	UpdateRatio float64 `json:"update_ratio"`
-	DeleteRatio float64 `json:"delete_ratio"`
+	InsertRatio float64 `json:"insert"`
+	UpdateRatio float64 `json:"update"`
+	DeleteRatio float64 `json:"delete"`
 
 	// Insert subtype ratios (within insert statements)
 	InsertSubtypeRatios InsertRatios `json:"insert_subtypes"`
@@ -79,25 +79,25 @@ type ValidationRatios struct {
 
 // InsertRatios defines ratios for different insert statement types
 type InsertRatios struct {
-	RegularInsertRatio float64 `json:"regular_insert_ratio"`
-	JSONInsertRatio    float64 `json:"json_insert_ratio"`
+	RegularInsertRatio float64 `json:"regular_insert"`
+	JSONInsertRatio    float64 `json:"json_insert"`
 }
 
 // DeleteRatios defines ratios for different delete statement types
 type DeleteRatios struct {
-	WholePartitionRatio     float64 `json:"whole_partition_ratio"`
-	SingleRowRatio          float64 `json:"single_row_ratio"`
-	SingleColumnRatio       float64 `json:"single_column_ratio"`
-	MultiplePartitionsRatio float64 `json:"multiple_partitions_ratio"`
+	WholePartitionRatio     float64 `json:"whole_partition"`
+	SingleRowRatio          float64 `json:"single_row"`
+	SingleColumnRatio       float64 `json:"single_column"`
+	MultiplePartitionsRatio float64 `json:"multiple_partitions"`
 }
 
 // SelectRatios defines ratios for different select statement types
 type SelectRatios struct {
-	SinglePartitionRatio                  float64 `json:"single_partition_ratio"`
-	MultiplePartitionRatio                float64 `json:"multiple_partition_ratio"`
-	ClusteringRangeRatio                  float64 `json:"clustering_range_ratio"`
-	MultiplePartitionClusteringRangeRatio float64 `json:"multiple_partition_clustering_range_ratio"`
-	SingleIndexRatio                      float64 `json:"single_index_ratio"`
+	SinglePartitionRatio                  float64 `json:"single_partition"`
+	MultiplePartitionRatio                float64 `json:"multiple_partition"`
+	ClusteringRangeRatio                  float64 `json:"clustering_range"`
+	MultiplePartitionClusteringRangeRatio float64 `json:"multiple_partition_clustering_range"`
+	SingleIndexRatio                      float64 `json:"single_index"`
 }
 
 // DefaultStatementRatios returns a balanced default configuration
@@ -316,7 +316,7 @@ func (c Ratios) GetStatementInfo() map[string]any {
 		selectRatios.SingleIndexRatio
 
 	return map[string]any{
-		"main_ratios": map[string]float64{
+		"main": map[string]float64{
 			"insert": c.MutationRatios.InsertRatio,
 			"update": c.MutationRatios.UpdateRatio,
 			"delete": c.MutationRatios.DeleteRatio,
