@@ -55,6 +55,7 @@ type (
 		MutationConcurrency   int
 		ReadConcurrency       int
 		DropSchema            bool
+		StatementRatios       statements.Ratios
 	}
 
 	Workload struct {
@@ -70,6 +71,8 @@ type (
 	}
 )
 
+var emptyRatios statements.Ratios
+
 func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typedef.Schema, logger *zap.Logger, flag *stop.Flag) (*Workload, error) {
 	randSrc, distFunc := distributions.New(
 		config.PartitionDistribution,
@@ -78,6 +81,10 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 		config.MU,
 		config.Sigma,
 	)
+
+	if config.StatementRatios == emptyRatios {
+		config.StatementRatios = statements.DefaultStatementRatios()
+	}
 
 	if config.RandomStringBuffer <= 0 {
 		if testutils.IsUnderTest() {
@@ -112,6 +119,11 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 		return nil, errors.Wrap(err, "failed to create store")
 	}
 
+	statementRatioController, err := statements.NewRatioController(config.StatementRatios, rand.New(randSrc))
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create statement ratio controller")
+	}
+
 	w := &Workload{
 		config:     config,
 		status:     globalStatus,
@@ -128,6 +140,7 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 			st,
 			gens,
 			globalStatus,
+			statementRatioController,
 			logger.Named("jobs"),
 			randSrc,
 		),
@@ -230,7 +243,7 @@ func (w *Workload) PrintResults(geminiVersion string, versionInfo any) error {
 		}
 	}()
 
-	w.status.PrintResult(writer, w.schema, geminiVersion, versionInfo)
+	w.status.PrintResult(writer, w.schema, geminiVersion, versionInfo, w.config.StatementRatios.GetStatementInfo())
 	if w.status.HasErrors() {
 		return errors.New("gemini encountered errors, exiting with non zero status")
 	}

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -119,19 +120,32 @@ func NewScyllaLoggerWithSession(
 
 	createKeyspace, createTable := buildCreateTableQuery(keyspace, table, partitionKeys, repl)
 
-	if err := session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec(); err != nil {
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get current working directory")
+	}
+
+	if oracleStatementsFile == "" {
+		oracleStatementsFile = filepath.Join(wd, "oracle_statements.jsonl")
+	}
+
+	if testStatementsFile == "" {
+		testStatementsFile = filepath.Join(wd, "test_statements.jsonl")
+	}
+
+	if err = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec(); err != nil {
 		return nil, err
 	}
 
-	if err := session.Query(createKeyspace).Exec(); err != nil {
+	if err = session.Query(createKeyspace).Exec(); err != nil {
 		return nil, err
 	}
 
-	if err := session.Query(createTable).Exec(); err != nil {
+	if err = session.Query(createTable).Exec(); err != nil {
 		return nil, err
 	}
 
-	if err := session.AwaitSchemaAgreement(context.Background()); err != nil {
+	if err = session.AwaitSchemaAgreement(context.Background()); err != nil {
 		return nil, errors.Wrap(err, "failed to await schema agreement for keyspace logs")
 	}
 
@@ -149,8 +163,8 @@ func NewScyllaLoggerWithSession(
 		wg:                   wg,
 		pool:                 pool,
 		logger:               l,
-		oracleStatementsFile: oracleStatementsFile,
-		testStatementsFile:   testStatementsFile,
+		oracleStatementsFile: filepath.Clean(oracleStatementsFile),
+		testStatementsFile:   filepath.Clean(testStatementsFile),
 		partitionKeysCount:   partitionKeys.LenValues(),
 		schemaPartitionKeys:  partitionKeys,
 		keyspaceAndTable:     fmt.Sprintf("%s.%s", keyspace, table),

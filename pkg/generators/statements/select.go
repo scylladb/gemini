@@ -25,7 +25,7 @@ import (
 )
 
 func (g *Generator) Select(ctx context.Context) (*typedef.Stmt, error) {
-	switch n := g.random.IntN(SelectStatementsCount); n {
+	switch n := g.ratioController.GetSelectSubtype(); n {
 	case SelectSinglePartitionQuery:
 		return g.genSelectSinglePartitionQuery(ctx)
 	case SelectMultiplePartitionQuery:
@@ -43,12 +43,11 @@ func (g *Generator) Select(ctx context.Context) (*typedef.Stmt, error) {
 		//    are always in the not found range.
 		// return g.genMultiplePartitionClusteringRangeQuery(ctx)
 	case SelectSingleIndexQuery:
-		// Reducing the probability to hit these since they often take a long time to run
-		if len(g.table.Indexes) > 0 && g.random.IntN(SelectSingleIndexQuery+2) == 0 {
-			return g.genSingleIndexQuery(), nil
+		if len(g.table.Indexes) == 0 {
+			return g.genSelectSinglePartitionQuery(ctx)
 		}
 
-		return g.genSelectSinglePartitionQuery(ctx)
+		return g.genSingleIndexQuery(), nil
 	default:
 		panic(fmt.Sprintf("unexpected case in GenCheckStmt, random value: %d", n))
 	}
