@@ -16,6 +16,7 @@ package main
 
 import (
 	"encoding/json"
+	"os"
 
 	"github.com/pkg/errors"
 
@@ -30,7 +31,18 @@ func parseStatementRatiosJSON(jsonStr string) (statements.Ratios, error) {
 		return ratios, nil
 	}
 
-	data := utils.UnsafeBytes(utils.SingleToDoubleQuoteReplacer.Replace(jsonStr))
+	var data []byte
+
+	if utils.IsFile(jsonStr) {
+		bytes, err := os.ReadFile(jsonStr)
+		if err != nil {
+			return statements.Ratios{}, errors.Wrapf(err, "failed to read statement ratios JSON file %q", jsonStr)
+		}
+
+		data = bytes
+	} else {
+		data = utils.UnsafeBytes(utils.SingleToDoubleQuoteReplacer.Replace(jsonStr))
+	}
 
 	if err := json.Unmarshal(data, &ratios); err != nil {
 		return statements.Ratios{}, errors.Wrap(err, "failed to parse statement ratios JSON")

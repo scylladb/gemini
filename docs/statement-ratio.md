@@ -52,8 +52,8 @@ Since the validation only have SELECT statement, there is nothing beside "select
 
 Some parts can be left out, and Gemini will use the default values for those parts, but **be aware that the sum of all values must be 1**.
 If the sum of all values is not 1, Gemini will throw an error and exit. It will be a best practice to just provide all parts, even if you want to use the default values, to avoid confusion.
-This flag allows for really granular control over the types of statements that Gemini will execute, allowing for more tailored testing scenarios and performance tuning, JSON object can be really large, so in the future
-we will add a way to load it from a file, but for now, you can just pass it as a string in the CLI.
+This flag allows for really granular control over the types of statements that Gemini will execute, allowing for more tailored testing scenarios and performance tuning, JSON object can be really large, 
+so you can provide a path to a file containing the JSON object using the same flag.
 
 ## Missing features
 
