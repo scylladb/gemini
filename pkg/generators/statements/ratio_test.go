@@ -376,7 +376,7 @@ func TestGetStatementInfo(t *testing.T) {
 	info := ratios.GetStatementInfo()
 
 	// Check that main ratios are present
-	mainRatios, ok := info["main_ratios"].(map[string]float64)
+	mainRatios, ok := info["main"].(map[string]float64)
 	if !ok {
 		t.Fatal("main_ratios not found or wrong type")
 	}
