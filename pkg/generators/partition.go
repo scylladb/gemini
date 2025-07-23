@@ -16,6 +16,7 @@ package generators
 
 import (
 	"context"
+	"os"
 	"sync"
 	"sync/atomic"
 
@@ -27,8 +28,8 @@ import (
 
 type (
 	Partition struct {
-		values    chan typedef.PartitionKeys
-		oldValues chan typedef.PartitionKeys
+		values    atomic.Pointer[chan typedef.PartitionKeys]
+		oldValues atomic.Pointer[chan typedef.PartitionKeys]
 		wakeup    chan<- struct{}
 		isStale   atomic.Bool
 	}
@@ -61,8 +62,13 @@ func (p *Partition) get(ctx context.Context) (typedef.PartitionKeys, error) {
 // getOld returns a previously used value and token or a new if
 // the old queue is empty.
 func (p *Partition) getOld(ctx context.Context) (typedef.PartitionKeys, error) {
+	ch := p.oldValues.Load()
+	if ch == nil {
+		return typedef.PartitionKeys{}, os.ErrClosed
+	}
+
 	select {
-	case v := <-p.oldValues:
+	case v := <-*ch:
 		return v, nil
 	case <-ctx.Done():
 		return typedef.PartitionKeys{}, context.Canceled
@@ -75,8 +81,13 @@ func (p *Partition) getOld(ctx context.Context) (typedef.PartitionKeys, error) {
 // is empty, in which case it removes the corresponding token from the
 // in-flight tracking.
 func (p *Partition) giveOld(ctx context.Context, v typedef.PartitionKeys) bool {
+	ch := p.oldValues.Load()
+	if ch == nil {
+		return false
+	}
+
 	select {
-	case p.oldValues <- v:
+	case *ch <- v:
 		return true
 	case <-ctx.Done():
 		return false
@@ -86,17 +97,17 @@ func (p *Partition) giveOld(ctx context.Context, v typedef.PartitionKeys) bool {
 }
 
 func (p *Partition) push(v typedef.PartitionKeys) bool {
+	ch := p.values.Load()
+	if ch == nil {
+		return false
+	}
+
 	select {
-	case p.values <- v:
+	case *ch <- v:
 		return true
 	default:
 		return false
 	}
-}
-
-// releaseToken removes the corresponding token from the in-flight tracking.
-func (p *Partition) releaseToken(_ uint32) {
-	// p.inFlight.Delete(token)
 }
 
 func (p *Partition) wakeUp() {
@@ -107,9 +118,14 @@ func (p *Partition) wakeUp() {
 }
 
 func (p *Partition) pick(ctx context.Context) (typedef.PartitionKeys, error) {
+	ch := p.values.Load()
+	if ch == nil {
+		return typedef.PartitionKeys{}, os.ErrClosed
+	}
+
 	select {
-	case v := <-p.values:
-		if len(p.values) <= cap(p.values)/4 {
+	case v := <-*ch:
+		if len(*ch) <= cap(*ch)/4 {
 			p.wakeUp() // channel at 25% capacity, trigger generator
 		}
 		return v, nil
@@ -117,20 +133,26 @@ func (p *Partition) pick(ctx context.Context) (typedef.PartitionKeys, error) {
 		return typedef.PartitionKeys{}, context.Canceled
 	default:
 		p.wakeUp()
-		return <-p.values, nil
+		return <-*ch, nil
 	}
 }
 
 func (p *Partition) Close() error {
-	close(p.oldValues)
-	close(p.values)
+	ch := p.values.Swap(nil)
+	if ch != nil {
+		close(*ch)
+	}
+
+	oldCh := p.oldValues.Swap(nil)
+	if oldCh != nil {
+		close(*oldCh)
+	}
 
 	return nil
 }
 
 type Partitions struct {
 	parts []Partition
-	mu    sync.Mutex
 }
 
 var closePartitions sync.Once
@@ -138,9 +160,6 @@ var closePartitions sync.Once
 func (p *Partitions) Close() error {
 	var err error
 	closePartitions.Do(func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-
 		for i := range len(p.parts) {
 			err = multierr.Append(err, p.parts[i].Close())
 		}
@@ -162,12 +181,12 @@ func NewPartitions(count, pkBufferSize int, wakeup chan<- struct{}) *Partitions 
 	partitions := make([]Partition, count)
 
 	for i := range len(partitions) {
-		partitions[i] = Partition{
-			values:    make(chan typedef.PartitionKeys, pkBufferSize),
-			oldValues: make(chan typedef.PartitionKeys, pkBufferSize),
-			wakeup:    wakeup,
-			isStale:   atomic.Bool{},
-		}
+		partitions[i] = Partition{wakeup: wakeup}
+
+		ch := make(chan typedef.PartitionKeys, pkBufferSize)
+		partitions[i].values.Store(&ch)
+		oldCh := make(chan typedef.PartitionKeys, pkBufferSize)
+		partitions[i].oldValues.Store(&oldCh)
 	}
 
 	return &Partitions{
