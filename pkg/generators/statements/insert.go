@@ -15,12 +15,17 @@
 package statements
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"time"
 
+	"github.com/gocql/gocql"
 	"github.com/scylladb/gocqlx/v3/qb"
+	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
@@ -116,11 +121,27 @@ func (g *Generator) InsertJSON(ctx context.Context) (*typedef.Stmt, error) {
 func convertForJSON(vType typedef.Type, value any) any {
 	switch vType {
 	case typedef.TypeBlob:
-		val, _ := value.(string)
-		return "0x" + val
+		val, _ := value.([]byte)
+		buffer := bytes.NewBuffer(nil)
+		buffer.Grow(len(val)*2 + 2) // 2 for "0x" prefix
+		buffer.WriteString("0x")
+		encoder := hex.NewEncoder(buffer)
+		_, _ = encoder.Write(val)
+		return utils.UnsafeString(buffer.Bytes())
+	case typedef.TypeDate:
+		return value.(time.Time).Format(time.DateOnly)
+	case typedef.TypeDuration:
+		return value.(time.Duration).String()
+	case typedef.TypeDecimal:
+		return value.(*inf.Dec).String()
+	case typedef.TypeUuid, typedef.TypeTimeuuid:
+		return value.(gocql.UUID).String()
+	case typedef.TypeVarint:
+		return value.(*big.Int).String()
 	case typedef.TypeTime:
 		val, _ := value.(int64)
 		return time.Unix(0, val).UTC().Format("15:04:05.000000000")
 	}
+
 	return value
 }

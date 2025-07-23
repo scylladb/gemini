@@ -17,6 +17,7 @@ package utils
 import (
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"os"
 	"strconv"
@@ -53,13 +54,6 @@ type MemoryFootprint interface {
 
 var maxDateMs = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC).UTC().UnixMilli()
 
-// RandDateStr generates time in string representation
-// it is done in such way because we wanted to make JSON statement to work
-// but scylla supports only string representation of date in JSON format
-func RandDateStr(rnd Random) time.Time {
-	return time.UnixMilli(rnd.Int64N(maxDateMs)).UTC()
-}
-
 // RandTimestamp generates timestamp in nanoseconds
 // Date limit needed to make sure that textual representation of the date is parsable by cql and drivers
 // Currently CQL fails: unable to parse date '95260-10-10T19:09:07.148+0000': marshaling error: Unable to parse timestamp from '95260-10-10t19:09:07.148+0000'"
@@ -69,7 +63,13 @@ func RandTimestamp(rnd Random) int64 {
 }
 
 func RandDate(rnd Random) time.Time {
-	return time.Unix(rnd.Int64N(1<<63-2), rnd.Int64N(999999999)).UTC()
+	return time.UnixMilli(rnd.Int64N(maxDateMs)).UTC()
+}
+
+func RandDuration(rnd Random) time.Duration {
+	// Duration is a signed int64 nanoseconds, so we can use the same range as for time
+	// but we need to make sure that it is not negative, so we use Int64N with 2^63-1
+	return time.Duration(rnd.Int64N(math.MaxInt64))
 }
 
 // RandTime - According to the CQL binary protocol, time is an int64 in range [0;86399999999999]

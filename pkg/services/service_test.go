@@ -31,8 +31,8 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	flag.BoolVar(&NoopLogger, "noop-logger", true, "Use noop logger for tests")
-	flag.StringVar(&LoggingLevel, "logging-level", "error", "Logging level for the tests")
+	flag.BoolVar(&NoopLogger, "noop-logger", false, "Use noop logger for tests")
+	flag.StringVar(&LoggingLevel, "logging-level", "debug", "Logging level for the tests")
 	utils.PreallocateRandomString(rand.New(rand.NewPCG(1, 1)), 1<<20)
 
 	flag.Parse()
@@ -41,7 +41,6 @@ func TestMain(m *testing.M) {
 
 func getLogger(tb testing.TB) *zap.Logger {
 	tb.Helper()
-
 	if NoopLogger {
 		return zap.NewNop()
 	}

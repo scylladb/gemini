@@ -15,6 +15,8 @@
 package typedef
 
 import (
+	"bytes"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"math/big"
@@ -120,13 +122,29 @@ func (st SimpleType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	switch st {
 	case TypeBlob:
 		ln := r.IntN(p.MaxBlobLength) + p.MinBlobLength
-		return utils.RandomBytes(r, ln)
+		buffer := bytes.NewBuffer(nil)
+		buffer.Grow(ln*2 + 2)
+		buffer.WriteString("0x")
+		encoder := hex.NewEncoder(buffer)
+		_, _ = encoder.Write(utils.RandomBytes(r, ln))
+		return utils.UnsafeString(buffer.Bytes())
+	case TypeDecimal:
+		return inf.NewDec(r.Int64N(math.MaxInt64), 3).String()
+	case TypeUuid, TypeTimeuuid:
+		return utils.UUIDFromTime(r).String()
+	case TypeVarint:
+		return big.NewInt(r.Int64N(math.MaxInt64)).String()
+	case TypeDate:
+		return utils.RandDate(r).Format(time.DateOnly)
+	case TypeDuration:
+		return utils.RandDuration(r).String()
 	case TypeTime:
 		return time.
 			Unix(0, utils.RandTime(r)).
 			UTC().
 			Format("15:04:05.000000000")
 	}
+
 	return st.genValue(r, p)
 }
 
@@ -145,7 +163,7 @@ func (st SimpleType) genValue(r utils.Random, p *PartitionRangeConfig) any {
 	case TypeBoolean:
 		return r.IntN(2) == 0
 	case TypeDate:
-		return utils.RandDateStr(r)
+		return utils.RandDate(r)
 	case TypeTime:
 		return utils.RandTime(r)
 	case TypeTimestamp:
@@ -155,7 +173,7 @@ func (st SimpleType) genValue(r utils.Random, p *PartitionRangeConfig) any {
 	case TypeDouble:
 		return float64(r.Uint64()<<11>>11) / (1 << 53)
 	case TypeDuration:
-		return time.Minute * time.Duration(r.IntN(100))
+		return utils.RandDuration(r)
 	case TypeFloat:
 		return float32(r.Uint32()<<8>>8) / (1 << 24)
 	case TypeInet:
