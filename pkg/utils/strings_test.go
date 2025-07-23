@@ -85,7 +85,7 @@ func TestRandomBytes(t *testing.T) {
 			name:   "returns single byte",
 			length: 1,
 			seed:   42,
-			expected: func(t *testing.T, result []byte, length int) {
+			expected: func(t *testing.T, result []byte, _ int) {
 				t.Helper()
 				assert.Len(t, result, 1)
 			},
