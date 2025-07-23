@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -46,6 +47,8 @@ var (
 	additionalColumnsArr   = strings.Split(additionalColumns, ",")
 	additionalColumnsCount = len(additionalColumnsArr)
 )
+
+var ErrEmptyStatementFileName = errors.New("statement file name cannot be empty")
 
 func GetScyllaStatementLogsKeyspace(originalKeyspace string) string {
 	return fmt.Sprintf("%s_logs", originalKeyspace)
@@ -470,7 +473,7 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 	}
 }
 
-func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) {
+func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) error {
 	var (
 		file   io.Writer
 		closer func() error
@@ -479,8 +482,16 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 
 	switch ty {
 	case TypeOracle:
+		if s.oracleStatementsFile == "" {
+			return ErrEmptyStatementFileName
+		}
+
 		file, closer, err = s.openStatementFile(s.oracleStatementsFile)
 	case TypeTest:
+		if s.testStatementsFile == "" {
+			return ErrEmptyStatementFileName
+		}
+
 		file, closer, err = s.openStatementFile(s.testStatementsFile)
 	default:
 		s.logger.DPanic("unsupported type to fetch from statement logs", zap.String("type", string(ty)))
@@ -495,7 +506,7 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 
 		s.logger.Error("failed to open oracle statements file", zap.Error(err))
 
-		return
+		return err
 	}
 
 	defer func() {
@@ -571,12 +582,14 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 			s.logger.Error("failed to encode oracle statement", zap.Error(encodeErr))
 		}
 	}
+
+	return nil
 }
 
 func (s *ScyllaLogger) openStatementFile(name string) (io.Writer, func() error, error) {
-	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644|fs.ModeExclusive)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to open test statements file %q", name)
+		return nil, nil, errors.Wrapf(err, "failed to open test statements file '%q'", name)
 	}
 
 	return file, func() error {
@@ -599,7 +612,14 @@ func (s *ScyllaLogger) Close() error {
 		wg.Add(1)
 		go func(errs []joberror.JobError) {
 			defer wg.Done()
-			s.fetchFailedPartitions(ty, errs)
+			if err := s.fetchFailedPartitions(ty, errs); err != nil {
+				s.logger.Error(
+					"failed to fetch failed partitions",
+					zap.String("type", string(ty)),
+					zap.Int("errors_count", len(errs)),
+					zap.Error(err),
+				)
+			}
 		}(slices.Clone(errs))
 	}
 
