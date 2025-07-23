@@ -15,9 +15,12 @@
 package utils
 
 import (
+	"encoding/hex"
 	"math"
 	"sync"
 	"unsafe"
+
+	"github.com/shirou/gopsutil/v4/mem"
 )
 
 const (
@@ -27,14 +30,24 @@ const (
 
 var (
 	randomString     string
+	randomBytes      []byte
 	randomStringOnce sync.Once
 )
 
 func PreallocateRandomString(rnd Random, ln int) {
 	randomStringOnce.Do(func() {
+		vmStat, err := mem.VirtualMemory()
+		if err != nil {
+			panic(err)
+		}
+
 		length := ln
 		if val := length % uint64Size; val != 0 {
 			length += uint64Size - val
+		}
+
+		if uint64(2*length) >= vmStat.Total/2 {
+			panic("PreallocateRandomString: requested length is too large, you'll be using more then half of the available memory")
 		}
 
 		data := make([]byte, ln)
@@ -42,19 +55,42 @@ func PreallocateRandomString(rnd Random, ln int) {
 		for i := 0; i < length; i += uint64Size {
 			number := rnd.Uint64()
 			for j := range uint64Size {
-				data[i+j] = hextable[(number>>j)&0x0f]
+				data[i+j] = byte(number >> j & 0xFF)
 			}
 		}
 
-		randomString = unsafe.String(unsafe.SliceData(data), length)
+		randomBytes = data
+
+		if ln&1 == 1 {
+			ln++ // Ensure the length is even
+		}
+
+		randomString = hex.EncodeToString(data)[:ln]
 	})
 }
 
-func RandString(rnd Random, ln int) string {
+func RandString(rnd Random, ln int, even bool) string {
 	val := len(randomString) - ln - 1
 	if val < 1 {
 		val = int(math.Abs(float64(val)))
 	}
 	start := rnd.IntN(val)
-	return randomString[start : start+ln]
+	end := start + ln
+
+	if even && start&1 == 1 {
+		end-- // Ensure the string is an even length
+	}
+
+	return randomString[start:end]
+}
+
+func RandomBytes(rnd Random, ln int) []byte {
+	val := len(randomBytes) - ln - 1
+	if val < 1 {
+		val = int(math.Abs(float64(val)))
+	}
+	start := rnd.IntN(val)
+	end := start + ln
+
+	return randomBytes[start:end]
 }

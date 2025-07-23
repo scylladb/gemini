@@ -120,7 +120,7 @@ func (st SimpleType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	switch st {
 	case TypeBlob:
 		ln := r.IntN(p.MaxBlobLength) + p.MinBlobLength
-		return "0x" + utils.RandString(r, ln)
+		return utils.RandomBytes(r, ln)
 	case TypeTime:
 		return time.
 			Unix(0, utils.RandTime(r)).
@@ -136,8 +136,10 @@ func (st SimpleType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 
 func (st SimpleType) genValue(r utils.Random, p *PartitionRangeConfig) any {
 	switch st {
-	case TypeAscii, TypeText, TypeVarchar, TypeBlob:
-		return utils.RandString(r, r.IntN(p.MaxStringLength)+p.MinStringLength)
+	case TypeBlob:
+		return utils.RandomBytes(r, r.IntN(p.MaxStringLength)+p.MinStringLength)
+	case TypeAscii, TypeText, TypeVarchar:
+		return utils.RandString(r, r.IntN(p.MaxStringLength)+p.MinStringLength, false)
 	case TypeBigint:
 		return r.Int64()
 	case TypeBoolean:
@@ -176,7 +178,7 @@ func (st SimpleType) genValue(r utils.Random, p *PartitionRangeConfig) any {
 	}
 }
 
-// ValueVariationsNumber returns number of bytes generated value holds
+// ValueVariationsNumber returns the number of bytes generated value holds
 func (st SimpleType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
 	switch st {
 	case TypeAscii, TypeText, TypeVarchar:
