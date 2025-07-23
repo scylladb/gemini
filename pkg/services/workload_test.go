@@ -17,6 +17,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/scylladb/gemini/pkg/generators/statements"
 	"os"
 	"path/filepath"
 	"slices"
@@ -470,6 +471,29 @@ func TestWorkloadWithAllSchemaTypes(t *testing.T) {
 		MutationConcurrency:   1,
 		ReadConcurrency:       1,
 		DropSchema:            true,
+		StatementRatios: statements.Ratios{
+			MutationRatios: statements.MutationRatios{
+				InsertRatio: 0.9,
+				UpdateRatio: 0.0,
+				DeleteRatio: 0.1,
+				InsertSubtypeRatios: statements.InsertRatios{
+					RegularInsertRatio: 1.0,
+					JSONInsertRatio:    0.0,
+				},
+				DeleteSubtypeRatios: statements.DeleteRatios{
+					WholePartitionRatio: 1.0,
+				},
+			},
+			ValidationRatios: statements.ValidationRatios{
+				SelectSubtypeRatios: statements.SelectRatios{
+					SinglePartitionRatio:                  0.25,
+					MultiplePartitionRatio:                0.25,
+					ClusteringRangeRatio:                  0.25,
+					MultiplePartitionClusteringRangeRatio: 0.25,
+					SingleIndexRatio:                      0,
+				},
+			},
+		},
 	}, storeConfig, schema, logger, stopFlag)
 
 	assert.NoError(err)
