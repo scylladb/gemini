@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/scylladb/gemini/pkg/distributions"
+	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/jobs"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
@@ -468,8 +469,34 @@ func TestWorkloadWithAllSchemaTypes(t *testing.T) {
 		Duration:              10 * time.Second,
 		PartitionCount:        partitionCount,
 		MutationConcurrency:   1,
-		ReadConcurrency:       1,
+		ReadConcurrency:       5,
 		DropSchema:            true,
+		StatementRatios: statements.Ratios{
+			MutationRatios: statements.MutationRatios{
+				InsertRatio: 0.8,
+				UpdateRatio: 0.1,
+				DeleteRatio: 0.1,
+				InsertSubtypeRatios: statements.InsertRatios{
+					RegularInsertRatio: 0.5,
+					JSONInsertRatio:    0.5,
+				},
+				DeleteSubtypeRatios: statements.DeleteRatios{
+					WholePartitionRatio:     0.25,
+					SingleRowRatio:          0.25,
+					SingleColumnRatio:       0.25,
+					MultiplePartitionsRatio: 0.25,
+				},
+			},
+			ValidationRatios: statements.ValidationRatios{
+				SelectSubtypeRatios: statements.SelectRatios{
+					SinglePartitionRatio:                  0.2,
+					MultiplePartitionRatio:                0.2,
+					ClusteringRangeRatio:                  0.2,
+					MultiplePartitionClusteringRangeRatio: 0.2,
+					SingleIndexRatio:                      0.2,
+				},
+			},
+		},
 	}, storeConfig, schema, logger, stopFlag)
 
 	assert.NoError(err)
