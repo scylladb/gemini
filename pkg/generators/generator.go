@@ -43,7 +43,6 @@ type Interface interface {
 	Get(context.Context) (typedef.PartitionKeys, error)
 	GetOld(context.Context) (typedef.PartitionKeys, error)
 	GiveOlds(context.Context, ...typedef.PartitionKeys)
-	ReleaseToken(uint32)
 }
 
 type Generator struct {
@@ -149,11 +148,6 @@ func (g *Generator) GiveOlds(ctx context.Context, tokens ...typedef.PartitionKey
 			g.oldDroppedValues.Inc()
 		}
 	}
-}
-
-// ReleaseToken removes the corresponding token from the in-flight tracking.
-func (g *Generator) ReleaseToken(token uint32) {
-	g.GetPartitionForToken(token).releaseToken(token)
 }
 
 func (g *Generator) start(ctx context.Context, wakeup chan struct{}) {

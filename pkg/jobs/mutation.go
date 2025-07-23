@@ -83,8 +83,6 @@ func (m *Mutation) run(ctx context.Context) error {
 		return err
 	}
 
-	defer m.generator.ReleaseToken(mutateStmt.PartitionKeys.Token)
-
 	err = m.store.Mutate(ctx, mutateStmt)
 
 	if err == nil {
