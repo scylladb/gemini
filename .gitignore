@@ -8,3 +8,5 @@ version.json
 .qodo
 scylla-monitoring/
 gemini.log
+*.pprof
+*.pgo
