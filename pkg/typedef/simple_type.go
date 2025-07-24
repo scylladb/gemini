@@ -137,7 +137,7 @@ func (st SimpleType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	case TypeDate:
 		return utils.RandDate(r).Format(time.DateOnly)
 	case TypeDuration:
-		return utils.RandDuration(r).String()
+		return utils.TimeDurationToScyllaDuration(utils.RandDuration(r))
 	case TypeTime:
 		return time.
 			Unix(0, utils.RandTime(r)).
