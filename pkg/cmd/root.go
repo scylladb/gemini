@@ -49,17 +49,13 @@ const (
 	oneStdDev   = 0.341 * math.MaxUint64
 )
 
-var (
-	rootCmd = &cobra.Command{
-		Use:              "gemini",
-		Short:            "Gemini is an automatic random testing tool for Scylla.",
-		RunE:             run,
-		PersistentPreRun: preRun,
-		SilenceUsage:     true,
-	}
-
-	versionInfo VersionInfo
-)
+var rootCmd = &cobra.Command{
+	Use:              "gemini",
+	Short:            "Gemini is an automatic random testing tool for Scylla.",
+	RunE:             run,
+	PersistentPreRun: preRun,
+	SilenceUsage:     true,
+}
 
 func init() {
 	setupFlags(rootCmd)
@@ -81,15 +77,6 @@ func preRun(cmd *cobra.Command, _ []string) {
 			log.Fatal(http.ListenAndServe("0.0.0.0:"+strconv.Itoa(profilingPort), mux))
 		}()
 	}
-
-	var err error
-
-	versionInfo, err = NewVersionInfo()
-	if err != nil {
-		panic(err)
-	}
-
-	cmd.Version = versionInfo.String()
 }
 
 func checkVersion(cmd *cobra.Command) (bool, error) {
@@ -97,14 +84,23 @@ func checkVersion(cmd *cobra.Command) (bool, error) {
 
 	if versionFlag || versionJSON {
 		if err != nil {
-			log.Panicf("Failed to get version info as json flag: %v", err)
+			return false, err
 		}
+
+		var versionInfo VersionInfo
+
+		versionInfo, err = NewVersionInfo()
+		if err != nil {
+			return false, err
+		}
+
+		cmd.Version = versionInfo.String()
 
 		if versionJSON {
 			var data []byte
 			data, err = json.Marshal(versionInfo)
 			if err != nil {
-				log.Panicf("Failed to marshal version info: %v\n", err)
+				return false, err
 			}
 
 			//nolint:forbidigo
@@ -246,7 +242,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		logger.Error("failed to run gemini workload", zap.Error(err))
 	}
 
-	return workload.PrintResults(versionInfo.Gemini.Version, versionInfo)
+	return workload.PrintResults(version)
 }
 
 func createLogger(level string) *zap.Logger {
