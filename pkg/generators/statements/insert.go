@@ -131,7 +131,7 @@ func convertForJSON(vType typedef.Type, value any) any {
 	case typedef.TypeDate:
 		return value.(time.Time).Format(time.DateOnly)
 	case typedef.TypeDuration:
-		return value.(time.Duration).String()
+		return utils.TimeDurationToScyllaDuration(value.(time.Duration))
 	case typedef.TypeDecimal:
 		return value.(*inf.Dec).String()
 	case typedef.TypeUuid, typedef.TypeTimeuuid:
