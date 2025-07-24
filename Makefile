@@ -77,13 +77,11 @@ build:
 		-gcflags="-wb=false -l=4 -B -C -live -d=ssa/check/on" \
 		-ldflags="-s -w $(LDFLAGS_VERSION)" \
 		-o bin/gemini ./pkg/cmd
-	@./bin/gemini --version --version-json > bin/version.json
 
 .PHONY: debug-build
 debug-build:
 	@mkdir -p bin
 	@go build -ldflags="$(LDFLAGS_VERSION)" -gcflags="-N -l" -o bin/gemini ./pkg/cmd
-	@./bin/gemini --version --version-json > bin/version.json
 
 .PHONY: build-docker
 build-docker:

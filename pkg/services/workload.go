@@ -217,7 +217,7 @@ func (w *Workload) Run(base context.Context) error {
 	return nil
 }
 
-func (w *Workload) PrintResults(geminiVersion string, versionInfo any) error {
+func (w *Workload) PrintResults(geminiVersion string) error {
 	writer, err := utils.CreateFile(w.config.OutputFile, false, os.Stdout)
 	if err != nil {
 		return err
@@ -243,7 +243,7 @@ func (w *Workload) PrintResults(geminiVersion string, versionInfo any) error {
 		}
 	}()
 
-	w.status.PrintResult(writer, w.schema, geminiVersion, versionInfo, w.config.StatementRatios.GetStatementInfo())
+	w.status.PrintResult(writer, w.schema, geminiVersion, w.config.StatementRatios.GetStatementInfo())
 	if w.status.HasErrors() {
 		return errors.New("gemini encountered errors, exiting with non zero status")
 	}
