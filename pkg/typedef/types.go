@@ -67,7 +67,10 @@ var (
 	TypesMapKeyBlacklist = map[SimpleType]struct{}{
 		TypeBlob:     {},
 		TypeDuration: {},
+		TypeVarint:   {},
+		TypeDecimal:  {},
 	}
+
 	TypesForIndex = SimpleTypes{
 		TypeDecimal,
 		TypeDouble,
