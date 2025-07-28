@@ -59,11 +59,10 @@ func (gs *GlobalStatus) AddReadError(err joberror.JobError) {
 	metrics.ErrorMessages.WithLabelValues("read", err.Error()).Inc()
 }
 
-func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, version string, versionData any, info map[string]any) error {
+func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, version string, info map[string]any) error {
 	result := map[string]any{
 		"result":           gs,
 		"gemini_version":   version,
-		"version":          versionData,
 		"schemaHash":       schema.GetHash(),
 		"schema":           schema,
 		"statement_ratios": info,
@@ -96,10 +95,9 @@ func (gs *GlobalStatus) PrintResult(
 	w io.Writer,
 	schema *typedef.Schema,
 	version string,
-	versionData any,
 	statementInfo map[string]any,
 ) {
-	if err := gs.PrintResultAsJSON(w, schema, version, versionData, statementInfo); err != nil {
+	if err := gs.PrintResultAsJSON(w, schema, version, statementInfo); err != nil {
 		// In case there has been, it has been a long run we want to display it anyway...
 		fmt.Printf("Unable to print result as json, using plain text to stdout, error=%s\n", err)
 		fmt.Printf("Gemini version: %s\n", version)
