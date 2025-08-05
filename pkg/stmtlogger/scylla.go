@@ -15,11 +15,11 @@
 package stmtlogger
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -31,6 +31,7 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/samber/mo"
+	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gocqlx/v3/qb"
 	"go.uber.org/zap"
 
@@ -41,11 +42,14 @@ import (
 	"github.com/scylladb/gemini/pkg/workpool"
 )
 
-const additionalColumns = "ddl,ts,ty,statement,values,host,attempt,gemini_attempt,error,dur"
+const (
+	additionalColumns       = "ddl,ts,ty,statement,values,host,attempt,gemini_attempt,error,dur"
+	selectAdditionalColumns = "ddl,ts,statement,values,host,attempt,gemini_attempt,error,dur"
+)
 
 var (
-	additionalColumnsArr   = strings.Split(additionalColumns, ",")
-	additionalColumnsCount = len(additionalColumnsArr)
+	additionalColumnsArr       = strings.Split(additionalColumns, ",")
+	selectAdditionalColumnsArr = strings.Split(selectAdditionalColumns, ",")
 )
 
 var ErrEmptyStatementFileName = errors.New("statement file name cannot be empty")
@@ -234,7 +238,7 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 
 	logStatement := func(item Item) {
 		s.metrics.Dec()
-		values := make([]any, 0, partitionKeysCount+additionalColumnsCount)
+		values := make([]any, 0, partitionKeysCount+len(additionalColumnsArr))
 
 		if item.StatementType.IsSchema() {
 			values = append(values, schemaChangeValues...)
@@ -264,16 +268,16 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 			item.Duration.Duration,
 		)
 
-		if len(values) != partitionKeysCount+additionalColumnsCount {
+		if len(values) != partitionKeysCount+len(additionalColumnsArr) {
 			metrics.ErrorMessages.WithLabelValues(
 				"statement_logger",
 				fmt.Sprintf("invalid number of values for Scylla insert: expected=%d actual=%d, values=%v, statement=%s",
-					partitionKeysCount+additionalColumnsCount, len(values), values, item.StatementType,
+					partitionKeysCount+len(additionalColumnsArr), len(values), values, item.StatementType,
 				),
 			).Inc()
 			s.logger.Error(
 				"invalid number of values for Scylla insert",
-				zap.Int("expected", partitionKeysCount+additionalColumnsCount),
+				zap.Int("expected", partitionKeysCount+len(additionalColumnsArr)),
 				zap.Int("actual", len(values)),
 				zap.Any("values", values),
 				zap.Stringer("statement", item.StatementType),
@@ -312,13 +316,13 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 	}
 }
 
-func prepareValues(values mo.Either[[]any, []byte]) []byte {
+func prepareValues(values mo.Either[[]any, []byte]) string {
 	if values.IsLeft() {
 		data, _ := json.Marshal(values.MustLeft())
-		return data
+		return utils.UnsafeString(data)
 	}
 
-	return values.MustRight()
+	return utils.UnsafeString(values.MustRight())
 }
 
 func buildCreateTableQuery(
@@ -349,7 +353,7 @@ func buildCreateTableQuery(
 		builder.WriteRune(',')
 	}
 
-	builder.WriteString("ddl boolean, ts timestamp, ty text, statement text, values blob, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, ")
+	builder.WriteString("ddl boolean, ts timestamp, ty text, statement text, values text, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, ")
 	builder.WriteString("PRIMARY KEY ((")
 	builder.WriteString(partitions)
 	builder.WriteString(", ty), ddl, ts, attempt, gemini_attempt)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'}")
@@ -362,43 +366,20 @@ func buildCreateTableQuery(
 	return createKeyspace, createTable
 }
 
-func (s *ScyllaLogger) fetchData(ch chan<- Item, ty Type, statement string, values []any) error {
+func (s *ScyllaLogger) fetchData(ch chan<- []byte, statement string, values []any) error {
 	query := s.session.Query(statement, values...)
 	defer query.Release()
 
 	iter := query.Iter()
 
 	for range iter.NumRows() {
-		m := make(map[string]any, additionalColumnsCount)
+		var b []byte
 
-		if !iter.MapScan(m) {
+		if !iter.Scan(&b) {
 			break
 		}
 
-		v := make([]any, 0)
-		var either mo.Either[[]any, []byte]
-
-		data := m["values"].([]byte)
-
-		if err := json.Unmarshal(data, &v); err != nil {
-			either = mo.Left[[]any, []byte](v)
-		} else {
-			either = mo.Right[[]any, []byte](data)
-		}
-
-		item := Item{
-			Start:         Time{Time: m["ts"].(time.Time)},
-			Error:         mo.Right[error, string](m["error"].(string)),
-			Statement:     m["statement"].(string),
-			Host:          m["host"].(string),
-			Type:          ty,
-			Values:        either,
-			Duration:      Duration{Duration: time.Duration(m["dur"].(gocql.Duration).Nanoseconds)},
-			Attempt:       int(m["attempt"].(int16)),
-			GeminiAttempt: int(m["gemini_attempt"].(int16)),
-		}
-
-		ch <- item
+		ch <- b
 	}
 
 	return iter.Close()
@@ -411,7 +392,8 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 		typedef.UpdateStatementType, typedef.DeleteWholePartitionType,
 		typedef.DeleteSingleRowType, typedef.DeleteSingleColumnType:
 		builder := qb.Select(s.keyspaceAndTable).
-			Columns(additionalColumnsArr...).
+			Json().
+			Columns(selectAdditionalColumnsArr...).
 			OrderBy("ts", qb.ASC)
 
 		values := make([]any, 0, len(s.schemaPartitionKeys))
@@ -441,7 +423,8 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 
 		for i := range iterations {
 			builder := qb.Select(s.keyspaceAndTable).
-				Columns(additionalColumnsArr...).
+				Json().
+				Columns(selectAdditionalColumnsArr...).
 				OrderBy("ts", qb.ASC)
 
 			vals := make([]any, 0, len(s.schemaPartitionKeys))
@@ -475,7 +458,7 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 
 func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) error {
 	var (
-		file   io.Writer
+		file   *bufio.Writer
 		closer func() error
 		err    error
 	)
@@ -494,32 +477,23 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 
 		file, closer, err = s.openStatementFile(s.testStatementsFile)
 	default:
-		s.logger.DPanic("unsupported type to fetch from statement logs", zap.String("type", string(ty)))
+		s.logger.Panic("unsupported type to fetch from statement logs", zap.String("type", string(ty)))
 	}
 
 	if err != nil {
-		if closer != nil {
-			if err = closer(); err != nil {
-				s.logger.Error("failed to close oracle statements file", zap.Error(err))
-			}
-		}
-
-		s.logger.Error("failed to open oracle statements file", zap.Error(err))
-
+		s.logger.Error("failed to open statements file", zap.String("type", string(ty)), zap.Error(err))
 		return err
 	}
 
 	defer func() {
 		if err = closer(); err != nil {
-			s.logger.Error("failed to close oracle statements file", zap.Error(err))
+			s.logger.Error("failed to close oracle statements file", zap.String("type", string(ty)), zap.Error(err))
 		}
 	}()
 
-	encoder := json.NewEncoder(file)
-	encoder.SetEscapeHTML(false)
-
 	builder := qb.Select(s.keyspaceAndTable).
-		Columns(additionalColumnsArr...).
+		Json().
+		Columns(selectAdditionalColumnsArr...).
 		OrderBy("ts", qb.ASC)
 
 	for _, pk := range s.schemaPartitionKeys {
@@ -530,7 +504,7 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 		Where(qb.EqLit("ddl", "true")).
 		ToCql()
 
-	ch := make(chan Item, 1000)
+	ch := make(chan []byte, 1000)
 	wg := &sync.WaitGroup{}
 
 	wg.Add(1)
@@ -540,7 +514,7 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 		schemaChangeValues = append(schemaChangeValues, s.schemaChangeValues.Values.ToCQLValues(s.schemaPartitionKeys)...)
 		schemaChangeValues = append(schemaChangeValues, string(ty))
 
-		if fetchErr := s.fetchData(ch, ty, ddlStatementsQuery, schemaChangeValues); fetchErr != nil {
+		if fetchErr := s.fetchData(ch, ddlStatementsQuery, schemaChangeValues); fetchErr != nil {
 			metrics.ErrorMessages.WithLabelValues("statement_logger_fetch_ddl", fetchErr.Error()).Inc()
 			s.logger.Error("failed to fetch schema change data", zap.Error(fetchErr))
 		}
@@ -557,7 +531,7 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 			wg.Add(1)
 			go func(values []any) {
 				defer wg.Done()
-				if fetchErr := s.fetchData(ch, ty, query, values); fetchErr != nil {
+				if fetchErr := s.fetchData(ch, query, values); fetchErr != nil {
 					metrics.ErrorMessages.WithLabelValues("statement_logger_query",
 						fmt.Sprintf(
 							"failed to fetch data for job error %s: error=%v partition-keys=%v", jobError.Error(), fetchErr,
@@ -578,23 +552,51 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 	}()
 
 	for item := range ch {
-		if encodeErr := encoder.Encode(item); encodeErr != nil {
-			s.logger.Error("failed to encode oracle statement", zap.Error(encodeErr))
+		if _, err = file.Write(item); err != nil {
+			s.logger.Error("failed to write statement",
+				zap.String("type", string(ty)),
+				zap.String("statement", string(item)),
+				zap.Error(err),
+			)
+
+			continue
 		}
+
+		// Since this is a new line, we can ignore the error
+		// if we fail to write a new line, it will be caught by the next write
+		// and will have two rows on the same line
+		_, _ = file.WriteRune('\n')
 	}
 
 	return nil
 }
 
-func (s *ScyllaLogger) openStatementFile(name string) (io.Writer, func() error, error) {
+func (s *ScyllaLogger) openStatementFile(name string) (*bufio.Writer, func() error, error) {
 	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644|fs.ModeExclusive)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "failed to open test statements file '%q'", name)
 	}
 
-	return file, func() error {
-		_ = file.Sync()
-		return file.Close()
+	buffered := bufio.NewWriterSize(file, 32*1024)
+
+	return buffered, func() error {
+		defer func() {
+			if err = file.Close(); err != nil {
+				s.logger.Error("failed to close statements file", zap.String("file", name), zap.Error(err))
+			}
+		}()
+
+		if err = buffered.Flush(); err != nil {
+			return err
+		}
+
+		if err = file.Sync(); err != nil {
+			s.logger.Error("failed to fsync statements file", zap.String("file", name), zap.Error(err))
+
+			return err
+		}
+
+		return nil
 	}, nil
 }
 
