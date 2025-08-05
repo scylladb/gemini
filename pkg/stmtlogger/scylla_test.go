@@ -186,19 +186,20 @@ func TestScyllaLogger(t *testing.T) {
 	sortedOracle := slices.SortedStableFunc(oracleStatements, strings.Compare)
 	sortedTest := slices.SortedStableFunc(testStatements, strings.Compare)
 
-	assert.Len(sortedOracle, 2)
 	assert.Len(sortedTest, 2)
+	assert.Len(sortedOracle, 2)
 
 	expectItem := func(data string, i Item) {
 		m := make(map[string]any, 10)
 		assert.NoError(json.Unmarshal([]byte(data), &m))
 
 		// Validate error field
-		if i.Error.IsLeft() && i.Error.MustLeft() != nil {
+		switch {
+		case i.Error.IsLeft() && i.Error.MustLeft() != nil:
 			assert.Equal(i.Error.MustLeft().Error(), m["error"])
-		} else if i.Error.IsRight() {
+		case i.Error.IsRight():
 			assert.Equal(i.Error.MustRight(), m["error"])
-		} else {
+		default:
 			assert.Nil(m["error"])
 		}
 

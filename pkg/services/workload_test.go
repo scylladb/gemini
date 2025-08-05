@@ -145,9 +145,6 @@ var dataset = []DataSet{
 
 			assert := require.New(tb)
 
-			assert.NoFileExists(storeConfig.OracleStatementFile)
-			assert.NoFileExists(storeConfig.TestStatementFile)
-
 			status := workload.GetGlobalStatus()
 
 			assert.Equalf(uint64(0), status.WriteErrors.Load(), "there were write errors")
@@ -167,9 +164,6 @@ var dataset = []DataSet{
 			tb.Helper()
 
 			assert := require.New(tb)
-
-			assert.NoFileExists(config.OracleStatementFile)
-			assert.NoFileExists(config.TestStatementFile)
 
 			status := workload.GetGlobalStatus()
 
@@ -192,9 +186,6 @@ var dataset = []DataSet{
 
 			assert := require.New(tb)
 
-			assert.NoFileExists(config.OracleStatementFile)
-			assert.NoFileExists(config.TestStatementFile)
-
 			status := workload.GetGlobalStatus()
 
 			assert.Equal(uint64(0), status.WriteErrors.Load())
@@ -213,9 +204,6 @@ var dataset = []DataSet{
 		expect: func(tb testing.TB, workload *Workload, config store.Config) {
 			tb.Helper()
 			assert := require.New(tb)
-
-			assert.NoFileExists(config.OracleStatementFile)
-			assert.NoFileExists(config.TestStatementFile)
 
 			status := workload.GetGlobalStatus()
 

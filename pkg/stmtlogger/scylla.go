@@ -31,7 +31,6 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/pkg/errors"
 	"github.com/samber/mo"
-	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gocqlx/v3/qb"
 	"go.uber.org/zap"
 
@@ -39,6 +38,7 @@ import (
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gemini/pkg/workpool"
 )
 
@@ -177,8 +177,9 @@ func NewScyllaLoggerWithSession(
 		keyspaceAndTable:     fmt.Sprintf("%s.%s", keyspace, table),
 	}
 
-	logger.wg.Add(1)
+	logger.wg.Add(2)
 	go logger.commiter(ctx, partitionKeys.LenValues())
+	go logger.logErrors(ctx)
 
 	return logger, nil
 }
@@ -316,6 +317,118 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 	}
 }
 
+func (s *ScyllaLogger) logErrors(ctx context.Context) {
+	defer s.wg.Done()
+	if s.oracleStatementsFile == "" || s.testStatementsFile == "" {
+		s.logger.Panic("statements files are not set",
+			zap.String("oracle_statements_file", s.oracleStatementsFile),
+			zap.String("test_statements_file", s.testStatementsFile),
+		)
+	}
+	wg := &sync.WaitGroup{}
+
+	storages := []struct {
+		ch   chan []byte
+		file string
+		ty   Type
+	}{{
+		ch:   make(chan []byte, s.errors.Cap()+10),
+		file: s.oracleStatementsFile,
+		ty:   TypeOracle,
+	}, {
+		ch:   make(chan []byte, s.errors.Cap()+10),
+		file: s.testStatementsFile,
+		ty:   TypeTest,
+	}}
+
+	for _, storage := range storages {
+		wg.Add(1)
+		go func() {
+			file, closer, err := s.openStatementFile(storage.file)
+			if err != nil {
+				s.logger.Panic("failed to open oracle statements file", zap.Error(err))
+				return
+			}
+
+			defer func() {
+				if err = closer(); err != nil {
+					s.logger.Error("failed to close statements file",
+						zap.String("type", string(storage.ty)),
+						zap.String("file", storage.file),
+						zap.Error(err),
+					)
+				}
+
+				wg.Done()
+			}()
+
+			for item := range storage.ch {
+				if _, err = file.Write(item); err != nil {
+					s.logger.Error("failed to write statement",
+						zap.String("type", string(storage.ty)),
+						zap.String("statement", string(item)),
+						zap.Error(err),
+					)
+
+					continue
+				}
+
+				// Since this is a new line, we can ignore the error
+				// if we fail to write a new line, it will be caught by the next write
+				// and will have two rows on the same line
+				_, _ = file.WriteRune('\n')
+			}
+		}()
+	}
+
+	pushErrors := func(jobErr *joberror.JobError, fetchSchema bool) {
+		pushErr := &sync.WaitGroup{}
+		for _, storage := range storages {
+			pushErr.Add(1)
+			go func() {
+				pushErr.Done()
+				if fetchSchema {
+					s.fetchSchemaChanges(storage.ty, storage.ch)
+				}
+
+				if err := s.fetchFailedPartitions(storage.ch, storage.ty, jobErr); err != nil {
+					s.logger.Error(
+						"failed to fetch failed partitions",
+						zap.String("type", string(storage.ty)),
+						zap.Error(err),
+					)
+				}
+			}()
+		}
+
+		pushErr.Wait()
+	}
+
+	errCh := s.errors.GetChannel()
+
+	for iteration := 0; ; {
+		select {
+		case <-ctx.Done():
+			_ = s.errors.Close()
+
+			for jobErr := range errCh {
+				pushErrors(jobErr, iteration == 0)
+				iteration++
+			}
+
+			for _, storage := range storages {
+				close(storage.ch)
+			}
+
+			wg.Wait()
+			return
+		case jobErr := <-errCh:
+			pushErrors(jobErr, iteration == 0)
+			iteration++
+		}
+	}
+}
+
 func prepareValues(values mo.Either[[]any, []byte]) string {
 	if values.IsLeft() {
 		data, _ := json.Marshal(values.MustLeft())
@@ -385,7 +498,7 @@ func (s *ScyllaLogger) fetchData(ch chan<- []byte, statement string, values []an
 	return iter.Close()
 }
 
-func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string, [][]any) {
+func (s *ScyllaLogger) buildQuery(jobError *joberror.JobError, ty Type) ([]string, [][]any) {
 	switch jobError.StmtType {
 	case typedef.SelectStatementType, typedef.SelectRangeStatementType,
 		typedef.InsertStatementType, typedef.InsertJSONStatementType,
@@ -456,41 +569,7 @@ func (s *ScyllaLogger) buildQuery(jobError joberror.JobError, ty Type) ([]string
 	}
 }
 
-func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) error {
-	var (
-		file   *bufio.Writer
-		closer func() error
-		err    error
-	)
-
-	switch ty {
-	case TypeOracle:
-		if s.oracleStatementsFile == "" {
-			return ErrEmptyStatementFileName
-		}
-
-		file, closer, err = s.openStatementFile(s.oracleStatementsFile)
-	case TypeTest:
-		if s.testStatementsFile == "" {
-			return ErrEmptyStatementFileName
-		}
-
-		file, closer, err = s.openStatementFile(s.testStatementsFile)
-	default:
-		s.logger.Panic("unsupported type to fetch from statement logs", zap.String("type", string(ty)))
-	}
-
-	if err != nil {
-		s.logger.Error("failed to open statements file", zap.String("type", string(ty)), zap.Error(err))
-		return err
-	}
-
-	defer func() {
-		if err = closer(); err != nil {
-			s.logger.Error("failed to close oracle statements file", zap.String("type", string(ty)), zap.Error(err))
-		}
-	}()
-
+func (s *ScyllaLogger) fetchSchemaChanges(ty Type, ch chan<- []byte) {
 	builder := qb.Select(s.keyspaceAndTable).
 		Json().
 		Columns(selectAdditionalColumnsArr...).
@@ -500,73 +579,46 @@ func (s *ScyllaLogger) fetchFailedPartitions(ty Type, errs []joberror.JobError) 
 		builder.Where(qb.Eq(pk.Name))
 	}
 
-	ddlStatementsQuery, _ := builder.Where(qb.Eq("ty")).
+	ddlStatementsQuery, _ := builder.Where(qb.EqLit("ty", "'"+string(ty)+"'")).
 		Where(qb.EqLit("ddl", "true")).
 		ToCql()
 
-	ch := make(chan []byte, 1000)
+	schemaChangeValues := make([]any, 0, s.partitionKeysCount)
+	schemaChangeValues = append(schemaChangeValues, s.schemaChangeValues.Values.ToCQLValues(s.schemaPartitionKeys)...)
+
+	if fetchErr := s.fetchData(ch, ddlStatementsQuery, schemaChangeValues); fetchErr != nil {
+		metrics.ErrorMessages.WithLabelValues("statement_logger_fetch_ddl", fetchErr.Error()).Inc()
+		s.logger.Error("failed to fetch schema change data", zap.Error(fetchErr))
+	}
+}
+
+func (s *ScyllaLogger) fetchFailedPartitions(ch chan<- []byte, ty Type, jobError *joberror.JobError) error {
+	queries, values := s.buildQuery(jobError, ty)
+	if len(queries) == 0 || len(values) == 0 {
+		return errors.New("unsupported type to fetch from statement logs")
+	}
+
 	wg := &sync.WaitGroup{}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		schemaChangeValues := make([]any, 0, s.partitionKeysCount+1)
-		schemaChangeValues = append(schemaChangeValues, s.schemaChangeValues.Values.ToCQLValues(s.schemaPartitionKeys)...)
-		schemaChangeValues = append(schemaChangeValues, string(ty))
-
-		if fetchErr := s.fetchData(ch, ddlStatementsQuery, schemaChangeValues); fetchErr != nil {
-			metrics.ErrorMessages.WithLabelValues("statement_logger_fetch_ddl", fetchErr.Error()).Inc()
-			s.logger.Error("failed to fetch schema change data", zap.Error(fetchErr))
-		}
-	}()
-
-	for _, jobError := range errs {
-		queries, values := s.buildQuery(jobError, ty)
-		if len(queries) == 0 || len(values) == 0 {
-			s.logger.Warn("Unsupported type to fetch from statement logs")
-			continue
-		}
-
-		for i, query := range queries {
-			wg.Add(1)
-			go func(values []any) {
-				defer wg.Done()
-				if fetchErr := s.fetchData(ch, query, values); fetchErr != nil {
-					metrics.ErrorMessages.WithLabelValues("statement_logger_query",
-						fmt.Sprintf(
-							"failed to fetch data for job error %s: error=%v partition-keys=%v", jobError.Error(), fetchErr,
-							values,
-						)).Inc()
-					s.logger.Error("failed to fetch failed partition data",
-						zap.Error(fetchErr),
-						zap.Any("partition_keys", values),
-					)
-				}
-			}(values[i])
-		}
+	for i, query := range queries {
+		wg.Add(1)
+		go func(values []any) {
+			defer wg.Done()
+			if fetchErr := s.fetchData(ch, query, values); fetchErr != nil {
+				metrics.ErrorMessages.WithLabelValues("statement_logger_query",
+					fmt.Sprintf(
+						"failed to fetch data for job error %s: error=%v partition-keys=%v", jobError.Error(), fetchErr,
+						values,
+					)).Inc()
+				s.logger.Error("failed to fetch failed partition data",
+					zap.Error(fetchErr),
+					zap.Any("partition_keys", values),
+				)
+			}
+		}(values[i])
 	}
 
-	go func() {
-		wg.Wait()
-		close(ch)
-	}()
-
-	for item := range ch {
-		if _, err = file.Write(item); err != nil {
-			s.logger.Error("failed to write statement",
-				zap.String("type", string(ty)),
-				zap.String("statement", string(item)),
-				zap.Error(err),
-			)
-
-			continue
-		}
-
-		// Since this is a new line, we can ignore the error
-		// if we fail to write a new line, it will be caught by the next write
-		// and will have two rows on the same line
-		_, _ = file.WriteRune('\n')
-	}
+	wg.Wait()
 
 	return nil
 }
@@ -603,28 +655,5 @@ func (s *ScyllaLogger) openStatementFile(name string) (*bufio.Writer, func() err
 func (s *ScyllaLogger) Close() error {
 	s.cancel()
 	s.wg.Wait()
-
-	errs := s.errors.Errors()
-	if len(errs) == 0 {
-		return nil
-	}
-
-	wg := &sync.WaitGroup{}
-	for _, ty := range []Type{TypeOracle, TypeTest} {
-		wg.Add(1)
-		go func(errs []joberror.JobError) {
-			defer wg.Done()
-			if err := s.fetchFailedPartitions(ty, errs); err != nil {
-				s.logger.Error(
-					"failed to fetch failed partitions",
-					zap.String("type", string(ty)),
-					zap.Int("errors_count", len(errs)),
-					zap.Error(err),
-				)
-			}
-		}(slices.Clone(errs))
-	}
-
-	wg.Wait()
 	return nil
 }
