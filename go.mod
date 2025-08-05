@@ -2,7 +2,7 @@ module github.com/scylladb/gemini
 
 go 1.24.0
 
-replace github.com/gocql/gocql => github.com/scylladb/gocql v1.15.0
+replace github.com/gocql/gocql => github.com/scylladb/gocql v1.15.2
 
 require (
 	github.com/aws/smithy-go v1.22.1
