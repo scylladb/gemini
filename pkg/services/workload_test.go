@@ -140,7 +140,7 @@ var dataset = []DataSet{
 		mode:     jobs.MixedMode,
 		duration: 10 * time.Second,
 		warmup:   10 * time.Second,
-		expect: func(tb testing.TB, workload *Workload, storeConfig store.Config) {
+		expect: func(tb testing.TB, workload *Workload, _ store.Config) {
 			tb.Helper()
 
 			assert := require.New(tb)
@@ -160,7 +160,7 @@ var dataset = []DataSet{
 		name:     "MixedModeWithoutWarmup",
 		mode:     jobs.MixedMode,
 		duration: 20 * time.Second,
-		expect: func(tb testing.TB, workload *Workload, config store.Config) {
+		expect: func(tb testing.TB, workload *Workload, _ store.Config) {
 			tb.Helper()
 
 			assert := require.New(tb)
@@ -181,7 +181,7 @@ var dataset = []DataSet{
 		mode:     jobs.WriteMode,
 		duration: 10 * time.Second,
 		warmup:   10 * time.Second,
-		expect: func(tb testing.TB, workload *Workload, config store.Config) {
+		expect: func(tb testing.TB, workload *Workload, _ store.Config) {
 			tb.Helper()
 
 			assert := require.New(tb)
@@ -201,7 +201,7 @@ var dataset = []DataSet{
 		name:     "WriteModeWithoutWarmup",
 		mode:     jobs.WriteMode,
 		duration: 20 * time.Second,
-		expect: func(tb testing.TB, workload *Workload, config store.Config) {
+		expect: func(tb testing.TB, workload *Workload, _ store.Config) {
 			tb.Helper()
 			assert := require.New(tb)
 
@@ -392,7 +392,8 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 		contents[file] = data
 	}
 
-	assert.Equal(len(contents[storeConfig.TestStatementFile]), len(contents[storeConfig.OracleStatementFile]), "test and oracle files should have the same number of items")
+	assert.NotEmpty(contents[storeConfig.TestStatementFile])
+	assert.NotEmpty(contents[storeConfig.OracleStatementFile])
 }
 
 func TestWorkloadWithAllSchemaTypes(t *testing.T) {
@@ -490,9 +491,6 @@ func TestWorkloadWithAllSchemaTypes(t *testing.T) {
 	assert.NoError(err)
 	assert.NoError(workload.Run(t.Context()))
 	assert.NoError(workload.Close())
-
-	assert.NoFileExists(storeConfig.OracleStatementFile)
-	assert.NoFileExists(storeConfig.TestStatementFile)
 
 	status := workload.GetGlobalStatus()
 

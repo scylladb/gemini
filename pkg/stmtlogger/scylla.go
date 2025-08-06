@@ -362,21 +362,30 @@ func (s *ScyllaLogger) logErrors(ctx context.Context) {
 				wg.Done()
 			}()
 
-			for item := range storage.ch {
-				if _, err = file.Write(item); err != nil {
-					s.logger.Error("failed to write statement",
-						zap.String("type", string(storage.ty)),
-						zap.String("statement", string(item)),
-						zap.Error(err),
-					)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case item, more := <-storage.ch:
+					if !more {
+						return
+					}
 
-					continue
+					if _, err = file.Write(item); err != nil {
+						s.logger.Error("failed to write statement",
+							zap.String("type", string(storage.ty)),
+							zap.String("statement", string(item)),
+							zap.Error(err),
+						)
+
+						continue
+					}
+
+					// Since this is a new line, we can ignore the error
+					// if we fail to write a new line, it will be caught by the next write
+					// and will have two rows on the same line
+					_, _ = file.WriteRune('\n')
 				}
-
-				// Since this is a new line, we can ignore the error
-				// if we fail to write a new line, it will be caught by the next write
-				// and will have two rows on the same line
-				_, _ = file.WriteRune('\n')
 			}
 		}()
 	}
@@ -414,10 +423,6 @@ func (s *ScyllaLogger) logErrors(ctx context.Context) {
 			for jobErr := range errCh {
 				pushErrors(jobErr, iteration == 0)
 				iteration++
-			}
-
-			for _, storage := range storages {
-				close(storage.ch)
 			}
 
 			wg.Wait()
