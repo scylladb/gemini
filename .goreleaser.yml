@@ -8,6 +8,18 @@ builds:
       - linux
     binary: gemini
     no_unique_dist_dir: false
+    gcflags:
+      - -wb=false
+      - -l=4
+      - -B
+      - -C
+      - -d=ssa/check/on
+    flags:
+      - -trimpath
+      - -a
+      - -pgo=merged.pgo
+    ldflags:
+      - -s -w
     env:
       - CGO_ENABLED=0
       - CFLAGS="-O3"
@@ -51,6 +63,7 @@ dockers:
     goarch: amd64
     goamd64: v3
     goos: linux
+    skip_push: true
     id: gemini-amd64
     build_flag_templates:
       - '--platform=linux/amd64/v3'
@@ -60,6 +73,7 @@ dockers:
       - scylladb/gemini:{{ .Version }}-arm64v8
     goarch: arm64
     id: gemini-arm
+    skip_push: true
     goos: linux
     build_flag_templates:
       - '--platform=linux/arm64/v8'
