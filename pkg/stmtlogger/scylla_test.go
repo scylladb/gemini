@@ -15,6 +15,7 @@
 package stmtlogger
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
@@ -117,82 +118,125 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 
 func TestScyllaLogger(t *testing.T) {
 	t.Parallel()
-
+	dir := t.TempDir()
+	oracleFile := dir + "/oracle_statements.json"
+	testFile := dir + "/test_statements.json"
 	item := CompressionTests[0]
 
-	t.Run("Compression_"+item.Compression.String(), func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		oracleFile := dir + "/oracle_statements.json"
-		testFile := dir + "/test_statements.json"
+	assert := require.New(t)
+	scyllaContainer := testutils.SingleScylla(t)
 
-		assert := require.New(t)
-		scyllaContainer := testutils.SingleScylla(t)
+	jobList := joberror.NewErrorList(1)
+	pool := workpool.New(1)
+	t.Cleanup(func() {
+		_ = pool.Close()
+	})
+	chMetrics := metrics.NewChannelMetrics("test", "test")
+	partitionKeys := []typedef.ColumnDef{
+		{Name: "col1", Type: typedef.TypeInt},
+		{Name: "col2", Type: typedef.TypeText},
+	}
 
-		jobList := joberror.NewErrorList(1)
-		pool := workpool.New(1)
-		t.Cleanup(func() {
-			_ = pool.Close()
-		})
-		chMetrics := metrics.NewChannelMetrics("test", "test")
-		partitionKeys := []typedef.ColumnDef{
-			{Name: "col1", Type: typedef.TypeInt},
-			{Name: "col2", Type: typedef.TypeText},
+	ch := make(chan Item, 10)
+	zapLogger := testutils.Must(zap.NewDevelopment())
+
+	logger, err := NewScyllaLoggerWithSession(
+		"ks1",
+		"table1",
+		typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{"col1": {5}, "col2": {"test_ddl"}})},
+		scyllaContainer.Test,
+		partitionKeys,
+		replication.NewNetworkTopologyStrategy(),
+		ch,
+		oracleFile, testFile, item.Compression, jobList,
+		pool, zapLogger, chMetrics,
+	)
+	assert.NoError(err)
+	assert.NotNil(logger)
+
+	itemTest, testJobErr := errorStatement(TypeTest)
+	itemOracle, _ := errorStatement(TypeOracle)
+
+	ch <- ddlStatement(TypeTest)
+	ch <- ddlStatement(TypeOracle)
+	ch <- successStatement(TypeTest)
+	ch <- itemTest
+	ch <- successStatement(TypeOracle)
+	ch <- itemOracle
+
+	jobList.AddError(testJobErr)
+	time.Sleep(2 * time.Second)
+	close(ch)
+	assert.NoError(logger.Close())
+
+	var count int
+	assert.NoError(scyllaContainer.Test.Query(
+		fmt.Sprintf("SELECT COUNT(*) FROM %s.%s",
+			GetScyllaStatementLogsKeyspace("ks1"),
+			GetScyllaStatementLogsTable("table1")),
+	).Scan(&count))
+	assert.Equal(6, count)
+
+	oracleData := item.ReadData(t, testutils.Must(os.Open(oracleFile)))
+	testData := item.ReadData(t, testutils.Must(os.Open(testFile)))
+
+	oracleStatements := strings.SplitSeq(strings.TrimRight(oracleData, "\n"), "\n")
+	testStatements := strings.SplitSeq(strings.TrimRight(testData, "\n"), "\n")
+
+	sortedOracle := slices.SortedStableFunc(oracleStatements, strings.Compare)
+	sortedTest := slices.SortedStableFunc(testStatements, strings.Compare)
+
+	assert.Len(sortedTest, 2)
+	assert.Len(sortedOracle, 2)
+
+	expectItem := func(data string, i Item) {
+		m := make(map[string]any, 10)
+		assert.NoError(json.Unmarshal([]byte(data), &m))
+
+		// Validate error field
+		switch {
+		case i.Error.IsLeft() && i.Error.MustLeft() != nil:
+			assert.Equal(i.Error.MustLeft().Error(), m["error"])
+		case i.Error.IsRight():
+			assert.Equal(i.Error.MustRight(), m["error"])
+		default:
+			assert.Nil(m["error"])
 		}
 
-		ch := make(chan Item, 10)
-		zapLogger := testutils.Must(zap.NewDevelopment())
+		assert.NotEmpty(m["ts"].(string))
+		assert.Equal(i.Statement, m["statement"])
+		assert.Equal(i.Host, m["host"])
+		assert.Equal(i.Duration.Duration.String(), m["dur"])
+		assert.Equal(float64(i.Attempt), m["attempt"])
 
-		logger, err := NewScyllaLoggerWithSession(
-			"ks1",
-			"table1",
-			typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{"col1": {5}, "col2": {"test_ddl"}})},
-			scyllaContainer.Test,
-			partitionKeys,
-			replication.NewNetworkTopologyStrategy(),
-			ch,
-			oracleFile, testFile, item.Compression, jobList,
-			pool, zapLogger, chMetrics,
-		)
-		assert.NoError(err)
-		assert.NotNil(logger)
+		if i.Values.IsLeft() {
+			values := i.Values.MustLeft()
+			if values != nil {
+				jsonValuesStr := m["values"].(string)
+				// Unescape the JSON string and parse it
+				var parsedValues []any
+				assert.NoError(json.Unmarshal([]byte(jsonValuesStr), &parsedValues), "Failed to unmarshal JSON values")
+				assert.Equal(len(values), len(parsedValues))
+				for idx, val := range values {
+					switch v := val.(type) {
+					case int:
+						assert.Equal(float64(v), parsedValues[idx])
+					case string:
+						assert.Equal(v, parsedValues[idx])
+					default:
+						assert.Equal(val, parsedValues[idx])
+					}
+				}
+			} else {
+				assert.Nil(m["values"])
+			}
+		} else {
+			assert.Equal(string(i.Values.MustRight()), m["values"])
+		}
+	}
 
-		itemTest, testJobErr := errorStatement(TypeTest)
-		itemOracle, _ := errorStatement(TypeOracle)
-
-		ch <- ddlStatement(TypeTest)
-		ch <- ddlStatement(TypeOracle)
-		ch <- successStatement(TypeTest)
-		ch <- itemTest
-		ch <- successStatement(TypeOracle)
-		ch <- itemOracle
-
-		jobList.AddError(testJobErr)
-		time.Sleep(2 * time.Second)
-		close(ch)
-		assert.NoError(logger.Close())
-
-		var count int
-		assert.NoError(scyllaContainer.Test.Query(
-			fmt.Sprintf("SELECT COUNT(*) FROM %s.%s",
-				GetScyllaStatementLogsKeyspace("ks1"),
-				GetScyllaStatementLogsTable("table1")),
-		).Scan(&count))
-		assert.Equal(6, count)
-
-		oracleData := item.ReadData(t, testutils.Must(os.Open(oracleFile)))
-		testData := item.ReadData(t, testutils.Must(os.Open(testFile)))
-
-		oracleStatements := strings.SplitSeq(strings.TrimRight(oracleData, "\n"), "\n")
-		testStatements := strings.SplitSeq(strings.TrimRight(testData, "\n"), "\n")
-
-		sortedOracle := slices.SortedStableFunc(oracleStatements, strings.Compare)
-		sortedTest := slices.SortedStableFunc(testStatements, strings.Compare)
-
-		assert.Equal(sortedOracle, sortedTest)
-		assert.Len(sortedOracle, 2)
-		assert.Len(sortedTest, 2)
-	})
+	expectItem(sortedOracle[0], itemOracle)
+	expectItem(sortedTest[0], itemTest)
 }
 
 func ddlStatement(ty Type) Item {

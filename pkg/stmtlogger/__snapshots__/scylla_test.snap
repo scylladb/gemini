@@ -5,6 +5,6 @@ createKeyspace
 ---
 
 [TestBuildQueriesCreation - 2]
-CREATE TABLE IF NOT EXISTS ks1_logs.table1_statements(col1 int,col2 ascii,ddl boolean, ts timestamp, ty text, statement text, values blob, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((col1,col2, ty), ddl, ts, attempt, gemini_attempt)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';
+CREATE TABLE IF NOT EXISTS ks1_logs.table1_statements(col1 int,col2 ascii,ddl boolean, ts timestamp, ty text, statement text, values text, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((col1,col2, ty), ddl, ts, attempt, gemini_attempt)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';
 createTable
 ---

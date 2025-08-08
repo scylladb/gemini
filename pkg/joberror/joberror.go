@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -50,9 +51,11 @@ func (j JobError) Error() string {
 }
 
 type ErrorList struct {
-	errors []JobError
-	limit  int
-	mu     sync.Mutex
+	ch            chan *JobError
+	errors        []JobError
+	limit         int
+	mu            sync.Mutex
+	channelClosed atomic.Bool
 }
 
 func (el *ErrorList) AddError(err JobError) {
@@ -61,6 +64,9 @@ func (el *ErrorList) AddError(err JobError) {
 
 	if len(el.errors) <= el.limit {
 		el.errors = append(el.errors, err)
+		if !el.channelClosed.Load() {
+			el.ch <- &err
+		}
 	}
 }
 
@@ -104,9 +110,20 @@ func (el *ErrorList) Error() string {
 	return strings.TrimRight(builder.String(), "\n")
 }
 
+func (el *ErrorList) GetChannel() <-chan *JobError {
+	return el.ch
+}
+
+func (el *ErrorList) Close() error {
+	el.channelClosed.Store(true)
+	close(el.ch)
+	return nil
+}
+
 func NewErrorList(limit int) *ErrorList {
 	return &ErrorList{
 		limit:  limit,
 		errors: make([]JobError, 0, limit),
+		ch:     make(chan *JobError, limit+1),
 	}
 }
