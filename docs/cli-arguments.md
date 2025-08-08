@@ -12,7 +12,7 @@ the blueprint for it's validations.
 
 ## Optional arguments
 
-1. ___--test-cluster___, ___-t___: This parameter takes a comma separated list of hosts that are 
+1. ___--test-cluster___, ___-t___: This parameter takes a comma separated list of hosts that are
 part of the ___SUT___ or commonly, ___system under test___. If omitted then Gemini will not use the Oracle
 at all and simply execute a lot of queries against the ___SUT___.
 
@@ -28,11 +28,11 @@ used during a run.
 5. ___--seed___, ___-s___: The seed parameter denotes the seed from where to start the random number
 generators that Gemini is using.
 
-6. ___--drop-schema___, ___-d___: Boolean value that instructs Gemini to issue a __DROP SCHEMA__ 
+6. ___--drop-schema___, ___-d___: Boolean value that instructs Gemini to issue a __DROP SCHEMA__
 statement before starting to run. Make sure you use it with care.
 
 7. ___--fail-fast___, ___-f___: Boolean value that instructs Gemini to stop running as soon as it
-encounters a validation error. If set to false, then Gemini will collect the errors and report them 
+encounters a validation error. If set to false, then Gemini will collect the errors and report them
 once normal program end is reached.
 
 8. ___--duration___: The duration of a run. Defaults to 30 seconds.
@@ -45,7 +45,7 @@ standard out is used.
 
 11. ___--max-tables___: Maximum number of tables in the generated schema.
 
-12. __--table-options__: Repeatable argument to set table options for example: 
+12. __--table-options__: Repeatable argument to set table options for example:
 _--table-options"compression = {'sstable_compression': 'LZ4Compressor'}"_
 
 13. ___--use-server-timestamps___: Each cell written to a CQL cluster has a timestamp which is used to determine recency of writes. By default, gemini generates a timestamp for each performed write using the clock of the machine that gemini runs on. This option disables that behavior, making the write coordinator node responsible for generating write timestamps.
@@ -57,3 +57,11 @@ _--table-options"compression = {'sstable_compression': 'LZ4Compressor'}"_
 16. ___--test-username___: Username for authentication against the ___SUT___ cluster. If this argument is provided, then ___--test-password___ is also required, otherwise it will continue without authenticaton.
 
 17. ___--test-password___: Password for the ___SUT___ cluster.
+
+18. ___--test-statement-log-file___: Path to a file where Gemini will write detailed logs of all statements executed against the test (SUT) cluster. The logger works immediately when errors occur, capturing failed statements with full context for debugging. See [Statement Logger documentation](statement-logger.md) for details.
+
+19. ___--oracle-statement-log-file___: Path to a file where Gemini will write detailed logs of all statements executed against the oracle cluster. Used in conjunction with test statement logging for comparison and validation purposes.
+
+20. ___--statement-log-file-compression___: Compression algorithm to use for statement log files. Options are: `none` (default), `gzip`, `zstd`. Helps reduce disk space usage for large test runs.
+
+21. ___--statement-ratios___: Controls the ratio of different statement types that Gemini executes during a run. Accepts JSON configuration either inline or as a file path. Allows fine-grained control over mutation (insert/update/delete) and validation (select) statement distribution. See [Statement Ratio documentation](statement-ratio.md) for detailed configuration options.
