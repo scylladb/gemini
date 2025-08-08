@@ -6,7 +6,7 @@ replace github.com/gocql/gocql => github.com/scylladb/gocql v1.15.2
 
 require (
 	github.com/aws/smithy-go v1.22.1
-	github.com/docker/docker v28.3.2+incompatible
+	github.com/docker/docker v28.3.3+incompatible
 	github.com/gkampitakis/go-snaps v0.5.13
 	github.com/gocql/gocql v1.8.0
 	github.com/google/go-cmp v0.7.0
