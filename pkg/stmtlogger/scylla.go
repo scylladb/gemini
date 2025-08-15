@@ -270,12 +270,6 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 		)
 
 		if len(values) != partitionKeysCount+len(additionalColumnsArr) {
-			metrics.ErrorMessages.WithLabelValues(
-				"statement_logger",
-				fmt.Sprintf("invalid number of values for Scylla insert: expected=%d actual=%d, values=%v, statement=%s",
-					partitionKeysCount+len(additionalColumnsArr), len(values), values, item.StatementType,
-				),
-			).Inc()
 			s.logger.Error(
 				"invalid number of values for Scylla insert",
 				zap.Int("expected", partitionKeysCount+len(additionalColumnsArr)),
@@ -293,7 +287,6 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 			defer q.Release()
 
 			if err := q.Exec(); err != nil {
-				metrics.ErrorMessages.WithLabelValues("statement_logger", err.Error()).Inc()
 				s.logger.Error("failed to insert into statements table", zap.Error(err))
 			}
 		})
@@ -592,7 +585,6 @@ func (s *ScyllaLogger) fetchSchemaChanges(ty Type, ch chan<- []byte) {
 	schemaChangeValues = append(schemaChangeValues, s.schemaChangeValues.Values.ToCQLValues(s.schemaPartitionKeys)...)
 
 	if fetchErr := s.fetchData(ch, ddlStatementsQuery, schemaChangeValues); fetchErr != nil {
-		metrics.ErrorMessages.WithLabelValues("statement_logger_fetch_ddl", fetchErr.Error()).Inc()
 		s.logger.Error("failed to fetch schema change data", zap.Error(fetchErr))
 	}
 }
@@ -610,11 +602,6 @@ func (s *ScyllaLogger) fetchFailedPartitions(ch chan<- []byte, ty Type, jobError
 		go func(values []any) {
 			defer wg.Done()
 			if fetchErr := s.fetchData(ch, query, values); fetchErr != nil {
-				metrics.ErrorMessages.WithLabelValues("statement_logger_query",
-					fmt.Sprintf(
-						"failed to fetch data for job error %s: error=%v partition-keys=%v", jobError.Error(), fetchErr,
-						values,
-					)).Inc()
 				s.logger.Error("failed to fetch failed partition data",
 					zap.Error(fetchErr),
 					zap.Any("partition_keys", values),

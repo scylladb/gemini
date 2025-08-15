@@ -156,10 +156,6 @@ var (
 		[]string{"ty"},
 	)
 
-	ErrorMessages = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "errors",
-	}, []string{"ty", "msg"})
-
 	GeminiInformation = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "information",
 	}, []string{"ty"})
@@ -194,7 +190,6 @@ func init() {
 		FileSizeMetrics,
 		ExecutionErrors,
 		CQLErrorRequests,
-		ErrorMessages,
 		GeminiInformation,
 		ValidatedRows,
 	)
