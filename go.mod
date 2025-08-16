@@ -29,7 +29,7 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/exp v0.0.0-20250808145144-a408d31f581a
+	golang.org/x/exp v0.0.0-20250813145105-42675adae3e6
 	golang.org/x/sync v0.16.0
 	gonum.org/v1/gonum v0.16.0
 	gopkg.in/inf.v0 v0.9.1
@@ -277,7 +277,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
 	golang.org/x/crypto v0.40.0 // indirect
-	golang.org/x/exp/typeparams v0.0.0-20250808145144-a408d31f581a // indirect
+	golang.org/x/exp/typeparams v0.0.0-20250813145105-42675adae3e6 // indirect
 	golang.org/x/image v0.28.0 // indirect
 	golang.org/x/mod v0.27.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
