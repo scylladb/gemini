@@ -144,10 +144,17 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 
 	for i, query := range batch.Statements {
 		if c.logger != nil && !data.Statement.QueryType.IsSelect() {
+			// Ensure values are never nil to prevent "null" in logs
+			values := batch.Values[i]
+			if values == nil {
+				values = []any{}
+			} else {
+				values = slices.Clone(values)
+			}
 			err := c.logger.LogStmt(stmtlogger.Item{
 				Error:         mo.Right[error, string](errStr),
 				Statement:     query,
-				Values:        mo.Left[[]any, []byte](slices.Clone(batch.Values[i])),
+				Values:        mo.Left[[]any, []byte](values),
 				Start:         stmtlogger.Time{Time: batch.Start},
 				Duration:      stmtlogger.Duration{Duration: batch.End.Sub(batch.Start)},
 				Host:          instance,
@@ -188,10 +195,17 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 	duration := query.End.Sub(query.Start)
 
 	if c.logger != nil && !data.Statement.QueryType.IsSelect() {
+		// Ensure values are never nil to prevent "null" in logs
+		values := query.Values
+		if values == nil {
+			values = []any{}
+		} else {
+			values = slices.Clone(values)
+		}
 		err := c.logger.LogStmt(stmtlogger.Item{
 			Error:         mo.Right[error, string](errStr),
 			Statement:     query.Statement,
-			Values:        mo.Left[[]any, []byte](slices.Clone(query.Values)),
+			Values:        mo.Left[[]any, []byte](values),
 			Start:         stmtlogger.Time{Time: query.Start},
 			Duration:      stmtlogger.Duration{Duration: duration},
 			Host:          instance,

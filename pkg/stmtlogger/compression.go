@@ -94,5 +94,8 @@ func (c closerWrapper) Close() error {
 		return err
 	}
 
-	return c.closer.Close()
+	if c.closer != nil {
+		return c.closer.Close()
+	}
+	return nil
 }

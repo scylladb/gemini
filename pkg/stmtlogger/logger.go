@@ -15,6 +15,7 @@
 package stmtlogger
 
 import (
+	"encoding/json"
 	"io"
 	"sync/atomic"
 	"time"
@@ -208,4 +209,39 @@ func (i Item) MemoryFootprint() uint64 {
 		utils.Sizeof(i.Host)
 
 	return size
+}
+
+// MarshalJSON customizes JSON marshaling for Item to handle nil values properly
+func (i Item) MarshalJSON() ([]byte, error) {
+	type Alias Item // Prevent recursion
+	
+	// Prepare values field to ensure it's never null
+	var valuesForJSON interface{}
+	if i.Values.IsLeft() {
+		leftValues := i.Values.MustLeft()
+		if leftValues == nil {
+			// Convert nil to empty array to prevent "null" in JSON
+			valuesForJSON = []any{}
+		} else {
+			valuesForJSON = leftValues
+		}
+	} else {
+		// For byte values, use as-is
+		valuesForJSON = i.Values.MustRight()
+	}
+	
+	// Create a map with all fields
+	result := map[string]interface{}{
+		"s":              i.Start,
+		"partitionKeys": i.PartitionKeys,
+		"e":              i.Error,
+		"q":              i.Statement,
+		"h":              i.Host,
+		"v":              valuesForJSON, // Use our prepared values
+		"d":              i.Duration,
+		"d_a":            i.Attempt,
+		"g_a":            i.GeminiAttempt,
+	}
+	
+	return json.Marshal(result)
 }

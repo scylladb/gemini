@@ -429,7 +429,13 @@ func (s *ScyllaLogger) logErrors(ctx context.Context) {
 
 func prepareValues(values mo.Either[[]any, []byte]) string {
 	if values.IsLeft() {
-		data, _ := json.Marshal(values.MustLeft())
+		leftValues := values.MustLeft()
+		// Handle nil values by treating them as empty arrays
+		// This prevents "null" from appearing in the logs
+		if leftValues == nil {
+			leftValues = []any{}
+		}
+		data, _ := json.Marshal(leftValues)
 		return utils.UnsafeString(data)
 	}
 
