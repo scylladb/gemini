@@ -120,9 +120,7 @@ func (e MutationError) Error() string {
 }
 
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
-	query := c.session.Bind(stmt.Query, func(_ *gocql.QueryInfo) ([]any, error) {
-		return stmt.Values, nil
-	}).WithContext(ctx)
+	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
 
 	defer query.Release()
 
@@ -167,9 +165,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 }
 
 func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
-	query := c.session.Bind(stmt.Query, func(_ *gocql.QueryInfo) ([]any, error) {
-		return stmt.Values, nil
-	}).WithContext(ctx)
+	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
 
 	iter := query.Iter()
 
