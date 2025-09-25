@@ -68,17 +68,17 @@ func successStatement(ty Type) Item {
 	start := time.Now().Add(-(5 * time.Second))
 	statement := "INSERT INTO test_table (col1, col2) VALUES (?, ?)"
 	item := Item{
-		Start:         Time{Time: start},
-		Error:         mo.Right[error, string](""),
-		Statement:     statement,
-		Host:          "test_host",
-		Type:          ty,
-		Values:        mo.Left[[]any, []byte]([]any{1, "test"}),
-		Duration:      Duration{Duration: time.Second},
-		Attempt:       1,
-		GeminiAttempt: 1,
-		StatementType: typedef.InsertStatementType,
-		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"col1": {1}, "col2": {"test_1"}}),
+		Start:           Time{Time: start},
+		Error:           mo.Right[error, string](""),
+		Statement:       statement,
+		Host:            "test_host",
+		Type:            ty,
+		GeneratedValues: mo.Left[[]any, []byte]([]any{1, "test"}),
+		Duration:        Duration{Duration: time.Second},
+		Attempt:         1,
+		GeminiAttempt:   1,
+		StatementType:   typedef.InsertStatementType,
+		PartitionKeys:   typedef.NewValuesFromMap(map[string][]any{"col1": {1}, "col2": {"test_1"}}),
 	}
 
 	return item
@@ -91,17 +91,17 @@ func errorStatement(ty Type) (Item, joberror.JobError) {
 	values := []any{2, "test_2"}
 
 	item := Item{
-		Start:         Time{Time: start},
-		Error:         mo.Left[error, string](ers),
-		Statement:     statement,
-		Host:          "test_host",
-		Type:          ty,
-		Values:        mo.Left[[]any, []byte](values),
-		Duration:      Duration{Duration: time.Second},
-		Attempt:       1,
-		GeminiAttempt: 1,
-		StatementType: typedef.InsertStatementType,
-		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"col1": {2}, "col2": {"test_2"}}),
+		Start:           Time{Time: start},
+		Error:           mo.Left[error, string](ers),
+		Statement:       statement,
+		Host:            "test_host",
+		Type:            ty,
+		GeneratedValues: mo.Left[[]any, []byte](values),
+		Duration:        Duration{Duration: time.Second},
+		Attempt:         1,
+		GeminiAttempt:   1,
+		StatementType:   typedef.InsertStatementType,
+		PartitionKeys:   typedef.NewValuesFromMap(map[string][]any{"col1": {2}, "col2": {"test_2"}}),
 	}
 
 	err := joberror.JobError{
@@ -209,8 +209,8 @@ func TestScyllaLogger(t *testing.T) {
 		assert.Equal(i.Duration.Duration.String(), m["dur"])
 		assert.Equal(float64(i.Attempt), m["attempt"])
 
-		if i.Values.IsLeft() {
-			values := i.Values.MustLeft()
+		if i.GeneratedValues.IsLeft() {
+			values := i.GeneratedValues.MustLeft()
 			if values != nil {
 				jsonValuesStr := m["values"].(string)
 				// Unescape the JSON string and parse it
@@ -231,7 +231,7 @@ func TestScyllaLogger(t *testing.T) {
 				assert.Nil(m["values"])
 			}
 		} else {
-			assert.Equal(string(i.Values.MustRight()), m["values"])
+			assert.Equal(string(i.GeneratedValues.MustRight()), m["values"])
 		}
 	}
 
@@ -241,15 +241,15 @@ func TestScyllaLogger(t *testing.T) {
 
 func ddlStatement(ty Type) Item {
 	return Item{
-		Start:         Time{Time: time.Now().Add(-(15 * time.Second))},
-		Error:         mo.Right[error, string](""),
-		Statement:     "CREATE TABLE IF NOT EXISTS test_table (col1 int, col2 text, PRIMARY KEY (col1))",
-		Host:          "test_host",
-		Type:          ty,
-		Values:        mo.Left[[]any, []byte](nil),
-		Duration:      Duration{Duration: time.Second},
-		Attempt:       1,
-		GeminiAttempt: 1,
-		StatementType: typedef.CreateSchemaStatementType,
+		Start:           Time{Time: time.Now().Add(-(15 * time.Second))},
+		Error:           mo.Right[error, string](""),
+		Statement:       "CREATE TABLE IF NOT EXISTS test_table (col1 int, col2 text, PRIMARY KEY (col1))",
+		Host:            "test_host",
+		Type:            ty,
+		GeneratedValues: mo.Left[[]any, []byte](nil),
+		Duration:        Duration{Duration: time.Second},
+		Attempt:         1,
+		GeminiAttempt:   1,
+		StatementType:   typedef.CreateSchemaStatementType,
 	}
 }

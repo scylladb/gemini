@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -98,7 +97,7 @@ func (g *Generator) InsertJSON(ctx context.Context) (*typedef.Stmt, error) {
 			}
 			values[pk.Name] = tupVals
 		default:
-			panic(fmt.Sprintf("unknown type: %s", t.Name()))
+			panic("unknown type: " + t.Name())
 		}
 	}
 

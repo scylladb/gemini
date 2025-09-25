@@ -44,17 +44,18 @@ type (
 	Type string
 
 	Item struct {
-		Start         Time                     `json:"s"`
-		PartitionKeys *typedef.Values          `json:"partitionKeys"`
-		Error         mo.Either[error, string] `json:"e,omitempty"`
-		Statement     string                   `json:"q"`
-		Host          string                   `json:"h"`
-		Type          Type                     `json:"-"`
-		Values        mo.Either[[]any, []byte] `json:"v"`
-		Duration      Duration                 `json:"d"`
-		Attempt       int                      `json:"d_a"`
-		GeminiAttempt int                      `json:"g_a"`
-		StatementType typedef.StatementType    `json:"-"`
+		Start           Time                     `json:"s"`
+		PartitionKeys   *typedef.Values          `json:"partitionKeys"`
+		Error           mo.Either[error, string] `json:"e,omitempty"`
+		Statement       string                   `json:"q"`
+		Host            string                   `json:"h"`
+		Type            Type                     `json:"-"`
+		GeneratedValues mo.Either[[]any, []byte] `json:"v"`
+		DriverValues    []any                    `json:"d_v"`
+		Duration        Duration                 `json:"d"`
+		Attempt         int                      `json:"d_a"`
+		GeminiAttempt   int                      `json:"g_a"`
+		StatementType   typedef.StatementType    `json:"-"`
 	}
 
 	Duration struct {

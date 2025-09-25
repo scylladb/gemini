@@ -25,7 +25,6 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/gocql/gocql/hostpolicy"
 	"github.com/hailocab/go-hostpool"
-	pkgerrors "github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/mo"
 	"go.uber.org/multierr"
@@ -34,7 +33,6 @@ import (
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type cqlStore struct {
@@ -90,7 +88,7 @@ func newCQLStore(
 ) (*cqlStore, error) {
 	testSession, err := createCluster(cfg, logger, statementLogger, true)
 	if err != nil {
-		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
+		return nil, errors.New("failed to create test cluster: " + err.Error())
 	}
 
 	return newCQLStoreWithSession(
@@ -114,13 +112,16 @@ type MutationError struct {
 }
 
 func (e MutationError) Error() string {
-	data, _ := json.Marshal(e.PartitionKeys)
+	data, _ := json.Marshal(map[string]any{
+		"partition_keys": e.PartitionKeys,
+		"error":          e.Inner,
+	})
 
-	return "mutation error: " + e.Inner.Error() + ", partition keys: " + utils.UnsafeString(data)
+	return string(data)
 }
 
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
-	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
+	query := c.session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 
 	defer query.Release()
 
@@ -165,7 +166,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 }
 
 func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
-	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
+	query := c.session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 
 	iter := query.Iter()
 
@@ -237,7 +238,6 @@ func createCluster(
 
 		cluster.ConnectObserver = o
 		cluster.QueryObserver = o
-		cluster.BatchObserver = o
 	}
 
 	cluster.Timeout = config.RequestTimeout

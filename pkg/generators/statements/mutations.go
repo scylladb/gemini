@@ -54,6 +54,10 @@ func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) (*
 		//       Falling back to Insert for now, until everything else is stable
 
 		if g.ratioController.GetInsertSubtype() == InsertJSONStatement {
+			if g.table.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
+				return g.Insert(ctx)
+			}
+
 			return g.InsertJSON(ctx)
 		}
 

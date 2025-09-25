@@ -101,13 +101,13 @@ func TestOutputToFile(t *testing.T) {
 			}
 
 			data := Item{
-				Statement: "INSERT INTO ks1.table1(pk1) VALUES(?)",
-				Values:    mo.Left[[]any, []byte]([]any{1}),
-				Error:     mo.Left[error, string](nil),
-				Duration:  Duration{Duration: 10 * time.Second},
-				Host:      "test_host",
-				Start:     Time{Time: time.Now()},
-				Type:      TypeTest,
+				Statement:       "INSERT INTO ks1.table1(pk1) VALUES(?)",
+				GeneratedValues: mo.Left[[]any, []byte]([]any{1}),
+				Error:           mo.Left[error, string](nil),
+				Duration:        Duration{Duration: 10 * time.Second},
+				Host:            "test_host",
+				Start:           Time{Time: time.Now()},
+				Type:            TypeTest,
 			}
 
 			if err = logger.LogStmt(data); err != nil {
@@ -145,13 +145,13 @@ func BenchmarkLogger(b *testing.B) {
 			rows := &atomic.Int64{}
 
 			data := Item{
-				Statement: "INSERT INTO ks1.table1(pk1) VALUES(?)",
-				Values:    mo.Left[[]any, []byte]([]any{1}),
-				Error:     mo.Left[error, string](nil),
-				Duration:  Duration{Duration: 10 * time.Second},
-				Host:      "test_host",
-				Start:     Time{Time: time.Now()},
-				Type:      TypeTest,
+				Statement:       "INSERT INTO ks1.table1(pk1) VALUES(?)",
+				GeneratedValues: mo.Left[[]any, []byte]([]any{1}),
+				Error:           mo.Left[error, string](nil),
+				Duration:        Duration{Duration: 10 * time.Second},
+				Host:            "test_host",
+				Start:           Time{Time: time.Now()},
+				Type:            TypeTest,
 			}
 
 			b.SetParallelism(100)

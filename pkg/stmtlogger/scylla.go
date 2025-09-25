@@ -43,16 +43,14 @@ import (
 )
 
 const (
-	additionalColumns       = "ddl,ts,ty,statement,values,host,attempt,gemini_attempt,error,dur"
-	selectAdditionalColumns = "ddl,ts,statement,values,host,attempt,gemini_attempt,error,dur"
+	additionalColumns       = "ddl,ts,ty,statement,values,driver_values,host,attempt,gemini_attempt,error,dur"
+	selectAdditionalColumns = "ddl,ts,statement,values,driver_values,host,attempt,gemini_attempt,error,dur"
 )
 
 var (
 	additionalColumnsArr       = strings.Split(additionalColumns, ",")
 	selectAdditionalColumnsArr = strings.Split(selectAdditionalColumns, ",")
 )
-
-var ErrEmptyStatementFileName = errors.New("statement file name cannot be empty")
 
 func GetScyllaStatementLogsKeyspace(originalKeyspace string) string {
 	return fmt.Sprintf("%s_logs", originalKeyspace)
@@ -261,7 +259,8 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 			item.Start.Time,
 			string(item.Type),
 			item.Statement,
-			prepareValues(item.Values),
+			prepareValues(item.GeneratedValues),
+			prepareValues(mo.Left[[]any, []byte](item.DriverValues)),
 			item.Host,
 			item.Attempt,
 			item.GeminiAttempt,
@@ -464,7 +463,7 @@ func buildCreateTableQuery(
 		builder.WriteRune(',')
 	}
 
-	builder.WriteString("ddl boolean, ts timestamp, ty text, statement text, values text, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, ")
+	builder.WriteString("ddl boolean, ts timestamp, ty text, statement text, values text, driver_values text, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, ")
 	builder.WriteString("PRIMARY KEY ((")
 	builder.WriteString(partitions)
 	builder.WriteString(", ty), ddl, ts, attempt, gemini_attempt)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'}")

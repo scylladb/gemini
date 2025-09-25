@@ -16,11 +16,11 @@ package store
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/mo"
 	"go.uber.org/zap"
@@ -73,15 +73,13 @@ func (o *observer[T]) Get(host string, ty typedef.StatementType) T {
 }
 
 type ClusterObserver struct {
-	logger            *stmtlogger.Logger
-	appLogger         *zap.Logger
-	goCQLBatchQueries *observer[prometheus.Counter]
-	goCQLBatches      *observer[prometheus.Counter]
-	goCQLQueryErrors  *observer[prometheus.Counter]
-	goCQLQueries      *observer[prometheus.Counter]
-	goCQLQueryTime    *observer[prometheus.Observer]
-	goCQLConnections  *observer[prometheus.Gauge]
-	clusterName       stmtlogger.Type
+	logger           *stmtlogger.Logger
+	appLogger        *zap.Logger
+	goCQLQueryErrors *observer[prometheus.Counter]
+	goCQLQueries     *observer[prometheus.Counter]
+	goCQLQueryTime   *observer[prometheus.Observer]
+	goCQLConnections *observer[prometheus.Gauge]
+	clusterName      stmtlogger.Type
 }
 
 func NewClusterObserver(
@@ -93,15 +91,6 @@ func NewClusterObserver(
 		logger:      logger,
 		appLogger:   appLogger,
 		clusterName: clusterName,
-		goCQLBatchQueries: newObserver[prometheus.Counter](
-			func(host string, ty typedef.StatementType) prometheus.Counter {
-				return metrics.GoCQLBatchQueries.WithLabelValues(string(clusterName), host, ty.String())
-			},
-		),
-		goCQLBatches: newObserver[prometheus.Counter](
-			func(host string, _ typedef.StatementType) prometheus.Counter {
-				return metrics.GoCQLBatches.WithLabelValues(string(clusterName), host)
-			}),
 		goCQLQueryErrors: newObserver[prometheus.Counter](
 			func(host string, _ typedef.StatementType) prometheus.Counter {
 				return metrics.GoCQLQueryErrors.WithLabelValues(string(clusterName), host)
@@ -124,57 +113,11 @@ func NewClusterObserver(
 	return c
 }
 
-func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedBatch) {
-	instance := batch.Host.ConnectAddressAndPort()
-	data := MustGetContextData(ctx)
-	var errStr string
-
-	if batch.Err != nil {
-		errStr = batch.Err.Error()
-		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, batch.Err.Error()).Inc()
-
-		switch {
-		case errors.Is(batch.Err, gocql.ErrConnectionClosed) || errors.Is(batch.Err, gocql.ErrHostDown):
-			c.goCQLConnections.Get(instance, 0).Dec()
-		case errors.Is(batch.Err, gocql.ErrNoConnections):
-			c.goCQLConnections.Get(instance, 0).Set(0)
-		default:
-		}
-	}
-
-	for i, query := range batch.Statements {
-		if c.logger != nil && !data.Statement.QueryType.IsSelect() {
-			err := c.logger.LogStmt(stmtlogger.Item{
-				Error:         mo.Right[error, string](errStr),
-				Statement:     query,
-				Values:        mo.Left[[]any, []byte](slices.Clone(batch.Values[i])),
-				Start:         stmtlogger.Time{Time: batch.Start},
-				Duration:      stmtlogger.Duration{Duration: batch.End.Sub(batch.Start)},
-				Host:          instance,
-				Attempt:       batch.Attempt,
-				GeminiAttempt: data.GeminiAttempt,
-				Type:          c.clusterName,
-				StatementType: data.Statement.QueryType,
-				PartitionKeys: data.Statement.PartitionKeys.Values,
-			})
-			if err != nil {
-				c.appLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("batch", batch))
-			}
-		}
-
-		c.goCQLBatchQueries.Get(instance, data.Statement.QueryType).Inc()
-	}
-
-	c.goCQLBatchQueries.Get(instance, data.Statement.QueryType).Inc()
-}
-
 func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQuery) {
 	instance := query.Host.ConnectAddressAndPort()
 	data := MustGetContextData(ctx)
-	var errStr string
 	if query.Err != nil {
 		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, query.Err.Error()).Inc()
-		errStr = query.Err.Error()
 
 		switch {
 		case errors.Is(query.Err, gocql.ErrConnectionClosed) || errors.Is(query.Err, gocql.ErrHostDown):
@@ -189,17 +132,18 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 
 	if c.logger != nil && !data.Statement.QueryType.IsSelect() {
 		err := c.logger.LogStmt(stmtlogger.Item{
-			Error:         mo.Right[error, string](errStr),
-			Statement:     query.Statement,
-			Values:        mo.Left[[]any, []byte](slices.Clone(query.Values)),
-			Start:         stmtlogger.Time{Time: query.Start},
-			Duration:      stmtlogger.Duration{Duration: duration},
-			Host:          instance,
-			Attempt:       query.Metrics.Attempts,
-			GeminiAttempt: data.GeminiAttempt,
-			Type:          c.clusterName,
-			StatementType: data.Statement.QueryType,
-			PartitionKeys: data.Statement.PartitionKeys.Values,
+			Error:           mo.Left[error, string](query.Err),
+			Statement:       query.Statement,
+			GeneratedValues: mo.Left[[]any, []byte](data.Statement.Values),
+			DriverValues:    slices.Clone(query.Values),
+			Start:           stmtlogger.Time{Time: query.Start},
+			Duration:        stmtlogger.Duration{Duration: duration},
+			Host:            instance,
+			Attempt:         query.Metrics.Attempts,
+			GeminiAttempt:   data.GeminiAttempt,
+			Type:            c.clusterName,
+			StatementType:   data.Statement.QueryType,
+			PartitionKeys:   data.Statement.PartitionKeys.Values,
 		})
 		if err != nil {
 			c.appLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("query", query))

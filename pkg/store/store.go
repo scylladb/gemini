@@ -16,6 +16,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"io"
 	"math/big"
 	"reflect"
@@ -24,7 +25,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	pkgerrors "github.com/pkg/errors"
 	"github.com/samber/mo"
 	"github.com/scylladb/go-set/strset"
 	"go.uber.org/multierr"
@@ -122,7 +122,7 @@ func New(
 				logger.Named("stmt_logger"),
 			))
 		if err != nil {
-			return nil, pkgerrors.Wrap(err, "failed to create statement logger")
+			return nil, errors.New("failed to create statement logger: " + err.Error())
 		}
 	}
 
@@ -145,7 +145,7 @@ func New(
 		cfg.UseServerSideTimestamps,
 	)
 	if err != nil {
-		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
+		return nil, errors.New("failed to create test cluster: " + err.Error())
 	}
 
 	var oracleStore storeLoader
@@ -162,7 +162,7 @@ func New(
 			cfg.UseServerSideTimestamps,
 		)
 		if err != nil {
-			return nil, pkgerrors.Wrap(err, "failed to create test cluster")
+			return nil, errors.New("failed to create oracle cluster: " + err.Error())
 		}
 	}
 
@@ -189,20 +189,12 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef
 		Statement:     stmt,
 	})
 	if err := ds.testStore.mutate(ctx, testBuilder, mo.None[time.Time]()); err != nil {
-		return pkgerrors.Wrapf(
-			err,
-			"unable to apply mutations to the %s store",
-			ds.testStore.name(),
-		)
+		return errors.New("unable to apply mutations to the test store: " + err.Error())
 	}
 
 	if ds.oracleStore != nil {
 		if err := ds.oracleStore.mutate(ctx, stmt, mo.None[time.Time]()); err != nil {
-			return pkgerrors.Wrapf(
-				err,
-				"unable to apply mutations to the %s store",
-				ds.testStore.name(),
-			)
+			return errors.New("unable to apply mutations to the oracle store: " + err.Error())
 		}
 	}
 
@@ -277,7 +269,7 @@ func (ds delegatingStore) Check(
 	ds.workers.Release(testCh)
 
 	if testResult.IsError() {
-		return 0, pkgerrors.Wrap(testResult.Error(), "unable to load check data from the test store")
+		return 0, errors.New("unable to load check data from the test store: " + testResult.Error().Error())
 	}
 
 	if oracleCh == nil {
@@ -288,7 +280,7 @@ func (ds delegatingStore) Check(
 	ds.workers.Release(oracleCh)
 
 	if oracleResult.IsError() {
-		return 0, pkgerrors.Wrap(oracleResult.Error(), "unable to load check data from the oracle store")
+		return 0, errors.New("unable to load check data from the oracle store: " + oracleResult.Error().Error())
 	}
 
 	oracleRows := oracleResult.MustGet().(Rows)

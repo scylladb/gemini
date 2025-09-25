@@ -108,19 +108,6 @@ var (
 		[]string{"cluster", "host", "error"},
 	)
 
-	GoCQLBatchQueries = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "cql_batched_queries",
-		},
-		[]string{"cluster", "host", "query_type"},
-	)
-
-	GoCQLBatches = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "cql_batches",
-		},
-		[]string{"cluster", "host"},
-	)
 	GeneratorEmittedValues = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "generated_emitted_values",
@@ -182,8 +169,6 @@ func init() {
 		GoCQLQueries,
 		GoCQLQueryTime,
 		GoCQLQueryErrors,
-		GoCQLBatchQueries,
-		GoCQLBatches,
 		GeneratorEmittedValues,
 		GeneratorDroppedValues,
 		MemoryMetrics,
