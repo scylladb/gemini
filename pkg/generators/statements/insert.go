@@ -114,6 +114,7 @@ func (g *Generator) InsertJSON(ctx context.Context) (*typedef.Stmt, error) {
 	return &typedef.Stmt{
 		PartitionKeys: pks,
 		Query:         query,
+		QueryType:     typedef.InsertJSONStatementType,
 		Values:        []any{utils.UnsafeString(jsonString)},
 	}, nil
 }

@@ -33,6 +33,7 @@ type JobError struct {
 	PartitionKeys *typedef.Values       `json:"partition-keys"`
 	Message       string                `json:"message"`
 	Query         string                `json:"query"`
+	Values        []any                 `json:"values,omitempty"`
 	StmtType      typedef.StatementType `json:"stmt-type"`
 }
 
