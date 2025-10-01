@@ -261,13 +261,12 @@ func TestWorkload(t *testing.T) {
 
 func TestWorkloadWithoutOracle(t *testing.T) {
 	t.Parallel()
-	logger := getLogger(t)
 	scyllaContainer := testutils.SingleScylla(t)
 
 	for _, test := range dataset {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-
+			logger := getLogger(t)
 			assert := require.New(t)
 			storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts)
 			schema := getSchema(t)

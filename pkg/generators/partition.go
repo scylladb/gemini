@@ -32,6 +32,8 @@ type (
 		oldValues atomic.Pointer[chan typedef.PartitionKeys]
 		wakeup    chan<- struct{}
 		isStale   atomic.Bool
+		closed    atomic.Bool
+		mu        sync.RWMutex
 	}
 )
 
@@ -97,13 +99,26 @@ func (p *Partition) giveOld(ctx context.Context, v typedef.PartitionKeys) bool {
 }
 
 func (p *Partition) push(v typedef.PartitionKeys) bool {
+	// Check if already closed before attempting to access channel
+	if p.closed.Load() {
+		return false
+	}
+
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	// Double-check after acquiring lock
+	if p.closed.Load() {
+		return false
+	}
+
 	ch := p.values.Load()
 	if ch == nil {
 		return false
 	}
 
 	select {
-	case *ch <- v:
+	case (*ch) <- v:
 		return true
 	default:
 		return false
@@ -118,14 +133,14 @@ func (p *Partition) wakeUp() {
 }
 
 func (p *Partition) pick(ctx context.Context) (typedef.PartitionKeys, error) {
-	ch := p.values.Load()
+	ch := *p.values.Load()
 	if ch == nil {
 		return typedef.PartitionKeys{}, os.ErrClosed
 	}
 
 	select {
-	case v := <-*ch:
-		if len(*ch) <= cap(*ch)/4 {
+	case v := <-ch:
+		if len(ch) <= cap(ch)/4 {
 			p.wakeUp() // channel at 25% capacity, trigger generator
 		}
 		return v, nil
@@ -133,11 +148,20 @@ func (p *Partition) pick(ctx context.Context) (typedef.PartitionKeys, error) {
 		return typedef.PartitionKeys{}, context.Canceled
 	default:
 		p.wakeUp()
-		return <-*ch, nil
+		return <-ch, nil
 	}
 }
 
 func (p *Partition) Close() error {
+	// Use atomic compare-and-swap to ensure Close is only called once
+	if p.closed.Swap(true) {
+		return nil // Already closed
+	}
+
+	// Acquire write lock to ensure no push operations are in progress
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	ch := p.values.Swap(nil)
 	if ch != nil {
 		close(*ch)

@@ -8,7 +8,7 @@ a system under test (SUT) and a test oracle.
 ## Project Structure
 
 ## Language & Framework
-- **Language**: Go 1.24
+- **Language**: Go 1.25
 - **Architecture**: CLI application with modular package structure
 - **Database**: Scylla/Cassandra using CQL protocol
 - **Testing**: Randomized testing with statistical distributions
