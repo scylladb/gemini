@@ -211,19 +211,16 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef
 
 func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error {
 	var oracleCh chan mo.Result[any]
+	doCtx := WithContextData(ctx, &ContextData{
+		Statement: stmt,
+	})
 
 	if ds.oracleStore != nil {
-		doCtx := WithContextData(ctx, &ContextData{
-			Statement: stmt,
-		})
 		oracleCh = ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
 			return nil, ds.oracleStore.mutate(ctx, stmt, mo.None[time.Time]())
 		})
 	}
 
-	doCtx := WithContextData(ctx, &ContextData{
-		Statement: stmt,
-	})
 	testCh := ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
 		return nil, ds.testStore.mutate(ctx, stmt, mo.None[time.Time]())
 	})

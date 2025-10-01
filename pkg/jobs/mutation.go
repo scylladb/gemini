@@ -106,6 +106,7 @@ func (m *Mutation) run(ctx context.Context) error {
 		Message:       "Mutation failed: " + err.Error(),
 		Query:         mutateStmt.Query,
 		PartitionKeys: mutateStmt.PartitionKeys.Values,
+		Values:        mutateStmt.Values,
 	}
 }
 
