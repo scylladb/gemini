@@ -86,7 +86,7 @@ func (m *IndexDef) UnmarshalJSON(data []byte) error {
 
 func (m *MaterializedView) UnmarshalJSON(data []byte) error {
 	d := struct {
-		NonPrimaryKey  *ColumnDef `json:"non_primary_key"`
+		NonPrimaryKey  *ColumnDef `json:"NonPrimaryKey"`
 		Name           string     `json:"name"`
 		PartitionKeys  Columns    `json:"partition_keys"`
 		ClusteringKeys Columns    `json:"clustering_keys"`
@@ -119,10 +119,10 @@ func (m *MaterializedView) MarshalJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(struct {
-		NonPrimaryKey  *ColumnDef
-		Name           string  `json:"name"`
-		PartitionKeys  Columns `json:"partition_keys"`
-		ClusteringKeys Columns `json:"clustering_keys"`
+		NonPrimaryKey  *ColumnDef `json:"NonPrimaryKey"`
+		Name           string     `json:"name"`
+		PartitionKeys  Columns    `json:"partition_keys"`
+		ClusteringKeys Columns    `json:"clustering_keys"`
 	}{
 		NonPrimaryKey:  nonPrimaryKey,
 		Name:           m.Name,

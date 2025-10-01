@@ -18,7 +18,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -38,7 +37,6 @@ import (
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gemini/pkg/workpool"
 )
 
@@ -427,13 +425,22 @@ func (s *ScyllaLogger) logErrors(ctx context.Context) {
 	}
 }
 
-func prepareValues(values mo.Either[[]any, []byte]) string {
-	if values.IsLeft() {
-		data, _ := json.Marshal(values.MustLeft())
-		return utils.UnsafeString(data)
+func prepareValues(values mo.Either[[]any, []byte]) []string {
+	if values.IsRight() {
+		return []string{string(values.MustRight())}
 	}
 
-	return utils.UnsafeString(values.MustRight())
+	valSlice := values.MustLeft()
+	if valSlice == nil {
+		return nil
+	}
+
+	strValues := make([]string, len(valSlice))
+	for i, val := range valSlice {
+		strValues[i] = fmt.Sprintf("%#v", val)
+	}
+
+	return strValues
 }
 
 func buildCreateTableQuery(
@@ -464,7 +471,9 @@ func buildCreateTableQuery(
 		builder.WriteRune(',')
 	}
 
-	builder.WriteString("ddl boolean, ts timestamp, ty text, statement text, values text, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, ")
+	builder.WriteString(
+		"ddl boolean, ts timestamp, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, ",
+	)
 	builder.WriteString("PRIMARY KEY ((")
 	builder.WriteString(partitions)
 	builder.WriteString(", ty), ddl, ts, attempt, gemini_attempt)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'}")
