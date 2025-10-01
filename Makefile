@@ -195,7 +195,7 @@ integration-test:
 	@mkdir -p $(PWD)/results
 	@touch $(PWD)/results/gemini_seed
 	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
-	GODEBUG="default=go1.24,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0" GOGC="95" $(GEMINI_BINARY) \
+	GODEBUG="default=go1.25,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0" GOGC="95" $(GEMINI_BINARY) \
 		--test-cluster="$(call get_scylla_ip,gemini-test)" \
 		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
 		--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
@@ -206,7 +206,7 @@ integration-cluster-test:
 	@mkdir -p $(PWD)/results
 	@touch $(PWD)/results/gemini_seed
 	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
-	GODEBUG="default=go1.24,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0" GOGC="95" \
+	GODEBUG="default=go1.25,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0" GOGC="95" \
 	$(GEMINI_BINARY) \
 		--test-cluster="$(call get_scylla_ip,gemini-test-1),$(call get_scylla_ip,gemini-test-2),$(call get_scylla_ip,gemini-test-3)" \
 		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \

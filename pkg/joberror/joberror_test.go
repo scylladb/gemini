@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -62,7 +61,7 @@ func TestJobError_ErrorWithEmptyFields(t *testing.T) {
 	}
 
 	actual := jobErr.Error()
-	assert.NotEmpty(t, actual)
+	require.NotEmpty(t, actual)
 }
 
 func TestNewErrorList(t *testing.T) {

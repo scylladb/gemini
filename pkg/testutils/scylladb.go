@@ -49,6 +49,7 @@ type (
 )
 
 var (
+	randomMutex         = &sync.Mutex{}
 	random              = rand.New(rand.NewPCG(uint64(time.Now().Second()), uint64(time.Now().Nanosecond())))
 	spawningScyllaMutex = &sync.Mutex{}
 	usedIPs             = &ipUsed{data: make(map[byte]bool, 256)}
@@ -62,7 +63,10 @@ func createScyllaNetwork(tb testing.TB) *testcontainers.DockerNetwork {
 	defer usedIPs.Unlock()
 
 	for {
+		randomMutex.Lock()
 		ipPart = byte(random.IntN(255))
+		randomMutex.Unlock()
+
 		if _, ok := usedIPs.data[ipPart]; !ok {
 			usedIPs.data[ipPart] = true
 			break
@@ -89,9 +93,9 @@ func createScyllaNetwork(tb testing.TB) *testcontainers.DockerNetwork {
 
 	tb.Cleanup(func() {
 		usedIPs.Lock()
+		defer usedIPs.Unlock()
 		_ = sharedNetwork.Remove(tb.Context())
 		delete(usedIPs.data, ipPart)
-		usedIPs.Unlock()
 	})
 
 	return sharedNetwork
@@ -132,10 +136,6 @@ func spawnScylla(tb testing.TB, version string, sharedNetwork *testcontainers.Do
 	testCluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy())
 	testCluster.Consistency = gocql.Quorum
 	testCluster.DefaultTimestamp = false
-	if err = testCluster.Validate(); err != nil {
-		tb.Fatalf("failed to validate test ScyllaDB cluster: %v", err)
-	}
-
 	if err = testCluster.Validate(); err != nil {
 		tb.Fatalf("failed to validate test ScyllaDB cluster: %v", err)
 	}

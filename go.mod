@@ -1,6 +1,6 @@
 module github.com/scylladb/gemini
 
-go 1.24.0
+go 1.25.0
 
 replace github.com/gocql/gocql => github.com/scylladb/gocql v1.15.3
 
