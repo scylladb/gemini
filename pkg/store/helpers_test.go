@@ -394,19 +394,19 @@ func TestFormatRows(t *testing.T) {
 			name:     "complex struct",
 			key:      "struct",
 			value:    struct{ Name string }{Name: "test"},
-			expected: "struct={test}",
+			expected: "struct=struct { Name string }{Name:\"test\"}",
 		},
 		{
 			name:     "slice of ints",
 			key:      "slice",
 			value:    []int{1, 2, 3},
-			expected: "slice=[1 2 3]",
+			expected: "slice=[]int{1, 2, 3}",
 		},
 		{
 			name:     "map value",
 			key:      "map",
 			value:    map[string]int{"a": 1, "b": 2},
-			expected: "map=map[a:1 b:2]",
+			expected: "map=map[string]int{\"a\":1, \"b\":2}",
 		},
 	}
 

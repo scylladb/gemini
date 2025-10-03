@@ -16,6 +16,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -26,21 +27,12 @@ const ContextDataKey QueryContextKey = "QueryContextData"
 
 type ContextData struct {
 	Statement     *typedef.Stmt
+	Timestamp     time.Time
 	GeminiAttempt int
 }
 
 func WithContextData(ctx context.Context, data *ContextData) context.Context {
 	return context.WithValue(ctx, ContextDataKey, data)
-}
-
-func GetContextData(ctx context.Context) (*ContextData, bool) {
-	data, ok := ctx.Value(ContextDataKey).(*ContextData)
-
-	if !ok {
-		return nil, false
-	}
-
-	return data, true
 }
 
 func MustGetContextData(ctx context.Context) *ContextData {

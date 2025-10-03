@@ -71,10 +71,12 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 	}
 
 	store := &delegatingStore{
-		workers:     workpool.New(2),
-		oracleStore: newCQLStoreWithSession(scyllaContainer.Oracle, schema, zap.NewNop(), "oracle", 1, 10*time.Millisecond, false),
-		testStore:   newCQLStoreWithSession(scyllaContainer.Test, schema, zap.NewNop(), "test", 5, 1*time.Millisecond, false),
-		logger:      zap.NewNop(),
+		workers:            workpool.New(2),
+		oracleStore:        newCQLStoreWithSession(scyllaContainer.Oracle, schema, zap.NewNop(), "oracle"),
+		testStore:          newCQLStoreWithSession(scyllaContainer.Test, schema, zap.NewNop(), "test"),
+		logger:             zap.NewNop(),
+		mutationRetrySleep: 100 * time.Millisecond,
+		mutationRetries:    10,
 	}
 
 	uuid := gocql.TimeUUID()

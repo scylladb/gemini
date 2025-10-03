@@ -160,26 +160,37 @@ func (w *Workload) GetGlobalStatus() *status.GlobalStatus {
 func (w *Workload) createSchemaAndTables(base context.Context) error {
 	if w.config.DropSchema && w.config.RunningMode != jobs.ReadMode {
 		for _, stmt := range statements.GetDropKeyspace(w.schema) {
+			dropCtx, dropCancel := context.WithTimeout(base, 30*time.Second)
 			w.logger.Debug(stmt)
-			if err := w.store.Mutate(base, typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
+			if err := w.store.Mutate(dropCtx, typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
+				dropCancel()
 				return errors.Wrap(err, "unable to drop schema")
 			}
+			dropCancel()
 		}
 	}
 
+	ctx, cancel := context.WithTimeout(base, 30*time.Second)
+	defer cancel()
+
 	testKeyspace, oracleKeyspace := statements.GetCreateKeyspaces(w.schema)
 	if err := w.store.Create(
-		base,
+		ctx,
 		typedef.SimpleStmt(testKeyspace, typedef.CreateKeyspaceStatementType),
 		typedef.SimpleStmt(oracleKeyspace, typedef.CreateKeyspaceStatementType)); err != nil {
 		return errors.Wrap(err, "unable to create keyspace")
 	}
 
 	for _, stmt := range statements.GetCreateSchema(w.schema) {
+		createSchemaCtx, createSchemaCancel := context.WithTimeout(base, 30*time.Second)
+
 		w.logger.Debug(stmt)
-		if err := w.store.Mutate(base, typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
+		if err := w.store.Mutate(createSchemaCtx, typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
+			createSchemaCancel()
 			return errors.Wrap(err, "unable to create schema")
 		}
+
+		createSchemaCancel()
 	}
 
 	return nil
