@@ -71,27 +71,71 @@ func PreallocateRandomString(rnd Random, ln int) {
 }
 
 func RandString(rnd Random, ln int, even bool) string {
+	// Ensure randomString is initialized before accessing
+	if len(randomString) == 0 {
+		return ""
+	}
+
 	val := len(randomString) - ln - 1
 	if val < 1 {
 		val = int(math.Abs(float64(val)))
 	}
+
+	// Ensure we don't exceed bounds
+	if val <= 0 {
+		val = 1
+	}
+
 	start := rnd.IntN(val)
 	end := start + ln
 
+	// Ensure end doesn't exceed randomString length
+	if end > len(randomString) {
+		end = len(randomString)
+		start = end - ln
+		if start < 0 {
+			start = 0
+		}
+	}
+
 	if even && start&1 == 1 {
 		end-- // Ensure the string is an even length
+		// Re-check bounds after adjustment
+		if end <= start {
+			end = start + 1
+		}
 	}
 
 	return randomString[start:end]
 }
 
 func RandomBytes(rnd Random, ln int) []byte {
+	// Ensure randomBytes is initialized before accessing
+	if len(randomBytes) == 0 {
+		return []byte{}
+	}
+
 	val := len(randomBytes) - ln - 1
 	if val < 1 {
 		val = int(math.Abs(float64(val)))
 	}
+
+	// Ensure we don't exceed bounds
+	if val <= 0 {
+		val = 1
+	}
+
 	start := rnd.IntN(val)
 	end := start + ln
+
+	// Ensure end doesn't exceed randomBytes length
+	if end > len(randomBytes) {
+		end = len(randomBytes)
+		start = end - ln
+		if start < 0 {
+			start = 0
+		}
+	}
 
 	return randomBytes[start:end]
 }

@@ -52,6 +52,8 @@ func newCQLStoreWithSession(
 	logger *zap.Logger,
 	system string,
 ) *cqlStore {
+	logger.Info("creating cql store with session", zap.String("system", system))
+
 	store := &cqlStore{
 		session: session,
 		schema:  schema,
@@ -65,6 +67,7 @@ func newCQLStoreWithSession(
 		store.cqlTimeoutsRequestsMetric[i] = metrics.CQLRequests.WithLabelValues(system, i.String())
 	}
 
+	logger.Info("cql store created", zap.String("system", system))
 	return store
 }
 
@@ -75,11 +78,18 @@ func newCQLStore(
 	logger *zap.Logger,
 	system string,
 ) (*cqlStore, error) {
+	logger.Info("creating cql store",
+		zap.String("system", system),
+		zap.Strings("hosts", cfg.Hosts),
+		zap.String("consistency", cfg.Consistency),
+	)
+
 	testSession, err := createCluster(cfg, logger, statementLogger, true)
 	if err != nil {
 		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
 	}
 
+	logger.Info("cluster session created", zap.String("system", system))
 	return newCQLStoreWithSession(
 		testSession,
 		schema,
@@ -123,13 +133,24 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 	}
 
 	if errors.Is(mutateErr, context.Canceled) {
+		c.logger.Warn("mutation cancelled", zap.String("system", c.system))
 		return context.Canceled
 	}
 
 	if errors.Is(mutateErr, context.DeadlineExceeded) {
+		c.logger.Warn("mutation timed out",
+			zap.String("system", c.system),
+			zap.String("query_type", stmt.QueryType.String()),
+		)
 		c.cqlTimeoutsRequestsMetric[stmt.QueryType].Inc()
 		return nil
 	}
+
+	c.logger.Error("mutation failed",
+		zap.String("system", c.system),
+		zap.String("query_type", stmt.QueryType.String()),
+		zap.Error(mutateErr),
+	)
 
 	acc = multierr.Append(acc, MutationError{
 		Inner:         mutateErr,
@@ -154,17 +175,32 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	for range iter.NumRows() {
 		row := make(Row, len(iter.Columns()))
 		if !iter.MapScan(row) {
-			return nil, iter.Close()
+			err := iter.Close()
+			c.logger.Error("failed to scan row",
+				zap.String("system", c.system),
+				zap.Error(err),
+			)
+			return nil, err
 		}
 
 		rows = append(rows, row)
 	}
 
-	return rows, iter.Close()
+	err := iter.Close()
+	if err != nil {
+		c.logger.Error("error closing iterator",
+			zap.String("system", c.system),
+			zap.Error(err),
+		)
+	}
+
+	return rows, err
 }
 
 func (c *cqlStore) Close() error {
+	c.logger.Debug("closing cql store", zap.String("system", c.system))
 	c.session.Close()
+	c.logger.Debug("cql store closed", zap.String("system", c.system))
 	return nil
 }
 

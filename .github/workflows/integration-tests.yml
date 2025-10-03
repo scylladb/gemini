@@ -35,7 +35,7 @@ jobs:
     needs: [build]
     runs-on: ubuntu-24.04
     strategy:
-      max-parallel: 1
+      max-parallel: 2
       matrix:
         gemini-features: ["basic", "normal"]
         gemini-concurrency: [1, 4]
@@ -59,7 +59,7 @@ jobs:
           sudo sysctl -w fs.file-max=30000000
 
           chmod +x ./bin/gemini
-          make scylla-setup \
+          sudo make scylla-setup \
             SCYLLA_TEST_VERSION=${{ matrix.test-scylla-version }} \
             SCYLLA_ORACLE_VERSION=${{ matrix.oracle-scylla-version }}
       - name: Test
@@ -68,7 +68,7 @@ jobs:
           SEED=$(python3 -c "import random; print(random.randint(1, 100))")
 
           make integration-test \
-          	GEMINI_IO_WORKER_POOL=128 \
+          	GEMINI_IO_WORKER_POOL=64 \
             GEMINI_SEED=$SEED \
             CONCURRENCY=${{ matrix.gemini-concurrency }} \
             CQL_FEATURES=${{ matrix.gemini-features }} \
@@ -78,7 +78,7 @@ jobs:
       - name: Shutdown ScyllaDB
         shell: bash
         run: |
-          make scylla-shutdown \
+          sudo make scylla-shutdown \
             SCYLLA_TEST_VERSION=${{ matrix.test-scylla-version }} \
             SCYLLA_ORACLE_VERSION=${{ matrix.oracle-scylla-version }}
 

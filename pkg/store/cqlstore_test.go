@@ -35,22 +35,23 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 
 	assert := require.New(t)
 	scyllaContainer := testutils.TestContainers(t)
+	keyspace := testutils.GenerateUniqueKeyspaceName(t)
 
 	assert.NoError(scyllaContainer.Test.Query(
-		"CREATE KEYSPACE ks1 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
+		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
 	).Exec())
 	assert.NoError(scyllaContainer.Test.Query(
-		"CREATE TABLE ks1.table_1 (id timeuuid PRIMARY KEY, value list<text>)",
+		fmt.Sprintf("CREATE TABLE %s.table_1 (id timeuuid PRIMARY KEY, value list<text>)", keyspace),
 	).Exec())
 	assert.NoError(scyllaContainer.Oracle.Query(
-		"CREATE KEYSPACE ks1 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
+		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
 	).Exec())
 	assert.NoError(scyllaContainer.Oracle.Query(
-		"CREATE TABLE ks1.table_1 (id timeuuid PRIMARY KEY, value list<text>)",
+		fmt.Sprintf("CREATE TABLE %s.table_1 (id timeuuid PRIMARY KEY, value list<text>)", keyspace),
 	).Exec())
 
 	schema := &typedef.Schema{
-		Keyspace: typedef.Keyspace{Name: "ks1"},
+		Keyspace: typedef.Keyspace{Name: keyspace},
 		Config: typedef.SchemaConfig{
 			ReplicationStrategy:              replication.NewSimpleStrategy(),
 			OracleReplicationStrategy:        replication.NewSimpleStrategy(),
@@ -82,12 +83,12 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 	uuid := gocql.TimeUUID()
 
 	insert := typedef.SimpleStmt(
-		fmt.Sprintf("INSERT INTO ks1.table_1(id, value) VALUES(%s, ['%s', '%s'])", uuid, "test1", "test2"),
+		fmt.Sprintf("INSERT INTO %s.table_1(id, value) VALUES(%s, ['%s', '%s'])", keyspace, uuid, "test1", "test2"),
 		typedef.InsertStatementType,
 	)
 
 	insert2 := typedef.SimpleStmt(
-		fmt.Sprintf("INSERT INTO ks1.table_1(id, value) VALUES(%s, ['%s', '%s', '%s'])", uuid, "test1", "test2", "test3"),
+		fmt.Sprintf("INSERT INTO %s.table_1(id, value) VALUES(%s, ['%s', '%s', '%s'])", keyspace, uuid, "test1", "test2", "test3"),
 		typedef.InsertStatementType,
 	)
 	timestamp := mo.Some(time.Now())
@@ -100,7 +101,7 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 	}
 
 	check := typedef.SimpleStmt(
-		fmt.Sprintf("SELECT * FROM ks1.table_1 WHERE id = %s", uuid),
+		fmt.Sprintf("SELECT * FROM %s.table_1 WHERE id = %s", keyspace, uuid),
 		typedef.InsertStatementType,
 	)
 	assert.NoError(store.Mutate(t.Context(), insert))

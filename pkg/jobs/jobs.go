@@ -67,6 +67,11 @@ func New(
 	logger *zap.Logger,
 	src *rand.ChaCha8,
 ) *Jobs {
+	logger.Info("creating jobs",
+		zap.Int("mutation_concurrency", mutationConcurrency),
+		zap.Int("read_concurrency", readConcurrency),
+	)
+
 	return &Jobs{
 		schema:              schema,
 		store:               st,
@@ -98,18 +103,23 @@ func (j *Jobs) parseMode(mode string) []string {
 
 func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error {
 	log := j.logger.Named(j.name)
-	log.Info("start jobs")
+	log.Info("start jobs", zap.String("mode", mode))
 	defer log.Info("stop jobs")
 
 	g, gCtx := errgroup.WithContext(base)
 
 	for _, table := range j.schema.Tables {
 		generator := j.generators.Get(table)
+		log.Debug("processing table", zap.String("table", table.Name))
 
 		for _, m := range j.parseMode(mode) {
 			switch m {
 			case WriteMode, WarmupMode:
-				for range j.mutationConcurrency {
+				log.Debug("starting mutation workers",
+					zap.String("mode", m),
+					zap.Int("count", j.mutationConcurrency),
+				)
+				for i := range j.mutationConcurrency {
 					newSrc := [32]byte{}
 					_, _ = j.random.Read(newSrc[:])
 
@@ -125,12 +135,27 @@ func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error
 						newSrc,
 					)
 
+					workerID := i
 					g.Go(func() error {
-						return mutation.Do(gCtx)
+						log.Debug("mutation worker started", zap.Int("worker_id", workerID))
+						err := mutation.Do(gCtx)
+						if err != nil {
+							log.Error("mutation worker finished with error",
+								zap.Int("worker_id", workerID),
+								zap.Error(err),
+							)
+						} else {
+							log.Debug("mutation worker finished", zap.Int("worker_id", workerID))
+						}
+						return err
 					})
 				}
 			case ReadMode:
-				for range j.readConcurrency {
+				log.Debug("starting validation workers",
+					zap.String("mode", m),
+					zap.Int("count", j.readConcurrency),
+				)
+				for i := range j.readConcurrency {
 					newSrc := [32]byte{}
 					_, _ = j.random.Read(newSrc[:])
 
@@ -145,14 +170,26 @@ func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error
 						newSrc,
 					)
 
+					workerID := i
 					g.Go(func() error {
-						return validation.Do(gCtx)
+						log.Debug("validation worker started", zap.Int("worker_id", workerID))
+						err := validation.Do(gCtx)
+						if err != nil {
+							log.Error("validation worker finished with error",
+								zap.Int("worker_id", workerID),
+								zap.Error(err),
+							)
+						} else {
+							log.Debug("validation worker finished", zap.Int("worker_id", workerID))
+						}
+						return err
 					})
 				}
 			}
 		}
 	}
 
+	log.Info("waiting for all workers to complete")
 	return g.Wait()
 }
 

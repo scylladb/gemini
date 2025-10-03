@@ -61,6 +61,9 @@ func (f *SyncList[T]) Get() []T {
 
 type logger interface {
 	Debug(msg string, fields ...zap.Field)
+	Info(msg string, fields ...zap.Field)
+	Warn(msg string, fields ...zap.Field)
+	Error(msg string, fields ...zap.Field)
 }
 
 type Flag struct {
@@ -78,30 +81,76 @@ func (s *Flag) Name() string {
 }
 
 func (s *Flag) closeChannel() {
+	s.log.Debug("closing signal channel", zap.String("flag", s.name))
 	ch := s.ch.Swap(&closedChan)
 	if ch != &closedChan {
 		close(*ch)
+		s.log.Debug("signal channel closed successfully", zap.String("flag", s.name))
+	} else {
+		s.log.Debug("signal channel was already closed", zap.String("flag", s.name))
 	}
 }
 
 func (s *Flag) sendSignal(signal uint32, sendToParent bool) bool {
-	s.log.Debug(fmt.Sprintf("flag %s received signal %s", s.name, GetStateName(signal)))
+	s.log.Info("sending signal to flag",
+		zap.String("flag", s.name),
+		zap.String("signal", GetStateName(signal)),
+		zap.Bool("send_to_parent", sendToParent),
+	)
+
 	s.closeChannel()
 	out := s.val.CompareAndSwap(SignalNoop, signal)
 	if !out {
+		s.log.Debug("signal already set, ignoring new signal",
+			zap.String("flag", s.name),
+			zap.String("current_signal", GetStateName(s.val.Load())),
+			zap.String("attempted_signal", GetStateName(signal)),
+		)
 		return false
 	}
 
-	for _, handler := range s.stopHandlers.Get() {
+	s.log.Info("signal set successfully",
+		zap.String("flag", s.name),
+		zap.String("signal", GetStateName(signal)),
+	)
+
+	handlers := s.stopHandlers.Get()
+	s.log.Debug("executing stop handlers",
+		zap.String("flag", s.name),
+		zap.Int("handler_count", len(handlers)),
+	)
+	for i, handler := range handlers {
+		s.log.Debug("executing stop handler",
+			zap.String("flag", s.name),
+			zap.Int("handler_index", i),
+		)
 		handler(signal)
 	}
 
-	for _, child := range s.children.Get() {
-		child.sendSignal(signal, sendToParent)
+	children := s.children.Get()
+	if len(children) > 0 {
+		s.log.Debug("propagating signal to children",
+			zap.String("flag", s.name),
+			zap.Int("child_count", len(children)),
+		)
+		for i, child := range children {
+			s.log.Debug("sending signal to child",
+				zap.String("parent_flag", s.name),
+				zap.String("child_flag", child.name),
+				zap.Int("child_index", i),
+			)
+			child.sendSignal(signal, sendToParent)
+		}
 	}
+
 	if sendToParent && s.parent != nil {
+		s.log.Debug("propagating signal to parent",
+			zap.String("child_flag", s.name),
+			zap.String("parent_flag", s.parent.name),
+		)
 		s.parent.sendSignal(signal, sendToParent)
 	}
+
 	return out
 }
 
@@ -114,13 +163,37 @@ func (s *Flag) SetSoft(sendToParent bool) bool {
 }
 
 func (s *Flag) CreateChild(name string) *Flag {
+	s.log.Info("creating child flag",
+		zap.String("parent_flag", s.name),
+		zap.String("child_name", name),
+	)
+
 	child := newFlag(name, s)
 	s.children.Append(child)
+
 	val := s.val.Load()
+	s.log.Debug("child flag created, checking parent state",
+		zap.String("parent_flag", s.name),
+		zap.String("child_flag", child.name),
+		zap.String("parent_state", GetStateName(val)),
+	)
+
 	switch val {
 	case SignalSoftStop, SignalHardStop:
+		s.log.Debug("propagating parent signal to new child",
+			zap.String("parent_flag", s.name),
+			zap.String("child_flag", child.name),
+			zap.String("signal", GetStateName(val)),
+		)
 		child.sendSignal(val, false)
+	default:
 	}
+
+	s.log.Info("child flag created successfully",
+		zap.String("parent_flag", s.name),
+		zap.String("child_flag", child.name),
+	)
+
 	return child
 }
 
@@ -145,10 +218,24 @@ func (s *Flag) Load() int32 {
 }
 
 func (s *Flag) AddHandler(handler func(signal uint32)) {
+	s.log.Debug("adding stop handler",
+		zap.String("flag", s.name),
+	)
+
 	s.stopHandlers.Append(handler)
+
 	if s.IsHardOrSoft() {
-		handler(s.val.Load())
+		currentSignal := s.val.Load()
+		s.log.Debug("flag already stopped, executing handler immediately",
+			zap.String("flag", s.name),
+			zap.String("current_signal", GetStateName(currentSignal)),
+		)
+		handler(currentSignal)
 	}
+
+	s.log.Info("stop handler added successfully",
+		zap.String("flag", s.name),
+	)
 }
 
 func (s *Flag) AddHandler2(handler func(), expectedSignal uint32) {
@@ -186,27 +273,65 @@ func newFlag(name string, parent *Flag) *Flag {
 	}
 	ch := make(SignalChannel)
 	out.ch.Store(&ch)
+
+	out.log.Debug("flag created",
+		zap.String("flag", name),
+		zap.Bool("has_parent", parent != nil),
+	)
+
+	if parent != nil {
+		out.log.Debug("flag created with parent",
+			zap.String("flag", name),
+			zap.String("parent", parent.name),
+		)
+	}
+
 	return &out
 }
 
 func StartOsSignalsTransmitter(logger *zap.Logger, flags ...*Flag) {
+	logger.Info("starting OS signals transmitter",
+		zap.Int("flag_count", len(flags)),
+	)
+
 	graceful := make(chan os.Signal, 1)
 	signal.Notify(graceful, syscall.SIGTERM, syscall.SIGINT)
+
+	logger.Debug("OS signal handler registered for SIGTERM and SIGINT")
+
 	go func() {
+		logger.Debug("OS signal handler goroutine started, waiting for signals")
 		sig := <-graceful
+
+		logger.Info("received OS signal",
+			zap.String("signal", sig.String()),
+		)
+
 		switch sig {
 		case syscall.SIGINT, syscall.SIGTERM:
+			logger.Info("processing graceful shutdown signal", zap.String("signal", sig.String()))
 			for i := range flags {
+				logger.Debug("setting soft stop for flag",
+					zap.String("flag", flags[i].name),
+					zap.Int("flag_index", i),
+				)
 				flags[i].SetSoft(true)
 			}
-			logger.Info("Get SIGINT signal, begin soft stop.")
+			logger.Info("soft stop initiated for all flags")
 		default:
+			logger.Warn("processing unexpected signal as hard stop", zap.String("signal", sig.String()))
 			for i := range flags {
-				flags[i].SetHard(true)
+				logger.Debug("setting hard stop for flag",
+					zap.String("flag", flags[i].name),
+					zap.Int("flag_index", i),
+				)
+				flags[i].SetHard(false)
 			}
-			logger.Info("Get SIGTERM signal, begin hard stop.")
+			logger.Info("hard stop initiated for all flags")
 		}
 	}()
+
+	logger.Debug("OS signals transmitter started successfully")
 }
 
 func GetStateName(state uint32) string {

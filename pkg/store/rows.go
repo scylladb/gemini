@@ -44,6 +44,7 @@ func (r Rows) Less(i, j int) bool {
 	return rowsCmp(r[i], r[j]) < 0
 }
 
+//nolint:gocyclo
 func rowsCmp(i, j Row) int {
 	switch mis := i["pk0"].(type) {
 	case []byte:
@@ -52,6 +53,15 @@ func rowsCmp(i, j Row) int {
 	case string:
 		mjs, _ := j["pk0"].(string)
 		return strings.Compare(mis, mjs)
+	case bool:
+		mjs, _ := j["pk0"].(bool)
+		if mis == mjs {
+			return 0
+		}
+		if !mis && mjs {
+			return -1
+		}
+		return 1
 	case float32:
 		mjs, _ := j["pk0"].(float32)
 		return cmp.Compare(mis, mjs)
@@ -94,6 +104,9 @@ func rowsCmp(i, j Row) int {
 	case time.Time:
 		mjs, _ := j["pk0"].(time.Time)
 		return mis.Compare(mjs)
+	case time.Duration:
+		mjs, _ := j["pk0"].(time.Duration)
+		return cmp.Compare(mis, mjs)
 	case *big.Int:
 		mjs, _ := j["pk0"].(*big.Int)
 		return mis.Cmp(mjs)

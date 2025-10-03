@@ -59,8 +59,9 @@ func TestBuildQueriesExecution(t *testing.T) {
 	assert := require.New(t)
 
 	scyllaContainer := testutils.SingleScylla(t)
+	keyspace := testutils.GenerateUniqueKeyspaceName(t)
 
-	createKeyspace, createTable := buildCreateTableQuery("ks1_logs", "table1_statements", []typedef.ColumnDef{
+	createKeyspace, createTable := buildCreateTableQuery(keyspace, "table1_statements", []typedef.ColumnDef{
 		{Name: "col1", Type: typedef.TypeInt},
 		{Name: "col2", Type: typedef.TypeAscii},
 	}, replication.NewNetworkTopologyStrategy())
@@ -587,13 +588,18 @@ func TestScyllaTypesFileLogging(t *testing.T) {
 // BenchmarkLogStatement benchmarks the logStatement method to measure allocations and performance
 func BenchmarkLogStatement(b *testing.B) {
 	ctx, cancel := context.WithCancel(b.Context())
+	defer cancel()
+
 	container := testutils.SingleScylla(b)
+	pool := workpool.New(10)
+	defer pool.Close()
+
 	logger := &ScyllaLogger{
 		logger:               zap.NewNop(),
 		channel:              nil,
 		errors:               nil,
 		wg:                   &sync.WaitGroup{},
-		pool:                 workpool.New(10),
+		pool:                 pool,
 		cancel:               cancel,
 		session:              container.Test,
 		oracleStatementsFile: "",
@@ -602,9 +608,11 @@ func BenchmarkLogStatement(b *testing.B) {
 		keyspaceAndTable:     "",
 		schemaPartitionKeys:  createMockPartitionKeys(),
 		partitionKeysCount:   2,
+		metrics:              metrics.NewChannelMetrics("test", "benchmark"),
 		valuePool: sync.Pool{
 			New: func() any {
-				return make([]any, 0, 12) // 2 partition keys + 10 additional columns
+				slice := make([]any, 0, 12)
+				return &slice
 			},
 		},
 	}
@@ -630,7 +638,7 @@ func BenchmarkLogStatement(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		logger.logStatement(ctx, item, query, schemaChangeValues, partitionKeysCount)
 	}
 }
