@@ -46,8 +46,8 @@ type (
 )
 
 func New(count int) *Pool {
-	if count < 1 {
-		panic("count must be greater than 0")
+	if count < 2 {
+		panic("count must be greater than 1 (minimum 2 workers required to prevent shutdown deadlocks)")
 	}
 
 	metrics.GeminiInformation.WithLabelValues("io_thread_pool").Set(float64(count))
