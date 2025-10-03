@@ -16,6 +16,7 @@ package workpool
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 
@@ -27,16 +28,20 @@ import (
 const ChannelSizeMultiplier = 4
 
 type (
+	cb         func(context.Context) (any, error)
+	cbNoResult func(context.Context)
+
 	item struct {
 		ctx context.Context
 		ch  chan<- mo.Result[any]
-		cb  func(context.Context) (any, error)
+		cb  mo.Either[cb, cbNoResult]
 	}
 	Pool struct {
-		chPool sync.Pool
-		ch     atomic.Pointer[chan item]
-		wg     *sync.WaitGroup
-		mu     sync.RWMutex
+		chPool    sync.Pool
+		ch        atomic.Pointer[chan item]
+		closed    atomic.Bool
+		closeOnce sync.Once
+		mu        sync.RWMutex
 	}
 )
 
@@ -49,9 +54,7 @@ func New(count int) *Pool {
 
 	ch := make(chan item, count*ChannelSizeMultiplier)
 
-	wg := &sync.WaitGroup{}
 	w := &Pool{
-		wg: wg,
 		chPool: sync.Pool{
 			New: func() any {
 				return make(chan mo.Result[any], 1)
@@ -62,7 +65,12 @@ func New(count int) *Pool {
 	w.ch.Store(&ch)
 
 	execute := func(it item) {
-		i, err := it.cb(it.ctx)
+		if it.cb.IsRight() {
+			it.cb.MustRight()(it.ctx)
+			return
+		}
+
+		i, err := it.cb.MustLeft()(it.ctx)
 
 		if it.ch == nil {
 			return
@@ -75,12 +83,8 @@ func New(count int) *Pool {
 		}
 	}
 
-	wg.Add(count)
-
 	for range count {
 		go func() {
-			defer wg.Done()
-
 			for {
 				it, more := <-ch
 				if !more {
@@ -95,40 +99,73 @@ func New(count int) *Pool {
 	return w
 }
 
-func (w *Pool) SendWithoutResult(ctx context.Context, cb func(context.Context)) {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-
-	if cb == nil {
+func (w *Pool) SendWithoutResult(ctx context.Context, callback func(context.Context)) {
+	if callback == nil {
 		panic("cb must not be nil")
 	}
 
-	if ch := w.ch.Load(); ch != nil {
-		*ch <- item{
-			cb: func(ctx context.Context) (any, error) {
-				cb(ctx)
-				return nil, nil
-			},
-			ctx: ctx,
-		}
-	}
-}
-
-func (w *Pool) Send(ctx context.Context, cb func(context.Context) (any, error)) chan mo.Result[any] {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	if cb == nil {
+	if w.closed.Load() {
+		return
+	}
+
+	ch := w.ch.Load()
+	if ch == nil {
+		return
+	}
+
+	select {
+	case *ch <- item{
+		cb:  mo.Right[cb, cbNoResult](callback),
+		ctx: ctx,
+	}:
+	case <-ctx.Done():
+		return
+	default:
+		// Channel is full or closed, skip
+		return
+	}
+}
+
+func (w *Pool) Send(ctx context.Context, callback func(context.Context) (any, error)) chan mo.Result[any] {
+	if callback == nil {
 		panic("cb must not be nil")
 	}
 
 	ch := w.chPool.Get().(chan mo.Result[any])
 
-	if sendCh := w.ch.Load(); sendCh != nil {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if w.closed.Load() {
+		// Pool is closed, return an error result
+		ch <- mo.Err[any](errors.New("workpool is closed"))
+		return ch
+	}
+
+	sendCh := w.ch.Load()
+	if sendCh == nil {
+		ch <- mo.Err[any](errors.New("workpool channel is nil"))
+		return ch
+	}
+
+	if ctx == nil {
 		*sendCh <- item{
 			ch:  ch,
-			cb:  cb,
+			cb:  mo.Left[cb, cbNoResult](callback),
 			ctx: ctx,
+		}
+	} else {
+		select {
+		case *sendCh <- item{
+			ch:  ch,
+			cb:  mo.Left[cb, cbNoResult](callback),
+			ctx: ctx,
+		}:
+		case <-ctx.Done():
+			ch <- mo.Err[any](ctx.Err())
 		}
 	}
 
@@ -149,12 +186,16 @@ func (w *Pool) Release(ch chan mo.Result[any]) {
 }
 
 func (w *Pool) Close() error {
-	ch := w.ch.Swap(nil)
-	w.mu.Lock()
-	close(*ch)
-	w.mu.Unlock()
+	w.closeOnce.Do(func() {
+		w.mu.Lock()
+		defer w.mu.Unlock()
 
-	w.wg.Wait()
+		w.closed.Store(true)
+		ch := w.ch.Swap(nil)
+		if ch != nil {
+			close(*ch)
+		}
+	})
 
 	return nil
 }

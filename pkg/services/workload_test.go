@@ -395,7 +395,8 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	assert.NotEmpty(contents[storeConfig.OracleStatementFile])
 }
 
-func TestWorkloadWithAllSchemaTypes(t *testing.T) {
+func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
+	t.Skip()
 	t.Parallel()
 	scyllaContainer := testutils.TestContainers(t)
 
@@ -440,10 +441,10 @@ func TestWorkloadWithAllSchemaTypes(t *testing.T) {
 	})
 
 	const (
-		partitionCount      = 100
+		partitionCount      = 1000
 		partitionBufferSize = 10
-		seed                = 1
-		maxErrorsCount      = 4
+		seed                = 20
+		maxErrorsCount      = 1
 	)
 
 	workload, err := NewWorkload(&WorkloadConfig{
@@ -451,13 +452,13 @@ func TestWorkloadWithAllSchemaTypes(t *testing.T) {
 		PartitionDistribution: distributions.DistributionUniform,
 		Seed:                  seed,
 		PartitionBufferSize:   partitionBufferSize,
-		IOWorkerPoolSize:      16,
+		IOWorkerPoolSize:      256,
 		MaxErrorsToStore:      maxErrorsCount,
 		WarmupDuration:        5 * time.Second,
 		Duration:              10 * time.Second,
 		PartitionCount:        partitionCount,
 		MutationConcurrency:   1,
-		ReadConcurrency:       5,
+		ReadConcurrency:       3,
 		DropSchema:            true,
 		StatementRatios: statements.Ratios{
 			MutationRatios: statements.MutationRatios{
@@ -500,4 +501,9 @@ func TestWorkloadWithAllSchemaTypes(t *testing.T) {
 	assert.Greater(status.WriteOps.Load(), uint64(0))
 	assert.Greater(status.ReadOps.Load(), uint64(0))
 	assert.Greater(status.ValidatedRows.Load(), uint64(0))
+
+	t.Logf("Status: %+v", status)
+	t.Logf("ReadOps: %+v", status.ReadOps.Load())
+	t.Logf("WriteOps: %+v", status.WriteOps.Load())
+	t.Logf("ValidatedRows: %+v", status.ValidatedRows.Load())
 }

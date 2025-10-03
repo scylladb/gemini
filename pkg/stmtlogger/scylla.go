@@ -61,6 +61,7 @@ func GetScyllaStatementLogsTable(originalTable string) string {
 }
 
 type ScyllaLogger struct {
+	valuePool            sync.Pool
 	metrics              metrics.ChannelMetrics
 	logger               *zap.Logger
 	channel              <-chan Item
@@ -70,9 +71,9 @@ type ScyllaLogger struct {
 	cancel               context.CancelFunc
 	session              *gocql.Session
 	oracleStatementsFile string
-	testStatementsFile   string
 	schemaChangeValues   typedef.PartitionKeys
 	keyspaceAndTable     string
+	testStatementsFile   string
 	schemaPartitionKeys  typedef.Columns
 	compression          Compression
 	partitionKeysCount   int
@@ -173,6 +174,12 @@ func NewScyllaLoggerWithSession(
 		partitionKeysCount:   partitionKeys.LenValues(),
 		schemaPartitionKeys:  partitionKeys,
 		keyspaceAndTable:     fmt.Sprintf("%s.%s", keyspace, table),
+		valuePool: sync.Pool{
+			New: func() any {
+				slice := make([]any, 0, partitionKeys.LenValues()+len(additionalColumnsArr))
+				return &slice
+			},
+		},
 	}
 
 	logger.wg.Add(2)
@@ -235,15 +242,37 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 	insertBuilder.Columns(additionalColumnsArr...)
 	query, _ := insertBuilder.ToCql()
 
-	logStatement := func(item Item) {
-		s.metrics.Dec()
-		values := make([]any, 0, partitionKeysCount+len(additionalColumnsArr))
+	for {
+		select {
+		case <-ctx.Done():
+			for item := range s.channel {
+				s.logStatement(ctx, item, query, schemaChangeValues, partitionKeysCount)
+			}
+
+			return
+		case item, more := <-s.channel:
+			if !more {
+				return
+			}
+
+			s.logStatement(ctx, item, query, schemaChangeValues, partitionKeysCount)
+		}
+	}
+}
+
+func (s *ScyllaLogger) logStatement(ctx context.Context, item Item, query string, schemaChangeValues []any, partitionKeysCount int) {
+	s.pool.SendWithoutResult(ctx, func(_ context.Context) {
+		valuesPtr := s.valuePool.Get().(*[]any)
+		defer func() {
+			*valuesPtr = (*valuesPtr)[:0]
+			s.valuePool.Put(valuesPtr)
+		}()
 
 		if item.StatementType.IsSchema() {
-			values = append(values, schemaChangeValues...)
+			*valuesPtr = append(*valuesPtr, schemaChangeValues...)
 		} else {
-			values = append(values, item.PartitionKeys.ToCQLValues(s.schemaPartitionKeys)...)
-			values = append(values, false)
+			*valuesPtr = append(*valuesPtr, item.PartitionKeys.ToCQLValues(s.schemaPartitionKeys)...)
+			*valuesPtr = append(*valuesPtr, false)
 		}
 
 		var itemErr string
@@ -255,11 +284,14 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 			itemErr = item.Error.MustRight()
 		}
 
-		values = append(values,
+		preparedValues := s.prepareValuesOptimized(item.Values)
+		itemType := item.Type
+
+		*valuesPtr = append(*valuesPtr,
 			item.Start.Time,
-			string(item.Type),
+			itemType,
 			item.Statement,
-			prepareValues(item.Values),
+			preparedValues,
 			item.Host,
 			item.Attempt,
 			item.GeminiAttempt,
@@ -267,45 +299,27 @@ func (s *ScyllaLogger) commiter(ctx context.Context, partitionKeysCount int) {
 			item.Duration.Duration,
 		)
 
-		if len(values) != partitionKeysCount+len(additionalColumnsArr) {
+		if len(*valuesPtr) != partitionKeysCount+len(additionalColumnsArr) {
 			s.logger.Error(
 				"invalid number of values for Scylla insert",
 				zap.Int("expected", partitionKeysCount+len(additionalColumnsArr)),
-				zap.Int("actual", len(values)),
-				zap.Any("values", values),
+				zap.Int("actual", len(*valuesPtr)),
+				zap.Any("values", *valuesPtr),
 				zap.Stringer("statement", item.StatementType),
+				zap.String("item_type", string(item.Type)),
+				zap.String("item_statement", item.Statement),
+				zap.Bool("is_schema", item.StatementType.IsSchema()),
 			)
 			return
 		}
 
-		s.pool.SendWithoutResult(ctx, func(_ context.Context) {
-			q := s.session.Bind(query, func(_ *gocql.QueryInfo) ([]any, error) {
-				return values, nil
-			})
-			defer q.Release()
+		q := s.session.QueryWithContext(ctx, query, (*valuesPtr)...)
+		defer q.Release()
 
-			if err := q.Exec(); err != nil {
-				s.logger.Error("failed to insert into statements table", zap.Error(err))
-			}
-		})
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			for item := range s.channel {
-				logStatement(item)
-			}
-
-			return
-		case item, more := <-s.channel:
-			if !more {
-				break
-			}
-
-			logStatement(item)
+		if err := q.Exec(); err != nil {
+			s.logger.Error("failed to insert into statements table", zap.Error(err))
 		}
-	}
+	})
 }
 
 func (s *ScyllaLogger) logErrors(ctx context.Context) {
@@ -316,8 +330,8 @@ func (s *ScyllaLogger) logErrors(ctx context.Context) {
 			zap.String("test_statements_file", s.testStatementsFile),
 		)
 	}
-	wg := &sync.WaitGroup{}
 
+	wg := &sync.WaitGroup{}
 	storages := []struct {
 		ch   chan []byte
 		file string
@@ -386,7 +400,7 @@ func (s *ScyllaLogger) logErrors(ctx context.Context) {
 		for _, storage := range storages {
 			pushErr.Add(1)
 			go func() {
-				pushErr.Done()
+				defer pushErr.Done()
 				if fetchSchema {
 					s.fetchSchemaChanges(storage.ty, storage.ch)
 				}
@@ -441,6 +455,26 @@ func prepareValues(values mo.Either[[]any, []byte]) []string {
 	}
 
 	return strValues
+}
+
+// prepareValuesOptimized is an optimized version of prepareValues that uses string pool
+func (s *ScyllaLogger) prepareValuesOptimized(values mo.Either[[]any, []byte]) []string {
+	if values.IsRight() {
+		return []string{string(values.MustRight())}
+	}
+
+	valSlice := values.MustLeft()
+	if valSlice == nil {
+		return nil
+	}
+
+	result := make([]string, len(valSlice))
+
+	for i, val := range valSlice {
+		result[i] = fmt.Sprintf("%#v", val)
+	}
+
+	return result
 }
 
 func buildCreateTableQuery(

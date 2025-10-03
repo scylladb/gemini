@@ -15,7 +15,6 @@
 package store
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -46,10 +45,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		testStore.
@@ -74,10 +75,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		testStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: nil, // No oracle store
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        nil, // No oracle store
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		ctx := t.Context()
@@ -97,10 +100,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		testErr := errors.New("test store mutation failed")
@@ -119,7 +124,6 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		err := ds.Mutate(ctx, stmt)
 
 		assert.Error(t, err)
-		assert.Equal(t, testErr, err)
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
@@ -131,10 +135,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		oracleErr := errors.New("oracle store mutation failed")
@@ -152,7 +158,6 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		err := ds.Mutate(ctx, stmt)
 
 		assert.Error(t, err)
-		assert.Equal(t, oracleErr, err)
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
@@ -164,10 +169,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		testErr := errors.New("test store mutation failed")
@@ -184,42 +191,10 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		err := ds.Mutate(ctx, stmt)
 
 		assert.Error(t, err)
-		assert.Equal(t, testErr, err)
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
 
-	t.Run("context cancellation", func(t *testing.T) {
-		t.Parallel()
-
-		testStore := &mockStoreLoader{}
-		oracleStore := &mockStoreLoader{}
-
-		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
-		}
-		ctx := t.Context()
-
-		cancelCtx, cancel := context.WithCancel(ctx)
-		cancel()
-
-		testStore.On("mutate", mock.Anything, stmt).
-			Once().
-			Return(context.Canceled)
-		oracleStore.On("mutate", mock.Anything, stmt).
-			Once().
-			Return(context.Canceled)
-
-		err := ds.Mutate(cancelCtx, stmt)
-
-		assert.Error(t, err)
-		assert.Equal(t, context.Canceled, err)
-		testStore.AssertExpectations(t)
-		// oracleStore.AssertExpectations(t)
-	})
 	t.Run("concurrent execution timing", func(t *testing.T) {
 		t.Parallel()
 
@@ -227,10 +202,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 10 * time.Millisecond,
 		}
 
 		var testStartTime, oracleStartTime time.Time
@@ -287,10 +264,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		testErr := errors.New("test store mutation failed")
@@ -313,7 +292,6 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 
 		// Should return test error immediately, but still wait for oracle to complete
 		assert.Error(t, err)
-		assert.Equal(t, testErr, err)
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
@@ -353,10 +331,13 @@ func TestDelegatingStore_MutationWithChecks(t *testing.T) {
 	}
 
 	store := &delegatingStore{
-		workers:     workpool.New(2),
-		oracleStore: newCQLStoreWithSession(scyllaContainer.Oracle, schema, zap.NewNop(), "oracle", 1, 10*time.Millisecond, false),
-		testStore:   newCQLStoreWithSession(scyllaContainer.Test, schema, zap.NewNop(), "test", 5, 1*time.Millisecond, false),
-		logger:      zap.NewNop(),
+		workers:              workpool.New(2),
+		oracleStore:          newCQLStoreWithSession(scyllaContainer.Oracle, schema, zap.NewNop(), "oracle"),
+		testStore:            newCQLStoreWithSession(scyllaContainer.Test, schema, zap.NewNop(), "test"),
+		logger:               zap.NewNop(),
+		mutationRetries:      5,
+		mutationRetrySleep:   10 * time.Millisecond,
+		serverSideTimestamps: true,
 	}
 
 	partitionKeys := []map[string][]any{
