@@ -15,6 +15,7 @@
 package stmtlogger
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -22,6 +23,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,8 +59,9 @@ func TestBuildQueriesExecution(t *testing.T) {
 	assert := require.New(t)
 
 	scyllaContainer := testutils.SingleScylla(t)
+	keyspace := testutils.GenerateUniqueKeyspaceName(t)
 
-	createKeyspace, createTable := buildCreateTableQuery("ks1_logs", "table1_statements", []typedef.ColumnDef{
+	createKeyspace, createTable := buildCreateTableQuery(keyspace, "table1_statements", []typedef.ColumnDef{
 		{Name: "col1", Type: typedef.TypeInt},
 		{Name: "col2", Type: typedef.TypeAscii},
 	}, replication.NewNetworkTopologyStrategy())
@@ -131,7 +134,7 @@ func TestScyllaLogger(t *testing.T) {
 	scyllaContainer := testutils.SingleScylla(t)
 
 	jobList := joberror.NewErrorList(1)
-	pool := workpool.New(1)
+	pool := workpool.New(2)
 	t.Cleanup(func() {
 		_ = pool.Close()
 	})
@@ -161,17 +164,26 @@ func TestScyllaLogger(t *testing.T) {
 	itemTest, testJobErr := errorStatement(TypeTest)
 	itemOracle, _ := errorStatement(TypeOracle)
 
-	ch <- ddlStatement(TypeTest)
-	ch <- ddlStatement(TypeOracle)
-	ch <- successStatement(TypeTest)
-	ch <- itemTest
-	ch <- successStatement(TypeOracle)
-	ch <- itemOracle
+	items := []Item{
+		ddlStatement(TypeTest),
+		ddlStatement(TypeOracle),
+		successStatement(TypeTest),
+		itemTest,
+		successStatement(TypeOracle),
+		itemOracle,
+	}
+
+	t.Logf("Sending %d items to channel", len(items))
+	for i, item := range items {
+		t.Logf("Sending item %d: Type=%s, StatementType=%s, Error=%v", i+1, item.Type, item.StatementType, item.Error)
+		ch <- item
+	}
 
 	jobList.AddError(testJobErr)
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second) // Increased sleep to ensure all items are processed
 	close(ch)
 	assert.NoError(logger.Close())
+	time.Sleep(1 * time.Second) // Additional sleep after close to ensure completion
 
 	var count int
 	assert.NoError(scyllaContainer.Test.Query(
@@ -179,7 +191,7 @@ func TestScyllaLogger(t *testing.T) {
 			GetScyllaStatementLogsKeyspace("ks1"),
 			GetScyllaStatementLogsTable("table1")),
 	).Scan(&count))
-	assert.Equal(6, count)
+	assert.Equal(len(items), count)
 
 	oracleData := item.ReadData(t, testutils.Must(os.Open(oracleFile)))
 	testData := item.ReadData(t, testutils.Must(os.Open(testFile)))
@@ -279,6 +291,7 @@ func ddlStatement(ty Type) Item {
 		Attempt:       1,
 		GeminiAttempt: 1,
 		StatementType: typedef.CreateSchemaStatementType,
+		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"col1": {5}, "col2": {"test_ddl"}}),
 	}
 }
 
@@ -569,5 +582,102 @@ func TestScyllaTypesFileLogging(t *testing.T) {
 			// Direct array case (fallback)
 			assert.Len(values, 2, "Line %d should have 2 values", i)
 		}
+	}
+}
+
+// BenchmarkLogStatement benchmarks the logStatement method to measure allocations and performance
+func BenchmarkLogStatement(b *testing.B) {
+	ctx, cancel := context.WithCancel(b.Context())
+	defer cancel()
+
+	container := testutils.SingleScylla(b)
+	pool := workpool.New(10)
+	defer pool.Close()
+
+	logger := &ScyllaLogger{
+		logger:               zap.NewNop(),
+		channel:              nil,
+		errors:               nil,
+		wg:                   &sync.WaitGroup{},
+		pool:                 pool,
+		cancel:               cancel,
+		session:              container.Test,
+		oracleStatementsFile: "",
+		testStatementsFile:   "",
+		schemaChangeValues:   typedef.PartitionKeys{},
+		keyspaceAndTable:     "",
+		schemaPartitionKeys:  createMockPartitionKeys(),
+		partitionKeysCount:   2,
+		metrics:              metrics.NewChannelMetrics("test", "benchmark"),
+		valuePool: sync.Pool{
+			New: func() any {
+				slice := make([]any, 0, 12)
+				return &slice
+			},
+		},
+	}
+
+	query := "INSERT INTO test.table (pk1, pk2, ddl, ts, ty, statement, values, host, attempt, gemini_attempt, error, dur) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+	schemaChangeValues := []any{"test_pk1", "test_pk2", true}
+	partitionKeysCount := 2
+
+	item := Item{
+		Start:         Time{Time: time.Now()},
+		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"pk1": {"test_value1"}, "pk2": {"test_value2"}}),
+		Error:         mo.Left[error, string](nil),
+		Statement:     "SELECT * FROM test WHERE pk1 = ? AND pk2 = ?",
+		Host:          "127.0.0.1",
+		Type:          TypeTest,
+		Values:        mo.Left[[]any, []byte]([]any{"val1", "val2"}),
+		Duration:      Duration{Duration: 10 * time.Millisecond},
+		Attempt:       1,
+		GeminiAttempt: 1,
+		StatementType: typedef.SelectStatementType,
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		logger.logStatement(ctx, item, query, schemaChangeValues, partitionKeysCount)
+	}
+}
+
+func createMockPartitionKeys() typedef.Columns {
+	return []typedef.ColumnDef{
+		{Name: "pk1", Type: typedef.TypeText},
+		{Name: "pk2", Type: typedef.TypeText},
+	}
+}
+
+// BenchmarkPrepareValues benchmarks the prepareValues function specifically
+func BenchmarkPrepareValues(b *testing.B) {
+	testCases := []struct {
+		name   string
+		values mo.Either[[]any, []byte]
+	}{
+		{
+			name:   "LeftValues",
+			values: mo.Left[[]any, []byte]([]any{"string", 123, true, nil}),
+		},
+		{
+			name:   "RightBytes",
+			values: mo.Right[[]any, []byte]([]byte("test byte data")),
+		},
+		{
+			name:   "EmptyLeft",
+			values: mo.Left[[]any, []byte](nil),
+		},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ResetTimer()
+			b.ReportAllocs()
+			for b.Loop() {
+				result := prepareValues(tc.values)
+				_ = result // Prevent optimization
+			}
+		})
 	}
 }

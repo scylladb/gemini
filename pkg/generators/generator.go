@@ -79,12 +79,25 @@ func NewGenerator(
 	logger *zap.Logger,
 	src *rand.ChaCha8,
 ) *Generator {
+	logger.Debug("creating new generator",
+		zap.String("table", table.Name),
+		zap.Int("partition_count", config.PartitionsCount),
+		zap.Int("pk_used_buffer_size", config.PkUsedBufferSize),
+	)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	rnd := rand.New(src)
 
+	logger.Debug("setting up generator metrics",
+		zap.String("table", table.Name),
+	)
 	metrics.GeminiInformation.WithLabelValues("partition_count_" + table.Name).Set(float64(config.PartitionsCount))
 	metrics.GeminiInformation.WithLabelValues("partition_buffer_size_" + table.Name).Set(float64(config.PkUsedBufferSize))
 
+	logger.Debug("creating generator partitions",
+		zap.String("table", table.Name),
+		zap.Int("partition_count", config.PartitionsCount),
+	)
 	wakeup := make(chan struct{}, 1)
 	g := &Generator{
 		cancel:            cancel,
@@ -101,22 +114,56 @@ func NewGenerator(
 		oldDroppedValues:  metrics.GeneratorDroppedValues.WithLabelValues(table.Name, "old"),
 	}
 
+	logger.Debug("starting generator background processes",
+		zap.String("table", table.Name),
+	)
 	g.start(ctx, wakeup)
+
+	logger.Info("generator created successfully",
+		zap.String("table", table.Name),
+		zap.Int("partition_count", config.PartitionsCount),
+	)
 
 	return g
 }
 
 func (g *Generator) Get(ctx context.Context) (typedef.PartitionKeys, error) {
-	targetPart := g.GetPartitionForToken(g.idxFunc())
+	token := g.idxFunc()
+	targetPart := g.GetPartitionForToken(token)
+
+	retryCount := 0
 	for targetPart.Stale() {
-		targetPart = g.GetPartitionForToken(g.idxFunc())
+		retryCount++
+		if retryCount > 10 {
+			g.logger.Warn("high number of stale partition retries",
+				zap.String("table", g.table.Name),
+				zap.Int("retry_count", retryCount),
+			)
+		}
+		token = g.idxFunc()
+		targetPart = g.GetPartitionForToken(token)
+	}
+
+	if retryCount > 5 {
+		g.logger.Debug("found valid partition after retries",
+			zap.String("table", g.table.Name),
+			zap.Int("retry_count", retryCount),
+			zap.Uint32("token", token),
+		)
 	}
 
 	v, err := targetPart.get(ctx)
 	if err != nil {
+		g.logger.Error("failed to get partition keys from partition",
+			zap.String("table", g.table.Name),
+			zap.Uint32("token", token),
+			zap.Error(err),
+		)
 		g.valuesMetrics.Dec()
+		return v, err
 	}
-	return v, err
+
+	return v, nil
 }
 
 func (g *Generator) GetPartitionForToken(token uint32) *Partition {
@@ -126,25 +173,42 @@ func (g *Generator) GetPartitionForToken(token uint32) *Partition {
 // GetOld returns a previously used value and token or a new if
 // the old queue is empty.
 func (g *Generator) GetOld(ctx context.Context) (typedef.PartitionKeys, error) {
-	targetPart := g.GetPartitionForToken(g.idxFunc())
+	token := g.idxFunc()
+	targetPart := g.GetPartitionForToken(token)
+
+	retryCount := 0
 	for targetPart.Stale() {
-		targetPart = g.GetPartitionForToken(g.idxFunc())
+		retryCount++
+		if retryCount > 10 {
+			g.logger.Warn("high number of stale partition retries for old values",
+				zap.String("table", g.table.Name),
+				zap.Int("retry_count", retryCount),
+			)
+		}
+		token = g.idxFunc()
+		targetPart = g.GetPartitionForToken(token)
 	}
 
 	v, err := targetPart.getOld(ctx)
-	if err == nil {
-		g.oldValuesMetrics.Dec()
+	if err != nil {
+		return targetPart.get(ctx)
 	}
 
-	return v, err
+	g.oldValuesMetrics.Dec()
+	return v, nil
 }
 
 // GiveOlds returns the supplied values for later reuse unless
 func (g *Generator) GiveOlds(ctx context.Context, tokens ...typedef.PartitionKeys) {
+	acceptedCount := 0
+	droppedCount := 0
+
 	for _, token := range tokens {
 		if g.GetPartitionForToken(token.Token).giveOld(ctx, token) {
+			acceptedCount++
 			g.oldValuesMetrics.Inc()
 		} else {
+			droppedCount++
 			g.oldDroppedValues.Inc()
 		}
 	}
@@ -152,20 +216,17 @@ func (g *Generator) GiveOlds(ctx context.Context, tokens ...typedef.PartitionKey
 
 func (g *Generator) start(ctx context.Context, wakeup chan struct{}) {
 	g.wg.Add(1)
-	defer g.wg.Done()
-
-	go func() {
-		<-ctx.Done()
-		g.logger.Info("stopping partition key generation loop")
-	}()
 
 	g.logger.Info("starting partition key generation loop")
 
 	wakeup <- struct{}{}
 	go func() {
+		defer g.wg.Done()
+
 		for {
 			select {
 			case <-ctx.Done():
+				g.logger.Info("stopping partition key generation loop")
 				return
 			case <-wakeup:
 				g.fillAllPartitions()
@@ -294,6 +355,5 @@ func (g *Generator) createPartitionKeyValues() (uint32, map[string][]any, error)
 func (g *Generator) Close() error {
 	g.cancel()
 	g.wg.Wait()
-
 	return g.partitions.Close()
 }

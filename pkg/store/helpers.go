@@ -72,7 +72,7 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 	case int64:
 		sb.WriteString(strconv.FormatInt(v, 10))
 	default:
-		_, _ = fmt.Fprintf(sb, "%v", v)
+		_, _ = fmt.Fprintf(sb, "%#v", v)
 	}
 
 	return sb.String()

@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"slices"
 	"time"
 
@@ -45,9 +44,6 @@ type cqlStore struct {
 	schema                    *typedef.Schema
 	logger                    *zap.Logger
 	system                    string
-	maxRetriesMutate          int
-	maxRetriesMutateSleep     time.Duration
-	useServerSideTimestamps   bool
 }
 
 func newCQLStoreWithSession(
@@ -55,18 +51,14 @@ func newCQLStoreWithSession(
 	schema *typedef.Schema,
 	logger *zap.Logger,
 	system string,
-	maxRetriesMutate int,
-	maxRetriesMutateSleep time.Duration,
-	useServerSideTimestamps bool,
 ) *cqlStore {
+	logger.Info("creating cql store with session", zap.String("system", system))
+
 	store := &cqlStore{
-		session:                 session,
-		schema:                  schema,
-		logger:                  logger,
-		system:                  system,
-		maxRetriesMutate:        maxRetriesMutate,
-		maxRetriesMutateSleep:   maxRetriesMutateSleep,
-		useServerSideTimestamps: useServerSideTimestamps,
+		session: session,
+		schema:  schema,
+		logger:  logger,
+		system:  system,
 	}
 
 	for i := range typedef.StatementTypeCount {
@@ -75,6 +67,7 @@ func newCQLStoreWithSession(
 		store.cqlTimeoutsRequestsMetric[i] = metrics.CQLRequests.WithLabelValues(system, i.String())
 	}
 
+	logger.Info("cql store created", zap.String("system", system))
 	return store
 }
 
@@ -84,23 +77,24 @@ func newCQLStore(
 	schema *typedef.Schema,
 	logger *zap.Logger,
 	system string,
-	maxRetriesMutate int,
-	maxRetriesMutateSleep time.Duration,
-	useServerSideTimestamps bool,
 ) (*cqlStore, error) {
+	logger.Info("creating cql store",
+		zap.String("system", system),
+		zap.Strings("hosts", cfg.Hosts),
+		zap.String("consistency", cfg.Consistency),
+	)
+
 	testSession, err := createCluster(cfg, logger, statementLogger, true)
 	if err != nil {
 		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
 	}
 
+	logger.Info("cluster session created", zap.String("system", system))
 	return newCQLStoreWithSession(
 		testSession,
 		schema,
 		logger,
 		system,
-		maxRetriesMutate,
-		maxRetriesMutateSleep,
-		useServerSideTimestamps,
 	), nil
 }
 
@@ -120,76 +114,93 @@ func (e MutationError) Error() string {
 }
 
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
-	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
-
+	query := c.session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 	defer query.Release()
-
-	if !c.useServerSideTimestamps {
-		ts = ts.MapNone(func() (time.Time, bool) {
-			return time.Now(), true
-		})
-		query.WithTimestamp(ts.MustGet().UnixMicro())
-	}
 
 	var acc error
 
-	for i := range c.maxRetriesMutate {
-		mutateErr := query.Exec()
-		c.cqlRequestsMetric[stmt.QueryType].Inc()
-
-		if mutateErr == nil || errors.Is(mutateErr, gocql.ErrNotFound) {
-			return nil
-		}
-
-		if errors.Is(mutateErr, context.Canceled) {
-			return context.Canceled
-		}
-
-		if errors.Is(mutateErr, context.DeadlineExceeded) {
-			c.cqlTimeoutsRequestsMetric[stmt.QueryType].Inc()
-			return nil
-		}
-
-		acc = multierr.Append(acc, MutationError{
-			Inner:         mutateErr,
-			PartitionKeys: stmt.PartitionKeys.Values,
-		})
-
-		data, _ := GetContextData(ctx)
-		data.GeminiAttempt = i
-		c.cqlErrorRequestsMetric[stmt.QueryType].Inc()
-		time.Sleep(c.maxRetriesMutateSleep)
+	if ts.IsSome() {
+		query = query.WithTimestamp(ts.MustGet().UnixMicro())
+	} else {
+		query = query.DefaultTimestamp(false)
 	}
+
+	mutateErr := query.Exec()
+	c.cqlRequestsMetric[stmt.QueryType].Inc()
+
+	if mutateErr == nil || errors.Is(mutateErr, gocql.ErrNotFound) {
+		return nil
+	}
+
+	if errors.Is(mutateErr, context.Canceled) {
+		c.logger.Warn("mutation cancelled", zap.String("system", c.system))
+		return context.Canceled
+	}
+
+	if errors.Is(mutateErr, context.DeadlineExceeded) {
+		c.logger.Warn("mutation timed out",
+			zap.String("system", c.system),
+			zap.String("query_type", stmt.QueryType.String()),
+		)
+		c.cqlTimeoutsRequestsMetric[stmt.QueryType].Inc()
+		return nil
+	}
+
+	c.logger.Error("mutation failed",
+		zap.String("system", c.system),
+		zap.String("query_type", stmt.QueryType.String()),
+		zap.Error(mutateErr),
+	)
+
+	acc = multierr.Append(acc, MutationError{
+		Inner:         mutateErr,
+		PartitionKeys: stmt.PartitionKeys.Values,
+	})
+
+	c.cqlErrorRequestsMetric[stmt.QueryType].Inc()
 
 	return acc
 }
 
 func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
-	query := c.session.Query(stmt.Query, stmt.Values...).WithContext(ctx)
-
-	iter := query.Iter()
-
+	query := c.session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 	defer func() {
 		query.Release()
 		c.cqlRequestsMetric[stmt.QueryType].Inc()
 	}()
 
+	iter := query.Iter()
 	rows := make(Rows, 0, iter.NumRows())
 
 	for range iter.NumRows() {
 		row := make(Row, len(iter.Columns()))
 		if !iter.MapScan(row) {
-			return nil, iter.Close()
+			err := iter.Close()
+			c.logger.Error("failed to scan row",
+				zap.String("system", c.system),
+				zap.Error(err),
+			)
+			return nil, err
 		}
 
 		rows = append(rows, row)
 	}
 
-	return rows, iter.Close()
+	err := iter.Close()
+	if err != nil {
+		c.logger.Error("error closing iterator",
+			zap.String("system", c.system),
+			zap.Error(err),
+		)
+	}
+
+	return rows, err
 }
 
 func (c *cqlStore) Close() error {
+	c.logger.Debug("closing cql store", zap.String("system", c.system))
 	c.session.Close()
+	c.logger.Debug("cql store closed", zap.String("system", c.system))
 	return nil
 }
 
@@ -215,7 +226,7 @@ func getHostSelectionPolicy(policy HostSelectionPolicy, hosts []string) gocql.Ho
 		)
 		return p
 	default:
-		panic(fmt.Sprintf("unknown host selection policy: %s", policy))
+		panic("unknown host selection policy: " + policy)
 	}
 }
 

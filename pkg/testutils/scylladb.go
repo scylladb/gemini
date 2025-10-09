@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -101,7 +103,43 @@ func createScyllaNetwork(tb testing.TB) *testcontainers.DockerNetwork {
 	return sharedNetwork
 }
 
-func spawnScylla(tb testing.TB, version string, sharedNetwork *testcontainers.DockerNetwork, timeouts ...time.Duration) *ScyllaContainer {
+func createScyllaSession(tb testing.TB, hosts ...string) *ScyllaContainer {
+	tb.Helper()
+
+	testCluster := gocql.NewCluster(hosts...)
+	testCluster.Timeout = 10 * time.Second
+	testCluster.ConnectTimeout = 10 * time.Second
+	testCluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
+		Min:        20 * time.Microsecond,
+		Max:        50 * time.Millisecond,
+		NumRetries: 10,
+	}
+	testCluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy())
+	testCluster.Consistency = gocql.Quorum
+	testCluster.DefaultTimestamp = false
+	if err := testCluster.Validate(); err != nil {
+		tb.Fatalf("failed to validate test ScyllaDB cluster: %v", err)
+	}
+
+	session, err := testCluster.CreateSession()
+	if err != nil {
+		tb.Fatalf("failed to create test ScyllaDB session: %v", err)
+	}
+
+	tb.Cleanup(func() {
+		keyspace := GenerateUniqueKeyspaceName(tb)
+		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s;", keyspace)).Exec()
+
+		session.Close()
+	})
+
+	return &ScyllaContainer{
+		Test:      session,
+		TestHosts: hosts,
+	}
+}
+
+func spawnScylla(tb testing.TB, version string, sharedNetwork *testcontainers.DockerNetwork) *ScyllaContainer {
 	tb.Helper()
 	spawningScyllaMutex.Lock()
 	scyllaContainer, err := scylladb.Run(tb.Context(),
@@ -116,80 +154,110 @@ func spawnScylla(tb testing.TB, version string, sharedNetwork *testcontainers.Do
 	}
 
 	tb.Cleanup(func() {
-		spawningScyllaMutex.Lock()
 		_ = scyllaContainer.Terminate(tb.Context())
-		spawningScyllaMutex.Unlock()
 	})
 
-	testCluster := gocql.NewCluster(Must(scyllaContainer.ContainerIP(tb.Context())))
-	if len(timeouts) > 0 {
-		testCluster.Timeout = timeouts[0]
-	} else {
-		testCluster.Timeout = 10 * time.Second
-	}
-	testCluster.ConnectTimeout = 10 * time.Second
-	testCluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
-		Min:        20 * time.Microsecond,
-		Max:        50 * time.Millisecond,
-		NumRetries: 10,
-	}
-	testCluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy())
-	testCluster.Consistency = gocql.Quorum
-	testCluster.DefaultTimestamp = false
-	if err = testCluster.Validate(); err != nil {
-		tb.Fatalf("failed to validate test ScyllaDB cluster: %v", err)
+	return createScyllaSession(tb, Must(scyllaContainer.ContainerIP(tb.Context())))
+}
+
+func SingleScylla(tb testing.TB) *ScyllaContainer {
+	tb.Helper()
+
+	val, existsDockerScylla := os.LookupEnv("GEMINI_USE_DOCKER_SCYLLA")
+	if !existsDockerScylla {
+		testVersion, exists := os.LookupEnv("GEMINI_SCYLLA_TEST")
+		if !exists || testVersion == "" {
+			testVersion = "2025.1"
+		}
+
+		sharedNetwork := createScyllaNetwork(tb)
+
+		return spawnScylla(tb, testVersion, sharedNetwork)
 	}
 
-	session, err := testCluster.CreateSession()
+	valBool, err := strconv.ParseBool(val)
 	if err != nil {
-		tb.Fatalf("failed to create test ScyllaDB session: %v", err)
+		tb.Fatalf("failed to parse GEMINI_USE_DOCKER_SCYLLA: %v", err)
+		return nil
 	}
 
-	tb.Cleanup(func() {
-		session.Close()
-	})
+	if valBool {
+		hosts, existsTestClusterIP := os.LookupEnv("GEMINI_TEST_CLUSTER_IP")
+		if !existsTestClusterIP || hosts == "" {
+			tb.Fatal("GEMINI_TEST_CLUSTER_IP is not set")
+		}
 
-	return &ScyllaContainer{
-		Test:      session,
-		TestHosts: []string{Must(scyllaContainer.ContainerIP(tb.Context()))},
+		return createScyllaSession(tb, strings.Split(hosts, ",")...)
 	}
+
+	tb.Fatal("GEMINI_USE_DOCKER_SCYLLA is set to false, but using in-memory ScyllaDB is not supported in this build")
+	return nil
 }
 
-func SingleScylla(tb testing.TB, timeouts ...time.Duration) *ScyllaContainer {
+func TestContainers(tb testing.TB) *ScyllaContainer {
 	tb.Helper()
+	val, exists := os.LookupEnv("GEMINI_USE_DOCKER_SCYLLA")
 
-	testVersion, exists := os.LookupEnv("GEMINI_SCYLLA_TEST")
-	if !exists || testVersion == "" {
-		testVersion = "2025.1"
+	if !exists {
+		oracleVersion, existsScyllaOracle := os.LookupEnv("GEMINI_SCYLLA_ORACLE")
+		if !existsScyllaOracle || oracleVersion == "" {
+			oracleVersion = "6.2"
+		}
+
+		testVersion, existsScyllaTest := os.LookupEnv("GEMINI_SCYLLA_TEST")
+		if !existsScyllaTest || testVersion == "" {
+			testVersion = "2025.1"
+		}
+
+		sharedNetwork := createScyllaNetwork(tb)
+
+		oracleScylla := spawnScylla(tb, oracleVersion, sharedNetwork)
+		testScylla := spawnScylla(tb, testVersion, sharedNetwork)
+
+		return &ScyllaContainer{
+			Oracle:      oracleScylla.Test,
+			OracleHosts: oracleScylla.TestHosts,
+			Test:        testScylla.Test,
+			TestHosts:   testScylla.TestHosts,
+		}
 	}
 
-	sharedNetwork := createScyllaNetwork(tb)
+	valBool, err := strconv.ParseBool(val)
+	if err != nil {
+		tb.Fatalf("failed to parse GEMINI_USE_DOCKER_SCYLLA: %v", err)
+		return nil
+	}
 
-	return spawnScylla(tb, testVersion, sharedNetwork, timeouts...)
+	if valBool {
+		oracleHosts, existsOracleClusterIP := os.LookupEnv("GEMINI_ORACLE_CLUSTER_IP")
+		if !existsOracleClusterIP || oracleHosts == "" {
+			tb.Fatal("GEMINI_ORACLE_CLUSTER_IP is not set")
+			return nil
+		}
+
+		testHosts, existsTestClusterIP := os.LookupEnv("GEMINI_TEST_CLUSTER_IP")
+		if !existsTestClusterIP || testHosts == "" {
+			tb.Fatal("GEMINI_TEST_CLUSTER_IP is not set")
+			return nil
+		}
+
+		oracleSession := createScyllaSession(tb, strings.Split(oracleHosts, ",")...)
+		testSession := createScyllaSession(tb, strings.Split(testHosts, ",")...)
+
+		return &ScyllaContainer{
+			Oracle:      oracleSession.Test,
+			OracleHosts: oracleSession.TestHosts,
+			Test:        testSession.Test,
+			TestHosts:   testSession.TestHosts,
+		}
+	}
+
+	tb.Fatal("GEMINI_USE_DOCKER_SCYLLA is set to false, but using in-memory ScyllaDB is not supported in this build")
+	return nil
 }
 
-func TestContainers(tb testing.TB, timeouts ...time.Duration) *ScyllaContainer {
+func GenerateUniqueKeyspaceName(tb testing.TB) string {
 	tb.Helper()
 
-	oracleVersion, exists := os.LookupEnv("GEMINI_SCYLLA_ORACLE")
-	if !exists || oracleVersion == "" {
-		oracleVersion = "6.2"
-	}
-
-	testVersion, exists := os.LookupEnv("GEMINI_SCYLLA_TEST")
-	if !exists || testVersion == "" {
-		testVersion = "2025.1"
-	}
-
-	sharedNetwork := createScyllaNetwork(tb)
-
-	oracleScylla := spawnScylla(tb, oracleVersion, sharedNetwork, timeouts...)
-	testScylla := spawnScylla(tb, testVersion, sharedNetwork, timeouts...)
-
-	return &ScyllaContainer{
-		Oracle:      oracleScylla.Test,
-		OracleHosts: oracleScylla.TestHosts,
-		Test:        testScylla.Test,
-		TestHosts:   testScylla.TestHosts,
-	}
+	return "ks" + strings.ReplaceAll(tb.Name(), "/", "_")
 }

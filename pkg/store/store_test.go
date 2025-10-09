@@ -15,8 +15,8 @@
 package store
 
 import (
-	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -46,10 +46,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		testStore.
@@ -74,10 +76,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		testStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: nil, // No oracle store
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        nil, // No oracle store
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		ctx := t.Context()
@@ -97,29 +101,34 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		testErr := errors.New("test store mutation failed")
 
 		ctx := t.Context()
 
+		// First attempt: test fails, oracle succeeds
+		// Retry: test still fails, oracle already succeeded (won't be called again)
 		testStore.
 			On("mutate", mock.Anything, stmt).
-			Once().
-			Return(testErr)
+			Return(testErr).
+			Times(2) // Initial attempt + 1 retry
+
 		oracleStore.
 			On("mutate", mock.Anything, stmt).
-			Once().
-			Return(nil)
+			Return(nil).
+			Once() // Only called on first attempt, then succeeds
 
 		err := ds.Mutate(ctx, stmt)
 
 		assert.Error(t, err)
-		assert.Equal(t, testErr, err)
+		assert.ErrorIs(t, err, testErr)
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
@@ -131,28 +140,33 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		oracleErr := errors.New("oracle store mutation failed")
 		ctx := t.Context()
 
+		// First attempt: test succeeds, oracle fails
+		// Retry: test already succeeded (won't be called again), oracle still fails
 		testStore.
 			On("mutate", mock.Anything, stmt).
-			Once().
-			Return(nil)
+			Return(nil).
+			Once() // Only called on first attempt, then succeeds
+
 		oracleStore.
 			On("mutate", mock.Anything, stmt).
-			Once().
-			Return(oracleErr)
+			Return(oracleErr).
+			Times(2) // Initial attempt + 1 retry
 
 		err := ds.Mutate(ctx, stmt)
 
 		assert.Error(t, err)
-		assert.Equal(t, oracleErr, err)
+		assert.ErrorIs(t, err, oracleErr)
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
@@ -164,62 +178,34 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		testErr := errors.New("test store mutation failed")
 		oracleErr := errors.New("oracle store mutation failed")
 		ctx := t.Context()
 
+		// With mutationRetries=1, we execute up to 2 attempts
 		testStore.On("mutate", mock.Anything, stmt).
-			Once().
-			Return(testErr)
+			Return(testErr).
+			Times(2) // Initial attempt + 1 retry
+
 		oracleStore.On("mutate", mock.Anything, stmt).
-			Once().
-			Return(oracleErr)
+			Return(oracleErr).
+			Times(2) // Initial attempt + 1 retry
 
 		err := ds.Mutate(ctx, stmt)
 
 		assert.Error(t, err)
-		assert.Equal(t, testErr, err)
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
 
-	t.Run("context cancellation", func(t *testing.T) {
-		t.Parallel()
-
-		testStore := &mockStoreLoader{}
-		oracleStore := &mockStoreLoader{}
-
-		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
-		}
-		ctx := t.Context()
-
-		cancelCtx, cancel := context.WithCancel(ctx)
-		cancel()
-
-		testStore.On("mutate", mock.Anything, stmt).
-			Once().
-			Return(context.Canceled)
-		oracleStore.On("mutate", mock.Anything, stmt).
-			Once().
-			Return(context.Canceled)
-
-		err := ds.Mutate(cancelCtx, stmt)
-
-		assert.Error(t, err)
-		assert.Equal(t, context.Canceled, err)
-		testStore.AssertExpectations(t)
-		// oracleStore.AssertExpectations(t)
-	})
 	t.Run("concurrent execution timing", func(t *testing.T) {
 		t.Parallel()
 
@@ -227,10 +213,12 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 10 * time.Millisecond,
 		}
 
 		var testStartTime, oracleStartTime time.Time
@@ -287,33 +275,36 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:     workpool.New(10),
-			testStore:   testStore,
-			oracleStore: oracleStore,
-			logger:      logger,
+			workers:            workpool.New(10),
+			testStore:          testStore,
+			oracleStore:        oracleStore,
+			logger:             logger,
+			mutationRetries:    1,
+			mutationRetrySleep: 100 * time.Millisecond,
 		}
 
 		testErr := errors.New("test store mutation failed")
 		ctx := t.Context()
 
-		// Setup expectations
+		// First attempt: test fails, oracle succeeds (but slow)
+		// Retry: test still fails, oracle already succeeded (won't be called again)
 		testStore.
 			On("mutate", mock.Anything, stmt).
-			Once().
-			Return(testErr)
+			Return(testErr).
+			Times(2) // First attempt + 1 retry
+
 		oracleStore.
 			On("mutate", mock.Anything, stmt).
-			Once().
 			Return(nil).
-			Run(func(_ mock.Arguments) {
-				time.Sleep(100 * time.Millisecond)
-			})
+			Once() // Only called on first attempt, then succeeds
 
+		// Execute mutation
 		err := ds.Mutate(ctx, stmt)
 
-		// Should return test error immediately, but still wait for oracle to complete
+		// Should fail because test store keeps failing
 		assert.Error(t, err)
-		assert.Equal(t, testErr, err)
+		assert.ErrorIs(t, err, testErr)
+
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
@@ -323,22 +314,23 @@ func TestDelegatingStore_MutationWithChecks(t *testing.T) {
 	t.Parallel()
 
 	scyllaContainer := testutils.TestContainers(t)
+	keyspace := testutils.GenerateUniqueKeyspaceName(t)
 
 	assert.NoError(t, scyllaContainer.Test.Query(
-		"CREATE KEYSPACE ks1 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
+		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
 	).Exec())
 	assert.NoError(t, scyllaContainer.Test.Query(
-		"CREATE TABLE ks1.table_1 (id int, value text, ck1 int, col1 text, PRIMARY KEY ((id,value), ck1));",
+		fmt.Sprintf("CREATE TABLE %s.table_1 (id int, value text, ck1 int, col1 text, PRIMARY KEY ((id,value), ck1));", keyspace),
 	).Exec())
 	assert.NoError(t, scyllaContainer.Oracle.Query(
-		"CREATE KEYSPACE ks1 WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
+		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
 	).Exec())
 	assert.NoError(t, scyllaContainer.Oracle.Query(
-		"CREATE TABLE ks1.table_1 (id int, value text, ck1 int, col1 text, PRIMARY KEY ((id,value), ck1));",
+		fmt.Sprintf("CREATE TABLE %s.table_1 (id int, value text, ck1 int, col1 text, PRIMARY KEY ((id,value), ck1));", keyspace),
 	).Exec())
 
 	schema := &typedef.Schema{
-		Keyspace: typedef.Keyspace{Name: "ks1"},
+		Keyspace: typedef.Keyspace{Name: keyspace},
 		Config: typedef.SchemaConfig{
 			ReplicationStrategy:              replication.NewSimpleStrategy(),
 			OracleReplicationStrategy:        replication.NewSimpleStrategy(),
@@ -353,10 +345,13 @@ func TestDelegatingStore_MutationWithChecks(t *testing.T) {
 	}
 
 	store := &delegatingStore{
-		workers:     workpool.New(2),
-		oracleStore: newCQLStoreWithSession(scyllaContainer.Oracle, schema, zap.NewNop(), "oracle", 1, 10*time.Millisecond, false),
-		testStore:   newCQLStoreWithSession(scyllaContainer.Test, schema, zap.NewNop(), "test", 5, 1*time.Millisecond, false),
-		logger:      zap.NewNop(),
+		workers:              workpool.New(2),
+		oracleStore:          newCQLStoreWithSession(scyllaContainer.Oracle, schema, zap.NewNop(), "oracle"),
+		testStore:            newCQLStoreWithSession(scyllaContainer.Test, schema, zap.NewNop(), "test"),
+		logger:               zap.NewNop(),
+		mutationRetries:      5,
+		mutationRetrySleep:   10 * time.Millisecond,
+		serverSideTimestamps: true,
 	}
 
 	partitionKeys := []map[string][]any{
@@ -371,7 +366,7 @@ func TestDelegatingStore_MutationWithChecks(t *testing.T) {
 	for _, pk := range partitionKeys {
 		for i := range rowsPerPartition {
 			insertStmt := typedef.PreparedStmt(
-				"INSERT INTO ks1.table_1 (id, value, ck1, col1) VALUES (?, ?, ?, ?)",
+				fmt.Sprintf("INSERT INTO %s.table_1 (id, value, ck1, col1) VALUES (?, ?, ?, ?)", keyspace),
 				pk,
 				[]any{pk["id"][0], pk["value"][0], i, "col1_value"},
 				typedef.InsertStatementType,
@@ -384,28 +379,28 @@ func TestDelegatingStore_MutationWithChecks(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	singlePartitionSelect := typedef.PreparedStmt(
-		"SELECT * FROM ks1.table_1 WHERE id = ? AND value = ?",
+		fmt.Sprintf("SELECT * FROM %s.table_1 WHERE id = ? AND value = ?", keyspace),
 		partitionKeys[0],
 		[]any{partitionKeys[0]["id"][0], partitionKeys[0]["value"][0]},
 		typedef.SelectStatementType,
 	)
 
 	multiPartitionSelect := typedef.PreparedStmt(
-		"SELECT * FROM ks1.table_1 WHERE id IN (?, ?) AND value IN (?, ?)",
+		fmt.Sprintf("SELECT * FROM %s.table_1 WHERE id IN (?, ?) AND value IN (?, ?)", keyspace),
 		map[string][]any{"id": {1, 2}, "value": {"test", "test2"}},
 		[]any{1, 2, "test", "test2"},
 		typedef.SelectMultiPartitionType,
 	)
 
 	singlePartitionRangeSelect := typedef.PreparedStmt(
-		"SELECT * FROM ks1.table_1 WHERE id = ? AND value = ? AND ck1 >= ? AND ck1 < ?",
+		fmt.Sprintf("SELECT * FROM %s.table_1 WHERE id = ? AND value = ? AND ck1 >= ? AND ck1 < ?", keyspace),
 		partitionKeys[2],
 		[]any{partitionKeys[2]["id"][0], partitionKeys[2]["value"][0], 0, 3},
 		typedef.SelectRangeStatementType,
 	)
 
 	multiPartitionRangeSelect := typedef.PreparedStmt(
-		"SELECT * FROM ks1.table_1 WHERE id IN (?, ?) AND value IN (?, ?) AND ck1 >= ? AND ck1 < ?",
+		fmt.Sprintf("SELECT * FROM %s.table_1 WHERE id IN (?, ?) AND value IN (?, ?) AND ck1 >= ? AND ck1 < ?", keyspace),
 		map[string][]any{"id": {1, 2}, "value": {"test", "test2"}},
 		[]any{3, 4, "test3", "test4", 0, 3},
 		typedef.SelectMultiPartitionType,

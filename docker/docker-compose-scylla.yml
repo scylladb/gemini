@@ -1,6 +1,6 @@
 networks:
   gemini:
-    name: gemini
+    name: gemini-single
     driver: bridge
     ipam:
       driver: default

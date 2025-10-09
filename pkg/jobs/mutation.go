@@ -117,12 +117,25 @@ func (m *Mutation) Do(ctx context.Context) error {
 	defer metrics.GeminiInformation.WithLabelValues("mutation_" + m.table.Name).Dec()
 
 	for !m.stopFlag.IsHardOrSoft() {
+		// Check if context is cancelled before proceeding
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
 		err := executionTime.RunFuncE(func() error {
 			return m.run(ctx)
 		})
 
 		if errors.Is(err, utils.ErrNoPartitionKeyValues) {
-			continue
+			// Add delay to prevent busy waiting when no partitions are available
+			select {
+			case <-time.After(200 * time.Millisecond):
+				continue
+			case <-ctx.Done():
+				return nil
+			}
 		}
 
 		if errors.Is(err, context.Canceled) {

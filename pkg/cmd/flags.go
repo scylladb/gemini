@@ -204,7 +204,7 @@ func setupFlags(cmd *cobra.Command) {
 		StringVarP(&testClusterHostSelectionPolicy, "test-host-selection-policy", "", "token-aware",
 			"Host selection policy used by the driver for the test cluster: round-robin|host-pool|token-aware")
 	cmd.Flags().
-		BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", true, "Use server-side generated timestamps for writes")
+		BoolVarP(&useServerSideTimestamps, "use-server-timestamps", "", false, "Use server-side generated timestamps for writes")
 	cmd.Flags().
 		DurationVarP(&requestTimeout, "request-timeout", "", 30*time.Second, "Duration of waiting request execution")
 	cmd.Flags().

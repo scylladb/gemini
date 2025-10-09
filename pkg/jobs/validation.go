@@ -133,7 +133,13 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 		}
 
 		acc = multierr.Append(acc, err)
-		time.Sleep(v.delay)
+
+		// Make delay cancellable by context
+		select {
+		case <-time.After(v.delay):
+		case <-ctx.Done():
+			return nil
+		}
 	}
 
 	return nil
@@ -149,13 +155,25 @@ func (v *Validation) Do(ctx context.Context) error {
 	validatedRowsMetric := metrics.ValidatedRows.WithLabelValues(v.table.Name)
 
 	for !v.stopFlag.IsHardOrSoft() {
+		// Check if context is cancelled before proceeding
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+
 		err := executionTime.RunFuncE(func() error {
 			return v.run(ctx, validatedRowsMetric)
 		})
 
 		if errors.Is(err, utils.ErrNoPartitionKeyValues) {
-			time.Sleep(v.delay)
-			continue
+			// Use a select with context to make delay cancellable
+			select {
+			case <-time.After(v.delay):
+				continue
+			case <-ctx.Done():
+				return nil
+			}
 		}
 
 		if errors.Is(err, context.Canceled) {

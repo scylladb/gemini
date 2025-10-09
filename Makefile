@@ -45,7 +45,9 @@ GEMINI_FLAGS ?= --level=debug \
 	--partition-key-distribution=uniform \
 	--io-worker-pool=$(GEMINI_IO_WORKER_POOL) \
 	--oracle-statement-log-file=$(PWD)/results/oracle-statements.json \
-	--test-statement-log-file=$(PWD)/results/test-statements.json
+	--test-statement-log-file=$(PWD)/results/test-statements.json \
+	 --verbose \
+	 --level=debug
 
 .PHONY: tidy
 tidy:
@@ -93,6 +95,11 @@ setup: scylla-setup debug-build
 
 .PHONY: scylla-setup
 scylla-setup:
+	@echo "Cleaning up any existing Scylla containers and networks..."
+	@docker compose -f docker/docker-compose-scylla.yml down --volumes --remove-orphans 2>/dev/null || true
+	@docker compose -f docker/docker-compose-scylla-cluster.yml down --volumes --remove-orphans 2>/dev/null || true
+	@docker network rm gemini gemini-single gemini-cluster 2>/dev/null || true
+	@echo "Starting Scylla containers..."
 	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml up -d --wait
 
 	until docker logs gemini-oracle 2>&1 | grep "Starting listening for CQL clients" > /dev/null; do sleep 0.2; done
@@ -101,7 +108,10 @@ scylla-setup:
 
 .PHONY: scylla-shutdown
 scylla-shutdown:
-	@docker compose -f docker/docker-compose-$(DOCKER_COMPOSE_TESTING).yml down --volumes
+	@echo "Shutting down all Scylla containers and cleaning up networks..."
+	@docker compose -f docker/docker-compose-scylla.yml down --volumes --remove-orphans 2>/dev/null || true
+	@docker compose -f docker/docker-compose-scylla-cluster.yml down --volumes --remove-orphans 2>/dev/null || true
+	@docker network rm gemini gemini-single gemini-cluster 2>/dev/null || true
 
 .PHONY: stop-scylla-monitoring
 stop-scylla-monitoring:
@@ -196,8 +206,8 @@ integration-test:
 	@touch $(PWD)/results/gemini_seed
 	@echo $(GEMINI_SEED) > $(PWD)/results/gemini_seed
 	GODEBUG="default=go1.25,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0" GOGC="95" $(GEMINI_BINARY) \
-		--test-cluster="$(call get_scylla_ip,gemini-test)" \
-		--oracle-cluster="$(call get_scylla_ip,gemini-oracle)" \
+		--test-cluster="192.168.100.3" \
+		--oracle-cluster="192.168.100.2" \
 		--replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 		$(GEMINI_FLAGS)
 
