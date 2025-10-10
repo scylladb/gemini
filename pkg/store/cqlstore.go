@@ -63,8 +63,8 @@ func newCQLStoreWithSession(
 
 	for i := range typedef.StatementTypeCount {
 		store.cqlRequestsMetric[i] = metrics.CQLRequests.WithLabelValues(system, i.String())
-		store.cqlErrorRequestsMetric[i] = metrics.CQLRequests.WithLabelValues(system, i.String())
-		store.cqlTimeoutsRequestsMetric[i] = metrics.CQLRequests.WithLabelValues(system, i.String())
+		store.cqlErrorRequestsMetric[i] = metrics.CQLErrorRequests.WithLabelValues(system, i.String())
+		store.cqlTimeoutsRequestsMetric[i] = metrics.CQLQueryTimeouts.WithLabelValues(system, i.String())
 	}
 
 	logger.Info("cql store created", zap.String("system", system))
@@ -143,7 +143,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 			zap.String("query_type", stmt.QueryType.String()),
 		)
 		c.cqlTimeoutsRequestsMetric[stmt.QueryType].Inc()
-		return nil
+		return mutateErr // Return timeout error so delegating store can retry
 	}
 
 	c.logger.Error("mutation failed",

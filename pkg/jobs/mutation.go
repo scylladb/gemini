@@ -16,10 +16,9 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"time"
-
-	"github.com/pkg/errors"
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/generators/statements"
@@ -148,7 +147,10 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 		var jobErr joberror.JobError
 		if errors.As(err, &jobErr) {
-			m.status.AddReadError(jobErr)
+			// When the write error occurs
+			m.status.AddWriteError(jobErr)
+			m.stopFlag.SetSoft(true)
+			return errors.Join(jobErr, errors.New("mutation job stopped due to write error"))
 		}
 
 		if m.status.HasReachedErrorCount() {

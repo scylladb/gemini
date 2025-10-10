@@ -85,14 +85,16 @@ type (
 		UseServerSideTimestamps bool
 	}
 	Config struct {
-		OracleClusterConfig     *ScyllaClusterConfig
-		OracleStatementFile     string
-		TestStatementFile       string
-		TestClusterConfig       ScyllaClusterConfig
-		MaxRetriesMutate        int
-		MaxRetriesMutateSleep   time.Duration
-		Compression             stmtlogger.Compression
-		UseServerSideTimestamps bool
+		OracleClusterConfig              *ScyllaClusterConfig
+		OracleStatementFile              string
+		TestStatementFile                string
+		TestClusterConfig                ScyllaClusterConfig
+		MaxRetriesMutate                 int
+		MaxRetriesMutateSleep            time.Duration
+		AsyncObjectStabilizationAttempts int
+		AsyncObjectStabilizationDelay    time.Duration
+		Compression                      stmtlogger.Compression
+		UseServerSideTimestamps          bool
 	}
 )
 
@@ -106,8 +108,10 @@ func New(
 ) (Store, error) {
 	logger.Debug("creating store",
 		zap.Bool("has_oracle", cfg.OracleClusterConfig != nil),
-		zap.Int("max_retries", cfg.MaxRetriesMutate),
-		zap.Duration("retry_sleep", cfg.MaxRetriesMutateSleep),
+		zap.Int("max_retries_mutate", cfg.MaxRetriesMutate),
+		zap.Duration("retry_sleep_mutate", cfg.MaxRetriesMutateSleep),
+		zap.Int("async_stabilization_attempts", cfg.AsyncObjectStabilizationAttempts),
+		zap.Duration("async_stabilization_delay", cfg.AsyncObjectStabilizationDelay),
 		zap.Bool("server_side_timestamps", cfg.UseServerSideTimestamps),
 	)
 
@@ -141,6 +145,14 @@ func New(
 
 	if cfg.MaxRetriesMutateSleep <= 50*time.Millisecond {
 		cfg.MaxRetriesMutateSleep = 50 * time.Millisecond
+	}
+
+	if cfg.AsyncObjectStabilizationAttempts <= 0 {
+		cfg.AsyncObjectStabilizationAttempts = 10
+	}
+
+	if cfg.AsyncObjectStabilizationDelay <= 0 {
+		cfg.AsyncObjectStabilizationDelay = 10 * time.Millisecond
 	}
 
 	logger.Debug("creating test store", zap.Strings("hosts", cfg.TestClusterConfig.Hosts))
@@ -630,7 +642,6 @@ func (ds delegatingStore) Check(
 		missingInTest := strset.Difference(oracleSet, testSet).List()
 		missingInOracle := strset.Difference(testSet, oracleSet).List()
 
-		ds.logger.Debug("oracle store created successfully")
 		return 0, ErrorRowDifference{
 			MissingInTest:   missingInTest,
 			MissingInOracle: missingInOracle,

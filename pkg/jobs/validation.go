@@ -134,9 +134,12 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 
 		acc = multierr.Append(acc, err)
 
+		// Apply exponential backoff delay: baseDelay * 2^(attempt-1)
+		backoffDelay := v.calculateExponentialBackoff(attempt - 1)
+
 		// Make delay cancellable by context
 		select {
-		case <-time.After(v.delay):
+		case <-time.After(backoffDelay):
 		case <-ctx.Done():
 			return nil
 		}
@@ -200,4 +203,26 @@ func (v *Validation) Do(ctx context.Context) error {
 
 func (v *Validation) Name() string {
 	return "validation_" + v.table.Name
+}
+
+// calculateExponentialBackoff calculates the delay for exponential backoff in validation retries
+func (v *Validation) calculateExponentialBackoff(attempt int) time.Duration {
+	// Base delay is the configured delay
+	// Exponential backoff: baseDelay * 2^attempt with some jitter
+	baseDelay := v.delay
+	if attempt == 0 {
+		return baseDelay
+	}
+
+	// Calculate exponential delay: baseDelay * 2^attempt
+	multiplier := 1 << uint(attempt) // 2^attempt
+	delay := time.Duration(multiplier) * baseDelay
+
+	// Cap the delay to prevent it from growing too large (max 30 seconds)
+	maxDelay := 30 * time.Second
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+
+	return delay
 }

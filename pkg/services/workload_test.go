@@ -69,10 +69,12 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string) store.Config
 			ConnectTimeout:          10 * time.Second,
 			UseServerSideTimestamps: false,
 		},
-		MaxRetriesMutate:        1,
-		MaxRetriesMutateSleep:   10 * time.Second,
-		Compression:             stmtlogger.CompressionNone,
-		UseServerSideTimestamps: true,
+		MaxRetriesMutate:                 1,
+		MaxRetriesMutateSleep:            10 * time.Second,
+		AsyncObjectStabilizationAttempts: 1,
+		AsyncObjectStabilizationDelay:    10 * time.Second,
+		Compression:                      stmtlogger.CompressionNone,
+		UseServerSideTimestamps:          true,
 	}
 }
 
