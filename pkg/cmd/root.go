@@ -169,12 +169,14 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	storeConfig := store.Config{
-		MaxRetriesMutate:        maxRetriesMutate,
-		MaxRetriesMutateSleep:   maxRetriesMutateSleep,
-		UseServerSideTimestamps: useServerSideTimestamps,
-		OracleStatementFile:     oracleStatementLogFile,
-		TestStatementFile:       testStatementLogFile,
-		Compression:             stmtlogger.CompressionNone,
+		MaxRetriesMutate:                 maxRetriesMutate,
+		MaxRetriesMutateSleep:            maxRetriesMutateSleep,
+		AsyncObjectStabilizationAttempts: asyncObjectStabilizationAttempts,
+		AsyncObjectStabilizationDelay:    asyncObjectStabilizationDelay,
+		UseServerSideTimestamps:          useServerSideTimestamps,
+		OracleStatementFile:              oracleStatementLogFile,
+		TestStatementFile:                testStatementLogFile,
+		Compression:                      stmtlogger.CompressionNone,
 		TestClusterConfig: store.ScyllaClusterConfig{
 			Name:                    stmtlogger.TypeTest,
 			Hosts:                   testClusterHost,
