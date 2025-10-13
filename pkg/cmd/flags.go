@@ -93,7 +93,7 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().IntVarP(&randomStringBuffer, "random-string-buffer-size", "", 100*1024*1024, "Size of the buffer used for random strings")
 	cmd.PersistentFlags().IntVarP(&mutationConcurrency, "mutation-concurrency", "", 0, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().IntVarP(&readConcurrency, "read-concurrency", "", 0, "Number of worker threads to use for IO operations")
-	cmd.PersistentFlags().IntVarP(&iOWorkerPool, "io-worker-pool", "", 1024, "Number of worker threads to use for IO operations")
+	cmd.PersistentFlags().IntVarP(&iOWorkerPool, "io-worker-pool", "", 128, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().BoolVarP(&versionFlag, "version", "", false, "Print version information")
 	cmd.PersistentFlags().
 		BoolP("version-json", "", false, "Print version information in JSON format")
@@ -171,7 +171,7 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		IntVarP(&maxRetriesMutate, "max-mutation-retries", "", 10, "Maximum number of attempts to apply a mutation")
 	cmd.Flags().
-		DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Millisecond,
+		DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Second,
 			"Duration between attempts to apply a mutation for example 10ms or 1s")
 	cmd.Flags().
 		IntVarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 256, "Number of reused buffered partition keys")
@@ -185,7 +185,7 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, defaults to one standard deviation ~0.341")
 	cmd.Flags().
-		StringVarP(&tracingOutFile, "tracing-outfile", "", "",
+		StringVarP(&tracingOutFile, "tracing-outdir", "", "",
 			"Specify the file to which tracing information gets written. Two magic names are available, 'stdout' and 'stderr'. By default tracing is disabled.")
 	cmd.Flags().
 		BoolVarP(&useCounters, "use-counters", "", false, "Ensure that at least one table is a counter table")
@@ -193,7 +193,7 @@ func setupFlags(cmd *cobra.Command) {
 		IntVarP(&asyncObjectStabilizationAttempts, "async-objects-stabilization-attempts", "", 10,
 			"Maximum number of attempts to validate result sets from MV and SI")
 	cmd.Flags().
-		DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 10*time.Millisecond,
+		DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 1*time.Second,
 			"Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
 	cmd.Flags().
 		BoolVarP(&useLWT, "use-lwt", "", false, "Emit LWT based updates")

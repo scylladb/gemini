@@ -237,7 +237,7 @@ func (g *Generator) start(ctx context.Context, wakeup chan struct{}) {
 
 func (g *Generator) FindAndMarkStalePartitions() {
 	nonStale := make([][]typedef.PartitionKeys, g.partitionCount)
-	for range g.partitionCount * 100 {
+	for range g.partitionCount * 1000 {
 		token, values, err := g.createPartitionKeyValues()
 		if err != nil {
 			g.logger.Panic("failed to get primary key hash", zap.Error(err))
@@ -269,6 +269,16 @@ func (g *Generator) FindAndMarkStalePartitions() {
 		zap.Int("stale_partitions", stalePartitions),
 		zap.Int("total_partitions", g.partitions.Len()),
 	)
+
+	staleThreshold := int(float64(g.partitions.Len()) * 0.3)
+
+	if stalePartitions > staleThreshold {
+		g.logger.Fatal("stale partitions exceed 30% threshold",
+			zap.Int("stale_partitions", stalePartitions),
+			zap.Int("total_partitions", g.partitions.Len()),
+			zap.Float64("percentage", float64(stalePartitions)/float64(g.partitions.Len())*100),
+		)
+	}
 
 	metrics.GeminiInformation.WithLabelValues("stale_partition_" + g.table.Name).Set(float64(stalePartitions))
 }

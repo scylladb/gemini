@@ -17,11 +17,11 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/multierr"
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/generators/statements"
@@ -90,8 +90,6 @@ func NewValidation(
 }
 
 func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
-	var acc error
-
 	stmt, stmtErr := v.statement.Select(ctx)
 	if errors.Is(stmtErr, utils.ErrNoPartitionKeyValues) {
 		return utils.ErrNoPartitionKeyValues
@@ -104,48 +102,32 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 		return ErrNoStatement
 	}
 
-	for attempt := 1; attempt <= v.maxAttempts; attempt++ {
-		validatedRows, err := v.store.Check(ctx, v.table, stmt, attempt)
-		if err == nil {
-			metric.Add(float64(validatedRows))
-			v.status.AddValidatedRows(validatedRows)
-			v.status.ReadOp()
-			return nil
-		}
-
-		if errors.Is(err, context.DeadlineExceeded) {
-			continue
-		}
-
-		if errors.Is(err, context.Canceled) {
-			return nil
-		}
-
-		if attempt == v.maxAttempts {
-			return joberror.JobError{
-				Timestamp:     time.Now(),
-				Err:           acc,
-				StmtType:      stmt.QueryType,
-				Message:       "Validation failed:" + err.Error(),
-				Query:         stmt.Query,
-				PartitionKeys: stmt.PartitionKeys.Values,
-			}
-		}
-
-		acc = multierr.Append(acc, err)
-
-		// Apply exponential backoff delay: baseDelay * 2^(attempt-1)
-		backoffDelay := v.calculateExponentialBackoff(attempt - 1)
-
-		// Make delay cancellable by context
-		select {
-		case <-time.After(backoffDelay):
-		case <-ctx.Done():
-			return nil
-		}
+	// Delegate retries to the store implementation
+	validatedRows, err := v.store.Check(ctx, v.table, stmt, 0)
+	if err == nil {
+		metric.Add(float64(validatedRows))
+		v.status.AddValidatedRows(validatedRows)
+		v.status.ReadOp()
+		return nil
 	}
 
-	return nil
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+
+	return joberror.JobError{
+		Timestamp:     time.Now(),
+		Err:           err,
+		StmtType:      stmt.QueryType,
+		Message:       "Validation failed: " + err.Error(),
+		Query:         stmt.Query,
+		PartitionKeys: stmt.PartitionKeys.Values,
+		Values:        stmt.Values,
+	}
 }
 
 func (v *Validation) Do(ctx context.Context) error {
@@ -169,12 +151,18 @@ func (v *Validation) Do(ctx context.Context) error {
 			return v.run(ctx, validatedRowsMetric)
 		})
 
+		if err == nil {
+			continue
+		}
+
 		if errors.Is(err, utils.ErrNoPartitionKeyValues) {
-			// Use a select with context to make delay cancellable
+			timer := utils.GetTimer(100 * time.Millisecond)
 			select {
-			case <-time.After(v.delay):
+			case <-timer.C:
+				utils.PutTimer(timer)
 				continue
 			case <-ctx.Done():
+				utils.PutTimer(timer)
 				return nil
 			}
 		}
@@ -187,9 +175,13 @@ func (v *Validation) Do(ctx context.Context) error {
 			return nil
 		}
 
+		// Handle different error types that can be returned from the store
 		var jobErr joberror.JobError
 		if errors.As(err, &jobErr) {
+			// It's already a joberror.JobError, use it directly
 			v.status.AddReadError(jobErr)
+		} else {
+			panic(fmt.Sprintf("invalid type err %T: %v", err, err))
 		}
 
 		if v.status.HasReachedErrorCount() {
@@ -203,26 +195,4 @@ func (v *Validation) Do(ctx context.Context) error {
 
 func (v *Validation) Name() string {
 	return "validation_" + v.table.Name
-}
-
-// calculateExponentialBackoff calculates the delay for exponential backoff in validation retries
-func (v *Validation) calculateExponentialBackoff(attempt int) time.Duration {
-	// Base delay is the configured delay
-	// Exponential backoff: baseDelay * 2^attempt with some jitter
-	baseDelay := v.delay
-	if attempt == 0 {
-		return baseDelay
-	}
-
-	// Calculate exponential delay: baseDelay * 2^attempt
-	multiplier := 1 << uint(attempt) // 2^attempt
-	delay := time.Duration(multiplier) * baseDelay
-
-	// Cap the delay to prevent it from growing too large (max 30 seconds)
-	maxDelay := 30 * time.Second
-	if delay > maxDelay {
-		delay = maxDelay
-	}
-
-	return delay
 }

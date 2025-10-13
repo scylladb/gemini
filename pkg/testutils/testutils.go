@@ -18,27 +18,39 @@ package testutils
 
 import (
 	"testing"
-	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/testcontainers/testcontainers-go"
 )
 
-type ScyllaContainer struct {
-	Oracle *gocql.Session
-	Test   *gocql.Session
-
-	OracleHosts []string
-	TestHosts   []string
-}
+type (
+	ScyllaContainer struct {
+		OracleContainer testcontainers.Container
+		TestContainer   testcontainers.Container
+		Oracle          *gocql.Session
+		Test            *gocql.Session
+		OracleHosts     []string
+		TestHosts       []string
+	}
+	ManagedScylla struct {
+		Container testcontainers.Container
+		Session   *gocql.Session
+		Hosts     []string
+	}
+)
 
 func Must[T any](T, error) T {
 	panic("this function should not be used in production code, only for testing purposes")
 }
 
-func SingleScylla(tb testing.TB, timeouts ...time.Duration) *ScyllaContainer {
+func SingleScylla(_ testing.TB, _ ...bool) *ScyllaContainer {
 	panic("this function should not be used in production code, only for testing purposes")
 }
 
-func TestContainers(_ testing.TB, timeouts ...time.Duration) *ScyllaContainer {
+func TestContainers(_ testing.TB, _ ...bool) *ScyllaContainer {
+	panic("this function should not be used in production code, only for testing purposes")
+}
+
+func GenerateUniqueKeyspaceName(_ testing.TB) string {
 	panic("this function should not be used in production code, only for testing purposes")
 }

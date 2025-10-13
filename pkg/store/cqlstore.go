@@ -18,6 +18,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -102,12 +105,12 @@ func (c *cqlStore) name() string {
 	return c.system
 }
 
-type MutationError struct {
+type MutationStoreError struct {
 	Inner         error
 	PartitionKeys *typedef.Values
 }
 
-func (e MutationError) Error() string {
+func (e MutationStoreError) Error() string {
 	data, _ := json.Marshal(e.PartitionKeys)
 
 	return "mutation error: " + e.Inner.Error() + ", partition keys: " + utils.UnsafeString(data)
@@ -133,7 +136,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 	}
 
 	if errors.Is(mutateErr, context.Canceled) {
-		c.logger.Warn("mutation cancelled", zap.String("system", c.system))
+		c.logger.Debug("mutation cancelled", zap.String("system", c.system))
 		return context.Canceled
 	}
 
@@ -152,7 +155,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 		zap.Error(mutateErr),
 	)
 
-	acc = multierr.Append(acc, MutationError{
+	acc = multierr.Append(acc, MutationStoreError{
 		Inner:         mutateErr,
 		PartitionKeys: stmt.PartitionKeys.Values,
 	})
@@ -187,7 +190,7 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	}
 
 	err := iter.Close()
-	if err != nil {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		c.logger.Error("error closing iterator",
 			zap.String("system", c.system),
 			zap.Error(err),
@@ -282,5 +285,33 @@ func createCluster(
 		}
 	}
 
-	return cluster.CreateSession()
+	session, err := cluster.CreateSession()
+	if err != nil {
+		return nil, err
+	}
+
+	if config.TracingDir != "" {
+		var file io.Writer
+
+		switch config.TracingDir {
+		case "stdout":
+			file = os.Stdout
+		case "stderr":
+			file = os.Stderr
+		default:
+			file, err = utils.CreateFile(filepath.Join(config.TracingDir, string(config.Name)+"-driver.log"), true)
+			if err != nil {
+				session.Close()
+				return nil, err
+			}
+		}
+
+		tracer := gocql.NewTraceWriter(session, file)
+		tracer.SetSleepInterval(100 * time.Millisecond)
+		tracer.SetMaxAttempts(10)
+
+		session.SetTrace(tracer)
+	}
+
+	return session, nil
 }

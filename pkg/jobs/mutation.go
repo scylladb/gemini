@@ -129,10 +129,13 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 		if errors.Is(err, utils.ErrNoPartitionKeyValues) {
 			// Add delay to prevent busy waiting when no partitions are available
+			timer := utils.GetTimer(200 * time.Millisecond)
 			select {
-			case <-time.After(200 * time.Millisecond):
+			case <-timer.C:
+				utils.PutTimer(timer)
 				continue
 			case <-ctx.Done():
+				utils.PutTimer(timer)
 				return nil
 			}
 		}
