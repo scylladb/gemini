@@ -37,11 +37,12 @@ const ContainerNetworkName = "scylla-gemini"
 
 type (
 	ScyllaContainer struct {
-		Oracle *gocql.Session
-		Test   *gocql.Session
-
-		OracleHosts []string
-		TestHosts   []string
+		OracleContainer testcontainers.Container
+		TestContainer   testcontainers.Container
+		Oracle          *gocql.Session
+		Test            *gocql.Session
+		OracleHosts     []string
+		TestHosts       []string
 	}
 
 	ipUsed struct {
@@ -139,32 +140,42 @@ func createScyllaSession(tb testing.TB, hosts ...string) *ScyllaContainer {
 	}
 }
 
-func spawnScylla(tb testing.TB, version string, sharedNetwork *testcontainers.DockerNetwork) *ScyllaContainer {
+func spawnScylla(tb testing.TB, name, version string, sharedNetwork *testcontainers.DockerNetwork) *ScyllaContainer {
 	tb.Helper()
 	spawningScyllaMutex.Lock()
+	defer spawningScyllaMutex.Unlock()
+
 	scyllaContainer, err := scylladb.Run(tb.Context(),
 		"scylladb/scylla:"+version,
 		scylladb.WithCustomCommands("--memory=512M", "--smp=1", "--developer-mode=1", "--overprovisioned=1"),
 		scylladb.WithShardAwareness(),
 		network.WithNetwork([]string{ContainerNetworkName}, sharedNetwork),
 	)
-	spawningScyllaMutex.Unlock()
 	if err != nil {
-		tb.Fatalf("failed to start oracle ScyllaDB container: %v", err)
+		tb.Fatalf("failed to start %s ScyllaDB container: %v", name, err)
 	}
 
 	tb.Cleanup(func() {
 		_ = scyllaContainer.Terminate(tb.Context())
 	})
 
-	return createScyllaSession(tb, Must(scyllaContainer.ContainerIP(tb.Context())))
+	container := createScyllaSession(tb, Must(scyllaContainer.ContainerIP(tb.Context())))
+	switch name {
+	case "oracle":
+		container.OracleContainer = scyllaContainer
+	case "test":
+		container.TestContainer = scyllaContainer
+	default:
+		tb.Fatalf("unknown ScyllaDB: %s", name)
+	}
+	return container
 }
 
-func SingleScylla(tb testing.TB) *ScyllaContainer {
+func SingleScylla(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 	tb.Helper()
 
 	val, existsDockerScylla := os.LookupEnv("GEMINI_USE_DOCKER_SCYLLA")
-	if !existsDockerScylla {
+	if (len(forceSpawn) > 0 && forceSpawn[0]) || !existsDockerScylla {
 		testVersion, exists := os.LookupEnv("GEMINI_SCYLLA_TEST")
 		if !exists || testVersion == "" {
 			testVersion = "2025.1"
@@ -172,7 +183,7 @@ func SingleScylla(tb testing.TB) *ScyllaContainer {
 
 		sharedNetwork := createScyllaNetwork(tb)
 
-		return spawnScylla(tb, testVersion, sharedNetwork)
+		return spawnScylla(tb, "test", testVersion, sharedNetwork)
 	}
 
 	valBool, err := strconv.ParseBool(val)
@@ -194,11 +205,11 @@ func SingleScylla(tb testing.TB) *ScyllaContainer {
 	return nil
 }
 
-func TestContainers(tb testing.TB) *ScyllaContainer {
+func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 	tb.Helper()
 	val, exists := os.LookupEnv("GEMINI_USE_DOCKER_SCYLLA")
 
-	if !exists {
+	if (len(forceSpawn) > 0 && forceSpawn[0]) || !exists {
 		oracleVersion, existsScyllaOracle := os.LookupEnv("GEMINI_SCYLLA_ORACLE")
 		if !existsScyllaOracle || oracleVersion == "" {
 			oracleVersion = "6.2"
@@ -211,14 +222,16 @@ func TestContainers(tb testing.TB) *ScyllaContainer {
 
 		sharedNetwork := createScyllaNetwork(tb)
 
-		oracleScylla := spawnScylla(tb, oracleVersion, sharedNetwork)
-		testScylla := spawnScylla(tb, testVersion, sharedNetwork)
+		oracleScylla := spawnScylla(tb, "oracle", oracleVersion, sharedNetwork)
+		testScylla := spawnScylla(tb, "test", testVersion, sharedNetwork)
 
 		return &ScyllaContainer{
-			Oracle:      oracleScylla.Test,
-			OracleHosts: oracleScylla.TestHosts,
-			Test:        testScylla.Test,
-			TestHosts:   testScylla.TestHosts,
+			Oracle:          oracleScylla.Test,
+			OracleHosts:     oracleScylla.TestHosts,
+			Test:            testScylla.Test,
+			TestHosts:       testScylla.TestHosts,
+			TestContainer:   testScylla.TestContainer,
+			OracleContainer: oracleScylla.OracleContainer,
 		}
 	}
 

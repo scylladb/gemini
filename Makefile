@@ -14,25 +14,28 @@ LDFLAGS_VERSION := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.d
 
 CQL_FEATURES ?= normal
 CONCURRENCY ?= 2
-DURATION ?= 10m
-WARMUP ?= 30s
+DURATION ?= 4m
+WARMUP ?= 1m
 MODE ?= mixed
 DATASET_SIZE ?= large
 GEMINI_SEED := $(shell echo $$((RANDOM % 100 + 1)))
 GEMINI_BINARY ?= $(PWD)/bin/gemini
 GEMINI_DOCKER_NETWORK ?= gemini
-GEMINI_IO_WORKER_POOL ?= 1024
+GEMINI_IO_WORKER_POOL ?= 128
 
 define get_scylla_ip
 	$(shell docker inspect --format "{{ .NetworkSettings.Networks.$(GEMINI_DOCKER_NETWORK).IPAddress }}" "$(1)")
 endef
 
-GEMINI_FLAGS ?= --level=debug \
+GEMINI_FLAGS ?= \
 	--consistency=QUORUM \
 	--test-host-selection-policy=token-aware \
 	--oracle-host-selection-policy=token-aware \
 	--mode=$(MODE) \
 	--async-objects-stabilization-attempts=10 \
+	--async-objects-stabilization-backoff=2s \
+	--max-mutation-retries-backoff=2s \
+	--max-mutation-retries=10 \
 	--oracle-replication-strategy="{'class': 'NetworkTopologyStrategy', 'replication_factor': '1'}" \
 	--concurrency=$(CONCURRENCY) \
 	--dataset-size=$(DATASET_SIZE) \
@@ -41,13 +44,14 @@ GEMINI_FLAGS ?= --level=debug \
 	--cql-features=$(CQL_FEATURES) \
 	--duration=$(DURATION) \
 	--warmup=$(WARMUP) \
-	--partition-key-buffer-reuse-size=50 \
+	--partition-key-buffer-reuse-size=128 \
 	--partition-key-distribution=uniform \
 	--io-worker-pool=$(GEMINI_IO_WORKER_POOL) \
 	--oracle-statement-log-file=$(PWD)/results/oracle-statements.json \
 	--test-statement-log-file=$(PWD)/results/test-statements.json \
-	 --verbose \
-	 --level=debug
+	--tracing-outdir=$(PWD)/results \
+	--verbose \
+	--level=debug
 
 .PHONY: tidy
 tidy:
@@ -55,11 +59,11 @@ tidy:
 
 .PHONY: check
 check:
-	@go tool golangci-lint run
+	@golangci-lint run
 
 .PHONY: fix
 fix:
-	@go tool golangci-lint run --fix
+	@golangci-lint run --fix
 
 .PHONY: fieldalign
 fieldalign:
@@ -67,7 +71,7 @@ fieldalign:
 
 .PHONY: fmt
 fmt:
-	@go tool golangci-lint fmt
+	@golangci-lint fmt
 
 .PHONY: build
 build:

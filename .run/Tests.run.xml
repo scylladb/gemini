@@ -2,7 +2,12 @@
   <configuration default="false" name="Tests" type="GoTestRunConfiguration" factoryName="Go Test">
     <module name="gemini" />
     <working_directory value="$PROJECT_DIR$" />
-    <go_parameters value="-timeout 5m -tags testing" />
+    <go_parameters value="-timeout 5m -tags testing -race" />
+    <envs>
+      <env name="GEMINI_USE_DOCKER_SCYLLA" value="true" />
+      <env name="GEMINI_TEST_CLUSTER_IP" value="192.168.100.3" />
+      <env name="GEMINI_ORACLE_CLUSTER_IP" value="192.168.100.2" />
+    </envs>
     <kind value="DIRECTORY" />
     <package value="github.com/scylladb/gemini" />
     <directory value="$PROJECT_DIR$" />

@@ -251,9 +251,14 @@ func (w *Workload) Run(base context.Context) error {
 		})
 
 		if err := w.jobs.Run(ctx, stopFlag, w.config.RunningMode); err != nil {
-			return errors.Wrap(err, "failed to run jobs")
+			return err
 		}
 		w.logger.Debug("main workload completed")
+	}
+
+	// If any errors were recorded during the workload, surface them to the caller
+	if w.status.HasErrors() {
+		return errors.New("workload encountered errors")
 	}
 
 	return nil

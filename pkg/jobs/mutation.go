@@ -16,10 +16,9 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"time"
-
-	"github.com/pkg/errors"
 
 	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/generators/statements"
@@ -130,10 +129,13 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 		if errors.Is(err, utils.ErrNoPartitionKeyValues) {
 			// Add delay to prevent busy waiting when no partitions are available
+			timer := utils.GetTimer(200 * time.Millisecond)
 			select {
-			case <-time.After(200 * time.Millisecond):
+			case <-timer.C:
+				utils.PutTimer(timer)
 				continue
 			case <-ctx.Done():
+				utils.PutTimer(timer)
 				return nil
 			}
 		}
@@ -148,7 +150,10 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 		var jobErr joberror.JobError
 		if errors.As(err, &jobErr) {
-			m.status.AddReadError(jobErr)
+			// When the write error occurs
+			m.status.AddWriteError(jobErr)
+			m.stopFlag.SetSoft(true)
+			return errors.Join(jobErr, errors.New("mutation job stopped due to write error"))
 		}
 
 		if m.status.HasReachedErrorCount() {

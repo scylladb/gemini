@@ -112,7 +112,7 @@ func New(count int) *Pool {
 				it, more := <-ch
 				if !more {
 					logger.Debug("worker shutting down", zap.Int("worker_id", workerID))
-					break
+					return
 				}
 
 				execute(it)

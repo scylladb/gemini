@@ -139,7 +139,7 @@ func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error
 					g.Go(func() error {
 						log.Debug("mutation worker started", zap.Int("worker_id", workerID))
 						err := mutation.Do(gCtx)
-						if err != nil {
+						if err != nil && !errors.Is(err, context.Canceled) {
 							log.Error("mutation worker finished with error",
 								zap.Int("worker_id", workerID),
 								zap.Error(err),
@@ -174,7 +174,7 @@ func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error
 					g.Go(func() error {
 						log.Debug("validation worker started", zap.Int("worker_id", workerID))
 						err := validation.Do(gCtx)
-						if err != nil {
+						if err != nil && !errors.Is(err, context.Canceled) {
 							log.Error("validation worker finished with error",
 								zap.Int("worker_id", workerID),
 								zap.Error(err),
