@@ -133,13 +133,17 @@ func (p *Partition) wakeUp() {
 }
 
 func (p *Partition) pick(ctx context.Context) (typedef.PartitionKeys, error) {
-	ch := *p.values.Load()
-	if ch == nil {
+	chPtr := p.values.Load()
+	if chPtr == nil {
 		return typedef.PartitionKeys{}, os.ErrClosed
 	}
+	ch := *chPtr
 
 	select {
-	case v := <-ch:
+	case v, ok := <-ch:
+		if !ok {
+			return typedef.PartitionKeys{}, os.ErrClosed
+		}
 		if len(ch) <= cap(ch)/4 {
 			p.wakeUp() // channel at 25% capacity, trigger generator
 		}
@@ -148,7 +152,16 @@ func (p *Partition) pick(ctx context.Context) (typedef.PartitionKeys, error) {
 		return typedef.PartitionKeys{}, context.Canceled
 	default:
 		p.wakeUp()
-		return <-ch, nil
+		// Block waiting for a value, but still honor context cancellation and closed channel
+		select {
+		case v, ok := <-ch:
+			if !ok {
+				return typedef.PartitionKeys{}, os.ErrClosed
+			}
+			return v, nil
+		case <-ctx.Done():
+			return typedef.PartitionKeys{}, context.Canceled
+		}
 	}
 }
 
@@ -176,14 +189,13 @@ func (p *Partition) Close() error {
 }
 
 type Partitions struct {
-	parts []Partition
+	parts      []Partition
+	closeOnce  sync.Once
 }
-
-var closePartitions sync.Once
 
 func (p *Partitions) Close() error {
 	var err error
-	closePartitions.Do(func() {
+	p.closeOnce.Do(func() {
 		for i := range len(p.parts) {
 			err = multierr.Append(err, p.parts[i].Close())
 		}

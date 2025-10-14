@@ -133,8 +133,15 @@ func (g *Generator) Get(ctx context.Context) (typedef.PartitionKeys, error) {
 
 	retryCount := 0
 	for targetPart.Stale() {
+		// Respect cancellation to allow fast shutdown when many partitions are stale
+		select {
+		case <-ctx.Done():
+			return typedef.PartitionKeys{}, context.Canceled
+		default:
+		}
+
 		retryCount++
-		if retryCount > 10 {
+		if retryCount > 10 && (retryCount&((1<<10)-1)) == 0 { // log approximately every 1024 retries to avoid flooding
 			g.logger.Warn("high number of stale partition retries",
 				zap.String("table", g.table.Name),
 				zap.Int("retry_count", retryCount),
@@ -178,8 +185,15 @@ func (g *Generator) GetOld(ctx context.Context) (typedef.PartitionKeys, error) {
 
 	retryCount := 0
 	for targetPart.Stale() {
+		// Respect cancellation to allow fast shutdown when many partitions are stale
+		select {
+		case <-ctx.Done():
+			return typedef.PartitionKeys{}, context.Canceled
+		default:
+		}
+
 		retryCount++
-		if retryCount > 10 {
+		if retryCount > 10 && (retryCount&((1<<10)-1)) == 0 { // log approximately every 1024 retries to avoid flooding
 			g.logger.Warn("high number of stale partition retries for old values",
 				zap.String("table", g.table.Name),
 				zap.Int("retry_count", retryCount),
@@ -229,7 +243,7 @@ func (g *Generator) start(ctx context.Context, wakeup chan struct{}) {
 				g.logger.Info("stopping partition key generation loop")
 				return
 			case <-wakeup:
-				g.fillAllPartitions()
+				g.fillAllPartitions(ctx)
 			}
 		}
 	}()
@@ -265,11 +279,6 @@ func (g *Generator) FindAndMarkStalePartitions() {
 		}
 	}
 
-	g.logger.Info("marked stale partitions",
-		zap.Int("stale_partitions", stalePartitions),
-		zap.Int("total_partitions", g.partitions.Len()),
-	)
-
 	staleThreshold := int(float64(g.partitions.Len()) * 0.3)
 
 	if stalePartitions > staleThreshold {
@@ -280,6 +289,11 @@ func (g *Generator) FindAndMarkStalePartitions() {
 		)
 	}
 
+	g.logger.Info("marked stale partitions",
+		zap.Int("stale_partitions", stalePartitions),
+		zap.Int("total_partitions", g.partitions.Len()),
+	)
+
 	metrics.GeminiInformation.WithLabelValues("stale_partition_" + g.table.Name).Set(float64(stalePartitions))
 }
 
@@ -288,7 +302,7 @@ var errFullPartitions = errors.New("all partitions are full, cannot fill more")
 // fillAllPartitions guarantees that each partition was tested to be full
 // at least once since the function started and before it ended.
 // In other words, no partition will be starved.
-func (g *Generator) fillAllPartitions() {
+func (g *Generator) fillAllPartitions(ctx context.Context) {
 	dropped := metrics.GeneratorDroppedValues.WithLabelValues("generator_"+g.table.Name, "new")
 	executionDuration := metrics.ExecutionTimeStart("generator_" + g.table.Name + "_new")
 	pFilled := make([]bool, g.partitions.Len())
@@ -302,7 +316,13 @@ func (g *Generator) fillAllPartitions() {
 	}
 
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		err := executionDuration.RunFuncE(func() error {
+			if ctx.Err() != nil {
+				return errFullPartitions
+			}
 			token, values, err := g.createPartitionKeyValues()
 			if err != nil {
 				g.logger.Error("failed to get primary key hash", zap.Error(err))
@@ -344,7 +364,10 @@ func (g *Generator) fillAllPartitions() {
 }
 
 func (g *Generator) shardOf(token uint32) int {
-	return int(token % uint32(g.partitionCount))
+	// Use unbiased multiplicative hashing to map 32-bit token into [0, partitionCount)
+	// This avoids modulo bias and low-bit patterns that can cause many stale partitions
+	// when the token space is sparse or exhibits low variance in lower bits.
+	return int((uint64(token) * uint64(g.partitionCount)) >> 32)
 }
 
 func (g *Generator) createPartitionKeyValues() (uint32, map[string][]any, error) {
