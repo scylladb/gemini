@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/schema"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -52,7 +53,7 @@ func TestGetReplicationStrategy(t *testing.T) {
 	fallback := replication.NewSimpleStrategy()
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			got := getReplicationStrategy(tc.strategy, fallback, logger)
+			got := schema.GetReplicationStrategy(tc.strategy, fallback, logger)
 			if diff := cmp.Diff(got.ToCQL(), tc.expected); diff != "" {
 				t.Errorf("expected=%s, got=%s,diff=%s", tc.strategy, got.ToCQL(), diff)
 			}
@@ -64,7 +65,7 @@ func TestGetReplicationStrategy(t *testing.T) {
 func TestReadExampleSchema(t *testing.T) {
 	filePath := "schema.json"
 
-	testSchema, err := readSchema(filePath, typedef.SchemaConfig{})
+	testSchema, err := schema.Read(filePath, typedef.SchemaConfig{})
 	if err != nil {
 		t.Fatalf("failed to open schema example json file %s, error:%s", filePath, err)
 	}

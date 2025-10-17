@@ -283,8 +283,7 @@ func NewValues(initial int) *Values {
 	}
 }
 
-func
-NewValuesFromMap(m map[string][]any) *Values {
+func NewValuesFromMap(m map[string][]any) *Values {
 	return &Values{
 		data: m,
 	}

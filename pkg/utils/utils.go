@@ -110,7 +110,8 @@ func RandInt2(rnd Random, minimum, maximum int) int {
 	if maximum <= minimum {
 		return minimum
 	}
-	return minimum + rnd.IntN(maximum-minimum)
+	num := rnd.IntN(maximum - minimum)
+	return minimum + num
 }
 
 func IgnoreError(fn func() error) {

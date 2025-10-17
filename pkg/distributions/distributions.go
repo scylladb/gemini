@@ -30,45 +30,43 @@ type (
 )
 
 const (
-	DistributionZipf      Distribution = "zipf"
-	DistributionLogNormal Distribution = "lognormal"
-	DistributionNormal    Distribution = "normal"
-	DistributionUniform   Distribution = "uniform"
+	Zipf      Distribution = "zipf"
+	LogNormal Distribution = "lognormal"
+	Normal    Distribution = "normal"
+	Uniform   Distribution = "uniform"
 )
 
 func New(distribution Distribution, partitionCount int, seed uint64, mu, sigma float64) (*rand.ChaCha8, DistributionFunc) {
-	hash := sha256.Sum256(
-		[]byte(
-			string(distribution) + strconv.FormatInt(
-				int64(partitionCount),
-				10,
-			) + strconv.FormatUint(
-				seed,
-				10,
-			) + strconv.FormatFloat(
-				mu,
-				'f',
-				-1,
-				64,
-			) + strconv.FormatFloat(
-				sigma,
-				'f',
-				-1,
-				64,
-			),
-		),
-	)
-
-	src := rand.NewChaCha8(hash)
+	toHash := string(distribution) + strconv.FormatInt(int64(partitionCount), 10) + strconv.FormatUint(seed, 10)
 
 	switch distribution {
-	case DistributionZipf:
+	case Zipf:
+		src := rand.NewChaCha8(sha256.Sum256([]byte(toHash)))
+
 		zipf := rand.NewZipf(rand.New(src), 1.001, float64(partitionCount), uint64(partitionCount))
 
 		return src, func() uint32 {
 			return uint32(zipf.Uint64())
 		}
-	case DistributionLogNormal:
+	case LogNormal:
+		hash := sha256.Sum256(
+			[]byte(
+				toHash + strconv.FormatFloat(
+					mu,
+					'f',
+					-1,
+					64,
+				) + strconv.FormatFloat(
+					sigma,
+					'f',
+					-1,
+					64,
+				),
+			),
+		)
+
+		src := rand.NewChaCha8(hash)
+
 		d := distuv.LogNormal{
 			Src:   src,
 			Mu:    mu,
@@ -78,7 +76,25 @@ func New(distribution Distribution, partitionCount int, seed uint64, mu, sigma f
 		return src, func() uint32 {
 			return uint32(d.Rand())
 		}
-	case DistributionNormal:
+	case Normal:
+		hash := sha256.Sum256(
+			[]byte(
+				toHash + strconv.FormatFloat(
+					mu,
+					'f',
+					-1,
+					64,
+				) + strconv.FormatFloat(
+					sigma,
+					'f',
+					-1,
+					64,
+				),
+			),
+		)
+
+		src := rand.NewChaCha8(hash)
+
 		d := distuv.Normal{
 			Src:   src,
 			Mu:    mu,
@@ -88,7 +104,9 @@ func New(distribution Distribution, partitionCount int, seed uint64, mu, sigma f
 		return src, func() uint32 {
 			return uint32(d.Rand())
 		}
-	case DistributionUniform:
+	case Uniform:
+		src := rand.NewChaCha8(sha256.Sum256([]byte(toHash)))
+
 		d := distuv.Uniform{
 			Min: 0,
 			Max: float64(partitionCount),

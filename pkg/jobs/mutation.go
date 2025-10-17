@@ -90,10 +90,27 @@ func (m *Mutation) run(ctx context.Context) error {
 		return nil
 	}
 
+	// Treat context cancellation as expected termination
 	if errors.Is(err, context.Canceled) {
 		return context.Canceled
 	}
 
+	// If this is a comprehensive mutation error (all retries failed), surface it.
+	// Note: MutationError implements Is and may match DeadlineExceeded; detect it explicitly.
+	var mutErr *store.MutationError
+	if errors.As(err, &mutErr) {
+		return joberror.JobError{
+			Err:           err,
+			Timestamp:     time.Now(),
+			StmtType:      mutateStmt.QueryType,
+			Message:       "Mutation failed: " + err.Error(),
+			Query:         mutateStmt.Query,
+			PartitionKeys: mutateStmt.PartitionKeys.Values,
+			Values:        mutateStmt.Values,
+		}
+	}
+
+	// For pure context deadline expirations (e.g. job/context shutdown), don't count as errors
 	if errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}
@@ -150,10 +167,14 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 		var jobErr joberror.JobError
 		if errors.As(err, &jobErr) {
-			// When the write error occurs
+			// Record the write error, but only stop if we've exceeded the error budget
 			m.status.AddWriteError(jobErr)
-			m.stopFlag.SetSoft(true)
-			return errors.Join(jobErr, errors.New("mutation job stopped due to write error"))
+			if m.status.HasReachedErrorCount() {
+				m.stopFlag.SetSoft(true)
+				return errors.New("mutation job stopped due to errors")
+			}
+			// Continue processing; transient errors should not halt immediately
+			continue
 		}
 
 		if m.status.HasReachedErrorCount() {

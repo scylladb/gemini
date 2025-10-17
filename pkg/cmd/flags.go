@@ -149,13 +149,13 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		IntVarP(&maxTables, "max-tables", "", 1, "Maximum number of generated tables")
 	cmd.Flags().
-		IntVarP(&maxPartitionKeys, "max-partition-keys", "", 5, "Maximum number of generated partition keys")
+		IntVarP(&maxPartitionKeys, "max-partition-keys", "", 8, "Maximum number of generated partition keys")
 	cmd.Flags().
-		IntVarP(&minPartitionKeys, "min-partition-keys", "", 1, "Minimum number of generated partition keys")
+		IntVarP(&minPartitionKeys, "min-partition-keys", "", 2, "Minimum number of generated partition keys")
 	cmd.Flags().
-		IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 3, "Maximum number of generated clustering keys")
+		IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 4, "Maximum number of generated clustering keys")
 	cmd.Flags().
-		IntVarP(&minClusteringKeys, "min-clustering-keys", "", 1, "Minimum number of generated clustering keys")
+		IntVarP(&minClusteringKeys, "min-clustering-keys", "", 0, "Minimum number of generated clustering keys")
 	cmd.Flags().
 		IntVarP(&maxColumns, "max-columns", "", 12, "Maximum number of generated columns")
 	cmd.Flags().

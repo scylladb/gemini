@@ -17,6 +17,7 @@ package generators
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"sync"
 
@@ -70,7 +71,6 @@ type Config struct {
 	PartitionsRangeConfig      typedef.PartitionRangeConfig
 	PartitionsCount            int
 	PkUsedBufferSize           int
-	Seed                       uint64
 }
 
 func NewGenerator(
@@ -249,24 +249,37 @@ func (g *Generator) start(ctx context.Context, wakeup chan struct{}) {
 	}()
 }
 
-func (g *Generator) FindAndMarkStalePartitions() {
+type ErrTooManyStalePartitions struct {
+	PartitionCount  int
+	StaleThreshold  int
+	StalePartitions int
+}
+
+func (e ErrTooManyStalePartitions) Error() string {
+	return fmt.Sprintf("too many stale partitions(%d): %d/%d",
+		e.PartitionCount, e.StalePartitions, e.StaleThreshold,
+	)
+}
+
+func (g *Generator) FindAndMarkStalePartitions() error {
 	nonStale := make([][]typedef.PartitionKeys, g.partitionCount)
-	for range g.partitionCount * 1000 {
+	for range g.partitionCount * 100 {
 		token, values, err := g.createPartitionKeyValues()
 		if err != nil {
 			g.logger.Panic("failed to get primary key hash", zap.Error(err))
 		}
 
-		nonStale[g.shardOf(token)] = append(nonStale[g.shardOf(token)], typedef.PartitionKeys{
+		idx := g.shardOf(token)
+		nonStale[idx] = append(nonStale[idx], typedef.PartitionKeys{
 			Values: typedef.NewValuesFromMap(values),
 			Token:  token,
 		})
 	}
 
-	stalePartitions := 0
+	staleCount := 0
 	for idx, v := range nonStale {
 		if len(v) == 0 {
-			stalePartitions++
+			staleCount++
 			if err := g.partitions.Get(idx).MarkStale(); err != nil {
 				g.logger.Panic("failed to mark partition as stale", zap.Error(err))
 			}
@@ -281,12 +294,19 @@ func (g *Generator) FindAndMarkStalePartitions() {
 
 	staleThreshold := int(float64(g.partitions.Len()) * 0.3)
 
+	stalePartitions := staleCount
 	if stalePartitions > staleThreshold {
-		g.logger.Fatal("stale partitions exceed 30% threshold",
+		g.logger.Error("stale partitions exceed 30% threshold",
 			zap.Int("stale_partitions", stalePartitions),
 			zap.Int("total_partitions", g.partitions.Len()),
 			zap.Float64("percentage", float64(stalePartitions)/float64(g.partitions.Len())*100),
 		)
+
+		return ErrTooManyStalePartitions{
+			PartitionCount:  g.partitions.Len(),
+			StaleThreshold:  staleThreshold,
+			StalePartitions: stalePartitions,
+		}
 	}
 
 	g.logger.Info("marked stale partitions",
@@ -295,6 +315,8 @@ func (g *Generator) FindAndMarkStalePartitions() {
 	)
 
 	metrics.GeminiInformation.WithLabelValues("stale_partition_" + g.table.Name).Set(float64(stalePartitions))
+
+	return nil
 }
 
 var errFullPartitions = errors.New("all partitions are full, cannot fill more")
@@ -319,6 +341,7 @@ func (g *Generator) fillAllPartitions(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+
 		err := executionDuration.RunFuncE(func() error {
 			if ctx.Err() != nil {
 				return errFullPartitions
