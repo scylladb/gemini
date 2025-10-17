@@ -31,7 +31,6 @@ import (
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
-	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gemini/pkg/workpool"
@@ -97,26 +96,25 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 	}
 
 	if config.RandomStringBuffer <= 0 {
-		if testutils.IsUnderTest() {
-			config.RandomStringBuffer = 65 * 1024 // 65 KiB
-		} else {
-			config.RandomStringBuffer = 32 * 1024 * 1024 // 32 MiB
-		}
+		config.RandomStringBuffer = 32 * 1024 * 1024 // 32 MiB
 	}
 
-	logger.Debug("preallocating random string buffer", zap.Int("size", config.RandomStringBuffer))
+	logger.Debug("pre-allocating random string buffer", zap.Int("size", config.RandomStringBuffer))
 	utils.PreallocateRandomString(rand.New(randSrc), config.RandomStringBuffer)
 
 	logger.Debug("creating generators")
-	gens := generators.New(
+	gens, err := generators.New(
 		schema,
 		distFunc,
-		config.Seed,
 		config.PartitionCount,
 		config.PartitionBufferSize,
 		logger,
 		randSrc,
 	)
+	if err != nil {
+		logger.Error("failed to create generators", zap.Error(err))
+		return nil, err
+	}
 
 	logger.Debug("generating schema changes")
 	schemaChanges, err := gens.Get(schema.Tables[0]).Get(context.Background())

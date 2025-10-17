@@ -189,8 +189,8 @@ func (p *Partition) Close() error {
 }
 
 type Partitions struct {
-	parts      []Partition
-	closeOnce  sync.Once
+	parts     []Partition
+	closeOnce sync.Once
 }
 
 func (p *Partitions) Close() error {

@@ -31,15 +31,14 @@ type Generators struct {
 func New(
 	schema *typedef.Schema,
 	distFunc distributions.DistributionFunc,
-	seed uint64, distributionSize, pkBufferReuseSize int,
+	distributionSize, pkBufferReuseSize int,
 	logger *zap.Logger,
 	source *rand.ChaCha8,
-) *Generators {
+) (*Generators, error) {
 	cfg := Config{
 		PartitionsRangeConfig:      schema.Config.GetPartitionRangeConfig(),
 		PartitionsCount:            distributionSize,
 		PartitionsDistributionFunc: distFunc,
-		Seed:                       seed,
 		PkUsedBufferSize:           pkBufferReuseSize,
 	}
 
@@ -54,13 +53,15 @@ func New(
 		if table.PartitionKeys.ValueVariationsNumber(&partitionRangeConfig) < math.MaxUint32 {
 			// Low partition key variation can lead to having staled partitions
 			// Let's detect and mark them before running test
-			g.FindAndMarkStalePartitions()
+			if err := g.FindAndMarkStalePartitions(); err != nil {
+				return nil, err
+			}
 		}
 
 		gens.Gens[table.Name] = g
 	}
 
-	return gens
+	return gens, nil
 }
 
 func (g *Generators) Get(table *typedef.Table) *Generator {

@@ -87,7 +87,7 @@ func TestWorkloadBrokenPipe(t *testing.T) {
 
 	workload, err := NewWorkload(&WorkloadConfig{
 		RunningMode:           jobs.MixedMode,
-		PartitionDistribution: distributions.DistributionUniform,
+		PartitionDistribution: distributions.Uniform,
 		Seed:                  42,
 		PartitionBufferSize:   64,
 		RandomStringBuffer:    1024,

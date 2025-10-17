@@ -37,7 +37,7 @@ func TestNew(t *testing.T) {
 	}{
 		{dist: "zipf", seed: uint64(time.Now().UnixNano()), size: 10000, maxSameValues: 10},
 		{
-			dist:          DistributionNormal,
+			dist:          Normal,
 			seed:          uint64(time.Now().UnixNano()),
 			size:          10000,
 			mu:            stdDistMean,
@@ -45,7 +45,7 @@ func TestNew(t *testing.T) {
 			maxSameValues: 3000,
 		},
 		{
-			dist:          DistributionUniform,
+			dist:          Uniform,
 			seed:          uint64(time.Now().UnixNano()),
 			size:          10000,
 			mu:            stdDistMean,

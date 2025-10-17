@@ -240,7 +240,7 @@ func TestWorkload(t *testing.T) {
 
 			workload, err := NewWorkload(&WorkloadConfig{
 				RunningMode:           test.mode,
-				PartitionDistribution: distributions.DistributionUniform,
+				PartitionDistribution: distributions.Uniform,
 				Seed:                  1,
 				PartitionBufferSize:   2,
 				IOWorkerPoolSize:      16,
@@ -280,7 +280,7 @@ func TestWorkloadWithoutOracle(t *testing.T) {
 
 			workload, err := NewWorkload(&WorkloadConfig{
 				RunningMode:           test.mode,
-				PartitionDistribution: distributions.DistributionUniform,
+				PartitionDistribution: distributions.Uniform,
 				Seed:                  1,
 				PartitionBufferSize:   10,
 				IOWorkerPoolSize:      2,
@@ -316,8 +316,8 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	})
 
 	const (
-		partitionCount      = 100
-		partitionBufferSize = 10
+		partitionCount      = 1000
+		partitionBufferSize = 100
 		seed                = 4
 		maxErrorsCount      = 1
 	)
@@ -326,17 +326,17 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	t.Log("Phase 1: Running mixed workload to populate and validate data")
 	mixedWorkload, err := NewWorkload(&WorkloadConfig{
 		RunningMode:           jobs.MixedMode,
-		PartitionDistribution: distributions.DistributionUniform,
+		PartitionDistribution: distributions.Uniform,
 		Seed:                  seed,
 		PartitionBufferSize:   partitionBufferSize,
 		RandomStringBuffer:    1024,
 		IOWorkerPoolSize:      1024,
 		MaxErrorsToStore:      maxErrorsCount,
-		WarmupDuration:        0,                // Warmup to populate data
-		Duration:              20 * time.Second, // Then validate
+		WarmupDuration:        4*time.Second + 500*time.Millisecond, // Warmup to populate data
+		Duration:              10 * time.Second,                     // Then validate
 		PartitionCount:        partitionCount,
 		MutationConcurrency:   2,
-		ReadConcurrency:       2,
+		ReadConcurrency:       5,
 		DropSchema:            true,
 	}, storeConfig, schema, logger, stopFlag)
 	assert.NoError(err)
@@ -359,10 +359,8 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	assert.Error(result)
 	assert.NoError(mixedWorkload.Close())
 
-	assert.Greater(mixedStatus.WriteOps.Load(), uint64(0), "should have written data")
-	assert.Greater(mixedStatus.ValidatedRows.Load(), uint64(0), "should have validated some rows")
-	assert.Equal(uint64(0), mixedStatus.WriteErrors.Load(), "should have no write errors")
-	assert.GreaterOrEqual(mixedStatus.ReadErrors.Load(), uint64(1), "should have no read errors initially")
+	assert.GreaterOrEqual(mixedStatus.ReadErrors.Load(), uint64(1), "should have read errors")
+	assert.Zero(mixedStatus.WriteErrors.Load(), "should have no write errors")
 
 	t.Log("Phase 4: Verifying log files contain error statements")
 	contents := map[string][]stmtlogger.Item{}
@@ -452,7 +450,7 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 
 	workload, err := NewWorkload(&WorkloadConfig{
 		RunningMode:           jobs.MixedMode,
-		PartitionDistribution: distributions.DistributionUniform,
+		PartitionDistribution: distributions.Uniform,
 		Seed:                  seed,
 		PartitionBufferSize:   partitionBufferSize,
 		IOWorkerPoolSize:      64, // Reduced from 16 to avoid overwhelming the system

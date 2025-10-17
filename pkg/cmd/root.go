@@ -36,10 +36,13 @@ import (
 	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/realrandom"
+	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/schema"
 	"github.com/scylladb/gemini/pkg/services"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
+	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -163,7 +166,11 @@ func run(cmd *cobra.Command, _ []string) error {
 	}
 
 	intSeed := seedFromString(seed)
-	schema, err := getSchema(schemaSeed, logger)
+	sc, err := schema.Get(
+		createSchemaConfig(datasetSize, logger),
+		schemaSeed,
+		schemaFile,
+	)
 	if err != nil {
 		return errors.Wrap(err, "failed to get schema")
 	}
@@ -222,7 +229,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		ReadConcurrency:       readConcurrency,
 		DropSchema:            dropSchema,
 		StatementRatios:       statementRatio,
-	}, storeConfig, schema, logger, stopFlag)
+	}, storeConfig, sc, logger, stopFlag)
 	if err != nil {
 		return err
 	}
@@ -238,7 +245,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		}
 	}()
 
-	printSetup(schema, statementRatio, intSeed, seedFromString(schemaSeed))
+	printSetup(sc, statementRatio, intSeed, seedFromString(schemaSeed))
 
 	if err = workload.Run(cmd.Context()); err != nil {
 		logger.Error("failed to run gemini workload", zap.Error(err))
@@ -325,4 +332,64 @@ func seedFromString(seed string) uint64 {
 	}
 	val, _ := strconv.ParseUint(seed, 10, 64)
 	return val
+}
+
+func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
+	rs := schema.GetReplicationStrategy(replicationStrategy, replication.NewNetworkTopologyStrategy(), logger)
+	ors := schema.GetReplicationStrategy(oracleReplicationStrategy, rs, logger)
+	return typedef.SchemaConfig{
+		ReplicationStrategy:              rs,
+		OracleReplicationStrategy:        ors,
+		TableOptions:                     tableopts.CreateTableOptions(tableOptions, logger),
+		MaxTables:                        maxTables,
+		MaxPartitionKeys:                 maxPartitionKeys,
+		MinPartitionKeys:                 minPartitionKeys,
+		MaxClusteringKeys:                maxClusteringKeys,
+		MinClusteringKeys:                minClusteringKeys,
+		MaxColumns:                       maxColumns,
+		MinColumns:                       minColumns,
+		MaxUDTParts:                      schema.MaxUDTParts,
+		MaxTupleParts:                    schema.MaxTupleParts,
+		MaxBlobLength:                    schema.MaxBlobLength,
+		MinBlobLength:                    schema.MinBlobLength,
+		MaxStringLength:                  schema.MaxStringLength,
+		MinStringLength:                  schema.MinStringLength,
+		UseCounters:                      useCounters,
+		UseLWT:                           useLWT,
+		CQLFeature:                       getCQLFeature(cqlFeatures),
+		UseMaterializedViews:             useMaterializedViews,
+		AsyncObjectStabilizationAttempts: asyncObjectStabilizationAttempts,
+		AsyncObjectStabilizationDelay:    asyncObjectStabilizationDelay,
+	}
+}
+
+func createSchemaConfig(datasetSize string, logger *zap.Logger) typedef.SchemaConfig {
+	defaultConfig := createDefaultSchemaConfig(logger)
+	switch strings.ToLower(datasetSize) {
+	case "small":
+		return typedef.SchemaConfig{
+			ReplicationStrategy:              defaultConfig.ReplicationStrategy,
+			OracleReplicationStrategy:        defaultConfig.OracleReplicationStrategy,
+			TableOptions:                     defaultConfig.TableOptions,
+			MaxTables:                        defaultConfig.MaxTables,
+			MaxPartitionKeys:                 defaultConfig.MaxPartitionKeys,
+			MinPartitionKeys:                 defaultConfig.MinPartitionKeys,
+			MaxClusteringKeys:                defaultConfig.MaxClusteringKeys,
+			MinClusteringKeys:                defaultConfig.MinClusteringKeys,
+			MaxColumns:                       defaultConfig.MaxColumns,
+			MinColumns:                       defaultConfig.MinColumns,
+			MaxUDTParts:                      2,
+			MaxTupleParts:                    2,
+			MaxBlobLength:                    20,
+			MaxStringLength:                  20,
+			UseCounters:                      defaultConfig.UseCounters,
+			UseLWT:                           defaultConfig.UseLWT,
+			CQLFeature:                       defaultConfig.CQLFeature,
+			AsyncObjectStabilizationAttempts: defaultConfig.AsyncObjectStabilizationAttempts,
+			UseMaterializedViews:             defaultConfig.UseMaterializedViews,
+			AsyncObjectStabilizationDelay:    defaultConfig.AsyncObjectStabilizationDelay,
+		}
+	default:
+		return defaultConfig
+	}
 }
