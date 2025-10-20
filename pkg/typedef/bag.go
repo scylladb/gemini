@@ -64,6 +64,14 @@ func (ct *BagType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	return []any{out}
 }
 
+func (ct *BagType) GenValueOut(out []any, r utils.Random, p *PartitionRangeConfig) []any {
+	count := utils.RandInt2(r, 1, maxBagSize+1)
+	for range count {
+		out = ct.ValueType.GenValueOut(out, r, p)
+	}
+	return out
+}
+
 func (ct *BagType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]any, count)

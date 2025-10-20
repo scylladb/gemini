@@ -24,6 +24,8 @@ type Type interface {
 	Name() string
 	CQLDef() string
 	CQLHolder() string
+
+	GenValueOut([]any, utils.Random, *PartitionRangeConfig) []any
 	GenValue(utils.Random, *PartitionRangeConfig) []any
 	GenJSONValue(utils.Random, *PartitionRangeConfig) any
 	LenValue() int

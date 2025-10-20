@@ -166,6 +166,25 @@ func (mt *MapType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	return vals.Interface()
 }
 
+func (mt *MapType) GenValueOut(out []any, r utils.Random, p *PartitionRangeConfig) []any {
+	count := utils.RandInt2(r, 1, maxMapSize+1)
+	vals := reflect.MakeMap(
+		reflect.MapOf(
+			reflect.TypeOf(mt.KeyType.GenValue(r, p)[0]),
+			reflect.TypeOf(mt.ValueType.GenValue(r, p)[0]),
+		),
+	)
+
+	for range count {
+		vals.SetMapIndex(
+			reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]),
+			reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]),
+		)
+	}
+
+	return append(out, vals.Interface())
+}
+
 func (mt *MapType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxMapSize+1)
 	vals := reflect.MakeMap(
@@ -207,7 +226,7 @@ func (mt *MapType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
 }
 
 type CounterType struct {
-	Value int64
+	Value atomic.Int32
 }
 
 func (ct *CounterType) CQLType() gocql.TypeInfo {
@@ -226,14 +245,23 @@ func (ct *CounterType) GenJSONValue(r utils.Random, _ *PartitionRangeConfig) any
 	if testutils.IsUnderTest() {
 		return r.Int64()
 	}
-	return atomic.AddInt64(&ct.Value, 1)
+
+	return ct.Value.Add(1)
 }
 
 func (ct *CounterType) GenValue(r utils.Random, _ *PartitionRangeConfig) []any {
 	if testutils.IsUnderTest() {
 		return []any{r.Int64()}
 	}
-	return []any{atomic.AddInt64(&ct.Value, 1)}
+	return []any{ct.Value.Add(1)}
+}
+
+func (ct *CounterType) GenValueOut(out []any, r utils.Random, _ *PartitionRangeConfig) []any {
+	if testutils.IsUnderTest() {
+		return append(out, r.Int64())
+	}
+
+	return append(out, ct.Value.Add(1))
 }
 
 func (ct *CounterType) LenValue() int {

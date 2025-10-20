@@ -39,14 +39,10 @@ func (g *Generator) Update(ctx context.Context) (*typedef.Stmt, error) {
 		}
 	}
 
-	pks, err := g.generator.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-
+	pks := g.generator.Next()
 	for _, pk := range g.table.PartitionKeys {
 		builder.Where(qb.Eq(pk.Name))
-		values = append(values, pks.Values.Get(pk.Name)...)
+		values = append(values, pks.Get(pk.Name)...)
 	}
 
 	for _, ck := range g.table.ClusteringKeys {
@@ -57,7 +53,7 @@ func (g *Generator) Update(ctx context.Context) (*typedef.Stmt, error) {
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		PartitionKeys: pks,
+		PartitionKeys: typedef.PartitionKeys{Values: pks},
 		Values:        values,
 		QueryType:     typedef.UpdateStatementType,
 		Query:         query,

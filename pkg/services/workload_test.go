@@ -29,9 +29,9 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/scylladb/gemini/pkg/distributions"
-	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/jobs"
 	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -242,7 +242,6 @@ func TestWorkload(t *testing.T) {
 				RunningMode:           test.mode,
 				PartitionDistribution: distributions.Uniform,
 				Seed:                  1,
-				PartitionBufferSize:   2,
 				IOWorkerPoolSize:      16,
 				MaxErrorsToStore:      1,
 				WarmupDuration:        test.warmup,
@@ -282,7 +281,6 @@ func TestWorkloadWithoutOracle(t *testing.T) {
 				RunningMode:           test.mode,
 				PartitionDistribution: distributions.Uniform,
 				Seed:                  1,
-				PartitionBufferSize:   10,
 				IOWorkerPoolSize:      2,
 				MaxErrorsToStore:      1,
 				WarmupDuration:        test.warmup,
@@ -316,10 +314,9 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	})
 
 	const (
-		partitionCount      = 1000
-		partitionBufferSize = 100
-		seed                = 4
-		maxErrorsCount      = 1
+		partitionCount = 1000
+		seed           = 4
+		maxErrorsCount = 1
 	)
 
 	// Phase 1: Run a mixed workload to populate data AND establish partition keys
@@ -328,7 +325,6 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 		RunningMode:           jobs.MixedMode,
 		PartitionDistribution: distributions.Uniform,
 		Seed:                  seed,
-		PartitionBufferSize:   partitionBufferSize,
 		RandomStringBuffer:    1024,
 		IOWorkerPoolSize:      1024,
 		MaxErrorsToStore:      maxErrorsCount,
@@ -452,7 +448,6 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 		RunningMode:           jobs.MixedMode,
 		PartitionDistribution: distributions.Uniform,
 		Seed:                  seed,
-		PartitionBufferSize:   partitionBufferSize,
 		IOWorkerPoolSize:      64, // Reduced from 16 to avoid overwhelming the system
 		MaxErrorsToStore:      maxErrorsCount,
 		WarmupDuration:        2 * time.Second,  // Reduced from 5s

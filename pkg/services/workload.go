@@ -25,9 +25,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/distributions"
-	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/jobs"
+	"github.com/scylladb/gemini/pkg/partitions"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -43,14 +43,13 @@ type (
 		OutputFile            string
 		MU                    float64
 		Seed                  uint64
-		PartitionBufferSize   int
 		IOWorkerPoolSize      int
 		MaxErrorsToStore      int
 		RandomStringBuffer    int
 		Sigma                 float64
 		WarmupDuration        time.Duration
 		Duration              time.Duration
-		PartitionCount        int
+		PartitionCount        uint64
 		MutationConcurrency   int
 		ReadConcurrency       int
 		DropSchema            bool
@@ -58,15 +57,15 @@ type (
 	}
 
 	Workload struct {
-		config     *WorkloadConfig
-		status     *status.GlobalStatus
-		logger     *zap.Logger
-		schema     *typedef.Schema
-		stopFlag   *stop.Flag
-		store      store.Store
-		pool       *workpool.Pool
-		generators *generators.Generators
-		jobs       *jobs.Jobs
+		config   *WorkloadConfig
+		status   *status.GlobalStatus
+		logger   *zap.Logger
+		schema   *typedef.Schema
+		stopFlag *stop.Flag
+		store    store.Store
+		pool     *workpool.Pool
+		jobs     *jobs.Jobs
+		distFunc distributions.DistributionFunc
 	}
 )
 
@@ -77,7 +76,7 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 		zap.String("mode", config.RunningMode),
 		zap.Duration("warmup", config.WarmupDuration),
 		zap.Duration("duration", config.Duration),
-		zap.Int("partition_count", config.PartitionCount),
+		zap.Uint64("partition_count", config.PartitionCount),
 		zap.Int("mutation_concurrency", config.MutationConcurrency),
 		zap.Int("read_concurrency", config.ReadConcurrency),
 		zap.Int("io_worker_pool", config.IOWorkerPoolSize),
@@ -103,25 +102,23 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 	utils.PreallocateRandomString(rand.New(randSrc), config.RandomStringBuffer)
 
 	logger.Debug("creating generators")
-	gens, err := generators.New(
-		schema,
-		distFunc,
-		config.PartitionCount,
-		config.PartitionBufferSize,
-		logger,
-		randSrc,
-	)
-	if err != nil {
-		logger.Error("failed to create generators", zap.Error(err))
-		return nil, err
-	}
+	//gens, err := generators.New(
+	//	schema,
+	//	distFunc,
+	//	config.PartitionCount,
+	//	config.PartitionBufferSize,
+	//	logger,
+	//	randSrc,
+	//)
+	//if err != nil {
+	//	logger.Error("failed to create generators", zap.Error(err))
+	//	return nil, err
+	//}
 
 	logger.Debug("generating schema changes")
-	schemaChanges, err := gens.Get(schema.Tables[0]).Get(context.Background())
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to generate schema changes")
-	}
 
+	partitionConfig := schema.Config.GetPartitionRangeConfig()
+	schemaChanges := partitions.NewPartitionKeys(rand.New(randSrc), schema.Tables[0], &partitionConfig)
 	globalStatus := status.NewGlobalStatus(config.MaxErrorsToStore)
 	logger.Debug("creating workpool", zap.Int("size", config.IOWorkerPoolSize))
 	pool := workpool.New(config.IOWorkerPoolSize)
@@ -140,20 +137,19 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 
 	logger.Debug("creating jobs")
 	w := &Workload{
-		config:     config,
-		status:     globalStatus,
-		logger:     logger,
-		schema:     schema,
-		store:      st,
-		pool:       pool,
-		generators: gens,
-		stopFlag:   flag.CreateChild("jobs"),
+		config:   config,
+		status:   globalStatus,
+		logger:   logger,
+		schema:   schema,
+		store:    st,
+		pool:     pool,
+		distFunc: distFunc,
+		stopFlag: flag.CreateChild("jobs"),
 		jobs: jobs.New(
 			config.MutationConcurrency,
 			config.ReadConcurrency,
 			schema,
 			st,
-			gens,
 			globalStatus,
 			statementRatioController,
 			logger.Named("jobs"),
@@ -223,15 +219,8 @@ func (w *Workload) Run(base context.Context) error {
 	if w.config.WarmupDuration > 0 {
 		w.logger.Debug("starting warmup phase", zap.Duration("duration", w.config.WarmupDuration))
 		stopFlag := w.stopFlag.CreateChild("warmup")
-		ctx, cancel := context.WithTimeout(base, w.config.WarmupDuration+2*time.Second)
-		defer cancel()
-		time.AfterFunc(w.config.WarmupDuration+1*time.Second, func() {
-			w.logger.Debug("warmup phase timeout reached, setting soft stop")
-			stopFlag.SetSoft(false)
-			cancel()
-		})
 
-		if err := w.jobs.Run(ctx, stopFlag, jobs.WarmupMode); err != nil {
+		if err := w.jobs.Run(base, w.config.WarmupDuration, w.distFunc, w.config.PartitionCount, w.schema.Config.GetPartitionRangeConfig(), stopFlag, jobs.WarmupMode); err != nil {
 			return errors.Wrap(err, "failed to run warmup jobs")
 		}
 		w.logger.Debug("warmup phase completed")
@@ -240,17 +229,19 @@ func (w *Workload) Run(base context.Context) error {
 	if w.config.Duration > 0 {
 		w.logger.Debug("starting main workload", zap.Duration("duration", w.config.Duration), zap.String("mode", w.config.RunningMode))
 		stopFlag := w.stopFlag.CreateChild("gemini")
-		ctx, cancel := context.WithTimeout(base, w.config.Duration+2*time.Second)
-		defer cancel()
-		time.AfterFunc(w.config.Duration+1*time.Second, func() {
-			w.logger.Debug("workload duration timeout reached, setting soft stop")
-			stopFlag.SetSoft(true)
-			cancel()
-		})
 
-		if err := w.jobs.Run(ctx, stopFlag, w.config.RunningMode); err != nil {
+		if err := w.jobs.Run(
+			base,
+			w.config.Duration,
+			w.distFunc,
+			w.config.PartitionCount,
+			w.schema.Config.GetPartitionRangeConfig(),
+			stopFlag,
+			w.config.RunningMode,
+		); err != nil {
 			return err
 		}
+
 		w.logger.Debug("main workload completed")
 	}
 
@@ -311,9 +302,6 @@ func (w *Workload) Close() error {
 
 	w.logger.Debug("closing store")
 	err = multierr.Append(err, w.store.Close())
-
-	w.logger.Info("closing generators")
-	err = multierr.Append(err, w.generators.Close())
 
 	if err != nil {
 		w.logger.Error("workload closed with errors", zap.Error(err))

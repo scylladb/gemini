@@ -15,18 +15,12 @@
 package statements
 
 import (
-	"context"
 	"math"
 
+	"github.com/scylladb/gemini/pkg/partitions"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
-
-type ValueGenerator interface {
-	Get(context.Context) (typedef.PartitionKeys, error)
-	GetOld(context.Context) (typedef.PartitionKeys, error)
-	GiveOlds(ctx context.Context, tokens ...typedef.PartitionKeys)
-}
 
 const (
 	SelectSinglePartitionQuery int = iota
@@ -59,7 +53,7 @@ const (
 const MutationStatementsCount = 3
 
 type Generator struct {
-	generator        ValueGenerator
+	generator        partitions.Interface
 	random           utils.Random
 	table            *typedef.Table
 	partitionConfig  *typedef.PartitionRangeConfig
@@ -71,7 +65,7 @@ type Generator struct {
 
 func New(
 	schema string,
-	valueGenerator ValueGenerator,
+	valueGenerator partitions.Interface,
 	table *typedef.Table,
 	random utils.Random,
 	partitionConfig *typedef.PartitionRangeConfig,

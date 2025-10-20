@@ -17,13 +17,15 @@ package jobs
 import (
 	"context"
 	"math/rand/v2"
+	"time"
 
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/generators/statements"
+	"github.com/scylladb/gemini/pkg/distributions"
+	"github.com/scylladb/gemini/pkg/partitions"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -40,7 +42,6 @@ const (
 type Jobs struct {
 	store               store.Store
 	schema              *typedef.Schema
-	generators          *generators.Generators
 	status              *status.GlobalStatus
 	logger              *zap.Logger
 	random              *rand.ChaCha8
@@ -61,7 +62,6 @@ func New(
 	mutationConcurrency, readConcurrency int,
 	schema *typedef.Schema,
 	st store.Store,
-	gens *generators.Generators,
 	globalStatus *status.GlobalStatus,
 	ratioController *statements.RatioController,
 	logger *zap.Logger,
@@ -75,7 +75,6 @@ func New(
 	return &Jobs{
 		schema:              schema,
 		store:               st,
-		generators:          gens,
 		status:              globalStatus,
 		logger:              logger,
 		random:              src,
@@ -101,7 +100,15 @@ func (j *Jobs) parseMode(mode string) []string {
 	return modes
 }
 
-func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error {
+func (j *Jobs) Run(
+	base context.Context,
+	duration time.Duration,
+	idxFunc distributions.DistributionFunc,
+	partsCount uint64,
+	partsConfig typedef.PartitionRangeConfig,
+	stopFlag *stop.Flag,
+	mode string,
+) error {
 	log := j.logger.Named(j.name)
 	log.Info("start jobs", zap.String("mode", mode))
 	defer log.Info("stop jobs")
@@ -109,8 +116,13 @@ func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error
 	g, gCtx := errgroup.WithContext(base)
 
 	for _, table := range j.schema.Tables {
-		generator := j.generators.Get(table)
+		generator := partitions.New(rand.New(j.random), idxFunc, table, partsConfig, partsCount)
 		log.Debug("processing table", zap.String("table", table.Name))
+
+		time.AfterFunc(duration+1*time.Second, func() {
+			log.Debug("warmup phase timeout reached, setting soft stop")
+			stopFlag.SetSoft(false)
+		})
 
 		for _, m := range j.parseMode(mode) {
 			switch m {
@@ -138,7 +150,7 @@ func (j *Jobs) Run(base context.Context, stopFlag *stop.Flag, mode string) error
 					workerID := i
 					g.Go(func() error {
 						log.Debug("mutation worker started", zap.Int("worker_id", workerID))
-						err := mutation.Do(gCtx)
+						err := mutation.Do(base)
 						if err != nil && !errors.Is(err, context.Canceled) {
 							log.Error("mutation worker finished with error",
 								zap.Int("worker_id", workerID),

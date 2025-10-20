@@ -22,7 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/scylladb/gemini/pkg/generators/statements"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -71,7 +71,6 @@ func (m *mockGenerator) Get(_ context.Context) (typedef.PartitionKeys, error) {
 
 	return typedef.PartitionKeys{
 		Values: values,
-		Token:  1,
 	}, nil
 }
 
@@ -83,7 +82,6 @@ func (m *mockGenerator) GetOld(_ context.Context) (typedef.PartitionKeys, error)
 
 	return typedef.PartitionKeys{
 		Values: values,
-		Token:  1,
 	}, nil
 }
 

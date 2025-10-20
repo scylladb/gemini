@@ -33,12 +33,12 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/scylladb/gemini/pkg/distributions"
-	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/realrandom"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/schema"
 	"github.com/scylladb/gemini/pkg/services"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -217,7 +217,6 @@ func run(cmd *cobra.Command, _ []string) error {
 		OutputFile:            outFileArg,
 		PartitionDistribution: distributions.Distribution(partitionKeyDistribution),
 		PartitionCount:        partitionCount,
-		PartitionBufferSize:   pkBufferReuseSize,
 		IOWorkerPoolSize:      iOWorkerPool,
 		Seed:                  intSeed,
 		MU:                    normalDistMean,

@@ -72,6 +72,15 @@ func (t *UDTType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	return []any{vals}
 }
 
+func (t *UDTType) GenValueOut(out []any, r utils.Random, p *PartitionRangeConfig) []any {
+	vals := make(map[string]any)
+	for name, typ := range t.ValueTypes {
+		vals[name] = typ.GenValue(r, p)[0]
+	}
+
+	return append(out, vals)
+}
+
 func (t *UDTType) LenValue() int {
 	return 1
 }

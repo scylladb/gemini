@@ -20,10 +20,10 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"github.com/scylladb/gemini/pkg/generators"
-	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
+	"github.com/scylladb/gemini/pkg/partitions"
+	statements2 "github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -32,10 +32,10 @@ import (
 )
 
 type Mutation struct {
-	generator generators.Interface
+	generator partitions.Interface
 	store     store.Store
 	table     *typedef.Table
-	statement *statements.Generator
+	statement *statements2.Generator
 	status    *status.GlobalStatus
 	stopFlag  *stop.Flag
 	schema    *typedef.Schema
@@ -45,16 +45,16 @@ type Mutation struct {
 func NewMutation(
 	schema *typedef.Schema,
 	table *typedef.Table,
-	generator generators.Interface,
+	generator partitions.Interface,
 	status *status.GlobalStatus,
-	statementRatioController *statements.RatioController,
+	statementRatioController *statements2.RatioController,
 	stopFlag *stop.Flag,
 	store store.Store,
 	del bool,
 	seed [32]byte,
 ) *Mutation {
 	pc := schema.Config.GetPartitionRangeConfig()
-	statementGenerator := statements.New(
+	statementGenerator := statements2.New(
 		schema.Keyspace.Name,
 		generator,
 		table,
@@ -86,7 +86,6 @@ func (m *Mutation) run(ctx context.Context) error {
 
 	if err == nil {
 		m.status.WriteOp()
-		m.generator.GiveOlds(ctx, mutateStmt.PartitionKeys)
 		return nil
 	}
 

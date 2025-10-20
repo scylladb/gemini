@@ -152,6 +152,11 @@ func (st SimpleType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	return []any{st.genValue(r, p)}
 }
 
+func (st SimpleType) GenValueOut(out []any, r utils.Random, p *PartitionRangeConfig) []any {
+	out = append(out, st.genValue(r, p))
+	return out
+}
+
 func (st SimpleType) genValue(r utils.Random, p *PartitionRangeConfig) any {
 	switch st {
 	case TypeBlob:

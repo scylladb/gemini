@@ -39,14 +39,11 @@ func (g *Generator) Insert(ctx context.Context) (*typedef.Stmt, error) {
 
 	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
 
-	pks, err := g.generator.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
+	pks := g.generator.Next()
 
 	for _, pk := range g.table.PartitionKeys {
 		builder.Columns(pk.Name)
-		values = append(values, pks.Values.Get(pk.Name)...)
+		values = append(values, pks.Get(pk.Name)...)
 	}
 
 	for _, ck := range g.table.ClusteringKeys {
@@ -68,7 +65,7 @@ func (g *Generator) Insert(ctx context.Context) (*typedef.Stmt, error) {
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		PartitionKeys: pks,
+		PartitionKeys: typedef.PartitionKeys{Values: pks},
 		Values:        values,
 		QueryType:     typedef.InsertStatementType,
 		Query:         query,
@@ -80,17 +77,13 @@ func (g *Generator) InsertJSON(ctx context.Context) (*typedef.Stmt, error) {
 		return nil, nil
 	}
 
-	pks, err := g.generator.Get(ctx)
-	if err != nil {
-		return nil, err
-	}
-
+	pks := g.generator.Next()
 	values := make(map[string]any, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
 
 	for _, pk := range g.table.PartitionKeys {
 		switch t := pk.Type.(type) {
 		case typedef.SimpleType:
-			values[pk.Name] = convertForJSON(t, pks.Values.Get(pk.Name)[0])
+			values[pk.Name] = convertForJSON(t, pks.Get(pk.Name)[0])
 		case *typedef.TupleType:
 			tupVals := make([]any, 0, len(t.ValueTypes))
 			for _, value := range t.ValueTypes {
@@ -112,7 +105,7 @@ func (g *Generator) InsertJSON(ctx context.Context) (*typedef.Stmt, error) {
 
 	query, _ := qb.Insert(g.keyspaceAndTable).Json().ToCql()
 	return &typedef.Stmt{
-		PartitionKeys: pks,
+		PartitionKeys: typedef.PartitionKeys{Values: pks},
 		Query:         query,
 		QueryType:     typedef.InsertJSONStatementType,
 		Values:        []any{utils.UnsafeString(jsonString)},

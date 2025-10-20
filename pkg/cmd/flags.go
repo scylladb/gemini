@@ -58,8 +58,7 @@ var (
 	maxRetriesMutate                 int
 	maxRetriesMutateSleep            time.Duration
 	maxErrorsToStore                 int
-	pkBufferReuseSize                int
-	partitionCount                   int
+	partitionCount                   uint64
 	partitionKeyDistribution         string
 	normalDistMean                   float64
 	normalDistSigma                  float64
@@ -151,9 +150,9 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		IntVarP(&maxPartitionKeys, "max-partition-keys", "", 8, "Maximum number of generated partition keys")
 	cmd.Flags().
-		IntVarP(&minPartitionKeys, "min-partition-keys", "", 2, "Minimum number of generated partition keys")
+		IntVarP(&minPartitionKeys, "min-partition-keys", "", 1, "Minimum number of generated partition keys")
 	cmd.Flags().
-		IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 4, "Maximum number of generated clustering keys")
+		IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 5, "Maximum number of generated clustering keys")
 	cmd.Flags().
 		IntVarP(&minClusteringKeys, "min-clustering-keys", "", 0, "Minimum number of generated clustering keys")
 	cmd.Flags().
@@ -174,9 +173,7 @@ func setupFlags(cmd *cobra.Command) {
 		DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Second,
 			"Duration between attempts to apply a mutation for example 10ms or 1s")
 	cmd.Flags().
-		IntVarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 256, "Number of reused buffered partition keys")
-	cmd.Flags().
-		IntVarP(&partitionCount, "token-range-slices", "", 10000, "Number of slices to divide the token space into")
+		Uint64VarP(&partitionCount, "token-range-slices", "", 10_000_000, "Number of slices to divide the token space into")
 	cmd.Flags().
 		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "zipf",
 			"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")

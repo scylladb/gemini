@@ -43,10 +43,7 @@ func (g *Generator) SelectFromMaterializedView(ctx context.Context) (*typedef.St
 }
 
 func (g *Generator) genSinglePartitionQueryMv(ctx context.Context, mv *typedef.MaterializedView) (*typedef.Stmt, error) {
-	pk, err := g.generator.GetOld(ctx)
-	if err != nil {
-		return nil, err
-	}
+	pk := g.generator.Next()
 
 	builder := qb.Select(g.keyspace + "." + mv.Name)
 
@@ -57,8 +54,8 @@ func (g *Generator) genSinglePartitionQueryMv(ctx context.Context, mv *typedef.M
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		PartitionKeys: pk,
-		Values:        pk.Values.ToCQLValues(mv.PartitionKeys),
+		PartitionKeys: typedef.PartitionKeys{Values: pk},
+		Values:        pk.ToCQLValues(mv.PartitionKeys),
 		QueryType:     typedef.SelectFromMaterializedViewStatementType,
 		Query:         query,
 	}, nil
@@ -76,23 +73,14 @@ func (g *Generator) genMultiplePartitionQueryMv(ctx context.Context, mv *typedef
 	pks := typedef.NewValues(mv.PartitionKeys.Len())
 
 	for range numQueryPKs {
-		pk, err := g.generator.GetOld(ctx)
-		if err != nil {
-			return nil, err
-		}
-		// TODO: Handle return value with token
-		//	if vs.Token == 0 {
-		//		g.GiveOlds(ctx, tokens...)
-		//		return nil
-		//	}
-
-		values = append(values, pk.Values.ToCQLValues(mv.PartitionKeys))
-		pks.Merge(pk.Values)
+		pk := g.generator.Next()
+		values = append(values, pk.ToCQLValues(mv.PartitionKeys))
+		pks.Merge(pk)
 	}
 
 	query, _ := builder.ToCql()
 	return &typedef.Stmt{
-		PartitionKeys: typedef.PartitionKeys{Token: 0, Values: pks},
+		PartitionKeys: typedef.PartitionKeys{Values: pks},
 		Values:        nil,
 		QueryType:     typedef.SelectFromMaterializedViewStatementType,
 		Query:         query,

@@ -1,4 +1,4 @@
-// Copyright 2019 ScyllaDB
+// Copyright 2025 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,22 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package generators
+package partitions
 
 import (
-	"github.com/scylladb/gemini/pkg/generators/statements"
+	"math/rand/v2"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func CreatePkColumns(cnt int, prefix string) typedef.Columns {
-	cols := make(typedef.Columns, 0, cnt)
+func TestNew(t *testing.T) {
+	t.Parallel()
 
-	for i := range cnt {
-		cols = append(cols, typedef.ColumnDef{
-			Name: statements.GenColumnName(prefix, i),
-			Type: typedef.TypeInt,
-		})
-	}
+	assert := require.New(t)
 
-	return cols
+	src, fn := distributions.New(distributions.Uniform, 10_000, 1, 0, 0)
+
+	table := &typedef.Table{}
+
+	parts := New(rand.New(src), fn, table, typedef.PartitionRangeConfig{}, 10_000)
+
+	assert.NotNil(parts)
 }

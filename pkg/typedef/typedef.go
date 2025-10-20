@@ -74,7 +74,6 @@ func (q SimpleQuery) ToCql() (stmt string, names []string) {
 type (
 	PartitionKeys struct {
 		Values *Values
-		Token  uint32
 	}
 
 	Stmt struct {
@@ -97,7 +96,7 @@ func PreparedStmt(query string, pks map[string][]any, values []any, queryType St
 		Query:         query,
 		Values:        values,
 		QueryType:     queryType,
-		PartitionKeys: PartitionKeys{Values: NewValuesFromMap(pks), Token: 0},
+		PartitionKeys: PartitionKeys{Values: NewValuesFromMap(pks)},
 	}
 }
 
@@ -274,7 +273,8 @@ func (st StatementType) PossibleAsyncOperation() bool {
 
 type Values struct {
 	data map[string][]any
-	mu   sync.RWMutex
+
+	mu sync.RWMutex
 }
 
 func NewValues(initial int) *Values {
@@ -380,7 +380,6 @@ func (v *Values) UnmarshalJSON(data []byte) error {
 
 func (v *PartitionKeys) Copy() PartitionKeys {
 	return PartitionKeys{
-		Token:  v.Token,
 		Values: v.Values.Copy(),
 	}
 }

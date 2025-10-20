@@ -20,10 +20,23 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/scylladb/gemini/pkg/generators"
 	"github.com/scylladb/gemini/pkg/routingkey"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
+
+func CreatePkColumns(cnt int, prefix string) typedef.Columns {
+	cols := make(typedef.Columns, 0, cnt)
+
+	for i := range cnt {
+		cols = append(cols, typedef.ColumnDef{
+			Name: statements.GenColumnName(prefix, i),
+			Type: typedef.TypeInt,
+		})
+	}
+
+	return cols
+}
 
 func TestRoutingKey(t *testing.T) {
 	t.Parallel()
@@ -38,7 +51,7 @@ func TestRoutingKey(t *testing.T) {
 		"single_partition_key": {
 			table: &typedef.Table{
 				Name:          "tbl0",
-				PartitionKeys: generators.CreatePkColumns(1, "pk"),
+				PartitionKeys: CreatePkColumns(1, "pk"),
 			},
 			data: []data{
 				{
@@ -274,7 +287,7 @@ func TestRoutingKey(t *testing.T) {
 		"complex_partition_key": {
 			table: &typedef.Table{
 				Name:          "tbl0",
-				PartitionKeys: generators.CreatePkColumns(2, "pk"),
+				PartitionKeys: CreatePkColumns(2, "pk"),
 			},
 			data: []data{
 				{

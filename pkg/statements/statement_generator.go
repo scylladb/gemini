@@ -83,9 +83,7 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 	if sc.UseCounters {
 		table.Columns = typedef.Columns{{
 			Name: GenColumnName("col", 0),
-			Type: &typedef.CounterType{
-				Value: 0,
-			},
+			Type: &typedef.CounterType{},
 		}}
 		return &table
 	}

@@ -73,17 +73,16 @@ func (g *Generator) genSelectSinglePartitionQuery(ctx context.Context) (*typedef
 }
 
 func (g *Generator) getSelectSinglePartitionKeys(ctx context.Context) (typedef.PartitionKeys, *qb.SelectBuilder, error) {
-	partitionKeys, err := g.generator.GetOld(ctx)
-	if err != nil {
-		return typedef.PartitionKeys{}, nil, err
-	}
+	partitionKeys := g.generator.Next()
 
 	builder := qb.Select(g.keyspaceAndTable)
 	for _, pk := range g.table.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
 	}
 
-	return partitionKeys, builder, nil
+	return typedef.PartitionKeys{
+		Values: partitionKeys,
+	}, builder, nil
 }
 
 func (g *Generator) buildSelectMultiPartitionsKey(ctx context.Context) (*typedef.Values, *qb.SelectBuilder, error) {
@@ -92,19 +91,9 @@ func (g *Generator) buildSelectMultiPartitionsKey(ctx context.Context) (*typedef
 	numQueryPKs := g.getMultiplePartitionKeys()
 	pks := typedef.NewValues(g.table.PartitionKeys.Len())
 
-	maybeReturn := make([]typedef.PartitionKeys, 0, numQueryPKs)
-
 	for range numQueryPKs {
-		pk, err := g.generator.GetOld(ctx)
-		if err != nil {
-			if len(maybeReturn) > 0 {
-				g.generator.GiveOlds(ctx, maybeReturn...)
-			}
-			return nil, nil, err
-		}
-
-		pks.Merge(pk.Values)
-		maybeReturn = append(maybeReturn, pk)
+		pk := g.generator.Next()
+		pks.Merge(pk)
 	}
 
 	for _, pk := range g.table.PartitionKeys {
