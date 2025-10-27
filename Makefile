@@ -44,7 +44,6 @@ GEMINI_FLAGS ?= \
 	--cql-features=$(CQL_FEATURES) \
 	--duration=$(DURATION) \
 	--warmup=$(WARMUP) \
-	--partition-key-buffer-reuse-size=128 \
 	--partition-key-distribution=uniform \
 	--io-worker-pool=$(GEMINI_IO_WORKER_POOL) \
 	--oracle-statement-log-file=$(PWD)/results/oracle-statements.json \
@@ -76,7 +75,7 @@ fmt:
 .PHONY: build
 build:
 	@mkdir -p bin
-	@go build \
+	@GOEXPERIMENT="greenteagc,arenas,newinliner,jsonv2" go build \
 		-a -installsuffix cgo \
 		-trimpath \
 		-tags="production,!debug,netgo,osusergo,static_build" \
@@ -87,7 +86,7 @@ build:
 .PHONY: debug-build
 debug-build:
 	@mkdir -p bin
-	@go build -ldflags="$(LDFLAGS_VERSION)" -gcflags="-N -l" -o bin/gemini ./pkg/cmd
+	@GOEXPERIMENT="cgocheck2,greenteagc,arenas,newinliner,jsonv2" go build -ldflags="$(LDFLAGS_VERSION)" -gcflags="-N -l" -o bin/gemini ./pkg/cmd
 
 .PHONY: build-docker
 build-docker:

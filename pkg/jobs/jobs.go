@@ -116,7 +116,7 @@ func (j *Jobs) Run(
 	g, gCtx := errgroup.WithContext(base)
 
 	for _, table := range j.schema.Tables {
-		generator := partitions.New(rand.New(j.random), idxFunc, table, partsConfig, partsCount)
+		generator := partitions.New(gCtx, j.random, idxFunc, table, partsConfig, partsCount)
 		log.Debug("processing table", zap.String("table", table.Name))
 
 		time.AfterFunc(duration+1*time.Second, func() {

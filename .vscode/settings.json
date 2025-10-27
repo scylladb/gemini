@@ -1,0 +1,19 @@
+{
+  "go.testTags": "testing",
+  "go.testEnvVars": {
+    "GEMINI_ORACLE_CLUSTER_IP": "192.168.100.2",
+    "GEMINI_TEST_CLUSTER_IP": "192.168.100.3",
+    "GEMINI_USE_DOCKER_SCYLLA": "true",
+    "GODEBUG": "default=go1.25,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0",
+    "GOEXPERIMENT": "jsonv2,greenteagc,cgocheck2",
+  },
+  "go.vetOnSave": "workspace",
+  "chat.tools.terminal.autoApprove": {
+    "go": true,
+    "make": true,
+    "golangci-lint": true,
+    "golangci-lint-v2": true,
+    "timeout": true,
+    "./bin/gemini": true
+  },
+}

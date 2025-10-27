@@ -77,15 +77,15 @@ func GenUDTType(sc *typedef.SchemaConfig, r utils.Random) *typedef.UDTType {
 	}
 }
 
-func GenSetType(sc *typedef.SchemaConfig, r utils.Random) *typedef.BagType {
+func GenSetType(sc *typedef.SchemaConfig, r utils.Random) *typedef.Collection {
 	return genBagType(typedef.TypeSet, sc, r)
 }
 
-func GenListType(sc *typedef.SchemaConfig, r utils.Random) *typedef.BagType {
+func GenListType(sc *typedef.SchemaConfig, r utils.Random) *typedef.Collection {
 	return genBagType(typedef.TypeList, sc, r)
 }
 
-func genBagType(kind string, sc *typedef.SchemaConfig, r utils.Random) *typedef.BagType {
+func genBagType(kind string, sc *typedef.SchemaConfig, r utils.Random) *typedef.Collection {
 	var t typedef.SimpleType
 	for {
 		t = GenSimpleType(sc, r)
@@ -93,7 +93,7 @@ func genBagType(kind string, sc *typedef.SchemaConfig, r utils.Random) *typedef.
 			break
 		}
 	}
-	return &typedef.BagType{
+	return &typedef.Collection{
 		ComplexType: kind,
 		ValueType:   t,
 		Frozen:      r.Uint32()%2 == 0,

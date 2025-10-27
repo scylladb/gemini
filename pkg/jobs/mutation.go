@@ -23,7 +23,7 @@ import (
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/partitions"
-	statements2 "github.com/scylladb/gemini/pkg/statements"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -35,7 +35,7 @@ type Mutation struct {
 	generator partitions.Interface
 	store     store.Store
 	table     *typedef.Table
-	statement *statements2.Generator
+	statement *statements.Generator
 	status    *status.GlobalStatus
 	stopFlag  *stop.Flag
 	schema    *typedef.Schema
@@ -47,14 +47,14 @@ func NewMutation(
 	table *typedef.Table,
 	generator partitions.Interface,
 	status *status.GlobalStatus,
-	statementRatioController *statements2.RatioController,
+	statementRatioController *statements.RatioController,
 	stopFlag *stop.Flag,
 	store store.Store,
 	del bool,
 	seed [32]byte,
 ) *Mutation {
 	pc := schema.Config.GetPartitionRangeConfig()
-	statementGenerator := statements2.New(
+	statementGenerator := statements.New(
 		schema.Keyspace.Name,
 		generator,
 		table,

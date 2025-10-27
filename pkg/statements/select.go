@@ -72,7 +72,7 @@ func (g *Generator) genSelectSinglePartitionQuery(ctx context.Context) (*typedef
 	}, nil
 }
 
-func (g *Generator) getSelectSinglePartitionKeys(ctx context.Context) (typedef.PartitionKeys, *qb.SelectBuilder, error) {
+func (g *Generator) getSelectSinglePartitionKeys(_ context.Context) (typedef.PartitionKeys, *qb.SelectBuilder, error) {
 	partitionKeys := g.generator.Next()
 
 	builder := qb.Select(g.keyspaceAndTable)
@@ -85,7 +85,7 @@ func (g *Generator) getSelectSinglePartitionKeys(ctx context.Context) (typedef.P
 	}, builder, nil
 }
 
-func (g *Generator) buildSelectMultiPartitionsKey(ctx context.Context) (*typedef.Values, *qb.SelectBuilder, error) {
+func (g *Generator) buildSelectMultiPartitionsKey(_ context.Context) (*typedef.Values, *qb.SelectBuilder, error) {
 	builder := qb.Select(g.keyspaceAndTable)
 
 	numQueryPKs := g.getMultiplePartitionKeys()

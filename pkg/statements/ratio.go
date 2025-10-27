@@ -170,13 +170,15 @@ func (c *RatioController) validate(ratios Ratios) error {
 		return fmt.Errorf("insert subtype ratios sum to %.3f, expected 1.0", insertSum)
 	}
 
-	// Check delete subtype ratios
-	deleteSum := ratios.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio +
-		ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio +
-		ratios.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio +
-		ratios.MutationRatios.DeleteSubtypeRatios.MultiplePartitionsRatio
-	if math.Abs(deleteSum-1.0) > tolerance {
-		return fmt.Errorf("delete subtype ratios sum to %.3f, expected 1.0", deleteSum)
+	if ratios.MutationRatios.DeleteRatio > 0.001 {
+		// Check delete subtype ratios
+		deleteSum := ratios.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio +
+			ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio +
+			ratios.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio +
+			ratios.MutationRatios.DeleteSubtypeRatios.MultiplePartitionsRatio
+		if math.Abs(deleteSum-1.0) > tolerance {
+			return fmt.Errorf("delete subtype ratios sum to %.3f, expected 1.0", deleteSum)
+		}
 	}
 
 	// Check select subtype ratios

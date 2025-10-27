@@ -89,7 +89,6 @@ func TestWorkloadBrokenPipe(t *testing.T) {
 		RunningMode:           jobs.MixedMode,
 		PartitionDistribution: distributions.Uniform,
 		Seed:                  42,
-		PartitionBufferSize:   64,
 		RandomStringBuffer:    1024,
 		IOWorkerPoolSize:      64,
 		MaxErrorsToStore:      16,

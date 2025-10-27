@@ -34,7 +34,7 @@ import (
 
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/metrics"
-	"github.com/scylladb/gemini/pkg/realrandom"
+	"github.com/scylladb/gemini/pkg/random"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/schema"
 	"github.com/scylladb/gemini/pkg/services"
@@ -62,6 +62,8 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	setupFlags(rootCmd)
+
+	rootCmd.AddCommand(Benchmark())
 }
 
 func preRun(cmd *cobra.Command, _ []string) {
@@ -314,7 +316,7 @@ func printSetup(schema *typedef.Schema, ratio statements.Ratios, seed, schemaSee
 }
 
 func RealRandom() uint64 {
-	return rand.New(realrandom.Source).Uint64()
+	return rand.New(random.Source).Uint64()
 }
 
 func validateSeed(seed string) error {

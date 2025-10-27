@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math/big"
 	"os"
 	"path/filepath"
 	"slices"
@@ -32,6 +33,7 @@ import (
 	"github.com/samber/mo"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
+	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
@@ -173,24 +175,25 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	}()
 
 	iter := query.Iter()
+
+	if iter.NumRows() == 0 {
+		return nil, iter.Close()
+	}
+
+	// Pre-allocate rows slice
 	rows := make(Rows, 0, iter.NumRows())
 
-	for range iter.NumRows() {
-		row := make(Row, len(iter.Columns()))
-		if !iter.MapScan(row) {
-			err := iter.Close()
-			c.logger.Error("failed to scan row",
-				zap.String("system", c.system),
-				zap.Error(err),
-			)
-			return nil, err
-		}
+	rowData, err := iter.RowData()
+	if err != nil {
+		return nil, err
+	}
 
+	for iter.Scan(rowData.Values...) {
+		row := NewRow(rowData.Columns, rowData.Values)
 		rows = append(rows, row)
 	}
 
-	err := iter.Close()
-	if err != nil && !errors.Is(err, context.Canceled) {
+	if err = iter.Close(); err != nil && !errors.Is(err, context.Canceled) {
 		c.logger.Error("error closing iterator",
 			zap.String("system", c.system),
 			zap.Error(err),
@@ -198,6 +201,103 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	}
 
 	return rows, err
+}
+
+// loadIter returns an iterator that yields rows one by one without loading all into memory
+func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator {
+	return func(yield func(Row, error) bool) {
+		query := c.session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
+		defer query.Release()
+		defer c.cqlRequestsMetric[stmt.QueryType].Inc()
+
+		iter := query.Iter()
+		defer func() {
+			if err := iter.Close(); err != nil && !errors.Is(err, context.Canceled) {
+				c.logger.Error("error closing iterator",
+					zap.String("system", c.system),
+					zap.Error(err),
+				)
+			}
+		}()
+
+		// Check if query returned any rows
+		if iter.NumRows() == 0 {
+			return
+		}
+
+		// Get column info once - order is guaranteed by the driver
+		rowData, err := iter.RowData()
+		if err != nil {
+			yield(Row{}, err)
+			return
+		}
+
+		for {
+			// Check for context cancellation
+			select {
+			case <-ctx.Done():
+				yield(Row{}, ctx.Err())
+				return
+			default:
+			}
+
+			// Scan into slice - this is faster than MapScan
+			if !iter.Scan(rowData.Values...) {
+				// No more rows
+				break
+			}
+
+			row := NewRow(rowData.Columns, rowData.Values)
+
+			// Yield the row
+			if !yield(row, nil) {
+				// Consumer stopped iteration
+				return
+			}
+		}
+	}
+}
+
+// deepCopyValue creates a deep copy of a value to avoid pointer and slice reuse issues
+// This is necessary because gocql reuses internal buffers for efficiency
+func deepCopyValue(v any) any {
+	if v == nil {
+		return nil
+	}
+
+	switch val := v.(type) {
+	case []byte:
+		// Critical: Must copy byte slices as gocql reuses the buffer
+		if val == nil {
+			return nil
+		}
+		copied := make([]byte, len(val))
+		copy(copied, val)
+		return copied
+	case string, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		// Primitive types are safe to return directly
+		return v
+	case *big.Int:
+		if val == nil {
+			return nil
+		}
+		return new(big.Int).Set(val)
+	case *inf.Dec:
+		if val == nil {
+			return nil
+		}
+		// Create a new Dec from the string representation to ensure deep copy
+		copied := new(inf.Dec)
+		copied.SetString(val.String())
+		return copied
+	case time.Time:
+		// time.Time is a struct, so it's copied by value
+		return val
+	default:
+		// For other types (UUID, custom types), return as-is
+		// They should be safe as gocql creates new instances for them
+		return v
+	}
 }
 
 func (c *cqlStore) Close() error {

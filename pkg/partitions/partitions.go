@@ -15,13 +15,17 @@
 package partitions
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/scylladb/gemini/pkg/distributions"
+	"github.com/scylladb/gemini/pkg/random"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type (
@@ -36,47 +40,60 @@ type (
 		ReplaceWithoutOld(idx uint64)
 		ReplaceNextWithoutOld()
 
+		Deleted() <-chan *typedef.Values
+
 		Len() uint64
+		Close()
 	}
 
 	Partition struct {
 		values []any
 	}
 
-	Partitions struct {
+	partitions struct {
 		parts              []any
-		r                  *rand.Rand
-		table              *typedef.Table
-		config             typedef.PartitionRangeConfig
-		idxFunc            distributions.DistributionFunc
 		partitionValuesLen uint64
-		mu                 sync.RWMutex
 		count              atomic.Uint64
-		partitionsReplaced atomic.Uint64
-		partitionsCreated  atomic.Uint64
+		created            atomic.Uint64
+		mu                 sync.RWMutex
+	}
+
+	Partitions struct {
+		table   *typedef.Table
+		idxFunc distributions.DistributionFunc
+		r       random.GoRoutineSafeRandom
+		config  typedef.PartitionRangeConfig
+		parts   partitions
+		deleted deletedPartitions
 	}
 
 	Stats struct {
-		CurrentPartitionCount uint64
-		PartitionsReplaced    uint64
-		PartitionsCreated     uint64
-		MemoryUsage           uint64
+		CurrentPartitionCount  uint64
+		PartitionsCreated      uint64
+		PartitionsDeleted      uint64
+		DeletedPartitionsCount uint64
+		MemoryUsage            uint64
 	}
 )
 
-func New(r *rand.Rand, idxFunc distributions.DistributionFunc, table *typedef.Table, config typedef.PartitionRangeConfig, count uint64) *Partitions {
+func New(ctx context.Context, r rand.Source, idxFunc distributions.DistributionFunc, table *typedef.Table, config typedef.PartitionRangeConfig, count uint64) *Partitions {
 	partitionValuesLen := table.PartitionKeys.LenValues()
 
 	p := &Partitions{
-		parts:              make([]any, count*uint64(partitionValuesLen)),
-		r:                  r,
-		table:              table,
-		config:             config,
-		idxFunc:            idxFunc,
-		partitionValuesLen: uint64(partitionValuesLen),
+		parts: partitions{
+			partitionValuesLen: uint64(partitionValuesLen),
+			parts:              make([]any, count*uint64(partitionValuesLen)),
+		},
+		deleted: *newDeleted(ctx, config.DeleteBuckets, false),
+		r:       *random.NewGoRoutineSafeRandom(r),
+		table:   table,
+		config:  config,
+		idxFunc: idxFunc,
 	}
 
-	p.count.Store(count)
+	go p.deleted.start(100 * time.Millisecond)
+
+	p.parts.count.Store(count)
 
 	for i := range count {
 		p.fill(i)
@@ -90,65 +107,69 @@ func (p Partition) size() uint64 {
 }
 
 func (p *Partitions) partition(idx uint64) Partition {
-	return Partition{values: p.parts[idx*p.partitionValuesLen : (idx+1)*p.partitionValuesLen]}
+	return Partition{
+		values: p.parts.parts[idx*p.parts.partitionValuesLen : (idx*p.parts.partitionValuesLen)+p.parts.partitionValuesLen],
+	}
 }
 
 func (p *Partitions) values(idx uint64) *typedef.Values {
-	m := make(map[string][]any, p.partitionValuesLen)
+	m := make(map[string][]any, p.parts.partitionValuesLen)
 
-	p.mu.RLock()
+	p.parts.mu.RLock()
 	values := p.partition(idx).values
 	for i, col := range p.table.PartitionKeys {
-		m[col.Name] = values[i*col.Type.LenValue() : (i+1)*col.Type.LenValue()]
+		// Copy the slice to avoid data races when the underlying array is modified
+		m[col.Name] = append(m[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
 	}
-	p.mu.RUnlock()
+	p.parts.mu.RUnlock()
 
 	return typedef.NewValuesFromMap(m)
 }
 
 func (p *Partitions) valuesCopy(idx uint64) *typedef.Values {
-	m := make(map[string][]any, p.partitionValuesLen)
+	m := make(map[string][]any, p.parts.partitionValuesLen)
 
-	p.mu.RLock()
+	p.parts.mu.RLock()
 	values := p.partition(idx).values
 	for i, col := range p.table.PartitionKeys {
 		m[col.Name] = append(m[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
 	}
-	p.mu.RUnlock()
+	p.parts.mu.RUnlock()
 
 	return typedef.NewValuesFromMap(m)
 }
 
 func (p *Partitions) fill(idx uint64) {
-	values := generateValue(p.r, p.table, &p.config)
+	values := generateValue(&p.r, p.table, &p.config)
 
-	if uint64(len(values)) != p.partitionValuesLen {
+	if uint64(len(values)) != p.parts.partitionValuesLen {
 		panic(fmt.Sprintf(
 			"invalid partition values generated: length %d, expected %d",
 			len(values),
-			p.partitionValuesLen,
+			p.parts.partitionValuesLen,
 		))
 	}
 
-	p.mu.Lock()
-	copy(p.partition(idx).values[:], values)
-	p.mu.Unlock()
+	p.parts.mu.Lock()
+	copy(p.partition(idx).values, values)
+	p.parts.mu.Unlock()
 }
 
 func (p *Partitions) Stats() Stats {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
+	p.parts.mu.RLock()
+	defer p.parts.mu.RUnlock()
 
 	mem := uint64(0)
-	for i := range p.count.Load() {
+	for i := range p.parts.count.Load() {
 		mem += p.partition(i).size()
 	}
 
 	return Stats{
-		CurrentPartitionCount: p.count.Load(),
-		PartitionsReplaced:    p.partitionsReplaced.Load(),
-		PartitionsCreated:     p.partitionsCreated.Load(),
-		MemoryUsage:           mem,
+		CurrentPartitionCount:  p.parts.count.Load(),
+		PartitionsCreated:      p.parts.created.Load(),
+		PartitionsDeleted:      p.deleted.deleted.Load(),
+		DeletedPartitionsCount: uint64(p.deleted.Len()),
+		MemoryUsage:            mem,
 	}
 }
 
@@ -161,24 +182,28 @@ func (p *Partitions) Next() *typedef.Values {
 }
 
 func (p *Partitions) Extend() *typedef.Values {
-	p.mu.Lock()
-	p.parts = append(p.parts, make([]any, p.partitionValuesLen)...)
-	p.mu.Unlock()
+	p.parts.mu.Lock()
+	p.parts.parts = append(p.parts.parts, make([]any, p.parts.partitionValuesLen)...)
+	p.parts.mu.Unlock()
 
-	value := p.count.Add(1)
-	p.fill(value)
+	value := p.parts.count.Add(1)
+	p.fill(value - 1)
 
-	p.partitionsCreated.Add(1)
+	p.parts.created.Add(1)
 
-	return p.values(value)
+	return p.values(value - 1)
 }
 
 func (p *Partitions) Replace(idx uint64) *typedef.Values {
 	oldValues := p.valuesCopy(idx)
 	p.fill(idx)
 
-	p.partitionsReplaced.Add(1)
+	p.deleted.Delete(oldValues)
 	return oldValues
+}
+
+func (p *Partitions) Deleted() <-chan *typedef.Values {
+	return p.deleted.ch
 }
 
 func (p *Partitions) ReplaceNext() *typedef.Values {
@@ -187,19 +212,23 @@ func (p *Partitions) ReplaceNext() *typedef.Values {
 
 func (p *Partitions) ReplaceWithoutOld(idx uint64) {
 	p.fill(idx)
-	p.partitionsReplaced.Add(1)
+	p.deleted.deleted.Add(1)
 }
 
 func (p *Partitions) ReplaceNextWithoutOld() {
 	p.fill(p.idxFunc())
-	p.partitionsReplaced.Add(1)
+	p.deleted.deleted.Add(1)
 }
 
 func (p *Partitions) Len() uint64 {
-	return p.count.Load()
+	return p.parts.count.Load()
 }
 
-func generateValue(r *rand.Rand, table *typedef.Table, config *typedef.PartitionRangeConfig) []any {
+func (p *Partitions) Close() {
+	p.deleted.Close()
+}
+
+func generateValue(r utils.Random, table *typedef.Table, config *typedef.PartitionRangeConfig) []any {
 	values := make([]any, 0, table.PartitionKeys.LenValues())
 
 	for _, pk := range table.PartitionKeys {
@@ -209,7 +238,7 @@ func generateValue(r *rand.Rand, table *typedef.Table, config *typedef.Partition
 	return values
 }
 
-func NewPartitionKeys(r *rand.Rand, table *typedef.Table, config *typedef.PartitionRangeConfig) typedef.PartitionKeys {
+func NewPartitionKeys(r utils.Random, table *typedef.Table, config *typedef.PartitionRangeConfig) typedef.PartitionKeys {
 	values := generateValue(r, table, config)
 
 	m := make(map[string][]any, table.PartitionKeys.LenValues())

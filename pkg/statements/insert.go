@@ -31,7 +31,7 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
-func (g *Generator) Insert(ctx context.Context) (*typedef.Stmt, error) {
+func (g *Generator) Insert(_ context.Context) (*typedef.Stmt, error) {
 	builder := qb.Insert(g.keyspaceAndTable)
 	if g.useLWT && g.random.Uint32()%10 == 0 {
 		builder.Unique()
@@ -72,7 +72,7 @@ func (g *Generator) Insert(ctx context.Context) (*typedef.Stmt, error) {
 	}, nil
 }
 
-func (g *Generator) InsertJSON(ctx context.Context) (*typedef.Stmt, error) {
+func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 	if g.table.IsCounterTable() {
 		return nil, nil
 	}

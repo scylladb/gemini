@@ -102,18 +102,6 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 	utils.PreallocateRandomString(rand.New(randSrc), config.RandomStringBuffer)
 
 	logger.Debug("creating generators")
-	//gens, err := generators.New(
-	//	schema,
-	//	distFunc,
-	//	config.PartitionCount,
-	//	config.PartitionBufferSize,
-	//	logger,
-	//	randSrc,
-	//)
-	//if err != nil {
-	//	logger.Error("failed to create generators", zap.Error(err))
-	//	return nil, err
-	//}
 
 	logger.Debug("generating schema changes")
 

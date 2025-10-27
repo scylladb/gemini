@@ -19,14 +19,12 @@ import (
 	"errors"
 	"io"
 	"math/big"
-	"slices"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	pkgerrors "github.com/pkg/errors"
 	"github.com/samber/mo"
-	"github.com/scylladb/go-set/strset"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"gopkg.in/inf.v0"
@@ -39,7 +37,7 @@ import (
 )
 
 var comparers = []cmp.Option{
-	cmp.AllowUnexported(),
+	cmp.AllowUnexported(Row{}),
 	cmpopts.SortMaps(func(x, y *inf.Dec) bool {
 		return x.Cmp(y) < 0
 	}),
@@ -52,6 +50,7 @@ var comparers = []cmp.Option{
 
 type loader interface {
 	load(context.Context, *typedef.Stmt) (Rows, error)
+	loadIter(context.Context, *typedef.Stmt) RowIterator
 }
 
 type storer interface {
@@ -546,60 +545,6 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	return mutationErr
 }
 
-// helper to safely extract Rows from a mo.Result without risking MustGet on error
-func rowsFromResult(res mo.Result[any]) (rows Rows, isNil bool, err error) {
-	if res.IsError() {
-		return nil, false, res.Error()
-	}
-	v := res.MustGet()
-	if v == nil {
-		return nil, true, nil
-	}
-	return v.(Rows), false, nil
-}
-
-// compareRows compares two sets of rows and returns either the matching row count or a descriptive error
-func compareRows(table *typedef.Table, testRows, oracleRows Rows) (int, error) {
-	if len(testRows) == 0 && len(oracleRows) == 0 {
-		return 0, nil
-	}
-
-	if len(testRows) != len(oracleRows) {
-		testSet := pks(table, testRows)
-		oracleSet := pks(table, oracleRows)
-		missingInTest := strset.Difference(oracleSet, testSet).List()
-		missingInOracle := strset.Difference(testSet, oracleSet).List()
-
-		return 0, ErrorRowDifference{
-			MissingInTest:   missingInTest,
-			MissingInOracle: missingInOracle,
-			TestRows:        len(testRows),
-			OracleRows:      len(oracleRows),
-		}
-	}
-
-	if len(testRows) > 1 {
-		slices.SortStableFunc(testRows, rowsCmp)
-	}
-	if len(oracleRows) > 1 {
-		slices.SortStableFunc(oracleRows, rowsCmp)
-	}
-	var diffErr error
-	for i, oracleRow := range oracleRows {
-		if diff := cmp.Diff(oracleRow, testRows[i], comparers...); diff != "" {
-			diffErr = multierr.Append(diffErr, ErrorRowDifference{
-				Diff:      diff,
-				OracleRow: oracleRow,
-				TestRow:   testRows[i],
-			})
-		}
-	}
-	if diffErr == nil {
-		return len(testRows), nil
-	}
-	return 0, diffErr
-}
-
 //nolint:gocyclo
 func (ds delegatingStore) Check(
 	ctx context.Context,
@@ -621,58 +566,69 @@ func (ds delegatingStore) Check(
 			Timestamp:     time.Now().UTC(),
 		})
 
-		// Launch loads
-		var oracleCh chan mo.Result[any]
-		if ds.oracleStore != nil {
-			oracleCh = ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
-				return ds.oracleStore.load(ctx, stmt)
-			})
-		}
-		testCh := ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
-			return ds.testStore.load(ctx, stmt)
-		})
-
-		// Wait for test result with context cancellation support
-		var testResult mo.Result[any]
-		select {
-		case testResult = <-testCh:
-		case <-ctx.Done():
-			ds.workers.Release(testCh)
-			if oracleCh != nil {
-				ds.workers.Release(oracleCh)
-			}
-			return 0, ctx.Err()
-		}
-		ds.workers.Release(testCh)
-
-		// If there is no oracle, handle only the test result safely
-		if oracleCh == nil {
-			testRows, testNil, testErr := rowsFromResult(testResult)
+		// If there is no oracle, just count test rows
+		if ds.oracleStore == nil {
+			testIter := ds.testStore.loadIter(doCtx, stmt)
+			count, testErr := testIter.Count()
 			duration := time.Since(attemptStart)
 
 			if testErr != nil {
 				validationErr.AddAttempt(attempt, TypeTest, testErr, duration)
 			} else {
-				if testNil {
-					return 0, nil
-				}
-				return len(testRows), nil
+				return count, nil
 			}
 		} else {
-			// We have oracle: wait for oracle result
+			// Run iterators in parallel using worker pool
+			testIterCh := ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
+				iter := ds.testStore.loadIter(ctx, stmt)
+				rows, err := iter.Collect()
+				return rows, err
+			})
+
+			oracleIterCh := ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
+				iter := ds.oracleStore.loadIter(ctx, stmt)
+				rows, err := iter.Collect()
+				return rows, err
+			})
+
+			// Wait for test result
+			var testResult mo.Result[any]
+			select {
+			case testResult = <-testIterCh:
+			case <-doCtx.Done():
+				ds.workers.Release(testIterCh)
+				ds.workers.Release(oracleIterCh)
+				return 0, doCtx.Err()
+			}
+			ds.workers.Release(testIterCh)
+
+			// Wait for oracle result
 			var oracleResult mo.Result[any]
 			select {
-			case oracleResult = <-oracleCh:
-			case <-ctx.Done():
-				ds.workers.Release(oracleCh)
-				return 0, ctx.Err()
+			case oracleResult = <-oracleIterCh:
+			case <-doCtx.Done():
+				ds.workers.Release(oracleIterCh)
+				return 0, doCtx.Err()
 			}
-			ds.workers.Release(oracleCh)
+			ds.workers.Release(oracleIterCh)
 
-			// Safely extract both results
-			testRows, testNil, testErr := rowsFromResult(testResult)
-			oracleRows, oracleNil, oracleErr := rowsFromResult(oracleResult)
 			duration := time.Since(attemptStart)
+
+			// Extract results
+			var testRows, oracleRows Rows
+			var testErr, oracleErr error
+
+			if testResult.IsError() {
+				testErr = testResult.Error()
+			} else if testResult.MustGet() != nil {
+				testRows = testResult.MustGet().(Rows)
+			}
+
+			if oracleResult.IsError() {
+				oracleErr = oracleResult.Error()
+			} else if oracleResult.MustGet() != nil {
+				oracleRows = oracleResult.MustGet().(Rows)
+			}
 
 			// Record any errors that occurred
 			if testErr != nil {
@@ -682,26 +638,17 @@ func (ds delegatingStore) Check(
 				validationErr.AddAttempt(attempt, TypeOracle, oracleErr, duration)
 			}
 
-			// If any side errored, continue to retry logic below
+			// Check if comparison succeeded
 			if testErr == nil && oracleErr == nil {
-				// Both sides OK; normalize nils and compare
-				if testNil && oracleNil {
-					return 0, nil
-				}
-				if testNil {
-					testRows = Rows{}
-				}
-				if oracleNil {
-					oracleRows = Rows{}
+				result := CompareCollectedRows(table, testRows, oracleRows)
+				compErr := result.ToError()
+				if compErr == nil {
+					// No differences found
+					return result.MatchCount, nil
 				}
 
-				count, diffErr := compareRows(table, testRows, oracleRows)
-				if diffErr == nil {
-					return count, nil
-				}
-
-				validationErr.AddAttempt(attempt, TypeTest, diffErr, duration)
-
+				// Found differences, record them
+				validationErr.AddAttempt(attempt, TypeTest, compErr, duration)
 			}
 		}
 

@@ -26,7 +26,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 
 	"github.com/scylladb/gemini/pkg/replication"
-	statements2 "github.com/scylladb/gemini/pkg/statements"
+	statements "github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/tableopts"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -183,7 +183,7 @@ func TestGetCreateSchema(t *testing.T) {
 		test := tests[name]
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			got := statements2.GetCreateTable(test.table, ks)
+			got := statements.GetCreateTable(test.table, ks)
 			if diff := cmp.Diff(got, test.want); diff != "" {
 				t.Fatalf("cmp.Diff failed: %s", diff)
 			}
@@ -208,7 +208,7 @@ func TestGenSchema(t *testing.T) {
 	}
 
 	for _, seed := range seeds {
-		testSchema := statements2.GenSchema(
+		testSchema := statements.GenSchema(
 			testSchemaConfig,
 			rand.NewChaCha8(sha256.Sum256([]byte(strconv.FormatInt(int64(seed), 10)))),
 		)
@@ -243,7 +243,7 @@ func createColumns(cnt int, prefix string) typedef.Columns {
 	var cols typedef.Columns
 	for i := range cnt {
 		cols = append(cols, typedef.ColumnDef{
-			Name: statements2.GenColumnName(prefix, i),
+			Name: statements.GenColumnName(prefix, i),
 			Type: typedef.TypeText,
 		})
 	}

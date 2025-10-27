@@ -7,6 +7,7 @@ ENV CFLAGS="-O3"
 ENV CXXFLAGS="-O3"
 ENV DEBIAN_FRONTEND="noninteractive"
 ENV TZ="UTC"
+ENV GOEXPERIMENT="cgocheck2,greenteagc,arenas,newinliner,jsonv2"
 
 WORKDIR /gemini
 

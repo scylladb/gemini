@@ -234,27 +234,27 @@ func GetBagTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	}{}
 
 	if err = mapstructure.Decode(data, &st); err != nil {
-		return nil, errors.Wrapf(err, "can't decode string value for BagType, value=%+v", data)
+		return nil, errors.Wrapf(err, "can't decode string value for Collection, value=%+v", data)
 	}
 	var complexType string
 	if err = mapstructure.Decode(st.Type["complex_type"], &complexType); err != nil {
-		return nil, errors.Wrapf(err, "can't decode string value for BagType::Frozen, value=%v", st)
+		return nil, errors.Wrapf(err, "can't decode string value for Collection::Frozen, value=%v", st)
 	}
 	var frozen bool
 	if err = mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
-		return nil, errors.Wrapf(err, "can't decode bool value for BagType::Frozen, value=%v", st)
+		return nil, errors.Wrapf(err, "can't decode bool value for Collection::Frozen, value=%v", st)
 	}
 	var typ SimpleType
 	if err = mapstructure.Decode(st.Type["value_type"], &typ); err != nil {
 		return nil, errors.Wrapf(
 			err,
-			"can't decode SimpleType value for BagType::ValueType, value=%v",
+			"can't decode SimpleType value for Collection::ValueType, value=%v",
 			st,
 		)
 	}
 	return &ColumnDef{
 		Name: st.Name,
-		Type: &BagType{
+		Type: &Collection{
 			ComplexType: complexType,
 			Frozen:      frozen,
 			ValueType:   typ,

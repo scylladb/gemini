@@ -43,7 +43,7 @@ func New(distribution Distribution, partitionCount, seed uint64, mu, sigma float
 	case Zipf:
 		src := rand.NewChaCha8(sha256.Sum256([]byte(toHash)))
 
-		zipf := rand.NewZipf(rand.New(src), 1.001, float64(partitionCount), uint64(partitionCount))
+		zipf := rand.NewZipf(rand.New(src), 1.001, float64(partitionCount), partitionCount)
 
 		return src, func() uint64 {
 			return zipf.Uint64()

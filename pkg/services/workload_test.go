@@ -223,7 +223,6 @@ var dataset = []DataSet{
 
 func TestWorkload(t *testing.T) {
 	t.Parallel()
-	logger := getLogger(t)
 	scyllaContainer := testutils.TestContainers(t)
 
 	for _, test := range dataset {
@@ -250,7 +249,7 @@ func TestWorkload(t *testing.T) {
 				MutationConcurrency:   1,
 				ReadConcurrency:       3,
 				DropSchema:            true,
-			}, storeConfig, schema, logger, stopFlag)
+			}, storeConfig, schema, getLogger(t), stopFlag)
 
 			assert.NoError(err)
 			assert.NoError(workload.Run(t.Context()))
@@ -300,6 +299,29 @@ func TestWorkloadWithoutOracle(t *testing.T) {
 	}
 }
 
+func statementRatio() statements.Ratios {
+	return statements.Ratios{
+		MutationRatios: statements.MutationRatios{
+			InsertRatio: 0.75,
+			UpdateRatio: 0.25,
+			DeleteRatio: 0,
+			InsertSubtypeRatios: statements.InsertRatios{
+				RegularInsertRatio: 0.9,
+				JSONInsertRatio:    0.1,
+			},
+		},
+		ValidationRatios: statements.ValidationRatios{
+			SelectSubtypeRatios: statements.SelectRatios{
+				SinglePartitionRatio:                  0.6,
+				MultiplePartitionRatio:                0.3,
+				ClusteringRangeRatio:                  0.05,
+				MultiplePartitionClusteringRangeRatio: 0.04,
+				SingleIndexRatio:                      0.01,
+			},
+		},
+	}
+}
+
 func TestWorkloadWithFailedValidation(t *testing.T) {
 	t.Parallel()
 	scyllaContainer := testutils.TestContainers(t)
@@ -326,18 +348,19 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 		PartitionDistribution: distributions.Uniform,
 		Seed:                  seed,
 		RandomStringBuffer:    1024,
-		IOWorkerPoolSize:      1024,
+		StatementRatios:       statementRatio(),
+		IOWorkerPoolSize:      128,
 		MaxErrorsToStore:      maxErrorsCount,
-		WarmupDuration:        4*time.Second + 500*time.Millisecond, // Warmup to populate data
-		Duration:              10 * time.Second,                     // Then validate
+		WarmupDuration:        5 * time.Second,  // Warmup to populate data
+		Duration:              10 * time.Minute, // Then validate
 		PartitionCount:        partitionCount,
-		MutationConcurrency:   2,
-		ReadConcurrency:       5,
+		MutationConcurrency:   4,
+		ReadConcurrency:       4,
 		DropSchema:            true,
 	}, storeConfig, schema, logger, stopFlag)
 	assert.NoError(err)
 
-	time.AfterFunc(5*time.Second, func() {
+	time.AfterFunc(10*time.Second, func() {
 		truncateQuery := fmt.Sprintf("TRUNCATE TABLE %s.%s", schema.Keyspace.Name, schema.Tables[0].Name)
 		if err = scyllaContainer.Test.Query(truncateQuery).Exec(); err != nil {
 			t.Logf("Failed to execute truncate query: %v", err)
@@ -438,10 +461,9 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 	})
 
 	const (
-		partitionCount      = 100 // Reduced from 1000 to prevent stalling
-		partitionBufferSize = 10
-		seed                = 20
-		maxErrorsCount      = 1 // Increased to capture more errors if they occur
+		partitionCount = 100 // Reduced from 1000 to prevent stalling
+		seed           = 20
+		maxErrorsCount = 1 // Increased to capture more errors if they occur
 	)
 
 	workload, err := NewWorkload(&WorkloadConfig{

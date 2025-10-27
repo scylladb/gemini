@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/scylladb/gocqlx/v3/qb"
@@ -42,6 +43,7 @@ type (
 	}
 
 	PartitionRangeConfig struct {
+		DeleteBuckets   []time.Duration
 		MaxBlobLength   int
 		MinBlobLength   int
 		MaxStringLength int
@@ -394,6 +396,30 @@ func (v *Values) Copy() *Values {
 	v.mu.RUnlock()
 
 	return &Values{data: m}
+}
+
+func (v *Values) Data() []any {
+	values := make([]any, 0, len(v.data))
+
+	keys := make([]string, 0, len(v.data))
+	for k := range v.data {
+		keys = append(keys, k)
+	}
+
+	// Sort keys to ensure deterministic order
+	for i := 0; i < len(keys); i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[i] > keys[j] {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+
+	for _, k := range keys {
+		values = append(values, v.data[k]...)
+	}
+
+	return values
 }
 
 type StatementCacheType uint8

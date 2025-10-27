@@ -22,7 +22,7 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func (g *Generator) Update(ctx context.Context) (*typedef.Stmt, error) {
+func (g *Generator) Update(_ context.Context) (*typedef.Stmt, error) {
 	builder := qb.Update(g.keyspaceAndTable)
 	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
 

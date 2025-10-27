@@ -46,7 +46,7 @@ func (g *Generator) Delete(ctx context.Context) (*typedef.Stmt, error) {
 }
 
 // nolint:unused
-func (g *Generator) deleteMultiplePartitions(ctx context.Context) (*typedef.Stmt, error) {
+func (g *Generator) deleteMultiplePartitions(_ context.Context) (*typedef.Stmt, error) {
 	builder := qb.Delete(g.keyspaceAndTable)
 
 	numQueryPKs := g.getMultiplePartitionKeys()
@@ -70,7 +70,7 @@ func (g *Generator) deleteMultiplePartitions(ctx context.Context) (*typedef.Stmt
 	}, nil
 }
 
-func (g *Generator) deleteSinglePartition(ctx context.Context) (*typedef.Stmt, error) {
+func (g *Generator) deleteSinglePartition(_ context.Context) (*typedef.Stmt, error) {
 	pks := g.generator.ReplaceNext()
 
 	builder := qb.Delete(g.keyspaceAndTable)

@@ -26,7 +26,7 @@ import (
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/partitions"
-	statements2 "github.com/scylladb/gemini/pkg/statements"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -36,7 +36,7 @@ import (
 
 type Validation struct {
 	table       *typedef.Table
-	statement   *statements2.Generator
+	statement   *statements.Generator
 	generator   partitions.Interface
 	status      *status.GlobalStatus
 	stopFlag    *stop.Flag
@@ -50,7 +50,7 @@ func NewValidation(
 	table *typedef.Table,
 	generator partitions.Interface,
 	status *status.GlobalStatus,
-	statementRatioController *statements2.RatioController,
+	statementRatioController *statements.RatioController,
 	stopFlag *stop.Flag,
 	store store.Store,
 	seed [32]byte,
@@ -67,7 +67,7 @@ func NewValidation(
 		delay = 200 * time.Millisecond
 	}
 
-	statementGenerator := statements2.New(
+	statementGenerator := statements.New(
 		schema.Keyspace.Name,
 		generator,
 		table,
