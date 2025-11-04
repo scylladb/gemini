@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build testing
+
 package services
 
 import (
@@ -245,7 +247,7 @@ func TestWorkload(t *testing.T) {
 				MaxErrorsToStore:      1,
 				WarmupDuration:        test.warmup,
 				Duration:              test.duration,
-				PartitionCount:        10,
+				PartitionCount:        10000,
 				MutationConcurrency:   1,
 				ReadConcurrency:       3,
 				DropSchema:            true,
