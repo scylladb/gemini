@@ -25,25 +25,26 @@ type SchemaConfig struct {
 	ReplicationStrategy              replication.Replication
 	OracleReplicationStrategy        replication.Replication
 	TableOptions                     []tableopts.Option
-	MaxTables                        int
-	MaxPartitionKeys                 int
-	MinPartitionKeys                 int
+	DeleteBuckets                    []time.Duration
+	MaxUDTParts                      int
+	MaxStringLength                  int
 	MaxClusteringKeys                int
 	MinClusteringKeys                int
 	MaxColumns                       int
 	MinColumns                       int
-	MaxUDTParts                      int
+	MaxPartitionKeys                 int
 	MaxTupleParts                    int
 	MaxBlobLength                    int
-	MaxStringLength                  int
+	MinPartitionKeys                 int
 	MinBlobLength                    int
 	MinStringLength                  int
-	UseCounters                      bool
-	UseLWT                           bool
-	UseMaterializedViews             bool
-	CQLFeature                       CQLFeature
-	AsyncObjectStabilizationAttempts int
+	MaxTables                        int
 	AsyncObjectStabilizationDelay    time.Duration
+	AsyncObjectStabilizationAttempts int
+	CQLFeature                       CQLFeature
+	UseMaterializedViews             bool
+	UseLWT                           bool
+	UseCounters                      bool
 }
 
 func (sc *SchemaConfig) Valid() error {
@@ -55,6 +56,20 @@ func (sc *SchemaConfig) Valid() error {
 	}
 	if sc.MaxColumns <= sc.MinColumns {
 		return ErrSchemaConfigInvalidRangeCols
+	}
+
+	if sc.MinStringLength > sc.MaxStringLength {
+		return ErrSchemaConfigInvalidRange
+	}
+
+	if sc.MinBlobLength > sc.MaxBlobLength {
+		return ErrSchemaConfigInvalidRange
+	}
+
+	for i := range len(sc.DeleteBuckets) - 1 {
+		if sc.DeleteBuckets[i] > sc.DeleteBuckets[i+1] {
+			return ErrSchemaConfigInvalidRange
+		}
 	}
 	return nil
 }
@@ -94,5 +109,6 @@ func (sc *SchemaConfig) GetPartitionRangeConfig() PartitionRangeConfig {
 		MaxStringLength: sc.MaxStringLength,
 		MinStringLength: sc.MinStringLength,
 		UseLWT:          sc.UseLWT,
+		DeleteBuckets:   sc.DeleteBuckets,
 	}
 }

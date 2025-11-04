@@ -85,6 +85,8 @@ var (
 	readConcurrency     int
 
 	statementRatios string
+
+	deletedPartitionsTimeBucket []string
 )
 
 //nolint:lll
@@ -173,7 +175,9 @@ func setupFlags(cmd *cobra.Command) {
 		DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Second,
 			"Duration between attempts to apply a mutation for example 10ms or 1s")
 	cmd.Flags().
-		Uint64VarP(&partitionCount, "token-range-slices", "", 10_000_000, "Number of slices to divide the token space into")
+		Uint64VarP(&partitionCount, "partition-count", "", 2_000_000, "Number of Scylla Partitions")
+	cmd.Flags().
+		StringArrayVarP(&deletedPartitionsTimeBucket, "deleted-partitions-time-bucket", "", []string{"1m", "10m", "1h"}, "Time after to check if data resurrection has occurred for the deleted partitions")
 	cmd.Flags().
 		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "zipf",
 			"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")

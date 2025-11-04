@@ -26,4 +26,6 @@ var (
 	ErrSchemaConfigInvalidRangeCols = errors.New(
 		"max number of columns must be bigger than min number of columns",
 	)
+
+	ErrSchemaConfigInvalidRange = errors.New("min length must be smaller than max length")
 )

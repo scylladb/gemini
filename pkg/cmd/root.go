@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -338,6 +339,17 @@ func seedFromString(seed string) uint64 {
 func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 	rs := schema.GetReplicationStrategy(replicationStrategy, replication.NewNetworkTopologyStrategy(), logger)
 	ors := schema.GetReplicationStrategy(oracleReplicationStrategy, rs, logger)
+
+	deletedBuckets := make([]time.Duration, 0, len(deletedPartitionsTimeBucket))
+	for _, bucket := range deletedPartitionsTimeBucket {
+		dur, err := time.ParseDuration(bucket)
+		if err != nil {
+			logger.Fatal("failed to parse deleted partitions time bucket", zap.Error(err))
+		}
+
+		deletedBuckets = append(deletedBuckets, dur)
+	}
+
 	return typedef.SchemaConfig{
 		ReplicationStrategy:              rs,
 		OracleReplicationStrategy:        ors,
@@ -361,6 +373,7 @@ func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 		UseMaterializedViews:             useMaterializedViews,
 		AsyncObjectStabilizationAttempts: asyncObjectStabilizationAttempts,
 		AsyncObjectStabilizationDelay:    asyncObjectStabilizationDelay,
+		DeleteBuckets:                    deletedBuckets,
 	}
 }
 
@@ -389,6 +402,9 @@ func createSchemaConfig(datasetSize string, logger *zap.Logger) typedef.SchemaCo
 			AsyncObjectStabilizationAttempts: defaultConfig.AsyncObjectStabilizationAttempts,
 			UseMaterializedViews:             defaultConfig.UseMaterializedViews,
 			AsyncObjectStabilizationDelay:    defaultConfig.AsyncObjectStabilizationDelay,
+			MinBlobLength:                    10,
+			MinStringLength:                  10,
+			DeleteBuckets:                    defaultConfig.DeleteBuckets,
 		}
 	default:
 		return defaultConfig
