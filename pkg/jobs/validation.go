@@ -59,7 +59,7 @@ func NewValidation(
 ) *Validation {
 	maxAttempts := schema.Config.AsyncObjectStabilizationAttempts
 	delay := schema.Config.AsyncObjectStabilizationDelay
-	pc := schema.Config.GetPartitionRangeConfig()
+	vc := schema.Config.GetValueRangeConfig()
 
 	if maxAttempts <= 1 {
 		maxAttempts = 10
@@ -74,7 +74,7 @@ func NewValidation(
 		generator,
 		table,
 		rand.New(rand.NewChaCha8(seed)),
-		&pc,
+		&vc,
 		statementRatioController,
 		schema.Config.UseLWT,
 	)

@@ -114,13 +114,13 @@ func (g *Generator) buildSelectClusteringRange(builder *qb.SelectBuilder, values
 
 	for _, ck := range g.table.ClusteringKeys[:maxClusteringKeys-1] {
 		builder.Where(qb.Eq(ck.Name))
-		values = append(values, ck.Type.GenValue(g.random, g.partitionConfig)...)
+		values = append(values, ck.Type.GenValue(g.random, g.valueRangeConfig)...)
 	}
 
 	ck := g.table.ClusteringKeys[maxClusteringKeys-1]
 	builder.Where(qb.Gt(ck.Name)).Where(qb.Lt(ck.Name))
-	values = append(values, ck.Type.GenValue(g.random, g.partitionConfig)...)
-	values = append(values, ck.Type.GenValue(g.random, g.partitionConfig)...)
+	values = append(values, ck.Type.GenValue(g.random, g.valueRangeConfig)...)
+	values = append(values, ck.Type.GenValue(g.random, g.valueRangeConfig)...)
 
 	return values
 }
@@ -189,7 +189,7 @@ func (g *Generator) genSingleIndexQuery() *typedef.Stmt {
 
 	for _, idx := range g.table.Indexes[:idxCount] {
 		builder = builder.Where(qb.Eq(idx.ColumnName))
-		values = append(values, idx.Column.Type.GenValue(g.random, g.partitionConfig)...)
+		values = append(values, idx.Column.Type.GenValue(g.random, g.valueRangeConfig)...)
 	}
 
 	query, _ := builder.ToCql()

@@ -80,6 +80,7 @@ var (
 		TypeTinyint,
 		TypeVarint,
 	}
+
 	PartitionKeyTypes = SimpleTypes{
 		TypeAscii, TypeBigint, TypeDate, TypeDecimal, TypeDouble,
 		TypeFloat, TypeInet, TypeInt, TypeSmallint, TypeText, TypeTime, TypeTimestamp, TypeTimeuuid,
@@ -91,6 +92,7 @@ var (
 		TypeFloat, TypeInet, TypeInt, TypeSmallint, TypeText, TypeTime, TypeTimestamp, TypeTimeuuid,
 		TypeTinyint, TypeUuid, TypeVarchar, TypeVarint,
 	}
+
 	AllTypes = append(append(SimpleTypes{}, PkTypes...), TypeBoolean, TypeDuration)
 )
 
@@ -149,7 +151,7 @@ func (mt *MapType) CQLHolder() string {
 	return "?"
 }
 
-func (mt *MapType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
+func (mt *MapType) GenJSONValue(r utils.Random, p RangeConfig) any {
 	count := r.IntN(9) + 1
 	vals := reflect.MakeMap(
 		reflect.MapOf(
@@ -157,7 +159,8 @@ func (mt *MapType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 			reflect.TypeOf(mt.ValueType.GenJSONValue(r, p)),
 		),
 	)
-	for i := 0; i < count; i++ {
+
+	for range count {
 		vals.SetMapIndex(
 			reflect.ValueOf(mt.KeyType.GenJSONValue(r, p)),
 			reflect.ValueOf(mt.ValueType.GenJSONValue(r, p)),
@@ -166,7 +169,7 @@ func (mt *MapType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	return vals.Interface()
 }
 
-func (mt *MapType) GenValueOut(out []any, r utils.Random, p *PartitionRangeConfig) []any {
+func (mt *MapType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxMapSize+1)
 	vals := reflect.MakeMap(
 		reflect.MapOf(
@@ -185,7 +188,7 @@ func (mt *MapType) GenValueOut(out []any, r utils.Random, p *PartitionRangeConfi
 	return append(out, vals.Interface())
 }
 
-func (mt *MapType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
+func (mt *MapType) GenValue(r utils.Random, p RangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxMapSize+1)
 	vals := reflect.MakeMap(
 		reflect.MapOf(
@@ -218,7 +221,7 @@ func (mt *MapType) Indexable() bool {
 }
 
 // ValueVariationsNumber returns number of bytes generated value holds
-func (mt *MapType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
+func (mt *MapType) ValueVariationsNumber(p RangeConfig) float64 {
 	return math.Pow(
 		mt.KeyType.ValueVariationsNumber(p)*mt.ValueType.ValueVariationsNumber(p),
 		maxMapSize,
@@ -241,7 +244,7 @@ func (ct *CounterType) CQLHolder() string {
 	return "?"
 }
 
-func (ct *CounterType) GenJSONValue(r utils.Random, _ *PartitionRangeConfig) any {
+func (ct *CounterType) GenJSONValue(r utils.Random, _ RangeConfig) any {
 	if testutils.IsUnderTest() {
 		return r.Int64()
 	}
@@ -249,14 +252,14 @@ func (ct *CounterType) GenJSONValue(r utils.Random, _ *PartitionRangeConfig) any
 	return ct.Value.Add(1)
 }
 
-func (ct *CounterType) GenValue(r utils.Random, _ *PartitionRangeConfig) []any {
+func (ct *CounterType) GenValue(r utils.Random, _ RangeConfig) []any {
 	if testutils.IsUnderTest() {
 		return []any{r.Int64()}
 	}
 	return []any{ct.Value.Add(1)}
 }
 
-func (ct *CounterType) GenValueOut(out []any, r utils.Random, _ *PartitionRangeConfig) []any {
+func (ct *CounterType) GenValueOut(out []any, r utils.Random, _ RangeConfig) []any {
 	if testutils.IsUnderTest() {
 		return append(out, r.Int64())
 	}
@@ -277,7 +280,7 @@ func (ct *CounterType) Indexable() bool {
 }
 
 // ValueVariationsNumber returns number of bytes generated value holds
-func (ct *CounterType) ValueVariationsNumber(_ *PartitionRangeConfig) float64 {
+func (ct *CounterType) ValueVariationsNumber(_ RangeConfig) float64 {
 	// As a type, counters are a 64-bit signed integer
 	return 2 ^ 64
 }

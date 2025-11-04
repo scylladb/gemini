@@ -56,7 +56,7 @@ func (t *UDTType) Indexable() bool {
 	return true
 }
 
-func (t *UDTType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
+func (t *UDTType) GenJSONValue(r utils.Random, p RangeConfig) any {
 	vals := make(map[string]any)
 	for name, typ := range t.ValueTypes {
 		vals[name] = typ.GenJSONValue(r, p)
@@ -64,7 +64,7 @@ func (t *UDTType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	return vals
 }
 
-func (t *UDTType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
+func (t *UDTType) GenValue(r utils.Random, p RangeConfig) []any {
 	vals := make(map[string]any)
 	for name, typ := range t.ValueTypes {
 		vals[name] = typ.GenValue(r, p)[0]
@@ -72,7 +72,7 @@ func (t *UDTType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	return []any{vals}
 }
 
-func (t *UDTType) GenValueOut(out []any, r utils.Random, p *PartitionRangeConfig) []any {
+func (t *UDTType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {
 	vals := make(map[string]any)
 	for name, typ := range t.ValueTypes {
 		vals[name] = typ.GenValue(r, p)[0]
@@ -86,7 +86,7 @@ func (t *UDTType) LenValue() int {
 }
 
 // ValueVariationsNumber returns number of bytes generated value holds
-func (t *UDTType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
+func (t *UDTType) ValueVariationsNumber(p RangeConfig) float64 {
 	out := float64(1)
 	for _, tp := range t.ValueTypes {
 		out *= tp.ValueVariationsNumber(p)

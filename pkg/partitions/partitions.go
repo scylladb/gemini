@@ -228,7 +228,7 @@ func (p *Partitions) Close() {
 	p.deleted.Close()
 }
 
-func generateValue(r utils.Random, table *typedef.Table, config *typedef.PartitionRangeConfig) []any {
+func generateValue(r utils.Random, table *typedef.Table, config typedef.RangeConfig) []any {
 	values := make([]any, 0, table.PartitionKeys.LenValues())
 
 	for _, pk := range table.PartitionKeys {
@@ -238,7 +238,7 @@ func generateValue(r utils.Random, table *typedef.Table, config *typedef.Partiti
 	return values
 }
 
-func NewPartitionKeys(r utils.Random, table *typedef.Table, config *typedef.PartitionRangeConfig) typedef.PartitionKeys {
+func NewPartitionKeys(r utils.Random, table *typedef.Table, config typedef.RangeConfig) typedef.PartitionKeys {
 	values := generateValue(r, table, config)
 
 	m := make(map[string][]any, table.PartitionKeys.LenValues())

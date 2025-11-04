@@ -30,12 +30,12 @@ func (g *Generator) Update(_ context.Context) (*typedef.Stmt, error) {
 		switch ty := col.Type.(type) {
 		case *typedef.TupleType:
 			builder.SetTuple(col.Name, len(ty.ValueTypes))
-			values = append(values, col.Type.GenValue(g.random, g.partitionConfig)...)
+			values = append(values, col.Type.GenValue(g.random, g.valueRangeConfig)...)
 		case *typedef.CounterType:
 			builder.SetLit(col.Name, col.Name+"+1")
 		default:
 			builder.Set(col.Name)
-			values = append(values, col.Type.GenValue(g.random, g.partitionConfig)...)
+			values = append(values, col.Type.GenValue(g.random, g.valueRangeConfig)...)
 		}
 	}
 
@@ -47,7 +47,7 @@ func (g *Generator) Update(_ context.Context) (*typedef.Stmt, error) {
 
 	for _, ck := range g.table.ClusteringKeys {
 		builder.Where(qb.Eq(ck.Name))
-		values = append(values, ck.Type.GenValue(g.random, g.partitionConfig)...)
+		values = append(values, ck.Type.GenValue(g.random, g.valueRangeConfig)...)
 	}
 
 	query, _ := builder.ToCql()

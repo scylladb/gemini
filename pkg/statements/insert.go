@@ -48,17 +48,17 @@ func (g *Generator) Insert(_ context.Context) (*typedef.Stmt, error) {
 
 	for _, ck := range g.table.ClusteringKeys {
 		builder.Columns(ck.Name)
-		values = append(values, ck.Type.GenValue(g.random, g.partitionConfig)...)
+		values = append(values, ck.Type.GenValue(g.random, g.valueRangeConfig)...)
 	}
 
 	for _, col := range g.table.Columns {
 		switch colType := col.Type.(type) {
 		case *typedef.TupleType:
 			builder.TupleColumn(col.Name, len(colType.ValueTypes))
-			values = append(values, col.Type.GenValue(g.random, g.partitionConfig)...)
+			values = append(values, col.Type.GenValue(g.random, g.valueRangeConfig)...)
 		default:
 			builder.Columns(col.Name)
-			values = append(values, col.Type.GenValue(g.random, g.partitionConfig)...)
+			values = append(values, col.Type.GenValue(g.random, g.valueRangeConfig)...)
 		}
 	}
 
@@ -95,8 +95,8 @@ func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 		}
 	}
 
-	values = g.table.ClusteringKeys.ToJSONMap(values, g.random, g.partitionConfig)
-	values = g.table.Columns.ToJSONMap(values, g.random, g.partitionConfig)
+	values = g.table.ClusteringKeys.ToJSONMap(values, g.random, g.valueRangeConfig)
+	values = g.table.Columns.ToJSONMap(values, g.random, g.valueRangeConfig)
 
 	jsonString, err := json.Marshal(values)
 	if err != nil {

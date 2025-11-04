@@ -22,22 +22,27 @@ import (
 )
 
 type SchemaConfig struct {
-	ReplicationStrategy              replication.Replication
-	OracleReplicationStrategy        replication.Replication
-	TableOptions                     []tableopts.Option
-	DeleteBuckets                    []time.Duration
-	MaxUDTParts                      int
-	MaxStringLength                  int
+	ReplicationStrategy       replication.Replication
+	OracleReplicationStrategy replication.Replication
+	TableOptions              []tableopts.Option
+	DeleteBuckets             []time.Duration
+	MaxUDTParts               int
+	MaxStringLength           int
+	MinBlobLength             int
+	MaxBlobLength             int
+	MinStringLength           int
+	MaxPKStringLength         int
+	MinPKBlobLength           int
+	MaxPKBlobLength           int
+	MinPKStringLength         int
+
 	MaxClusteringKeys                int
 	MinClusteringKeys                int
 	MaxColumns                       int
 	MinColumns                       int
 	MaxPartitionKeys                 int
 	MaxTupleParts                    int
-	MaxBlobLength                    int
 	MinPartitionKeys                 int
-	MinBlobLength                    int
-	MinStringLength                  int
 	MaxTables                        int
 	AsyncObjectStabilizationDelay    time.Duration
 	AsyncObjectStabilizationAttempts int
@@ -104,11 +109,20 @@ func (sc *SchemaConfig) GetMinColumns() int {
 
 func (sc *SchemaConfig) GetPartitionRangeConfig() PartitionRangeConfig {
 	return PartitionRangeConfig{
+		MaxBlobLength:   sc.MaxPKBlobLength,
+		MinBlobLength:   sc.MinPKBlobLength,
+		MaxStringLength: sc.MaxPKStringLength,
+		MinStringLength: sc.MinPKStringLength,
+		UseLWT:          sc.UseLWT,
+		DeleteBuckets:   sc.DeleteBuckets,
+	}
+}
+
+func (sc *SchemaConfig) GetValueRangeConfig() ValueRangeConfig {
+	return ValueRangeConfig{
 		MaxBlobLength:   sc.MaxBlobLength,
 		MinBlobLength:   sc.MinBlobLength,
 		MaxStringLength: sc.MaxStringLength,
 		MinStringLength: sc.MinStringLength,
-		UseLWT:          sc.UseLWT,
-		DeleteBuckets:   sc.DeleteBuckets,
 	}
 }

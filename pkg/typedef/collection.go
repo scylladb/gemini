@@ -55,7 +55,7 @@ func (ct *Collection) CQLHolder() string {
 	return "?"
 }
 
-func (ct *Collection) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
+func (ct *Collection) GenValue(r utils.Random, p RangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]any, count)
 	for i := 0; i < count; i++ {
@@ -64,7 +64,7 @@ func (ct *Collection) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	return []any{out}
 }
 
-func (ct *Collection) GenValueOut(out []any, r utils.Random, p *PartitionRangeConfig) []any {
+func (ct *Collection) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	for range count {
 		out = ct.ValueType.GenValueOut(out, r, p)
@@ -72,7 +72,7 @@ func (ct *Collection) GenValueOut(out []any, r utils.Random, p *PartitionRangeCo
 	return out
 }
 
-func (ct *Collection) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
+func (ct *Collection) GenJSONValue(r utils.Random, p RangeConfig) any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]any, count)
 	for i := 0; i < count; i++ {
@@ -90,6 +90,6 @@ func (ct *Collection) Indexable() bool {
 }
 
 // ValueVariationsNumber returns number of bytes generated value holds
-func (ct *Collection) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
+func (ct *Collection) ValueVariationsNumber(p RangeConfig) float64 {
 	return math.Pow(ct.ValueType.ValueVariationsNumber(p), maxBagSize)
 }

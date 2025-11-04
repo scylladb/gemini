@@ -60,7 +60,7 @@ func (t *TupleType) Indexable() bool {
 	return !slices.Contains(t.ValueTypes, TypeDuration)
 }
 
-func (t *TupleType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
+func (t *TupleType) GenJSONValue(r utils.Random, p RangeConfig) any {
 	out := make([]any, 0, len(t.ValueTypes))
 	for _, tp := range t.ValueTypes {
 		out = append(out, tp.GenJSONValue(r, p))
@@ -68,7 +68,7 @@ func (t *TupleType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	return out
 }
 
-func (t *TupleType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
+func (t *TupleType) GenValue(r utils.Random, p RangeConfig) []any {
 	out := make([]any, 0, len(t.ValueTypes))
 	for _, tp := range t.ValueTypes {
 		out = append(out, tp.GenValue(r, p)...)
@@ -76,7 +76,7 @@ func (t *TupleType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
 	return out
 }
 
-func (t *TupleType) GenValueOut(out []any, r utils.Random, p *PartitionRangeConfig) []any {
+func (t *TupleType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {
 	for _, tp := range t.ValueTypes {
 		out = append(out, tp.GenValue(r, p)...)
 	}
@@ -92,7 +92,7 @@ func (t *TupleType) LenValue() int {
 }
 
 // ValueVariationsNumber returns number of bytes generated value holds
-func (t *TupleType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
+func (t *TupleType) ValueVariationsNumber(p RangeConfig) float64 {
 	out := float64(1)
 	for _, tp := range t.ValueTypes {
 		out *= out * tp.ValueVariationsNumber(p)

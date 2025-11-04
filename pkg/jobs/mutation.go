@@ -53,13 +53,13 @@ func NewMutation(
 	del bool,
 	seed [32]byte,
 ) *Mutation {
-	pc := schema.Config.GetPartitionRangeConfig()
+	vc := schema.Config.GetValueRangeConfig()
 	statementGenerator := statements.New(
 		schema.Keyspace.Name,
 		generator,
 		table,
 		rand.New(rand.NewChaCha8(seed)),
-		&pc,
+		&vc,
 		statementRatioController,
 		schema.Config.UseLWT,
 	)

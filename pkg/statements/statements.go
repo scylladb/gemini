@@ -56,7 +56,7 @@ type Generator struct {
 	generator        partitions.Interface
 	random           utils.Random
 	table            *typedef.Table
-	partitionConfig  *typedef.PartitionRangeConfig
+	valueRangeConfig *typedef.ValueRangeConfig
 	ratioController  *RatioController
 	keyspace         string
 	keyspaceAndTable string
@@ -68,7 +68,7 @@ func New(
 	valueGenerator partitions.Interface,
 	table *typedef.Table,
 	random utils.Random,
-	partitionConfig *typedef.PartitionRangeConfig,
+	valueRangeConfig *typedef.ValueRangeConfig,
 	ratioController *RatioController,
 	useLWT bool,
 ) *Generator {
@@ -77,7 +77,7 @@ func New(
 		keyspaceAndTable: schema + "." + table.Name,
 		table:            table,
 		random:           random,
-		partitionConfig:  partitionConfig,
+		valueRangeConfig: valueRangeConfig,
 		useLWT:           useLWT,
 		generator:        valueGenerator,
 		ratioController:  ratioController,

@@ -51,6 +51,20 @@ type (
 		UseLWT          bool
 	}
 
+	ValueRangeConfig struct {
+		MaxBlobLength   int
+		MinBlobLength   int
+		MaxStringLength int
+		MinStringLength int
+	}
+
+	RangeConfig interface {
+		GetMaxBlobLength() int
+		GetMinBlobLength() int
+		GetMaxStringLength() int
+		GetMinStringLength() int
+	}
+
 	Stmts struct {
 		PostStmtHook func()
 		List         []*Stmt
@@ -426,4 +440,36 @@ type StatementCacheType uint8
 
 func (v ValueWithToken) MemoryFootprint() uint64 {
 	return uint64(unsafe.Sizeof(v)) + v.Value.MemoryFootprint()
+}
+
+func (p PartitionRangeConfig) GetMaxBlobLength() int {
+	return p.MaxBlobLength
+}
+
+func (p PartitionRangeConfig) GetMinBlobLength() int {
+	return p.MinBlobLength
+}
+
+func (p PartitionRangeConfig) GetMaxStringLength() int {
+	return p.MaxStringLength
+}
+
+func (p PartitionRangeConfig) GetMinStringLength() int {
+	return p.MinStringLength
+}
+
+func (p ValueRangeConfig) GetMaxBlobLength() int {
+	return p.MaxBlobLength
+}
+
+func (p ValueRangeConfig) GetMinBlobLength() int {
+	return p.MinBlobLength
+}
+
+func (p ValueRangeConfig) GetMaxStringLength() int {
+	return p.MaxStringLength
+}
+
+func (p ValueRangeConfig) GetMinStringLength() int {
+	return p.MinStringLength
 }

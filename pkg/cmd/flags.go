@@ -80,6 +80,16 @@ var (
 	iOWorkerPool                     int
 	randomStringBuffer               int
 
+	maxPKStringLength int
+	minPKStringLength int
+	maxPKBlobLength   int
+	minPKBlobLength   int
+
+	maxStringLength int
+	minStringLength int
+	maxBlobLength   int
+	minBlobLength   int
+
 	concurrency         int
 	mutationConcurrency int
 	readConcurrency     int
@@ -98,6 +108,14 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().BoolVarP(&versionFlag, "version", "", false, "Print version information")
 	cmd.PersistentFlags().
 		BoolP("version-json", "", false, "Print version information in JSON format")
+	cmd.Flags().IntVarP(&maxStringLength, "max-string-length", "", 1024, "Maximum string length")
+	cmd.Flags().IntVarP(&minStringLength, "min-string-length", "", 1, "Minimum string length")
+	cmd.Flags().IntVarP(&maxBlobLength, "max-blob-length", "", 10000, "Maximum blob length")
+	cmd.Flags().IntVarP(&minBlobLength, "min-blob-length", "", 1, "Minimum blob length")
+	cmd.Flags().IntVarP(&maxPKStringLength, "max-pk-string-length", "", 64, "Maximum string length")
+	cmd.Flags().IntVarP(&minPKStringLength, "min-pk-string-length", "", 16, "Minimum string length")
+	cmd.Flags().IntVarP(&maxPKBlobLength, "max-pk-blob-length", "", 128, "Maximum blob length")
+	cmd.Flags().IntVarP(&minPKBlobLength, "min-pk-blob-length", "", 32, "Minimum blob length")
 	cmd.Flags().
 		StringSliceVarP(&testClusterHost, "test-cluster", "t", []string{}, "Host names or IPs of the test cluster that is system under test")
 	cmd.Flags().
