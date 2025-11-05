@@ -24,8 +24,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/builders"
-	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )

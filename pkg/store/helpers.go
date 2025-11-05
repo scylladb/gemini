@@ -90,11 +90,11 @@ func pks(t *typedef.Table, rows Rows) *strset.Set {
 
 	for _, row := range rows {
 		for _, pk := range t.PartitionKeys {
-			keySet.Add(formatRows(&sb, pk.Name, row[pk.Name]))
+			keySet.Add(formatRows(&sb, pk.Name, row.Get(pk.Name)))
 		}
 
 		for _, ck := range t.ClusteringKeys {
-			keySet.Add(formatRows(&sb, ck.Name, row[ck.Name]))
+			keySet.Add(formatRows(&sb, ck.Name, row.Get(ck.Name)))
 		}
 	}
 

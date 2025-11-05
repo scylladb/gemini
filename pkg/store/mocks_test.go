@@ -39,6 +39,11 @@ func (m *mockStoreLoader) load(ctx context.Context, stmt *typedef.Stmt) (Rows, e
 	return args.Get(0).(Rows), args.Error(1)
 }
 
+func (m *mockStoreLoader) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator {
+	args := m.Called(ctx, stmt)
+	return args.Get(0).(RowIterator)
+}
+
 func (m *mockStoreLoader) Close() error {
 	args := m.Called()
 	return args.Error(0)

@@ -18,7 +18,7 @@ package jobs
 import (
 	"fmt"
 
-	"github.com/scylladb/gemini/pkg/generators/statements"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )

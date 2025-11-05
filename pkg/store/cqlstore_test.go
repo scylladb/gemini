@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build testing
+
 package store
 
 import (
@@ -62,7 +64,7 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 			Name: "table_1",
 			Columns: typedef.Columns{
 				{Name: "id", Type: typedef.TypeUuid},
-				{Name: "values", Type: &typedef.BagType{
+				{Name: "values", Type: &typedef.Collection{
 					ComplexType: typedef.TypeList,
 					ValueType:   typedef.TypeText,
 					Frozen:      false,

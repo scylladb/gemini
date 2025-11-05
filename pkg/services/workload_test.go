@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build testing
+
 package services
 
 import (
@@ -29,9 +31,9 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/scylladb/gemini/pkg/distributions"
-	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/jobs"
 	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -113,18 +115,31 @@ func getSchema(tb testing.TB, table ...*typedef.Table) *typedef.Schema {
 		Config: typedef.SchemaConfig{
 			ReplicationStrategy:              replication.NewSimpleStrategy(),
 			OracleReplicationStrategy:        replication.NewSimpleStrategy(),
-			MaxTables:                        1,
-			MaxPartitionKeys:                 2,
-			MinPartitionKeys:                 2,
-			MaxClusteringKeys:                0,
+			TableOptions:                     nil,
+			DeleteBuckets:                    []time.Duration{5 * time.Second, 10 * time.Second, 15 * time.Second},
+			MaxUDTParts:                      2,
+			MaxStringLength:                  32,
+			MinBlobLength:                    1,
+			MaxBlobLength:                    32,
+			MinStringLength:                  1,
+			MaxPKStringLength:                8,
+			MinPKBlobLength:                  64,
+			MaxPKBlobLength:                  128,
+			MinPKStringLength:                8,
+			MaxClusteringKeys:                2,
 			MinClusteringKeys:                1,
 			MaxColumns:                       1,
 			MinColumns:                       1,
-			MaxBlobLength:                    32,
-			MaxStringLength:                  32,
-			CQLFeature:                       typedef.CQLFeatureNormal,
-			AsyncObjectStabilizationAttempts: 10,
+			MaxPartitionKeys:                 2,
+			MaxTupleParts:                    3,
+			MinPartitionKeys:                 2,
+			MaxTables:                        1,
 			AsyncObjectStabilizationDelay:    10 * time.Millisecond,
+			AsyncObjectStabilizationAttempts: 10,
+			CQLFeature:                       typedef.CQLFeatureNormal,
+			UseMaterializedViews:             false,
+			UseLWT:                           false,
+			UseCounters:                      false,
 		},
 	}
 }
@@ -223,7 +238,6 @@ var dataset = []DataSet{
 
 func TestWorkload(t *testing.T) {
 	t.Parallel()
-	logger := getLogger(t)
 	scyllaContainer := testutils.TestContainers(t)
 
 	for _, test := range dataset {
@@ -242,16 +256,15 @@ func TestWorkload(t *testing.T) {
 				RunningMode:           test.mode,
 				PartitionDistribution: distributions.Uniform,
 				Seed:                  1,
-				PartitionBufferSize:   2,
 				IOWorkerPoolSize:      16,
 				MaxErrorsToStore:      1,
 				WarmupDuration:        test.warmup,
 				Duration:              test.duration,
-				PartitionCount:        10,
+				PartitionCount:        10000,
 				MutationConcurrency:   1,
 				ReadConcurrency:       3,
 				DropSchema:            true,
-			}, storeConfig, schema, logger, stopFlag)
+			}, storeConfig, schema, getLogger(t), stopFlag)
 
 			assert.NoError(err)
 			assert.NoError(workload.Run(t.Context()))
@@ -282,7 +295,6 @@ func TestWorkloadWithoutOracle(t *testing.T) {
 				RunningMode:           test.mode,
 				PartitionDistribution: distributions.Uniform,
 				Seed:                  1,
-				PartitionBufferSize:   10,
 				IOWorkerPoolSize:      2,
 				MaxErrorsToStore:      1,
 				WarmupDuration:        test.warmup,
@@ -302,6 +314,29 @@ func TestWorkloadWithoutOracle(t *testing.T) {
 	}
 }
 
+func statementRatio() statements.Ratios {
+	return statements.Ratios{
+		MutationRatios: statements.MutationRatios{
+			InsertRatio: 0.75,
+			UpdateRatio: 0.25,
+			DeleteRatio: 0,
+			InsertSubtypeRatios: statements.InsertRatios{
+				RegularInsertRatio: 0.9,
+				JSONInsertRatio:    0.1,
+			},
+		},
+		ValidationRatios: statements.ValidationRatios{
+			SelectSubtypeRatios: statements.SelectRatios{
+				SinglePartitionRatio:                  0.6,
+				MultiplePartitionRatio:                0.3,
+				ClusteringRangeRatio:                  0.05,
+				MultiplePartitionClusteringRangeRatio: 0.04,
+				SingleIndexRatio:                      0.01,
+			},
+		},
+	}
+}
+
 func TestWorkloadWithFailedValidation(t *testing.T) {
 	t.Parallel()
 	scyllaContainer := testutils.TestContainers(t)
@@ -316,10 +351,9 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	})
 
 	const (
-		partitionCount      = 1000
-		partitionBufferSize = 100
-		seed                = 4
-		maxErrorsCount      = 1
+		partitionCount = 1000
+		seed           = 4
+		maxErrorsCount = 1
 	)
 
 	// Phase 1: Run a mixed workload to populate data AND establish partition keys
@@ -328,20 +362,20 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 		RunningMode:           jobs.MixedMode,
 		PartitionDistribution: distributions.Uniform,
 		Seed:                  seed,
-		PartitionBufferSize:   partitionBufferSize,
 		RandomStringBuffer:    1024,
-		IOWorkerPoolSize:      1024,
+		StatementRatios:       statementRatio(),
+		IOWorkerPoolSize:      128,
 		MaxErrorsToStore:      maxErrorsCount,
-		WarmupDuration:        4*time.Second + 500*time.Millisecond, // Warmup to populate data
-		Duration:              10 * time.Second,                     // Then validate
+		WarmupDuration:        5 * time.Second,  // Warmup to populate data
+		Duration:              10 * time.Minute, // Then validate
 		PartitionCount:        partitionCount,
-		MutationConcurrency:   2,
-		ReadConcurrency:       5,
+		MutationConcurrency:   4,
+		ReadConcurrency:       4,
 		DropSchema:            true,
 	}, storeConfig, schema, logger, stopFlag)
 	assert.NoError(err)
 
-	time.AfterFunc(5*time.Second, func() {
+	time.AfterFunc(10*time.Second, func() {
 		truncateQuery := fmt.Sprintf("TRUNCATE TABLE %s.%s", schema.Keyspace.Name, schema.Tables[0].Name)
 		if err = scyllaContainer.Test.Query(truncateQuery).Exec(); err != nil {
 			t.Logf("Failed to execute truncate query: %v", err)
@@ -442,17 +476,15 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 	})
 
 	const (
-		partitionCount      = 100 // Reduced from 1000 to prevent stalling
-		partitionBufferSize = 10
-		seed                = 20
-		maxErrorsCount      = 1 // Increased to capture more errors if they occur
+		partitionCount = 100 // Reduced from 1000 to prevent stalling
+		seed           = 20
+		maxErrorsCount = 1 // Increased to capture more errors if they occur
 	)
 
 	workload, err := NewWorkload(&WorkloadConfig{
 		RunningMode:           jobs.MixedMode,
 		PartitionDistribution: distributions.Uniform,
 		Seed:                  seed,
-		PartitionBufferSize:   partitionBufferSize,
 		IOWorkerPoolSize:      64, // Reduced from 16 to avoid overwhelming the system
 		MaxErrorsToStore:      maxErrorsCount,
 		WarmupDuration:        2 * time.Second,  // Reduced from 5s

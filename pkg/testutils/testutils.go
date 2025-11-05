@@ -40,17 +40,17 @@ type (
 )
 
 func Must[T any](T, error) T {
-	panic("this function should not be used in production code, only for testing purposes")
+	panic("this function should not be used in production code, only for testing purposes, use -tags=testing")
 }
 
 func SingleScylla(_ testing.TB, _ ...bool) *ScyllaContainer {
-	panic("this function should not be used in production code, only for testing purposes")
+	panic("this function should not be used in production code, only for testing purposes, use -tags=testing")
 }
 
 func TestContainers(_ testing.TB, _ ...bool) *ScyllaContainer {
-	panic("this function should not be used in production code, only for testing purposes")
+	panic("this function should not be used in production code, only for testing purposes, use -tags=testing")
 }
 
 func GenerateUniqueKeyspaceName(_ testing.TB) string {
-	panic("this function should not be used in production code, only for testing purposes")
+	panic("this function should not be used in production code, only for testing purposes, use -tags=testing")
 }

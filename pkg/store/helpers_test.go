@@ -56,7 +56,7 @@ func TestPks(t *testing.T) {
 				ClusteringKeys: typedef.Columns{},
 			},
 			rows: Rows{
-				{"pk0": "value1", "pk1": 42},
+				NewRow([]string{"pk0", "pk1"}, []any{"value1", 42}),
 			},
 			expected: func() *strset.Set {
 				s := strset.New()
@@ -75,7 +75,7 @@ func TestPks(t *testing.T) {
 				},
 			},
 			rows: Rows{
-				{"ck0": "valueA", "ck1": 24},
+				NewRow([]string{"ck0", "ck1"}, []any{"valueA", 24}),
 			},
 			expected: func() *strset.Set {
 				s := strset.New()
@@ -95,7 +95,7 @@ func TestPks(t *testing.T) {
 				},
 			},
 			rows: Rows{
-				{"pk0": "value1", "ck0": "valueA"},
+				NewRow([]string{"pk0", "ck0"}, []any{"value1", "valueA"}),
 			},
 			expected: func() *strset.Set {
 				s := strset.New()
@@ -115,8 +115,8 @@ func TestPks(t *testing.T) {
 				},
 			},
 			rows: Rows{
-				{"pk0": "value1", "ck0": "valueA"},
-				{"pk0": "value2", "ck0": "valueB"},
+				NewRow([]string{"pk0", "ck0"}, []any{"value1", "valueA"}),
+				NewRow([]string{"pk0", "ck0"}, []any{"value2", "valueB"}),
 			},
 			expected: func() *strset.Set {
 				s := strset.New()
@@ -139,12 +139,7 @@ func TestPks(t *testing.T) {
 				ClusteringKeys: typedef.Columns{},
 			},
 			rows: Rows{
-				{
-					"pk_string": "test",
-					"pk_int":    42,
-					"pk_float":  3.14,
-					"pk_bool":   true,
-				},
+				NewRow([]string{"pk_string", "pk_int", "pk_float", "pk_bool"}, []any{"test", 42, 3.14, true}),
 			},
 			expected: func() *strset.Set {
 				s := strset.New()
@@ -165,7 +160,7 @@ func TestPks(t *testing.T) {
 				ClusteringKeys: typedef.Columns{},
 			},
 			rows: Rows{
-				{"pk0": "value1"},
+				NewRow([]string{"pk0"}, []any{"value1"}),
 			},
 			expected: func() *strset.Set {
 				s := strset.New()
@@ -185,11 +180,7 @@ func TestPks(t *testing.T) {
 				ClusteringKeys: typedef.Columns{},
 			},
 			rows: Rows{
-				{
-					"pk_int":    0,
-					"pk_string": "",
-					"pk_bool":   false,
-				},
+				NewRow([]string{"pk_int", "pk_string", "pk_bool"}, []any{0, "", false}),
 			},
 			expected: func() *strset.Set {
 				s := strset.New()
@@ -208,7 +199,7 @@ func TestPks(t *testing.T) {
 				ClusteringKeys: typedef.Columns{},
 			},
 			rows: Rows{
-				{"pk_bytes": []byte("hello")},
+				NewRow([]string{"pk_bytes"}, []any{[]byte("hello")}),
 			},
 			expected: func() *strset.Set {
 				s := strset.New()
@@ -434,12 +425,7 @@ func BenchmarkPks(b *testing.B) {
 
 	rows := make(Rows, 100)
 	for i := 0; i < 100; i++ {
-		rows[i] = Row{
-			"pk0": "value" + strconv.Itoa(i),
-			"pk1": i,
-			"ck0": "cluster" + strconv.Itoa(i),
-			"ck1": float64(i) * 1.5,
-		}
+		rows[i] = NewRow([]string{"pk0", "pk1", "ck0", "ck1"}, []any{"value" + strconv.Itoa(i), i, "cluster" + strconv.Itoa(i), float64(i) * 1.5})
 	}
 
 	b.ResetTimer()

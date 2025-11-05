@@ -26,7 +26,7 @@ import (
 type (
 	Distribution string
 
-	DistributionFunc func() uint32
+	DistributionFunc func() uint64
 )
 
 const (
@@ -36,17 +36,17 @@ const (
 	Uniform   Distribution = "uniform"
 )
 
-func New(distribution Distribution, partitionCount int, seed uint64, mu, sigma float64) (*rand.ChaCha8, DistributionFunc) {
+func New(distribution Distribution, partitionCount, seed uint64, mu, sigma float64) (*rand.ChaCha8, DistributionFunc) {
 	toHash := string(distribution) + strconv.FormatInt(int64(partitionCount), 10) + strconv.FormatUint(seed, 10)
 
 	switch distribution {
 	case Zipf:
 		src := rand.NewChaCha8(sha256.Sum256([]byte(toHash)))
 
-		zipf := rand.NewZipf(rand.New(src), 1.001, float64(partitionCount), uint64(partitionCount))
+		zipf := rand.NewZipf(rand.New(src), 1.001, float64(partitionCount), partitionCount)
 
-		return src, func() uint32 {
-			return uint32(zipf.Uint64())
+		return src, func() uint64 {
+			return zipf.Uint64()
 		}
 	case LogNormal:
 		hash := sha256.Sum256(
@@ -73,8 +73,8 @@ func New(distribution Distribution, partitionCount int, seed uint64, mu, sigma f
 			Sigma: sigma,
 		}
 
-		return src, func() uint32 {
-			return uint32(d.Rand())
+		return src, func() uint64 {
+			return uint64(d.Rand())
 		}
 	case Normal:
 		hash := sha256.Sum256(
@@ -101,8 +101,8 @@ func New(distribution Distribution, partitionCount int, seed uint64, mu, sigma f
 			Sigma: sigma,
 		}
 
-		return src, func() uint32 {
-			return uint32(d.Rand())
+		return src, func() uint64 {
+			return uint64(d.Rand())
 		}
 	case Uniform:
 		src := rand.NewChaCha8(sha256.Sum256([]byte(toHash)))
@@ -113,8 +113,8 @@ func New(distribution Distribution, partitionCount int, seed uint64, mu, sigma f
 			Src: src,
 		}
 
-		return src, func() uint32 {
-			return uint32(d.Rand())
+		return src, func() uint64 {
+			return uint64(d.Rand())
 		}
 	default:
 		panic(fmt.Sprintf("unsupported distribution: %s", string(distribution)))

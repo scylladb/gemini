@@ -4,9 +4,12 @@
     <working_directory value="$PROJECT_DIR$" />
     <go_parameters value="-timeout 5m -tags testing -race" />
     <envs>
-      <env name="GEMINI_USE_DOCKER_SCYLLA" value="true" />
-      <env name="GEMINI_TEST_CLUSTER_IP" value="192.168.100.3" />
+      <env name="CGO_ENABLED" value="1" />
       <env name="GEMINI_ORACLE_CLUSTER_IP" value="192.168.100.2" />
+      <env name="GEMINI_TEST_CLUSTER_IP" value="192.168.100.3" />
+      <env name="GEMINI_USE_DOCKER_SCYLLA" value="true" />
+      <env name="GODEBUG" value="default\\=go1.24,cgocheck\\=1,disablethp\\=0,panicnil\\=0,http2client\\=1,http2server\\=1,asynctimerchan\\=0,madvdontneed\\=0," />
+      <env name="GOGC" value="95" />
     </envs>
     <kind value="DIRECTORY" />
     <package value="github.com/scylladb/gemini" />

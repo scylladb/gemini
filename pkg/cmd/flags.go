@@ -58,8 +58,7 @@ var (
 	maxRetriesMutate                 int
 	maxRetriesMutateSleep            time.Duration
 	maxErrorsToStore                 int
-	pkBufferReuseSize                int
-	partitionCount                   int
+	partitionCount                   uint64
 	partitionKeyDistribution         string
 	normalDistMean                   float64
 	normalDistSigma                  float64
@@ -81,11 +80,23 @@ var (
 	iOWorkerPool                     int
 	randomStringBuffer               int
 
+	maxPKStringLength int
+	minPKStringLength int
+	maxPKBlobLength   int
+	minPKBlobLength   int
+
+	maxStringLength int
+	minStringLength int
+	maxBlobLength   int
+	minBlobLength   int
+
 	concurrency         int
 	mutationConcurrency int
 	readConcurrency     int
 
 	statementRatios string
+
+	deletedPartitionsTimeBucket []string
 )
 
 //nolint:lll
@@ -97,6 +108,14 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().BoolVarP(&versionFlag, "version", "", false, "Print version information")
 	cmd.PersistentFlags().
 		BoolP("version-json", "", false, "Print version information in JSON format")
+	cmd.Flags().IntVarP(&maxStringLength, "max-string-length", "", 1024, "Maximum string length")
+	cmd.Flags().IntVarP(&minStringLength, "min-string-length", "", 1, "Minimum string length")
+	cmd.Flags().IntVarP(&maxBlobLength, "max-blob-length", "", 10000, "Maximum blob length")
+	cmd.Flags().IntVarP(&minBlobLength, "min-blob-length", "", 1, "Minimum blob length")
+	cmd.Flags().IntVarP(&maxPKStringLength, "max-pk-string-length", "", 64, "Maximum string length")
+	cmd.Flags().IntVarP(&minPKStringLength, "min-pk-string-length", "", 16, "Minimum string length")
+	cmd.Flags().IntVarP(&maxPKBlobLength, "max-pk-blob-length", "", 128, "Maximum blob length")
+	cmd.Flags().IntVarP(&minPKBlobLength, "min-pk-blob-length", "", 32, "Minimum blob length")
 	cmd.Flags().
 		StringSliceVarP(&testClusterHost, "test-cluster", "t", []string{}, "Host names or IPs of the test cluster that is system under test")
 	cmd.Flags().
@@ -151,9 +170,9 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		IntVarP(&maxPartitionKeys, "max-partition-keys", "", 8, "Maximum number of generated partition keys")
 	cmd.Flags().
-		IntVarP(&minPartitionKeys, "min-partition-keys", "", 2, "Minimum number of generated partition keys")
+		IntVarP(&minPartitionKeys, "min-partition-keys", "", 1, "Minimum number of generated partition keys")
 	cmd.Flags().
-		IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 4, "Maximum number of generated clustering keys")
+		IntVarP(&maxClusteringKeys, "max-clustering-keys", "", 5, "Maximum number of generated clustering keys")
 	cmd.Flags().
 		IntVarP(&minClusteringKeys, "min-clustering-keys", "", 0, "Minimum number of generated clustering keys")
 	cmd.Flags().
@@ -174,9 +193,9 @@ func setupFlags(cmd *cobra.Command) {
 		DurationVarP(&maxRetriesMutateSleep, "max-mutation-retries-backoff", "", 10*time.Second,
 			"Duration between attempts to apply a mutation for example 10ms or 1s")
 	cmd.Flags().
-		IntVarP(&pkBufferReuseSize, "partition-key-buffer-reuse-size", "", 256, "Number of reused buffered partition keys")
+		Uint64VarP(&partitionCount, "partition-count", "", 2_000_000, "Number of Scylla Partitions")
 	cmd.Flags().
-		IntVarP(&partitionCount, "token-range-slices", "", 10000, "Number of slices to divide the token space into")
+		StringArrayVarP(&deletedPartitionsTimeBucket, "deleted-partitions-time-bucket", "", []string{"1m", "10m", "1h"}, "Time after to check if data resurrection has occurred for the deleted partitions")
 	cmd.Flags().
 		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "zipf",
 			"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")

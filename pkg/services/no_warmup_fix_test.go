@@ -112,10 +112,11 @@ func TestBusyLoopPreventionFix(t *testing.T) {
 		iterations := 0
 
 		// Old buggy loop (immediate continue on ErrNoPartitionKeyValues)
+	loop:
 		for iterations < 100 { // Limit iterations to prevent infinite test
 			select {
 			case <-ctx.Done():
-				break
+				break loop
 			default:
 			}
 

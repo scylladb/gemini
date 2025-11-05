@@ -18,6 +18,8 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"runtime/trace"
+	"time"
 
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -25,6 +27,19 @@ import (
 func main() {
 	runtime.SetMutexProfileFraction(1)
 	runtime.SetBlockProfileRate(1)
+
+	recorder := trace.NewFlightRecorder(trace.FlightRecorderConfig{
+		MaxBytes: 1 << 24, // 16 MiB
+		MinAge:   1 * time.Hour,
+	})
+
+	// Enable flight recorder for continuous tracing
+	if err := recorder.Start(); err != nil {
+		// Non-fatal: continue execution even if flight recorder fails to start
+		_, _ = os.Stderr.WriteString("Warning: failed to start flight recorder: " + err.Error() + "\n")
+	}
+
+	defer recorder.Stop()
 
 	status := 0
 

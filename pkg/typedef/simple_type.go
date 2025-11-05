@@ -118,10 +118,10 @@ func (st SimpleType) Indexable() bool {
 	return st != TypeDuration
 }
 
-func (st SimpleType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
+func (st SimpleType) GenJSONValue(r utils.Random, p RangeConfig) any {
 	switch st {
 	case TypeBlob:
-		ln := r.IntN(p.MaxBlobLength) + p.MinBlobLength
+		ln := r.IntN(p.GetMaxBlobLength()) + p.GetMinBlobLength()
 		buffer := bytes.NewBuffer(nil)
 		buffer.Grow(ln*2 + 2)
 		buffer.WriteString("0x")
@@ -148,16 +148,21 @@ func (st SimpleType) GenJSONValue(r utils.Random, p *PartitionRangeConfig) any {
 	return st.genValue(r, p)
 }
 
-func (st SimpleType) GenValue(r utils.Random, p *PartitionRangeConfig) []any {
+func (st SimpleType) GenValue(r utils.Random, p RangeConfig) []any {
 	return []any{st.genValue(r, p)}
 }
 
-func (st SimpleType) genValue(r utils.Random, p *PartitionRangeConfig) any {
+func (st SimpleType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {
+	out = append(out, st.genValue(r, p))
+	return out
+}
+
+func (st SimpleType) genValue(r utils.Random, p RangeConfig) any {
 	switch st {
 	case TypeBlob:
-		return utils.RandomBytes(r, r.IntN(p.MaxStringLength)+p.MinStringLength)
+		return utils.RandomBytes(r, r.IntN(p.GetMaxStringLength())+p.GetMinStringLength())
 	case TypeAscii, TypeText, TypeVarchar:
-		return utils.RandString(r, r.IntN(p.MaxStringLength)+p.MinStringLength, false)
+		return utils.RandString(r, r.IntN(p.GetMaxStringLength())+p.GetMinStringLength(), false)
 	case TypeBigint:
 		return r.Int64()
 	case TypeBoolean:
@@ -197,12 +202,12 @@ func (st SimpleType) genValue(r utils.Random, p *PartitionRangeConfig) any {
 }
 
 // ValueVariationsNumber returns the number of bytes generated value holds
-func (st SimpleType) ValueVariationsNumber(p *PartitionRangeConfig) float64 {
+func (st SimpleType) ValueVariationsNumber(p RangeConfig) float64 {
 	switch st {
 	case TypeAscii, TypeText, TypeVarchar:
-		return math.Pow(2, float64(p.MaxStringLength))
+		return math.Pow(2, float64(p.GetMaxStringLength()))
 	case TypeBlob:
-		return math.Pow(2, float64(p.MaxBlobLength))
+		return math.Pow(2, float64(p.GetMaxBlobLength()))
 	case TypeBoolean:
 		return 2
 	case TypeDate:

@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/scylladb/gocqlx/v3/qb"
@@ -42,11 +43,26 @@ type (
 	}
 
 	PartitionRangeConfig struct {
+		DeleteBuckets   []time.Duration
 		MaxBlobLength   int
 		MinBlobLength   int
 		MaxStringLength int
 		MinStringLength int
 		UseLWT          bool
+	}
+
+	ValueRangeConfig struct {
+		MaxBlobLength   int
+		MinBlobLength   int
+		MaxStringLength int
+		MinStringLength int
+	}
+
+	RangeConfig interface {
+		GetMaxBlobLength() int
+		GetMinBlobLength() int
+		GetMaxStringLength() int
+		GetMinStringLength() int
 	}
 
 	Stmts struct {
@@ -74,7 +90,6 @@ func (q SimpleQuery) ToCql() (stmt string, names []string) {
 type (
 	PartitionKeys struct {
 		Values *Values
-		Token  uint32
 	}
 
 	Stmt struct {
@@ -97,7 +112,7 @@ func PreparedStmt(query string, pks map[string][]any, values []any, queryType St
 		Query:         query,
 		Values:        values,
 		QueryType:     queryType,
-		PartitionKeys: PartitionKeys{Values: NewValuesFromMap(pks), Token: 0},
+		PartitionKeys: PartitionKeys{Values: NewValuesFromMap(pks)},
 	}
 }
 
@@ -274,7 +289,8 @@ func (st StatementType) PossibleAsyncOperation() bool {
 
 type Values struct {
 	data map[string][]any
-	mu   sync.RWMutex
+
+	mu sync.RWMutex
 }
 
 func NewValues(initial int) *Values {
@@ -380,7 +396,6 @@ func (v *Values) UnmarshalJSON(data []byte) error {
 
 func (v *PartitionKeys) Copy() PartitionKeys {
 	return PartitionKeys{
-		Token:  v.Token,
 		Values: v.Values.Copy(),
 	}
 }
@@ -397,8 +412,64 @@ func (v *Values) Copy() *Values {
 	return &Values{data: m}
 }
 
+func (v *Values) Data() []any {
+	values := make([]any, 0, len(v.data))
+
+	keys := make([]string, 0, len(v.data))
+	for k := range v.data {
+		keys = append(keys, k)
+	}
+
+	// Sort keys to ensure deterministic order
+	for i := 0; i < len(keys); i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[i] > keys[j] {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+
+	for _, k := range keys {
+		values = append(values, v.data[k]...)
+	}
+
+	return values
+}
+
 type StatementCacheType uint8
 
 func (v ValueWithToken) MemoryFootprint() uint64 {
 	return uint64(unsafe.Sizeof(v)) + v.Value.MemoryFootprint()
+}
+
+func (p PartitionRangeConfig) GetMaxBlobLength() int {
+	return p.MaxBlobLength
+}
+
+func (p PartitionRangeConfig) GetMinBlobLength() int {
+	return p.MinBlobLength
+}
+
+func (p PartitionRangeConfig) GetMaxStringLength() int {
+	return p.MaxStringLength
+}
+
+func (p PartitionRangeConfig) GetMinStringLength() int {
+	return p.MinStringLength
+}
+
+func (p ValueRangeConfig) GetMaxBlobLength() int {
+	return p.MaxBlobLength
+}
+
+func (p ValueRangeConfig) GetMinBlobLength() int {
+	return p.MinBlobLength
+}
+
+func (p ValueRangeConfig) GetMaxStringLength() int {
+	return p.MaxStringLength
+}
+
+func (p ValueRangeConfig) GetMinStringLength() int {
+	return p.MinStringLength
 }

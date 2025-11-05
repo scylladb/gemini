@@ -30,7 +30,7 @@ func TestNew(t *testing.T) {
 
 	data := []struct {
 		dist          Distribution
-		size          int
+		size          uint64
 		seed          uint64
 		mu, sigma     float64
 		maxSameValues int

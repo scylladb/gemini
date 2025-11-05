@@ -364,12 +364,12 @@ var fullSchema = Schema{
 					ValueTypes:  []SimpleType{TypeFloat, TypeDate, TypeVarchar},
 					Frozen:      false,
 				}},
-				{Name: "col3", Type: &BagType{
+				{Name: "col3", Type: &Collection{
 					ComplexType: "list",
 					ValueType:   TypeUuid,
 					Frozen:      true,
 				}},
-				{Name: "col4", Type: &BagType{
+				{Name: "col4", Type: &Collection{
 					ComplexType: "set",
 					ValueType:   TypeTimestamp,
 					Frozen:      false,

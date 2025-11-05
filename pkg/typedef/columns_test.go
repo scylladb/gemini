@@ -26,8 +26,8 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/samber/mo"
 
-	"github.com/scylladb/gemini/pkg/generators/statements"
 	"github.com/scylladb/gemini/pkg/replication"
+	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
