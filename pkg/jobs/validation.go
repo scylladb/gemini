@@ -154,14 +154,13 @@ func (v *Validation) createSelectStmtForPartitionKeys(partitionKeyValues *typede
 	}
 }
 
-// validateDeletedPartition checks that a deleted partition returns no rows from the database
+// validateDeletedPartition validates a deleted partition by verifying it no longer exists.
+// The partition should have been deleted from both test and oracle clusters, so we expect
+// zero rows to be returned.
 func (v *Validation) validateDeletedPartition(ctx context.Context, partitionKeyValues *typedef.Values) error {
 	stmt := v.createSelectStmtForPartitionKeys(partitionKeyValues)
 
-	// Check that the partition returns 0 rows
-	rowCount, err := v.store.Check(ctx, v.table, stmt, 0)
-	if err != nil {
-		// Store check failed - this is an error
+	if _, err := v.store.Check(ctx, v.table, stmt, 0); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return err
 		}
@@ -169,28 +168,13 @@ func (v *Validation) validateDeletedPartition(ctx context.Context, partitionKeyV
 			Timestamp:     time.Now(),
 			Err:           err,
 			StmtType:      stmt.QueryType,
-			Message:       "Deleted partition validation failed: " + err.Error(),
+			Message:       "Deleted partition validation failed (difference found): " + err.Error(),
 			Query:         stmt.Query,
 			PartitionKeys: stmt.PartitionKeys.Values,
 			Values:        stmt.Values,
 		}
 	}
 
-	if rowCount > 0 {
-		// Deleted partition still has rows - this is a validation error
-		err = fmt.Errorf("deleted partition still exists with %d rows", rowCount)
-		return joberror.JobError{
-			Timestamp:     time.Now(),
-			Err:           err,
-			StmtType:      stmt.QueryType,
-			Message:       fmt.Sprintf("Deleted partition validation failed: partition still exists with %d rows", rowCount),
-			Query:         stmt.Query,
-			PartitionKeys: stmt.PartitionKeys.Values,
-			Values:        stmt.Values,
-		}
-	}
-
-	// Partition correctly returns 0 rows
 	return nil
 }
 

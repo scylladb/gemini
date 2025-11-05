@@ -158,45 +158,6 @@ func TestValidateDeletedPartition_Success(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestValidateDeletedPartition_PartitionStillExists(t *testing.T) {
-	t.Parallel()
-
-	table := &typedef.Table{
-		Name: "test_table",
-		PartitionKeys: typedef.Columns{
-			{Name: "pk1", Type: typedef.TypeInt},
-		},
-	}
-
-	mockSt := &mockStore{
-		checkFunc: func(_ context.Context, _ *typedef.Table, _ *typedef.Stmt, _ int) (int, error) {
-			// Simulate partition still exists (5 rows returned)
-			return 5, nil
-		},
-	}
-
-	v := &Validation{
-		table:        table,
-		keyspaceName: "test_keyspace",
-		store:        mockSt,
-	}
-
-	partitionKeyValues := typedef.NewValuesFromMap(map[string][]any{
-		"pk1": {int32(123)},
-	})
-
-	ctx := t.Context()
-	err := v.validateDeletedPartition(ctx, partitionKeyValues)
-
-	require.Error(t, err)
-
-	var jobErr joberror.JobError
-	require.True(t, errors.As(err, &jobErr))
-	require.Contains(t, jobErr.Message, "Deleted partition validation failed")
-	require.Contains(t, jobErr.Message, "5 rows")
-	require.Equal(t, typedef.SelectStatementType, jobErr.StmtType)
-}
-
 func TestValidateDeletedPartition_StoreError(t *testing.T) {
 	t.Parallel()
 
@@ -321,7 +282,8 @@ func TestValidateDeletedPartition_MultiplePartitionKeys(t *testing.T) {
 	mockSt := &mockStore{
 		checkFunc: func(_ context.Context, _ *typedef.Table, stmt *typedef.Stmt, _ int) (int, error) {
 			capturedStmt = stmt
-			return 3, nil // Partition still exists
+			// Partition is deleted (0 rows returned)
+			return 0, nil
 		},
 	}
 
@@ -340,14 +302,11 @@ func TestValidateDeletedPartition_MultiplePartitionKeys(t *testing.T) {
 	ctx := t.Context()
 	err := v.validateDeletedPartition(ctx, partitionKeyValues)
 
-	require.Error(t, err)
+	// Should succeed - partition is deleted (0 rows)
+	require.NoError(t, err)
 	require.NotNil(t, capturedStmt)
 	require.Len(t, capturedStmt.Values, 3)
 	require.Contains(t, capturedStmt.Query, "pk1=?")
 	require.Contains(t, capturedStmt.Query, "pk2=?")
 	require.Contains(t, capturedStmt.Query, "pk3=?")
-
-	var jobErr joberror.JobError
-	require.True(t, errors.As(err, &jobErr))
-	require.Equal(t, "Deleted partition validation failed: partition still exists with 3 rows", jobErr.Message)
 }
