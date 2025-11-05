@@ -8,3 +8,46 @@ createKeyspace
 CREATE TABLE IF NOT EXISTS ks1_logs.table1_statements(col1 int,col2 ascii,ddl boolean, ts timestamp, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((col1,col2, ty), ddl, ts, attempt, gemini_attempt)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';
 createTable
 ---
+
+[TestScyllaLoggerOutputSnapshot - 1]
+{"partition_keys":{"col1":5,"col2":"test_ddl"},"statements":[{"ts":"0001-01-01T00:00:00Z","statement":"CREATE TABLE IF NOT EXISTS test_table (col1 int, col2 text, PRIMARY KEY (col1))","values":null,"host":"test_host","attempt":1,"gemini_attempt":1,"dur":"1s"},{"ts":"0001-01-01T00:00:00Z","statement":"CREATE TABLE IF NOT EXISTS test_table (col1 int, col2 text, PRIMARY KEY (col1))","values":null,"host":"test_host","attempt":1,"gemini_attempt":1,"dur":"1s"}]}
+{"partition_keys":{"col1":2,"col2":"error_value"},"statements":[{"ts":"0001-01-01T00:00:00Z","statement":"INSERT INTO test_table (col1, col2) VALUES (?, ?)","values":["2","\"error_value\""],"host":"test_host","attempt":1,"gemini_attempt":1,"error":"test error","dur":"1s"}]}
+
+---
+
+[TestLoggerOutputSnapshot - 1]
+{"s":{"Time":"2024-01-15T10:30:00Z"},"partitionKeys":{"col1":[5],"col2":["test_ddl"]},"e":{},"q":"CREATE TABLE IF NOT EXISTS test_table (col1 int, col2 text, PRIMARY KEY (col1))","h":"test_host","v":{},"d":{"Duration":1000000000},"d_a":1,"g_a":1}
+line_0
+---
+
+[TestLoggerOutputSnapshot - 2]
+{"s":{"Time":"2024-01-15T10:30:05Z"},"partitionKeys":{"col1":[1],"col2":["test_value"]},"e":{},"q":"INSERT INTO test_table (col1, col2) VALUES (?, ?)","h":"test_host","v":{},"d":{"Duration":1000000000},"d_a":1,"g_a":1}
+line_1
+---
+
+[TestLoggerOutputSnapshot - 3]
+{"s":{"Time":"2024-01-15T10:30:10Z"},"partitionKeys":{"col1":[2],"col2":["error_value"]},"e":{},"q":"INSERT INTO test_table (col1, col2) VALUES (?, ?)","h":"test_host","v":{},"d":{"Duration":1000000000},"d_a":1,"g_a":1}
+line_2
+---
+
+[TestLoggerOutputSnapshot - 4]
+{"s":{"Time":"2024-01-15T10:30:00Z"},"partitionKeys":{"col1":[5],"col2":["test_ddl"]},"e":{},"q":"CREATE TABLE IF NOT EXISTS test_table (col1 int, col2 text, PRIMARY KEY (col1))","h":"test_host","v":{},"d":{"Duration":1000000000},"d_a":1,"g_a":1}
+{"s":{"Time":"2024-01-15T10:30:05Z"},"partitionKeys":{"col1":[1],"col2":["test_value"]},"e":{},"q":"INSERT INTO test_table (col1, col2) VALUES (?, ?)","h":"test_host","v":{},"d":{"Duration":1000000000},"d_a":1,"g_a":1}
+{"s":{"Time":"2024-01-15T10:30:10Z"},"partitionKeys":{"col1":[2],"col2":["error_value"]},"e":{},"q":"INSERT INTO test_table (col1, col2) VALUES (?, ?)","h":"test_host","v":{},"d":{"Duration":1000000000},"d_a":1,"g_a":1}
+
+full_output
+---
+
+[TestScyllaLogger - 1]
+{"partition_keys":{"col1":5,"col2":"test_ddl"},"statements":[{"ts":"0001-01-01T00:00:00Z","statement":"CREATE TABLE IF NOT EXISTS test_table (col1 int, col2 text, PRIMARY KEY (col1))","host":"test_host","dur":"1s","values":null,"attempt":1,"gemini_attempt":1}]}
+{"partition_keys":{"col1":2,"col2":"test_2"},"statements":[{"ts":"0001-01-01T00:00:00Z","statement":"INSERT INTO test_table (col1, col2) VALUES (?, ?)","host":"test_host","error":"test error","dur":"1s","values":["2","\"test_2\""],"attempt":1,"gemini_attempt":1}]}
+
+oracle_output
+---
+
+[TestScyllaLogger - 2]
+{"partition_keys":{"col1":5,"col2":"test_ddl"},"statements":[{"ts":"0001-01-01T00:00:00Z","statement":"CREATE TABLE IF NOT EXISTS test_table (col1 int, col2 text, PRIMARY KEY (col1))","host":"test_host","dur":"1s","values":null,"attempt":1,"gemini_attempt":1}]}
+{"partition_keys":{"col1":2,"col2":"test_2"},"statements":[{"ts":"0001-01-01T00:00:00Z","statement":"INSERT INTO test_table (col1, col2) VALUES (?, ?)","host":"test_host","error":"test error","dur":"1s","values":["2","\"test_2\""],"attempt":1,"gemini_attempt":1}]}
+
+test_output
+---

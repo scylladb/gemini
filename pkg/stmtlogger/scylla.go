@@ -18,11 +18,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +79,24 @@ type ScyllaLogger struct {
 	schemaPartitionKeys  typedef.Columns
 	compression          Compression
 	partitionKeysCount   int
+}
+
+// Statement represents a single statement with its metadata
+type Statement struct {
+	Timestamp     time.Time `json:"ts"`
+	Statement     string    `json:"statement"`
+	Host          string    `json:"host"`
+	Error         string    `json:"error,omitempty"`
+	Duration      string    `json:"dur"`
+	Values        []string  `json:"values"`
+	Attempt       int       `json:"attempt"`
+	GeminiAttempt int       `json:"gemini_attempt"`
+}
+
+// PartitionLog represents a partition with its keys and ordered statements
+type PartitionLog struct {
+	PartitionKeys map[string]interface{} `json:"partition_keys"`
+	Statements    []Statement            `json:"statements"`
 }
 
 func newSession(hosts []string, username, password string, logger *zap.Logger) (*gocql.Session, error) {
@@ -353,6 +373,266 @@ func (s *ScyllaLogger) logStatement(ctx context.Context, item Item, query string
 	}
 }
 
+// parseAndGroupStatements parses JSON statement bytes, groups them by partition keys,
+// and returns a map of partition logs
+func (s *ScyllaLogger) parseAndGroupStatements(statements [][]byte) (map[string]*PartitionLog, error) {
+	partitionMap := make(map[string]*PartitionLog)
+
+	for _, stmtBytes := range statements {
+		// Parse the JSON statement
+		var rawStmt map[string]interface{}
+		if err := json.Unmarshal(stmtBytes, &rawStmt); err != nil {
+			s.logger.Warn("failed to parse statement JSON", zap.Error(err), zap.String("json", string(stmtBytes)))
+			continue
+		}
+
+		// Extract partition keys
+		partitionKeys := make(map[string]interface{})
+		partitionKeyStr := ""
+		for _, pk := range s.schemaPartitionKeys {
+			if val, ok := rawStmt[pk.Name]; ok {
+				partitionKeys[pk.Name] = val
+				partitionKeyStr += fmt.Sprintf("%v|", val)
+			}
+		}
+
+		// Create Statement object
+		stmt := Statement{}
+
+		// Parse timestamp
+		if tsStr, ok := rawStmt["ts"].(string); ok {
+			if ts, err := time.Parse(time.RFC3339Nano, tsStr); err == nil {
+				stmt.Timestamp = ts
+			}
+		}
+
+		// Extract other fields
+		if statement, ok := rawStmt["statement"].(string); ok {
+			stmt.Statement = statement
+		}
+		if host, ok := rawStmt["host"].(string); ok {
+			stmt.Host = host
+		}
+		if attempt, ok := rawStmt["attempt"].(float64); ok {
+			stmt.Attempt = int(attempt)
+		}
+		if geminiAttempt, ok := rawStmt["gemini_attempt"].(float64); ok {
+			stmt.GeminiAttempt = int(geminiAttempt)
+		}
+		if errStr, ok := rawStmt["error"].(string); ok {
+			stmt.Error = errStr
+		}
+		if dur, ok := rawStmt["dur"].(string); ok {
+			stmt.Duration = dur
+		}
+
+		var strVal string
+		// Parse values array
+		if values, ok := rawStmt["values"].([]interface{}); ok {
+			stmt.Values = make([]string, len(values))
+			for i, v := range values {
+				if strVal, ok = v.(string); ok {
+					stmt.Values[i] = strVal
+				} else {
+					stmt.Values[i] = fmt.Sprintf("%v", v)
+				}
+			}
+		}
+
+		// Get or create partition log
+		if _, exists := partitionMap[partitionKeyStr]; !exists {
+			partitionMap[partitionKeyStr] = &PartitionLog{
+				PartitionKeys: partitionKeys,
+				Statements:    make([]Statement, 0),
+			}
+		}
+
+		partitionMap[partitionKeyStr].Statements = append(partitionMap[partitionKeyStr].Statements, stmt)
+	}
+
+	// Sort statements within each partition by timestamp
+	for _, partLog := range partitionMap {
+		sort.SliceStable(partLog.Statements, func(i, j int) bool {
+			return partLog.Statements[i].Timestamp.Before(partLog.Statements[j].Timestamp)
+		})
+	}
+
+	return partitionMap, nil
+}
+
+// storageConfig holds configuration for a storage channel
+type storageConfig struct {
+	ch   chan []byte
+	file string
+	ty   Type
+}
+
+// processAndWriteStatements processes statements from a channel and writes them to a file
+func (s *ScyllaLogger) processAndWriteStatements(storage storageConfig, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	// Open file for writing first
+	file, closer, err := s.openStatementFile(storage.file)
+	if err != nil {
+		s.logger.Panic("failed to open statements file", zap.Error(err))
+		return
+	}
+
+	defer func() {
+		if err = closer(); err != nil {
+			s.logger.Error("failed to close statements file",
+				zap.String("type", string(storage.ty)),
+				zap.String("file", storage.file),
+				zap.Error(err),
+			)
+		}
+	}()
+
+	// Accumulate all statements first
+	statements := make([][]byte, 0, s.errors.Cap()+10)
+	for item := range storage.ch {
+		statements = append(statements, item)
+	}
+
+	// Group statements by partition keys
+	partitionLogs, err := s.parseAndGroupStatements(statements)
+	if err != nil {
+		s.logger.Error("failed to parse and group statements",
+			zap.String("type", string(storage.ty)),
+			zap.Error(err),
+		)
+	}
+
+	// Process and write each partition one at a time
+	s.writePartitionLogs(file, partitionLogs, storage.ty)
+}
+
+// writePartitionLogs writes partition logs to the file
+func (s *ScyllaLogger) writePartitionLogs(file *bufio.Writer, partitionLogs map[string]*PartitionLog, ty Type) {
+	var jsonBytes []byte
+	var err error
+
+	for _, partLog := range partitionLogs {
+		// Marshal the partition log to JSON
+		jsonBytes, err = json.Marshal(partLog)
+		if err != nil {
+			s.logger.Error("failed to marshal partition log",
+				zap.String("type", string(ty)),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		// Write the partition log to file
+		if _, err = file.Write(jsonBytes); err != nil {
+			s.logger.Error("failed to write partition log",
+				zap.String("type", string(ty)),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		// Write newline to separate partition objects
+		if _, err = file.WriteRune('\n'); err != nil {
+			s.logger.Error("failed to write newline",
+				zap.String("type", string(ty)),
+				zap.Error(err),
+			)
+		}
+
+		// Flush to disk immediately after writing each partition
+		if err = file.Flush(); err != nil {
+			s.logger.Error("failed to flush partition log",
+				zap.String("type", string(ty)),
+				zap.Error(err),
+			)
+		}
+	}
+}
+
+// pushErrorsToStorages fetches and pushes error data to storage channels
+func (s *ScyllaLogger) pushErrorsToStorages(jobErr *joberror.JobError, storages []storageConfig, fetchSchema bool) {
+	pushErr := &sync.WaitGroup{}
+	for _, storage := range storages {
+		pushErr.Add(1)
+		go func(st storageConfig) {
+			defer pushErr.Done()
+			if fetchSchema {
+				s.fetchSchemaChanges(st.ty, st.ch)
+			}
+
+			if err := s.fetchFailedPartitions(st.ch, st.ty, jobErr); err != nil {
+				s.logger.Error(
+					"failed to fetch failed partitions",
+					zap.String("type", string(st.ty)),
+					zap.Error(err),
+				)
+			}
+		}(storage)
+	}
+
+	pushErr.Wait()
+}
+
+// initializeStorages creates storage configurations for oracle and test files
+func (s *ScyllaLogger) initializeStorages() []storageConfig {
+	return []storageConfig{{
+		ch:   make(chan []byte, s.errors.Cap()+10),
+		file: s.oracleStatementsFile,
+		ty:   TypeOracle,
+	}, {
+		ch:   make(chan []byte, s.errors.Cap()+10),
+		file: s.testStatementsFile,
+		ty:   TypeTest,
+	}}
+}
+
+// startFileWriters starts goroutines to write statements to files
+func (s *ScyllaLogger) startFileWriters(storages []storageConfig, wg *sync.WaitGroup) {
+	for _, storage := range storages {
+		wg.Add(1)
+		go s.processAndWriteStatements(storage, wg)
+	}
+}
+
+// processErrorLoop processes errors from the error channel
+func (s *ScyllaLogger) processErrorLoop(ctx context.Context, storages []storageConfig, wg *sync.WaitGroup) {
+	errCh := s.errors.GetChannel()
+
+	for iteration := 0; ; {
+		select {
+		case <-ctx.Done():
+			s.handleContextCancellation(errCh, storages, wg, &iteration)
+			return
+		case jobErr := <-errCh:
+			s.pushErrorsToStorages(jobErr, storages, iteration == 0)
+			iteration++
+		}
+	}
+}
+
+// handleContextCancellation handles cleanup when context is cancelled
+func (s *ScyllaLogger) handleContextCancellation(errCh <-chan *joberror.JobError, storages []storageConfig, wg *sync.WaitGroup, iteration *int) {
+	s.logger.Debug("error logger context cancelled, closing error channel")
+	_ = s.errors.Close()
+
+	s.logger.Debug("processing remaining errors")
+	for jobErr := range errCh {
+		s.pushErrorsToStorages(jobErr, storages, *iteration == 0)
+		*iteration++
+	}
+
+	s.logger.Debug("closing storage channels to signal file writers")
+	// Close the storage channels to signal file writer goroutines to exit
+	for _, storage := range storages {
+		close(storage.ch)
+	}
+
+	s.logger.Debug("waiting for file writer goroutines to finish")
+	wg.Wait()
+	s.logger.Debug("all file writer goroutines finished")
+}
+
 func (s *ScyllaLogger) logErrors(ctx context.Context) {
 	defer func() {
 		s.logger.Debug("error logger goroutine exiting")
@@ -372,112 +652,9 @@ func (s *ScyllaLogger) logErrors(ctx context.Context) {
 	}
 
 	wg := &sync.WaitGroup{}
-	storages := []struct {
-		ch   chan []byte
-		file string
-		ty   Type
-	}{{
-		ch:   make(chan []byte, s.errors.Cap()+10),
-		file: s.oracleStatementsFile,
-		ty:   TypeOracle,
-	}, {
-		ch:   make(chan []byte, s.errors.Cap()+10),
-		file: s.testStatementsFile,
-		ty:   TypeTest,
-	}}
-
-	for _, storage := range storages {
-		wg.Add(1)
-		go func() {
-			file, closer, err := s.openStatementFile(storage.file)
-			if err != nil {
-				s.logger.Panic("failed to open oracle statements file", zap.Error(err))
-				return
-			}
-
-			defer func() {
-				if err = closer(); err != nil {
-					s.logger.Error("failed to close statements file",
-						zap.String("type", string(storage.ty)),
-						zap.String("file", storage.file),
-						zap.Error(err),
-					)
-				}
-
-				wg.Done()
-			}()
-
-			for item := range storage.ch {
-				if _, err = file.Write(item); err != nil {
-					s.logger.Error("failed to write statement",
-						zap.String("type", string(storage.ty)),
-						zap.String("statement", string(item)),
-						zap.Error(err),
-					)
-
-					continue
-				}
-
-				// Since this is a new line, we can ignore the error
-				// if we fail to write a new line, it will be caught by the next write
-				// and will have two rows on the same line
-				_, _ = file.WriteRune('\n')
-			}
-		}()
-	}
-
-	pushErrors := func(jobErr *joberror.JobError, fetchSchema bool) {
-		pushErr := &sync.WaitGroup{}
-		for _, storage := range storages {
-			pushErr.Add(1)
-			go func() {
-				defer pushErr.Done()
-				if fetchSchema {
-					s.fetchSchemaChanges(storage.ty, storage.ch)
-				}
-
-				if err := s.fetchFailedPartitions(storage.ch, storage.ty, jobErr); err != nil {
-					s.logger.Error(
-						"failed to fetch failed partitions",
-						zap.String("type", string(storage.ty)),
-						zap.Error(err),
-					)
-				}
-			}()
-		}
-
-		pushErr.Wait()
-	}
-
-	errCh := s.errors.GetChannel()
-
-	for iteration := 0; ; {
-		select {
-		case <-ctx.Done():
-			s.logger.Debug("error logger context cancelled, closing error channel")
-			_ = s.errors.Close()
-
-			s.logger.Debug("processing remaining errors")
-			for jobErr := range errCh {
-				pushErrors(jobErr, iteration == 0)
-				iteration++
-			}
-
-			s.logger.Debug("closing storage channels to signal file writers")
-			// Close the storage channels to signal file writer goroutines to exit
-			for _, storage := range storages {
-				close(storage.ch)
-			}
-
-			s.logger.Debug("waiting for file writer goroutines to finish")
-			wg.Wait()
-			s.logger.Debug("all file writer goroutines finished")
-			return
-		case jobErr := <-errCh:
-			pushErrors(jobErr, iteration == 0)
-			iteration++
-		}
-	}
+	storages := s.initializeStorages()
+	s.startFileWriters(storages, wg)
+	s.processErrorLoop(ctx, storages, wg)
 }
 
 func prepareValues(values mo.Either[[]any, []byte]) []string {
@@ -588,8 +765,14 @@ func (s *ScyllaLogger) buildQuery(jobError *joberror.JobError, ty Type) ([]strin
 		typedef.DeleteSingleRowType, typedef.DeleteSingleColumnType:
 		builder := qb.Select(s.keyspaceAndTable).
 			Json().
-			Columns(selectAdditionalColumnsArr...).
 			OrderBy("ts", qb.ASC)
+
+		// Add partition key columns to SELECT
+		for _, pk := range s.schemaPartitionKeys {
+			builder.Columns(pk.Name)
+		}
+		// Add additional columns
+		builder.Columns(selectAdditionalColumnsArr...)
 
 		values := make([]any, 0, len(s.schemaPartitionKeys))
 		for _, pk := range s.schemaPartitionKeys {
@@ -619,8 +802,14 @@ func (s *ScyllaLogger) buildQuery(jobError *joberror.JobError, ty Type) ([]strin
 		for i := range iterations {
 			builder := qb.Select(s.keyspaceAndTable).
 				Json().
-				Columns(selectAdditionalColumnsArr...).
 				OrderBy("ts", qb.ASC)
+
+			// Add partition key columns to SELECT
+			for _, pk := range s.schemaPartitionKeys {
+				builder.Columns(pk.Name)
+			}
+			// Add additional columns
+			builder.Columns(selectAdditionalColumnsArr...)
 
 			vals := make([]any, 0, len(s.schemaPartitionKeys))
 			for _, pk := range s.schemaPartitionKeys {
@@ -654,8 +843,14 @@ func (s *ScyllaLogger) buildQuery(jobError *joberror.JobError, ty Type) ([]strin
 func (s *ScyllaLogger) fetchSchemaChanges(ty Type, ch chan<- []byte) {
 	builder := qb.Select(s.keyspaceAndTable).
 		Json().
-		Columns(selectAdditionalColumnsArr...).
 		OrderBy("ts", qb.ASC)
+
+	// Add partition key columns to SELECT
+	for _, pk := range s.schemaPartitionKeys {
+		builder.Columns(pk.Name)
+	}
+	// Add additional columns
+	builder.Columns(selectAdditionalColumnsArr...)
 
 	for _, pk := range s.schemaPartitionKeys {
 		builder.Where(qb.Eq(pk.Name))

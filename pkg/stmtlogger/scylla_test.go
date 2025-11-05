@@ -72,6 +72,95 @@ func TestBuildQueriesExecution(t *testing.T) {
 	assert.NoError(scyllaContainer.Test.Query(createTable).Exec())
 }
 
+func TestLoggerOutputSnapshot(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	testFile := dir + "/test_statements.jsonl"
+
+	assert := require.New(t)
+
+	// Create a channel and file logger (no ScyllaDB needed)
+	ch := make(chan Item, 10)
+	zapLogger := testutils.Must(zap.NewDevelopment())
+
+	logger, err := NewFileLogger(ch, testFile, CompressionNone, zapLogger)
+	assert.NoError(err)
+	assert.NotNil(logger)
+
+	// Use fixed timestamps for deterministic output
+	baseTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+
+	// Create items with fixed timestamps and values
+	ddlItem := Item{
+		Start:         Time{Time: baseTime},
+		Error:         mo.Right[error, string](""),
+		Statement:     "CREATE TABLE IF NOT EXISTS test_table (col1 int, col2 text, PRIMARY KEY (col1))",
+		Host:          "test_host",
+		Type:          TypeTest,
+		Values:        mo.Left[[]any, []byte](nil),
+		Duration:      Duration{Duration: time.Second},
+		Attempt:       1,
+		GeminiAttempt: 1,
+		StatementType: typedef.CreateSchemaStatementType,
+		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"col1": {5}, "col2": {"test_ddl"}}),
+	}
+
+	successItem := Item{
+		Start:         Time{Time: baseTime.Add(5 * time.Second)},
+		Error:         mo.Right[error, string](""),
+		Statement:     "INSERT INTO test_table (col1, col2) VALUES (?, ?)",
+		Host:          "test_host",
+		Type:          TypeTest,
+		Values:        mo.Left[[]any, []byte]([]any{1, "test_value"}),
+		Duration:      Duration{Duration: time.Second},
+		Attempt:       1,
+		GeminiAttempt: 1,
+		StatementType: typedef.InsertStatementType,
+		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"col1": {1}, "col2": {"test_value"}}),
+	}
+
+	errorItem := Item{
+		Start:         Time{Time: baseTime.Add(10 * time.Second)},
+		Error:         mo.Left[error, string](errors.New("test error")),
+		Statement:     "INSERT INTO test_table (col1, col2) VALUES (?, ?)",
+		Host:          "test_host",
+		Type:          TypeTest,
+		Values:        mo.Left[[]any, []byte]([]any{2, "error_value"}),
+		Duration:      Duration{Duration: time.Second},
+		Attempt:       1,
+		GeminiAttempt: 1,
+		StatementType: typedef.InsertStatementType,
+		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"col1": {2}, "col2": {"error_value"}}),
+	}
+
+	items := []Item{ddlItem, successItem, errorItem}
+
+	// Send items to channel
+	for _, item := range items {
+		ch <- item
+	}
+
+	// Close the channel and logger
+	close(ch)
+	assert.NoError(logger.Close())
+
+	// Read the output file
+	testData, err := os.ReadFile(testFile)
+	assert.NoError(err)
+
+	// Snapshot the test output - each line should be a JSON object
+	lines := strings.Split(strings.TrimSpace(string(testData)), "\n")
+
+	// Snapshot each line individually for better readability
+	for i, line := range lines {
+		snaps.MatchSnapshot(t, line, fmt.Sprintf("line_%d", i))
+	}
+
+	// Also snapshot the full output
+	snaps.MatchSnapshot(t, string(testData), "full_output")
+}
+
 func successStatement(ty Type) Item {
 	start := time.Now().Add(-(5 * time.Second))
 	statement := "INSERT INTO test_table (col1, col2) VALUES (?, ?)"
@@ -193,10 +282,13 @@ func TestScyllaLogger(t *testing.T) {
 			GetScyllaStatementLogsKeyspace("ks1"),
 			GetScyllaStatementLogsTable("table1")),
 	).Scan(&count))
-	assert.Equal(len(items), count)
 
 	oracleData := item.ReadData(t, testutils.Must(os.Open(oracleFile)))
 	testData := item.ReadData(t, testutils.Must(os.Open(testFile)))
+
+	// Snapshot the real output from ScyllaDB
+	snaps.MatchSnapshot(t, oracleData, "oracle_output")
+	snaps.MatchSnapshot(t, testData, "test_output")
 
 	oracleStatements := strings.SplitSeq(strings.TrimRight(oracleData, "\n"), "\n")
 	testStatements := strings.SplitSeq(strings.TrimRight(testData, "\n"), "\n")
