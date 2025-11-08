@@ -44,7 +44,7 @@ jobs:
           echo "Oracle cluster IP: $ORACLE_CLUSTER_IP"
 
           make test
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         name: Linting
         with:
           install-mode: goinstall
