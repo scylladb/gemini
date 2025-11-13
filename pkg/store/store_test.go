@@ -347,14 +347,22 @@ func TestDelegatingStore_MutationWithChecks(t *testing.T) {
 	}
 
 	store := &delegatingStore{
-		workers:              workpool.New(2),
-		oracleStore:          newCQLStoreWithSession(scyllaContainer.Oracle, schema, zap.NewNop(), "oracle"),
-		testStore:            newCQLStoreWithSession(scyllaContainer.Test, schema, zap.NewNop(), "test"),
+		workers: workpool.New(2),
+		oracleStore: newCQLStoreWithSession(
+			scyllaContainer.OracleCluster,
+			schema, zap.NewNop(),
+			"",
+			"oracle",
+		),
+		testStore:            newCQLStoreWithSession(scyllaContainer.TestCluster, schema, zap.NewNop(), "", "test"),
 		logger:               zap.NewNop(),
 		mutationRetries:      5,
 		mutationRetrySleep:   10 * time.Millisecond,
 		serverSideTimestamps: true,
 	}
+
+	assert.NoError(t, store.oracleStore.Init())
+	assert.NoError(t, store.testStore.Init())
 
 	partitionKeys := []map[string][]any{
 		{"id": {1}, "value": {"test"}},

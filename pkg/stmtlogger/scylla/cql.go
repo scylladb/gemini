@@ -33,12 +33,6 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-const (
-	additionalColumns = "ts,ty,statement,values,host,attempt,gemini_attempt,error,dur"
-)
-
-var additionalColumnsArr = strings.Split(additionalColumns, ",")
-
 type cqlStatements struct {
 	mutationFragmentsSelect string
 	oracleSelect            string
@@ -46,8 +40,8 @@ type cqlStatements struct {
 	insertStmt              string
 
 	session       *gocql.Session
-	oracleSession *gocql.Session
-	testSession   *gocql.Session
+	oracleSession func() (*gocql.Session, error)
+	testSession   func() (*gocql.Session, error)
 
 	valuePool     sync.Pool
 	partitionKeys typedef.Columns
@@ -59,8 +53,15 @@ type cqlData struct {
 	statements        []json.RawMessage
 }
 
+const (
+	additionalColumns = "ts,ty,statement,values,host,attempt,gemini_attempt,error,dur"
+)
+
+var additionalColumnsArr = strings.Split(additionalColumns, ",")
+
 func newStatements(
-	session, oracleSession, testSession *gocql.Session,
+	session *gocql.Session,
+	oracleSession, testSession func() (*gocql.Session, error),
 	keyspace, table string,
 	originalKeyspace, originalTable string,
 	partitionKeys typedef.Columns,
@@ -171,8 +172,8 @@ func fetchPartitionKeys(ctx context.Context, session *gocql.Session, stmt string
 	q := session.QueryWithContext(ctx, stmt, values...)
 	defer q.Release()
 
-	data := make([]json.RawMessage, 0)
 	iter := q.Iter()
+	data := make([]json.RawMessage, 0, iter.NumRows())
 
 	for range iter.NumRows() {
 		var it json.RawMessage
@@ -210,17 +211,22 @@ func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *job
 	var (
 		stmt    string
 		session *gocql.Session
+		err     error
 	)
 
 	switch ty {
 	case stmtlogger.TypeOracle:
 		stmt = c.oracleSelect
-		session = c.oracleSession
+		session, err = c.oracleSession()
 	case stmtlogger.TypeTest:
 		stmt = c.testSelect
-		session = c.testSession
+		session, err = c.testSession()
 	default:
 		panic("Invalid type for Error: " + string(ty))
+	}
+
+	if err != nil {
+		return nil, err
 	}
 
 	switch item.StmtType {
@@ -228,6 +234,7 @@ func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *job
 		typedef.InsertStatementType, typedef.InsertJSONStatementType,
 		typedef.UpdateStatementType, typedef.DeleteWholePartitionType,
 		typedef.DeleteSingleRowType, typedef.DeleteSingleColumnType:
+		//nolint:govet
 		statements, err := fetchPartitionKeys(ctx, c.session, stmt, item.PartitionKeys.ToCQLValues(c.partitionKeys))
 		if err != nil {
 			return nil, err
@@ -256,18 +263,28 @@ func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *job
 				pks[pk.Name] = append(pks[pk.Name], item.PartitionKeys.Get(pk.Name)[i])
 			}
 
+			//nolint:govet
 			statements, err := fetchPartitionKeys(ctx, c.session, stmt, values)
 			if err != nil {
 				// Log the error
 				continue
 			}
 
-			fragments, err := fetchFragments(ctx, session, c.mutationFragmentsSelect, item.PartitionKeys.ToCQLValues(c.partitionKeys))
+			fragments, err := fetchFragments(ctx, session, c.mutationFragmentsSelect, values)
 			if err != nil {
 				continue
 			}
 
-			result[item.Hash()] = cqlData{
+			// Create a job error for this specific partition to get the correct hash
+			partitionJobErr := &joberror.JobError{
+				Timestamp:     item.Timestamp,
+				Query:         item.Query,
+				Message:       item.Message,
+				StmtType:      item.StmtType,
+				PartitionKeys: typedef.NewValuesFromMap(pks),
+			}
+
+			result[partitionJobErr.Hash()] = cqlData{
 				statements:        statements,
 				mutationFragments: fragments,
 				partitionKeys:     pks,

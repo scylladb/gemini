@@ -65,7 +65,7 @@ type (
 func New(
 	originalKeyspace string,
 	originalTable string,
-	oracleSession, testSession *gocql.Session,
+	oracleSession, testSession func() (*gocql.Session, error),
 	hosts []string,
 	username, password string,
 	partitionKeys typedef.Columns,

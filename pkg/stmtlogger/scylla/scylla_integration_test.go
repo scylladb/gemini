@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gocql/gocql"
 	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -84,7 +85,9 @@ func TestNewStatements_Integration(t *testing.T) {
 	t.Run("single partition key", func(t *testing.T) {
 		t.Parallel()
 		cqlStmts, err := newStatements(
-			session, containers.Oracle, containers.Test,
+			session,
+			func() (*gocql.Session, error) { return containers.Oracle, nil },
+			func() (*gocql.Session, error) { return containers.Test, nil },
 			keyspace+"_1", table,
 			"test_ks", "test_table",
 			partitionKeys,
@@ -111,7 +114,9 @@ func TestNewStatements_Integration(t *testing.T) {
 		}
 
 		cqlStmts, err := newStatements(
-			session, containers.Oracle, containers.Test,
+			session,
+			func() (*gocql.Session, error) { return containers.Oracle, nil },
+			func() (*gocql.Session, error) { return containers.Test, nil },
 			keyspace+"_2", table,
 			"test_ks", "test_table",
 			multiKeys,
@@ -144,7 +149,9 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 	}
 
 	cqlStmts, err := newStatements(
-		session, containers.Oracle, containers.Test,
+		session,
+		func() (*gocql.Session, error) { return containers.Oracle, nil },
+		func() (*gocql.Session, error) { return containers.Test, nil },
 		keyspace, table,
 		"test_ks", "test_table",
 		partitionKeys,
@@ -259,7 +266,9 @@ func TestNewStatements_WithTupleType_Integration(t *testing.T) {
 	}
 
 	cqlStmts, err := newStatements(
-		session, containers.Oracle, containers.Test,
+		session,
+		func() (*gocql.Session, error) { return containers.Oracle, nil },
+		func() (*gocql.Session, error) { return containers.Test, nil },
 		keyspace, table,
 		"test_ks", "test_table",
 		partitionKeys,
@@ -331,7 +340,9 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 	}
 
 	cqlStmts, err := newStatements(
-		session, containers.Oracle, containers.Test,
+		session,
+		func() (*gocql.Session, error) { return containers.Oracle, nil },
+		func() (*gocql.Session, error) { return containers.Test, nil },
 		logsKS, logsTable,
 		testKS, testTable,
 		partitionKeys,
@@ -489,7 +500,9 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 	}
 
 	cqlStmts, err := newStatements(
-		session, containers.Oracle, containers.Test,
+		session,
+		func() (*gocql.Session, error) { return containers.Oracle, nil },
+		func() (*gocql.Session, error) { return containers.Test, nil },
 		logsKS, logsTable,
 		testKS, testTable,
 		partitionKeys,
@@ -690,8 +703,8 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 	scyllaLogger, err := New(
 		testKS,
 		testTable,
-		containers.Oracle,
-		containers.Test,
+		func() (*gocql.Session, error) { return containers.Oracle, nil },
+		func() (*gocql.Session, error) { return containers.Test, nil },
 		containers.TestHosts,
 		"", "",
 		partitionKeys,

@@ -62,6 +62,7 @@ type storer interface {
 type storeLoader interface {
 	storer
 	loader
+	Init() error
 	Close() error
 	name() string
 }
@@ -140,7 +141,6 @@ func New(
 	logger.Debug("creating test store", zap.Strings("hosts", cfg.TestClusterConfig.Hosts))
 	testStore, err := newCQLStore(
 		cfg.TestClusterConfig,
-		statementLogger,
 		schema,
 		logger.Named("test_store"),
 		"test",
@@ -157,13 +157,12 @@ func New(
 		//nolint:govet
 		oracleStoreImpl, err := newCQLStore(
 			*cfg.OracleClusterConfig,
-			statementLogger,
 			schema,
 			logger.Named("oracle_store"),
 			"oracle",
 		)
 		if err != nil {
-			return nil, pkgerrors.Wrap(err, "failed to create oracle cluster")
+			return nil, err
 		}
 		oracleStore = oracleStoreImpl
 		logger.Debug("oracle store created successfully")
@@ -177,8 +176,8 @@ func New(
 			stmtlogger.WithLogger(scylla.New(
 				keyspace,
 				table,
-				oracleStoreImpl.session,
-				testStore.session,
+				oracleStoreImpl.getSession,
+				testStore.getSession,
 				cfg.OracleClusterConfig.Hosts,
 				cfg.OracleClusterConfig.Username,
 				cfg.OracleClusterConfig.Password,
@@ -192,10 +191,24 @@ func New(
 				logger.With(zap.String("component", "statement_logger")),
 			)),
 		)
+
+		oracleStoreImpl.SetLogger(statementLogger, true)
+		testStore.SetLogger(statementLogger, true)
+
 		if err != nil {
 			return nil, errors.Join(err, errors.New("failed to create statement logger"))
 		}
 		logger.Debug("statement logger created successfully")
+	}
+
+	if err = testStore.Init(); err != nil {
+		return nil, errors.Join(err, errors.New("failed to initialize test store"))
+	}
+
+	if oracleStore != nil {
+		if err = oracleStore.Init(); err != nil {
+			return nil, errors.Join(err, errors.New("failed to initialize oracle store"))
+		}
 	}
 
 	ds := &delegatingStore{

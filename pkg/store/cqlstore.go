@@ -28,7 +28,6 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/gocql/gocql/hostpolicy"
 	"github.com/hailocab/go-hostpool"
-	pkgerrors "github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/mo"
 	"go.uber.org/multierr"
@@ -45,25 +44,28 @@ type cqlStore struct {
 	cqlRequestsMetric         [typedef.StatementTypeCount]prometheus.Counter
 	cqlErrorRequestsMetric    [typedef.StatementTypeCount]prometheus.Counter
 	cqlTimeoutsRequestsMetric [typedef.StatementTypeCount]prometheus.Counter
+	cluster                   *gocql.ClusterConfig
 	session                   *gocql.Session
+	tracingDir                string
 	schema                    *typedef.Schema
 	logger                    *zap.Logger
 	system                    string
 }
 
 func newCQLStoreWithSession(
-	session *gocql.Session,
+	cluster *gocql.ClusterConfig,
 	schema *typedef.Schema,
 	logger *zap.Logger,
-	system string,
+	tracingDir, system string,
 ) *cqlStore {
 	logger.Info("creating cql store with session", zap.String("system", system))
 
 	store := &cqlStore{
-		session: session,
-		schema:  schema,
-		logger:  logger,
-		system:  system,
+		cluster:    cluster,
+		schema:     schema,
+		logger:     logger,
+		system:     system,
+		tracingDir: tracingDir,
 	}
 
 	for i := range typedef.StatementTypeCount {
@@ -78,7 +80,6 @@ func newCQLStoreWithSession(
 
 func newCQLStore(
 	cfg ScyllaClusterConfig,
-	statementLogger *stmtlogger.Logger,
 	schema *typedef.Schema,
 	logger *zap.Logger,
 	system string,
@@ -89,9 +90,9 @@ func newCQLStore(
 		zap.String("consistency", cfg.Consistency),
 	)
 
-	testSession, err := createCluster(cfg, logger, statementLogger, true)
+	testSession, err := createCluster(cfg, logger.With(zap.String("system", system)))
 	if err != nil {
-		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
+		return nil, err
 	}
 
 	logger.Info("cluster session created", zap.String("system", system))
@@ -99,12 +100,64 @@ func newCQLStore(
 		testSession,
 		schema,
 		logger,
+		cfg.TracingDir,
 		system,
 	), nil
 }
 
 func (c *cqlStore) name() string {
 	return c.system
+}
+
+func (c *cqlStore) SetLogger(logger *stmtlogger.Logger, enableLogger bool) {
+	if enableLogger {
+		o := NewClusterObserver(logger, c.logger, stmtlogger.Type(c.system))
+
+		c.cluster.ConnectObserver = o
+		c.cluster.QueryObserver = o
+		c.cluster.BatchObserver = o
+	}
+}
+
+func (c *cqlStore) Init() error {
+	var err error
+
+	c.session, err = c.cluster.CreateSession()
+	if err != nil {
+		return err
+	}
+
+	if c.tracingDir != "" {
+		var file io.Writer
+
+		switch c.tracingDir {
+		case "stdout":
+			file = os.Stdout
+		case "stderr":
+			file = os.Stderr
+		default:
+			file, err = utils.CreateFile(filepath.Join(c.tracingDir, c.system+"-driver.log"), true)
+			if err != nil {
+				c.session.Close()
+				return err
+			}
+		}
+
+		tracer := gocql.NewTraceWriter(c.session, file)
+		tracer.SetSleepInterval(100 * time.Millisecond)
+		tracer.SetMaxAttempts(10)
+
+		c.session.SetTrace(tracer)
+	}
+
+	return err
+}
+
+func (c *cqlStore) getSession() (*gocql.Session, error) {
+	if c.session == nil {
+		return nil, errors.New("session not initialized")
+	}
+	return c.session, nil
 }
 
 type MutationStoreError struct {
@@ -119,7 +172,12 @@ func (e MutationStoreError) Error() string {
 }
 
 func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error {
-	query := c.session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
+	session, err := c.getSession()
+	if err != nil {
+		return err
+	}
+
+	query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 	defer query.Release()
 
 	var acc error
@@ -168,7 +226,12 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 }
 
 func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
-	query := c.session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
+	session, err := c.getSession()
+	if err != nil {
+		return nil, err
+	}
+
+	query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 	defer func() {
 		query.Release()
 		c.cqlRequestsMetric[stmt.QueryType].Inc()
@@ -206,13 +269,19 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 // loadIter returns an iterator that yields rows one by one without loading all into memory
 func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator {
 	return func(yield func(Row, error) bool) {
-		query := c.session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
+		session, err := c.getSession()
+		if err != nil {
+			yield(Row{}, errors.New("failed to get cql session"))
+			return
+		}
+
+		query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 		defer query.Release()
 		defer c.cqlRequestsMetric[stmt.QueryType].Inc()
 
 		iter := query.Iter()
 		defer func() {
-			if err := iter.Close(); err != nil && !errors.Is(err, context.Canceled) {
+			if err = iter.Close(); err != nil && !errors.Is(err, context.Canceled) {
 				c.logger.Error("error closing iterator",
 					zap.String("system", c.system),
 					zap.Error(err),
@@ -302,7 +371,9 @@ func deepCopyValue(v any) any {
 
 func (c *cqlStore) Close() error {
 	c.logger.Debug("closing cql store", zap.String("system", c.system))
-	c.session.Close()
+	if c.session != nil {
+		c.session.Close()
+	}
 	c.logger.Debug("cql store closed", zap.String("system", c.system))
 	return nil
 }
@@ -336,23 +407,13 @@ func getHostSelectionPolicy(policy HostSelectionPolicy, hosts []string) gocql.Ho
 func createCluster(
 	config ScyllaClusterConfig,
 	logger *zap.Logger,
-	statementLogger *stmtlogger.Logger,
-	enableObserver bool,
-) (*gocql.Session, error) {
+) (*gocql.ClusterConfig, error) {
 	c, err := gocql.ParseConsistencyWrapper(config.Consistency)
 	if err != nil {
 		return nil, err
 	}
 
 	cluster := gocql.NewCluster(slices.Clone(config.Hosts)...)
-
-	if enableObserver {
-		o := NewClusterObserver(statementLogger, logger, config.Name)
-
-		cluster.ConnectObserver = o
-		cluster.QueryObserver = o
-		cluster.BatchObserver = o
-	}
 
 	cluster.Timeout = config.RequestTimeout
 	cluster.ConnectTimeout = config.ConnectTimeout
@@ -385,33 +446,5 @@ func createCluster(
 		}
 	}
 
-	session, err := cluster.CreateSession()
-	if err != nil {
-		return nil, err
-	}
-
-	if config.TracingDir != "" {
-		var file io.Writer
-
-		switch config.TracingDir {
-		case "stdout":
-			file = os.Stdout
-		case "stderr":
-			file = os.Stderr
-		default:
-			file, err = utils.CreateFile(filepath.Join(config.TracingDir, string(config.Name)+"-driver.log"), true)
-			if err != nil {
-				session.Close()
-				return nil, err
-			}
-		}
-
-		tracer := gocql.NewTraceWriter(session, file)
-		tracer.SetSleepInterval(100 * time.Millisecond)
-		tracer.SetMaxAttempts(10)
-
-		session.SetTrace(tracer)
-	}
-
-	return session, nil
+	return cluster, nil
 }
