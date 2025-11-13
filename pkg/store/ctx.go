@@ -36,7 +36,13 @@ func WithContextData(ctx context.Context, data *ContextData) context.Context {
 }
 
 func MustGetContextData(ctx context.Context) *ContextData {
-	data, ok := ctx.Value(ContextDataKey).(*ContextData)
+	value := ctx.Value(ContextDataKey)
+
+	if value == nil {
+		return nil
+	}
+
+	data, ok := value.(*ContextData)
 
 	if !ok {
 		panic("context does not contain QueryContextData")

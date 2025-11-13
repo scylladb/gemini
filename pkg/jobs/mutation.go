@@ -98,7 +98,7 @@ func (m *Mutation) run(ctx context.Context) error {
 	// Note: MutationError implements Is and may match DeadlineExceeded; detect it explicitly.
 	var mutErr *store.MutationError
 	if errors.As(err, &mutErr) {
-		return joberror.JobError{
+		return &joberror.JobError{
 			Err:           err,
 			Timestamp:     time.Now(),
 			StmtType:      mutateStmt.QueryType,
@@ -114,7 +114,7 @@ func (m *Mutation) run(ctx context.Context) error {
 		return nil
 	}
 
-	return joberror.JobError{
+	return &joberror.JobError{
 		Err:           err,
 		Timestamp:     time.Now(),
 		StmtType:      mutateStmt.QueryType,
@@ -164,15 +164,16 @@ func (m *Mutation) Do(ctx context.Context) error {
 			return nil
 		}
 
-		var jobErr joberror.JobError
+		var jobErr *joberror.JobError
 		if errors.As(err, &jobErr) {
 			// Record the write error, but only stop if we've exceeded the error budget
-			m.status.AddWriteError(jobErr)
+			m.status.AddWriteError(*jobErr)
 			if m.status.HasReachedErrorCount() {
 				m.stopFlag.SetSoft(true)
 				return errors.New("mutation job stopped due to errors")
 			}
-			// Continue processing; transient errors should not halt immediately
+			// Continue procesjobErr)
+			//			if m.status.HasReachedEsing; transient errors should not halt immediately
 			continue
 		}
 

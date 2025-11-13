@@ -186,7 +186,6 @@ func run(cmd *cobra.Command, _ []string) error {
 		UseServerSideTimestamps:          useServerSideTimestamps,
 		OracleStatementFile:              oracleStatementLogFile,
 		TestStatementFile:                testStatementLogFile,
-		Compression:                      stmtlogger.CompressionNone,
 		TestClusterConfig: store.ScyllaClusterConfig{
 			Name:                    stmtlogger.TypeTest,
 			Hosts:                   testClusterHost,
@@ -197,6 +196,7 @@ func run(cmd *cobra.Command, _ []string) error {
 			UseServerSideTimestamps: useServerSideTimestamps,
 			Username:                testClusterUsername,
 			Password:                testClusterPassword,
+			Replication:             sc.Config.ReplicationStrategy,
 		},
 	}
 
@@ -211,6 +211,7 @@ func run(cmd *cobra.Command, _ []string) error {
 			UseServerSideTimestamps: useServerSideTimestamps,
 			Username:                oracleClusterUsername,
 			Password:                oracleClusterPassword,
+			Replication:             sc.Config.OracleReplicationStrategy,
 		}
 	}
 

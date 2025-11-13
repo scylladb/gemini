@@ -192,7 +192,7 @@ func TestValidateDeletedPartition_StoreError(t *testing.T) {
 
 	require.Error(t, err)
 
-	var jobErr joberror.JobError
+	var jobErr *joberror.JobError
 	require.True(t, errors.As(err, &jobErr))
 	require.Contains(t, jobErr.Message, "Deleted partition validation failed")
 	require.Equal(t, typedef.SelectStatementType, jobErr.StmtType)

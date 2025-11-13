@@ -125,8 +125,12 @@ func NewClusterObserver(
 }
 
 func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedBatch) {
-	instance := batch.Host.ConnectAddressAndPort()
 	data := MustGetContextData(ctx)
+	if data == nil {
+		return
+	}
+	instance := batch.Host.ConnectAddressAndPort()
+
 	var errStr string
 
 	if batch.Err != nil {
@@ -169,8 +173,11 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 }
 
 func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQuery) {
-	instance := query.Host.ConnectAddressAndPort()
 	data := MustGetContextData(ctx)
+	if data == nil {
+		return
+	}
+	instance := query.Host.ConnectAddressAndPort()
 	var errStr string
 	if query.Err != nil {
 		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, query.Err.Error()).Inc()

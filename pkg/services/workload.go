@@ -26,7 +26,6 @@ import (
 
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/jobs"
-	"github.com/scylladb/gemini/pkg/partitions"
 	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
@@ -105,14 +104,15 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 
 	logger.Debug("generating schema changes")
 
-	partitionConfig := schema.Config.GetPartitionRangeConfig()
-	schemaChanges := partitions.NewPartitionKeys(rand.New(randSrc), schema.Tables[0], &partitionConfig)
 	globalStatus := status.NewGlobalStatus(config.MaxErrorsToStore)
 	logger.Debug("creating workpool", zap.Int("size", config.IOWorkerPoolSize))
 	pool := workpool.New(config.IOWorkerPoolSize)
 
 	logger.Debug("creating store")
-	st, err := store.New(schemaChanges, pool, schema, storeConfig, logger.Named("store"), globalStatus.Errors)
+	st, err := store.New(
+		schema.Keyspace.Name,
+		schema.Tables[0].Name,
+		schema.Tables[0].PartitionKeys, pool, schema, storeConfig, logger.Named("store"), globalStatus.Errors)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create store")
 	}
@@ -286,11 +286,12 @@ func (w *Workload) Close() error {
 	w.stopFlag.SetSoft(true)
 
 	w.logger.Info("closing workpool")
-	err := w.pool.Close()
+
+	err := w.status.Errors.Close()
 
 	w.logger.Debug("closing store")
 	err = multierr.Append(err, w.store.Close())
-
+	err = multierr.Append(err, w.pool.Close())
 	if err != nil {
 		w.logger.Error("workload closed with errors", zap.Error(err))
 	} else {

@@ -122,7 +122,7 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 		return nil
 	}
 
-	return joberror.JobError{
+	return &joberror.JobError{
 		Timestamp:     time.Now(),
 		Err:           err,
 		StmtType:      stmt.QueryType,
@@ -164,7 +164,7 @@ func (v *Validation) validateDeletedPartition(ctx context.Context, partitionKeyV
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return err
 		}
-		return joberror.JobError{
+		return &joberror.JobError{
 			Timestamp:     time.Now(),
 			Err:           err,
 			StmtType:      stmt.QueryType,
@@ -216,9 +216,9 @@ func (v *Validation) Do(ctx context.Context) error {
 			}
 
 			// Handle validation error
-			var jobErr joberror.JobError
+			var jobErr *joberror.JobError
 			if errors.As(err, &jobErr) {
-				v.status.AddReadError(jobErr)
+				v.status.AddReadError(*jobErr)
 			} else {
 				panic(fmt.Sprintf("invalid type err %T: %v", err, err))
 			}
@@ -259,10 +259,10 @@ func (v *Validation) Do(ctx context.Context) error {
 			}
 
 			// Handle different error types that can be returned from the store
-			var jobErr joberror.JobError
+			var jobErr *joberror.JobError
 			if errors.As(err, &jobErr) {
 				// It's already a joberror.JobError, use it directly
-				v.status.AddReadError(jobErr)
+				v.status.AddReadError(*jobErr)
 			} else {
 				panic(fmt.Sprintf("invalid type err %T: %v", err, err))
 			}

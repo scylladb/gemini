@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 	"unsafe"
@@ -313,6 +314,19 @@ func (v *Values) Get(name string) []any {
 	}
 
 	return nil
+}
+
+func (v *Values) Keys() []string {
+	keys := make([]string, 0, len(v.data))
+
+	v.mu.RLock()
+	for k := range v.data {
+		keys = append(keys, k)
+	}
+	v.mu.RUnlock()
+
+	sort.Strings(keys)
+	return keys
 }
 
 func (v *Values) Len() int {

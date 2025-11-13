@@ -15,6 +15,7 @@
 package joberror
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -35,9 +36,10 @@ type JobError struct {
 	Query         string                `json:"query"`
 	Values        []any                 `json:"values,omitempty"`
 	StmtType      typedef.StatementType `json:"stmt-type"`
+	hash          [32]byte
 }
 
-func (j JobError) Error() string {
+func (j *JobError) Error() string {
 	data, _ := json.Marshal(j.PartitionKeys)
 
 	return fmt.Sprintf(
@@ -49,6 +51,33 @@ func (j JobError) Error() string {
 		j.Timestamp.Format(time.RFC3339Nano),
 		utils.UnsafeString(data),
 	)
+}
+
+func (j *JobError) Hash() [32]byte {
+	if j.hash != [32]byte{} {
+		return j.hash
+	}
+
+	hasher := sha256.New()
+	var bytes [32]byte
+
+	hasher.Write(utils.UnsafeBytes(j.Query))
+	hasher.Write([]byte{byte(j.StmtType)})
+
+	if j.PartitionKeys != nil {
+		keys := j.PartitionKeys.Keys()
+
+		for _, key := range keys {
+			hasher.Write(utils.UnsafeBytes(key))
+			data, _ := json.Marshal(j.PartitionKeys.Get(key))
+			hasher.Write(data)
+		}
+	}
+
+	hasher.Sum(bytes[:0])
+
+	j.hash = bytes
+	return bytes
 }
 
 type ErrorList struct {

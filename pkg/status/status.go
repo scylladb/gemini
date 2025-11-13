@@ -105,7 +105,7 @@ func (gs *GlobalStatus) PrintResult(
 		fmt.Printf("\twrite errors: %v\n", gs.WriteErrors.Load())
 		fmt.Printf("\tread errors:  %v\n", gs.ReadErrors.Load())
 		for i, err := range gs.Errors.Errors() {
-			fmt.Printf("Error %d: %s\n", i, err)
+			fmt.Printf("Error %d: %v\n", i, err)
 		}
 		jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
 		fmt.Printf("Schema: %v\n", string(jsonSchema))

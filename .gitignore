@@ -8,3 +8,4 @@ version.json
 .qodo
 scylla-monitoring/
 gemini.log
+buildkitd.toml

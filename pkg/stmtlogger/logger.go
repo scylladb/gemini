@@ -20,15 +20,11 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/pkg/errors"
 	"github.com/samber/mo"
-	"go.uber.org/zap"
 
-	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
-	"github.com/scylladb/gemini/pkg/workpool"
 )
 
 const (
@@ -67,128 +63,67 @@ type (
 
 	Logger struct {
 		closer  io.Closer
-		channel atomic.Pointer[chan<- Item]
+		channel atomic.Pointer[chan Item]
 		metrics metrics.ChannelMetrics
 	}
 
 	options struct {
-		logger      mo.Either[*ScyllaLogger, *IOWriterLogger]
-		channelSize int
+		channel     chan Item
+		innerLogger io.Closer
 	}
 
-	Option func(*options, chan Item, metrics.ChannelMetrics) error
+	Option func(*options) error
 )
 
-func WithChannelSize(size int) Option {
-	return func(o *options, _ chan Item, _ metrics.ChannelMetrics) error {
-		if size <= 0 {
-			return errors.New("channel size must be greater than 0")
+func WithChannel(ch chan Item) Option {
+	return func(o *options) error {
+		if o.channel != nil {
+			close(o.channel)
 		}
-		o.channelSize = size
+		o.channel = ch
 		return nil
 	}
 }
 
-func WithScyllaLogger(
-	schemaChangesValues typedef.PartitionKeys,
-	schema *typedef.Schema,
-	oracleStatementsFile string,
-	testStatementsFile string,
-	hosts []string,
-	username, password string,
-	compression Compression,
-	e *joberror.ErrorList,
-	pool *workpool.Pool,
-	l *zap.Logger,
-) Option {
-	return func(o *options, ch chan Item, chMetrics metrics.ChannelMetrics) error {
-		logger, err := NewScyllaLogger(
-			schema.Keyspace.Name,
-			schema.Tables[0].Name,
-			ch,
-			schemaChangesValues,
-			schema,
-			oracleStatementsFile,
-			testStatementsFile,
-			hosts,
-			username,
-			password,
-			compression,
-			e,
-			pool,
-			l,
-			chMetrics,
-		)
+func WithLogger(logger io.Closer, err error) Option {
+	return func(o *options) error {
 		if err != nil {
 			return err
 		}
 
-		o.logger = mo.Left[*ScyllaLogger, *IOWriterLogger](logger)
-
-		return nil
-	}
-}
-
-func WithIOWriterLogger(name string, input io.Writer, compression Compression, l *zap.Logger) Option {
-	return func(o *options, ch chan Item, _ metrics.ChannelMetrics) error {
-		logger, err := NewIOWriterLogger(ch, name, input, compression, l)
-		if err != nil {
-			return err
-		}
-
-		o.logger = mo.Right[*ScyllaLogger, *IOWriterLogger](logger)
-
-		return nil
-	}
-}
-
-func WithFileLogger(filePath string, compression Compression, l *zap.Logger) Option {
-	return func(o *options, ch chan Item, _ metrics.ChannelMetrics) error {
-		logger, err := NewFileLogger(ch, filePath, compression, l)
-		if err != nil {
-			return err
-		}
-
-		o.logger = mo.Right[*ScyllaLogger, *IOWriterLogger](logger)
-
+		o.innerLogger = logger
 		return nil
 	}
 }
 
 func NewLogger(opts ...Option) (*Logger, error) {
 	o := options{
-		channelSize: defaultChanSize,
+		channel: make(chan Item, defaultChanSize),
 	}
 
 	chMetrics := metrics.NewChannelMetrics("statement_logger", "statement_logger")
-	ch := make(chan Item, o.channelSize)
 
 	for _, opt := range opts {
-		if err := opt(&o, ch, chMetrics); err != nil {
+		if err := opt(&o); err != nil {
 			return nil, err
 		}
 	}
 
 	l := &Logger{
 		metrics: chMetrics,
+		closer:  o.innerLogger,
 	}
 
-	l.init(ch, o.logger)
+	l.channel.Store(&o.channel)
 
 	return l, nil
 }
 
-func (l *Logger) init(ch chan<- Item, logger mo.Either[*ScyllaLogger, *IOWriterLogger]) {
-	if logger.IsLeft() {
-		l.closer = logger.MustLeft()
-	} else {
-		l.closer = logger.MustRight()
+func (l *Logger) LogStmt(item Item) error {
+	if l.closer == nil {
+		return nil
 	}
 
-	l.channel.Store(&ch)
-}
-
-func (l *Logger) LogStmt(item Item) error {
 	if ch := l.channel.Load(); ch != nil {
 		*ch <- item
 		l.metrics.Inc()
@@ -200,7 +135,12 @@ func (l *Logger) LogStmt(item Item) error {
 func (l *Logger) Close() error {
 	old := l.channel.Swap(nil)
 	close(*old)
-	return l.closer.Close()
+
+	if l.closer != nil {
+		return l.closer.Close()
+	}
+
+	return nil
 }
 
 func (i Item) MemoryFootprint() uint64 {

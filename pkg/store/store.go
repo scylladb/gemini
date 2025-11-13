@@ -30,7 +30,9 @@ import (
 	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
+	"github.com/scylladb/gemini/pkg/stmtlogger/scylla"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 	"github.com/scylladb/gemini/pkg/workpool"
@@ -76,6 +78,7 @@ type (
 	ScyllaClusterConfig struct {
 		Name                    stmtlogger.Type
 		HostSelectionPolicy     HostSelectionPolicy
+		Replication             replication.Replication
 		Consistency             string
 		Username                string
 		Password                string
@@ -94,13 +97,13 @@ type (
 		MaxRetriesMutateSleep            time.Duration
 		AsyncObjectStabilizationAttempts int
 		AsyncObjectStabilizationDelay    time.Duration
-		Compression                      stmtlogger.Compression
 		UseServerSideTimestamps          bool
 	}
 )
 
 func New(
-	schemaChangesValues typedef.PartitionKeys,
+	keyspace, table string,
+	partitionKeyColumns typedef.Columns,
 	workers *workpool.Pool,
 	schema *typedef.Schema,
 	cfg Config,
@@ -117,28 +120,6 @@ func New(
 	)
 
 	var statementLogger *stmtlogger.Logger
-	if cfg.OracleClusterConfig != nil {
-		logger.Debug("creating statement logger with oracle cluster")
-		var err error
-		statementLogger, err = stmtlogger.NewLogger(
-			stmtlogger.WithScyllaLogger(
-				schemaChangesValues,
-				schema,
-				cfg.OracleStatementFile,
-				cfg.TestStatementFile,
-				cfg.OracleClusterConfig.Hosts,
-				cfg.OracleClusterConfig.Username,
-				cfg.OracleClusterConfig.Password,
-				cfg.Compression,
-				e,
-				workers,
-				logger.Named("stmt_logger"),
-			))
-		if err != nil {
-			return nil, pkgerrors.Wrap(err, "failed to create statement logger")
-		}
-		logger.Debug("statement logger created successfully")
-	}
 
 	if cfg.MaxRetriesMutate < 0 {
 		cfg.MaxRetriesMutate = 10
@@ -173,7 +154,8 @@ func New(
 
 	if cfg.OracleClusterConfig != nil {
 		logger.Debug("creating oracle store", zap.Strings("hosts", cfg.OracleClusterConfig.Hosts))
-		oracleStore, err = newCQLStore(
+		//nolint:govet
+		oracleStoreImpl, err := newCQLStore(
 			*cfg.OracleClusterConfig,
 			statementLogger,
 			schema,
@@ -183,7 +165,37 @@ func New(
 		if err != nil {
 			return nil, pkgerrors.Wrap(err, "failed to create oracle cluster")
 		}
+		oracleStore = oracleStoreImpl
 		logger.Debug("oracle store created successfully")
+
+		logger.Debug("creating statement logger with oracle cluster")
+
+		ch := make(chan stmtlogger.Item, 2_000)
+
+		statementLogger, err = stmtlogger.NewLogger(
+			stmtlogger.WithChannel(ch),
+			stmtlogger.WithLogger(scylla.New(
+				keyspace,
+				table,
+				oracleStoreImpl.session,
+				testStore.session,
+				cfg.OracleClusterConfig.Hosts,
+				cfg.OracleClusterConfig.Username,
+				cfg.OracleClusterConfig.Password,
+				partitionKeyColumns,
+				cfg.OracleClusterConfig.Replication,
+				ch,
+				cfg.OracleStatementFile,
+				cfg.TestStatementFile,
+				e.GetChannel(),
+				workers,
+				logger.With(zap.String("component", "statement_logger")),
+			)),
+		)
+		if err != nil {
+			return nil, errors.Join(err, errors.New("failed to create statement logger"))
+		}
+		logger.Debug("statement logger created successfully")
 	}
 
 	ds := &delegatingStore{
@@ -693,14 +705,7 @@ func (ds delegatingStore) Check(
 func (ds delegatingStore) Close() error {
 	ds.logger.Info("closing store")
 
-	ds.logger.Debug("closing test store")
-	err := multierr.Append(nil, ds.testStore.Close())
-
-	if ds.oracleStore != nil {
-		ds.logger.Debug("closing oracle store")
-		err = multierr.Append(err, ds.oracleStore.Close())
-	}
-
+	var err error
 	if ds.statementLogger != nil {
 		ds.logger.Debug("closing statement logger")
 		err = multierr.Append(err, ds.statementLogger.Close())

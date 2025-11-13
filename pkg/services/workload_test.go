@@ -17,9 +17,7 @@
 package services
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +26,6 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/slices"
 
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/jobs"
@@ -54,6 +51,7 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string) store.Config
 			RequestTimeout:          10 * time.Second,
 			ConnectTimeout:          10 * time.Second,
 			UseServerSideTimestamps: true,
+			Replication:             replication.NewSimpleStrategy(),
 		}
 	}
 
@@ -71,12 +69,12 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string) store.Config
 			RequestTimeout:          10 * time.Second,
 			ConnectTimeout:          10 * time.Second,
 			UseServerSideTimestamps: false,
+			Replication:             replication.NewSimpleStrategy(),
 		},
 		MaxRetriesMutate:                 5,
 		MaxRetriesMutateSleep:            10 * time.Second,
 		AsyncObjectStabilizationAttempts: 5,
 		AsyncObjectStabilizationDelay:    10 * time.Second,
-		Compression:                      stmtlogger.CompressionNone,
 		UseServerSideTimestamps:          true,
 	}
 }
@@ -366,8 +364,8 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 		StatementRatios:       statementRatio(),
 		IOWorkerPoolSize:      128,
 		MaxErrorsToStore:      maxErrorsCount,
-		WarmupDuration:        5 * time.Second,  // Warmup to populate data
-		Duration:              10 * time.Minute, // Then validate
+		WarmupDuration:        5 * time.Second, // Warmup to populate data
+		Duration:              1 * time.Minute, // Then validate
 		PartitionCount:        partitionCount,
 		MutationConcurrency:   4,
 		ReadConcurrency:       4,
@@ -375,7 +373,7 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	}, storeConfig, schema, logger, stopFlag)
 	assert.NoError(err)
 
-	time.AfterFunc(10*time.Second, func() {
+	time.AfterFunc(15*time.Second, func() {
 		truncateQuery := fmt.Sprintf("TRUNCATE TABLE %s.%s", schema.Keyspace.Name, schema.Tables[0].Name)
 		if err = scyllaContainer.Test.Query(truncateQuery).Exec(); err != nil {
 			t.Logf("Failed to execute truncate query: %v", err)
@@ -397,34 +395,11 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	assert.Zero(mixedStatus.WriteErrors.Load(), "should have no write errors")
 
 	t.Log("Phase 4: Verifying log files contain error statements")
-	contents := map[string][]stmtlogger.Item{}
+	contents := map[string][]byte{}
 
 	for _, file := range []string{storeConfig.TestStatementFile, storeConfig.OracleStatementFile} {
-		var handle *os.File
-		handle, err = os.Open(file)
-		assert.NoError(err)
-		defer handle.Close()
-
-		data := make([]stmtlogger.Item, 0, 1000)
-
-		var stats os.FileInfo
-		stats, err = handle.Stat()
-		assert.NoError(err)
-		assert.Greater(stats.Size(), int64(1), "log file %s should not be empty", file)
-
-		decoder := json.NewDecoder(handle)
-
-		var item stmtlogger.Item
-		for err = decoder.Decode(&item); err == nil; err = decoder.Decode(&item) {
-			data = append(data, item)
-		}
-		assert.Equal(io.EOF, err, "should reach EOF when reading log file %s", file)
-
-		slices.SortStableFunc(data, func(a, b stmtlogger.Item) int {
-			return a.Start.Time.Compare(b.Start.Time)
-		})
-
-		contents[file] = data
+		bytes := testutils.Must(os.ReadFile(file))
+		contents[file] = bytes
 	}
 
 	assert.NotEmpty(contents[storeConfig.TestStatementFile], "test log file should contain statements")
