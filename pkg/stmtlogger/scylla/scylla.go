@@ -216,6 +216,9 @@ func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, t
 				writer = oracleStatementsFile
 			case stmtlogger.TypeTest:
 				writer = testStatementsFile
+			default:
+				s.logger.Error("unknown statement type", zap.String("type", string(item.ty)))
+				continue
 			}
 
 			if _, err = writer.Write(bytes); err != nil {
@@ -227,6 +230,25 @@ func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, t
 					zap.String("data", string(bytes)),
 				)
 				continue
+			}
+
+			// Write newline for JSONL format
+			if err = writer.WriteByte('\n'); err != nil {
+				s.logger.Error("failed to write newline to statement log",
+					zap.Error(err),
+					zap.String("type", string(item.ty)),
+					zap.String("file", oracleStatements),
+				)
+				continue
+			}
+
+			// Flush after each write to ensure data is written to disk
+			if err = writer.Flush(); err != nil {
+				s.logger.Error("failed to flush statement log",
+					zap.Error(err),
+					zap.String("type", string(item.ty)),
+					zap.String("file", oracleStatements),
+				)
 			}
 		}
 	}
