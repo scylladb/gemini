@@ -39,6 +39,8 @@ type (
 	ScyllaContainer struct {
 		OracleContainer testcontainers.Container
 		TestContainer   testcontainers.Container
+		OracleCluster   *gocql.ClusterConfig
+		TestCluster     *gocql.ClusterConfig
 		Oracle          *gocql.Session
 		Test            *gocql.Session
 		OracleHosts     []string
@@ -104,20 +106,25 @@ func createScyllaNetwork(tb testing.TB) *testcontainers.DockerNetwork {
 	return sharedNetwork
 }
 
-func createScyllaSession(tb testing.TB, hosts ...string) *ScyllaContainer {
-	tb.Helper()
-
-	testCluster := gocql.NewCluster(hosts...)
-	testCluster.Timeout = 10 * time.Second
-	testCluster.ConnectTimeout = 10 * time.Second
-	testCluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
+func createClusterConfig(hosts ...string) *gocql.ClusterConfig {
+	cluster := gocql.NewCluster(hosts...)
+	cluster.Timeout = 10 * time.Second
+	cluster.ConnectTimeout = 10 * time.Second
+	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
 		Min:        20 * time.Microsecond,
 		Max:        50 * time.Millisecond,
 		NumRetries: 10,
 	}
-	testCluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy())
-	testCluster.Consistency = gocql.Quorum
-	testCluster.DefaultTimestamp = false
+	cluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy())
+	cluster.Consistency = gocql.Quorum
+	cluster.DefaultTimestamp = false
+	return cluster
+}
+
+func createScyllaSession(tb testing.TB, hosts ...string) *ScyllaContainer {
+	tb.Helper()
+
+	testCluster := createClusterConfig(hosts...)
 	if err := testCluster.Validate(); err != nil {
 		tb.Fatalf("failed to validate test ScyllaDB cluster: %v", err)
 	}
@@ -135,8 +142,9 @@ func createScyllaSession(tb testing.TB, hosts ...string) *ScyllaContainer {
 	})
 
 	return &ScyllaContainer{
-		Test:      session,
-		TestHosts: hosts,
+		Test:        session,
+		TestCluster: testCluster,
+		TestHosts:   hosts,
 	}
 }
 
@@ -232,6 +240,8 @@ func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 			TestHosts:       testScylla.TestHosts,
 			TestContainer:   testScylla.TestContainer,
 			OracleContainer: oracleScylla.OracleContainer,
+			TestCluster:     testScylla.TestCluster,
+			OracleCluster:   oracleScylla.OracleCluster,
 		}
 	}
 
@@ -258,10 +268,12 @@ func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 		testSession := createScyllaSession(tb, strings.Split(testHosts, ",")...)
 
 		return &ScyllaContainer{
-			Oracle:      oracleSession.Test,
-			OracleHosts: oracleSession.TestHosts,
-			Test:        testSession.Test,
-			TestHosts:   testSession.TestHosts,
+			Oracle:        oracleSession.Test,
+			OracleHosts:   oracleSession.TestHosts,
+			OracleCluster: createClusterConfig(strings.Split(oracleHosts, ",")...),
+			Test:          testSession.Test,
+			TestHosts:     testSession.TestHosts,
+			TestCluster:   createClusterConfig(strings.Split(testHosts, ",")...),
 		}
 	}
 

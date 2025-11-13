@@ -17,6 +17,7 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -404,6 +405,30 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 
 	assert.NotEmpty(contents[storeConfig.TestStatementFile], "test log file should contain statements")
 	assert.NotEmpty(contents[storeConfig.OracleStatementFile], "oracle log file should contain statements")
+
+	// Validate that statements in the log files are not empty
+	for _, file := range []string{storeConfig.TestStatementFile, storeConfig.OracleStatementFile} {
+		lines := strings.Split(strings.TrimSpace(string(contents[file])), "\n")
+		assert.NotEmpty(lines, "file %s should have at least one line", file)
+
+		for i, line := range lines {
+			if line == "" {
+				continue // Skip empty lines
+			}
+
+			var loggedStmt struct {
+				Query      string            `json:"query"`
+				Fragments  []json.RawMessage `json:"mutationFragments"`
+				Statements []json.RawMessage `json:"statements"`
+			}
+			err = json.Unmarshal([]byte(line), &loggedStmt)
+			assert.NoError(err, "failed to unmarshal line %d in file %s", i, file)
+
+			// Validate that either Query or Statements are not empty
+			assert.NotEmpty(loggedStmt.Query, "line %d in file %s should have non-empty query", i, file)
+			assert.NotEmpty(loggedStmt.Statements, "line %d in file %s should have non-empty statements", i, file)
+		}
+	}
 }
 
 func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
