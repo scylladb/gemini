@@ -279,7 +279,7 @@ func TestStatementChData_Structure(t *testing.T) {
 			name: "oracle type",
 			data: statementChData{
 				ty: stmtlogger.TypeOracle,
-				Data: map[[32]byte]cqlData{
+				Data: cqlDataMap{
 					{1}: {
 						partitionKeys: map[string][]any{"pk0": {"key"}},
 						statements:    []json.RawMessage{json.RawMessage(`{"stmt":"SELECT"}`)},
@@ -296,7 +296,7 @@ func TestStatementChData_Structure(t *testing.T) {
 			name: "test type",
 			data: statementChData{
 				ty: stmtlogger.TypeTest,
-				Data: map[[32]byte]cqlData{
+				Data: cqlDataMap{
 					{2}: {
 						partitionKeys: map[string][]any{"pk0": {"key2"}},
 					},

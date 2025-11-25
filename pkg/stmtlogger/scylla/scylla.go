@@ -46,8 +46,10 @@ type (
 	}
 
 	statementChData struct {
-		Data  map[[32]byte]cqlData `json:"data"`
-		Error *joberror.JobError   `json:"error"`
+		// Use the binary hash as map key for internal processing. Do NOT try to JSON-encode
+		// the whole structure directly in logs; only encode specific fields.
+		Data  cqlDataMap         `json:"data"`
+		Error *joberror.JobError `json:"error"`
 		ty    stmtlogger.Type
 	}
 
@@ -165,6 +167,14 @@ func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, t
 	}
 
 	testStatementsFile, testCloser, err := s.openStatementFile(testStatements)
+	if err != nil {
+		s.logger.Error("failed to open test statements file",
+			zap.Error(err),
+			zap.String("file", testStatements),
+			zap.String("type", string(stmtlogger.TypeTest)),
+		)
+		panic(err)
+	}
 
 	defer func() {
 		if err = oracleCloser(); err != nil {
@@ -204,18 +214,26 @@ func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, t
 			if err != nil {
 				s.logger.Error("failed to marshal statement log",
 					zap.Error(err),
-					zap.Any("item", item),
+					zap.String("type", string(item.ty)),
+					zap.String("query", item.Error.Query),
+					zap.String("message", item.Error.Message),
+					zap.String("job_error_hash", item.Error.HashHex()),
 				)
 				continue
 			}
 
-			var writer *bufio.Writer
+			var (
+				writer   *bufio.Writer
+				fileName string
+			)
 
 			switch item.ty {
 			case stmtlogger.TypeOracle:
 				writer = oracleStatementsFile
+				fileName = oracleStatements
 			case stmtlogger.TypeTest:
 				writer = testStatementsFile
+				fileName = testStatements
 			default:
 				s.logger.Error("unknown statement type", zap.String("type", string(item.ty)))
 				continue
@@ -224,9 +242,8 @@ func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, t
 			if _, err = writer.Write(bytes); err != nil {
 				s.logger.Error("failed to write statement log",
 					zap.Error(err),
-					zap.Any("item", item),
 					zap.String("type", string(item.ty)),
-					zap.String("file", oracleStatements),
+					zap.String("file", fileName),
 					zap.String("data", string(bytes)),
 				)
 				continue
@@ -237,7 +254,7 @@ func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, t
 				s.logger.Error("failed to write newline to statement log",
 					zap.Error(err),
 					zap.String("type", string(item.ty)),
-					zap.String("file", oracleStatements),
+					zap.String("file", fileName),
 				)
 				continue
 			}
@@ -247,7 +264,7 @@ func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, t
 				s.logger.Error("failed to flush statement log",
 					zap.Error(err),
 					zap.String("type", string(item.ty)),
-					zap.String("file", oracleStatements),
+					zap.String("file", fileName),
 				)
 			}
 		}
@@ -257,7 +274,10 @@ func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, t
 func (s *Logger) poolCallback(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError) statementChData {
 	data, err := s.cqlStatements.Fetch(ctx, ty, jobError)
 	if err != nil {
-		s.logger.Error("failed to fetch failed statements", zap.Error(err))
+		s.logger.Error("failed to fetch failed statements",
+			zap.Error(err),
+			zap.Any("job_error", jobError),
+		)
 		return statementChData{}
 	}
 
@@ -270,7 +290,8 @@ func (s *Logger) poolCallback(ctx context.Context, ty stmtlogger.Type, jobError 
 
 func (s *Logger) fetchErrors(items chan<- statementChData, ch <-chan *joberror.JobError) {
 	s.wg.Add(1)
-	seen := make(map[[32]byte]bool, len(items))
+	// Track seen errors by hex hash to avoid JSON-unsafe key types
+	seen := make(map[[32]byte]bool)
 	wg := &sync.WaitGroup{}
 
 	defer func() {

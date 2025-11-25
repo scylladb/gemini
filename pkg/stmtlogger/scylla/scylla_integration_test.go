@@ -537,7 +537,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 
 	tests := []struct {
 		jobError  *joberror.JobError
-		checkFunc func(*testing.T, map[[32]byte]cqlData)
+		checkFunc func(*testing.T, cqlDataMap)
 		name      string
 		ty        stmtlogger.Type
 		expectErr bool
@@ -555,7 +555,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 				}),
 			},
 			expectErr: false,
-			checkFunc: func(t *testing.T, result map[[32]byte]cqlData) {
+			checkFunc: func(t *testing.T, result cqlDataMap) {
 				t.Helper()
 
 				// Result may be empty if statement logs don't match exactly
@@ -576,7 +576,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 				}),
 			},
 			expectErr: false,
-			checkFunc: func(t *testing.T, result map[[32]byte]cqlData) {
+			checkFunc: func(t *testing.T, result cqlDataMap) {
 				t.Helper()
 				assert.NotNil(t, result)
 			},
@@ -594,7 +594,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 				}),
 			},
 			expectErr: false,
-			checkFunc: func(t *testing.T, result map[[32]byte]cqlData) {
+			checkFunc: func(t *testing.T, result cqlDataMap) {
 				t.Helper()
 				assert.NotNil(t, result)
 			},
@@ -612,7 +612,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 				}),
 			},
 			expectErr: true,
-			checkFunc: func(_ *testing.T, _ map[[32]byte]cqlData) {
+			checkFunc: func(_ *testing.T, _ cqlDataMap) {
 				// Should return error for unsupported statement types
 			},
 		},
@@ -629,7 +629,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 				}),
 			},
 			expectErr: true,
-			checkFunc: func(_ *testing.T, _ map[[32]byte]cqlData) {
+			checkFunc: func(_ *testing.T, _ cqlDataMap) {
 				// Should return error for unsupported statement types
 			},
 		},
@@ -812,7 +812,7 @@ func TestLogger_StatementFlusher_Integration(t *testing.T) {
 	// Send data
 	ch <- statementChData{
 		ty: stmtlogger.TypeOracle,
-		Data: map[[32]byte]cqlData{
+		Data: cqlDataMap{
 			{1}: {
 				partitionKeys: map[string][]any{
 					"pk0": {"test"},

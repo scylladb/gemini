@@ -15,6 +15,7 @@
 package joberror
 
 import (
+	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
@@ -84,6 +85,64 @@ func TestNewErrorList(t *testing.T) {
 
 	if cap(el.errors) != limit {
 		t.Errorf("Expected capacity %d, got %d", limit, cap(el.errors))
+	}
+}
+
+func TestHashHex_StableAndMatchesSum(t *testing.T) {
+	t.Parallel()
+
+	base := &JobError{
+		Timestamp: time.Unix(1732406400, 123456789), // fixed point in time
+		Query:     "SELECT * FROM ks.tbl WHERE pk0 = ? AND pk1 = ?",
+		Message:   "unit test",
+		StmtType:  typedef.SelectStatementType,
+		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+			"pk0": {"k"},
+			"pk1": {int32(1)},
+		}),
+	}
+
+	// First call populates the cached hash as well
+	h1 := base.Hash()
+	hex1 := base.HashHex()
+
+	if h1 == ([32]byte{}) {
+		t.Fatalf("hash should not be the zero value")
+	}
+	if len(hex1) != 64 {
+		t.Fatalf("hex-encoded hash must be 64 chars, got %d: %q", len(hex1), hex1)
+	}
+
+	// Subsequent calls should be stable
+	h2 := base.Hash()
+	hex2 := base.HashHex()
+
+	if h1 != h2 {
+		t.Fatalf("hash must be stable across calls: %v vs %v", h1, h2)
+	}
+	if hex1 != hex2 {
+		t.Fatalf("hex hash must be stable across calls: %q vs %q", hex1, hex2)
+	}
+
+	// hex must match encoding of binary sum
+	if want := hex.EncodeToString(h1[:]); want != hex1 {
+		t.Fatalf("hex mismatch: want %q, got %q", want, hex1)
+	}
+
+	// Changing PKs should change the hash; create a fresh JobError so the cached
+	// hash from base isn't copied over.
+	modified := &JobError{
+		Timestamp: base.Timestamp,
+		Query:     base.Query,
+		Message:   base.Message,
+		StmtType:  base.StmtType,
+		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+			"pk0": {"k2"},
+			"pk1": {int32(1)},
+		}),
+	}
+	if base.HashHex() == modified.HashHex() {
+		t.Fatalf("hash must change when partition keys change")
 	}
 }
 
