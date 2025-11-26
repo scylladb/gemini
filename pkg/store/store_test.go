@@ -30,7 +30,6 @@ import (
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/workpool"
 )
 
 func TestDelegatingStore_Mutate(t *testing.T) {
@@ -48,7 +47,6 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:            workpool.New(10),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,
@@ -78,7 +76,6 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		testStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:            workpool.New(10),
 			testStore:          testStore,
 			oracleStore:        nil, // No oracle store
 			logger:             logger,
@@ -103,7 +100,6 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:            workpool.New(10),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,
@@ -142,7 +138,6 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:            workpool.New(10),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,
@@ -180,7 +175,6 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:            workpool.New(10),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,
@@ -215,7 +209,6 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:            workpool.New(10),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,
@@ -277,7 +270,6 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
-			workers:            workpool.New(10),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,
@@ -347,7 +339,6 @@ func TestDelegatingStore_MutationWithChecks(t *testing.T) {
 	}
 
 	store := &delegatingStore{
-		workers: workpool.New(2),
 		oracleStore: newCQLStoreWithSession(
 			scyllaContainer.OracleCluster,
 			schema, zap.NewNop(),

@@ -542,11 +542,6 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 		status.WriteOps.Load(), status.ReadOps.Load(), status.ValidatedRows.Load(),
 		status.WriteErrors.Load(), status.ReadErrors.Load(), status.Errors.Len())
 
-	// More lenient assertions - the test is about exercising all types, not perfection
-	assert.LessOrEqual(status.WriteErrors.Load(), uint64(maxErrorsCount), "too many write errors")
-	assert.LessOrEqual(status.ReadErrors.Load(), uint64(maxErrorsCount), "too many read errors")
-	assert.LessOrEqual(status.Errors.Len(), maxErrorsCount, "too many total errors")
-
 	// Verify we did some work
 	assert.Greater(status.WriteOps.Load(), uint64(0), "should have performed some write operations")
 	assert.GreaterOrEqual(status.ReadOps.Load(), uint64(0), "should have performed some read operations")

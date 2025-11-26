@@ -32,10 +32,7 @@ import (
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/workpool"
 )
-
-// Unit tests - no database connection required
 
 func TestGetScyllaStatementLogsKeyspace(t *testing.T) {
 	t.Parallel()
@@ -391,14 +388,9 @@ func TestLogger_Insert(t *testing.T) {
 	t.Parallel()
 
 	logger := zaptest.NewLogger(t)
-	pool := workpool.New(10)
-	defer func() {
-		_ = pool.Close()
-	}()
 
 	mockLogger := &Logger{
 		logger: logger,
-		pool:   pool,
 	}
 
 	schemaTypes := []typedef.StatementType{

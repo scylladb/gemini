@@ -33,14 +33,12 @@ import (
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/workpool"
 )
 
 type (
 	Logger struct {
 		logger        *zap.Logger
 		channel       <-chan stmtlogger.Item
-		pool          *workpool.Pool
 		cqlStatements *cqlStatements
 		wg            sync.WaitGroup
 	}
@@ -76,7 +74,6 @@ func New(
 	oracleStatementsFile string,
 	testStatementsFile string,
 	e <-chan *joberror.JobError,
-	pool *workpool.Pool,
 	l *zap.Logger,
 ) (*Logger, error) {
 	l.Debug("creating scylla logger",
@@ -141,7 +138,6 @@ func New(
 		channel:       ch,
 		logger:        l,
 		cqlStatements: cqlStmts,
-		pool:          pool,
 	}
 
 	l.Debug("starting committer goroutine")
@@ -338,21 +334,14 @@ func (s *Logger) insert(item stmtlogger.Item) {
 		return
 	}
 
-	err := s.pool.SendWithoutResult(context.Background(), func(ctx context.Context) {
-		if err := s.cqlStatements.Insert(ctx, item); err != nil {
+	go func() {
+		if err := s.cqlStatements.Insert(context.Background(), item); err != nil && !errors.Is(err, context.Canceled) {
 			s.logger.Error("failed to insert into statements table",
 				zap.Error(err),
 				zap.Any("item", item),
 			)
 		}
-	})
-
-	if err != nil && !errors.Is(err, context.Canceled) {
-		s.logger.Error("failed to enqueue statement log",
-			zap.Error(err),
-			zap.Any("item", item),
-		)
-	}
+	}()
 }
 
 func (s *Logger) openStatementFile(name string) (*bufio.Writer, func() error, error) {

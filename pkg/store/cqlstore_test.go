@@ -29,7 +29,6 @@ import (
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/workpool"
 )
 
 func Test_DuplicateValuesWithCompare(t *testing.T) {
@@ -74,7 +73,6 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 	}
 
 	store := &delegatingStore{
-		workers:            workpool.New(2),
 		oracleStore:        newCQLStoreWithSession(scyllaContainer.OracleCluster, schema, zap.NewNop(), "", "oracle"),
 		testStore:          newCQLStoreWithSession(scyllaContainer.TestCluster, schema, zap.NewNop(), "", "test"),
 		logger:             zap.NewNop(),
