@@ -40,7 +40,7 @@ func (e ErrorRowDifference) Error() string {
 	}
 
 	return fmt.Sprintf(
-		"row count differ (test has %d rows, oracle has %d rows, test is missing rows: %s, oracle is missing rows: %s)",
+		"row count differ (test has %d rows, oracle has %d rows, test is missing rows: %v, oracle is missing rows: %v)",
 		e.TestRows,
 		e.OracleRows,
 		e.MissingInTest,

@@ -225,7 +225,7 @@ func (v *Validation) Do(ctx context.Context) error {
 
 			if v.status.HasReachedErrorCount() {
 				v.stopFlag.SetSoft(true)
-				return errors.New("validation job stopped due to errors")
+				return ErrValidationJobStopped
 			}
 
 		default:
@@ -269,7 +269,7 @@ func (v *Validation) Do(ctx context.Context) error {
 
 			if v.status.HasReachedErrorCount() {
 				v.stopFlag.SetSoft(true)
-				return errors.New("validation job stopped due to errors")
+				return ErrValidationJobStopped
 			}
 		}
 	}

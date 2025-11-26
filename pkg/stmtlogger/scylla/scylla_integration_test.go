@@ -35,7 +35,6 @@ import (
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/workpool"
 )
 
 func TestNewSession_Integration(t *testing.T) {
@@ -690,10 +689,6 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 	// Create channels
 	itemCh := make(chan stmtlogger.Item, 100)
 	errorCh := make(chan *joberror.JobError, 100)
-	pool := workpool.New(10)
-	defer func() {
-		_ = pool.Close()
-	}()
 
 	partitionKeys := typedef.Columns{
 		{Name: "pk0", Type: typedef.TypeText},
@@ -713,7 +708,6 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 		oracleFile,
 		testFile,
 		errorCh,
-		pool,
 		logger,
 	)
 	require.NoError(t, err)
