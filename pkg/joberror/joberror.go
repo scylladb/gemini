@@ -16,6 +16,7 @@ package joberror
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -78,6 +79,13 @@ func (j *JobError) Hash() [32]byte {
 
 	j.hash = bytes
 	return bytes
+}
+
+// HashHex returns the hex-encoded string form of the 32-byte hash.
+// Useful for using the hash as a JSON map key or log identifier.
+func (j *JobError) HashHex() string {
+	sum := j.Hash()
+	return hex.EncodeToString(sum[:])
 }
 
 type ErrorList struct {

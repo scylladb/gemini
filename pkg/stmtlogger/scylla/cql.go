@@ -17,6 +17,7 @@ package scylla
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +54,23 @@ type cqlData struct {
 	statements        []json.RawMessage
 }
 
+// cqlDataMap is a compact in-memory representation keyed by the 32-byte binary
+// hash. It provides a custom JSON marshaler that converts it into a
+// map[string]cqlData using hex-encoded keys. This keeps the runtime memory
+// footprint small while still enabling easy conversion to a JSON string when
+// needed (e.g., for debugging).
+type cqlDataMap map[[32]byte]cqlData
+
+// MarshalJSON implements json.Marshaler by copying the map into a
+// map[string]cqlData with hex-encoded keys, and marshaling that.
+func (m cqlDataMap) MarshalJSON() ([]byte, error) {
+	dup := make(map[string]cqlData, len(m))
+	for k, v := range m {
+		dup[hex.EncodeToString(k[:])] = v
+	}
+	return json.Marshal(dup)
+}
+
 const (
 	additionalColumns = "ts,ty,statement,values,host,attempt,gemini_attempt,error,dur"
 )
@@ -77,8 +95,9 @@ func newStatements(
 		return nil, err
 	}
 
-	mutationFragmentsSelectBuilder := qb.Select("MUTATION_FRAGMENTS(" + originalKeyspace + "." + originalTable + ")").
-		Json()
+	// MUTATION_FRAGMENTS is a table function; SELECT JSON is not supported on table functions.
+	// Build a regular SELECT without JSON for fragments and encode rows ourselves.
+	mutationFragmentsSelectBuilder := qb.Select("MUTATION_FRAGMENTS(" + originalKeyspace + "." + originalTable + ")")
 	oracleSelectBuilder := qb.Select(keyspace+"."+table).
 		Json().
 		Where(qb.EqLit("ty", "'oracle'")).
@@ -200,14 +219,33 @@ func fetchFragments(ctx context.Context, session *gocql.Session, stmt string, va
 			break
 		}
 
-		bs, _ := json.Marshal(row)
+		bs, err := encodeRowToJSON(row)
+		if err != nil {
+			// If JSON marshal fails for a row, skip it but continue scanning
+			continue
+		}
 		data = append(data, bs)
 	}
 
 	return data, iter.Close()
 }
 
-func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *joberror.JobError) (map[[32]byte]cqlData, error) {
+// encodeRowToJSON encodes a row scanned from Scylla into JSON using Go's encoding/json.
+// This locks in the expected formatting of certain types:
+//   - time.Time values are encoded as RFC3339Nano strings
+//   - []byte values are encoded as base64 strings
+//   - numeric values are encoded as JSON numbers
+//
+// The returned slice is safe to store as json.RawMessage.
+func encodeRowToJSON(row map[string]any) (json.RawMessage, error) { //nolint:unused // used in tests via same package
+	bs, err := json.Marshal(row)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(bs), nil
+}
+
+func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *joberror.JobError) (cqlDataMap, error) {
 	var (
 		stmt    string
 		session *gocql.Session
@@ -243,8 +281,7 @@ func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *job
 		if err != nil {
 			return nil, err
 		}
-
-		return map[[32]byte]cqlData{
+		return cqlDataMap{
 			item.Hash(): {
 				mutationFragments: fragments,
 				statements:        statements,
@@ -254,7 +291,7 @@ func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *job
 	case typedef.SelectMultiPartitionType, typedef.SelectMultiPartitionRangeStatementType,
 		typedef.DeleteMultiplePartitionsType:
 		iterations := len(item.PartitionKeys.Get(c.partitionKeys[0].Name))
-		result := make(map[[32]byte]cqlData, iterations)
+		result := make(cqlDataMap, iterations)
 		for i := range iterations {
 			values := make([]any, 0, c.partitionKeys.LenValues())
 			pks := make(map[string][]any, len(c.partitionKeys))

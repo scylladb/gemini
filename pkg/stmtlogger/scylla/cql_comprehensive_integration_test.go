@@ -400,7 +400,7 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 	tests := []struct {
 		name         string
 		setupFunc    func(t *testing.T) *joberror.JobError
-		validateFunc func(t *testing.T, result map[[32]byte]cqlData, jobErr *joberror.JobError)
+		validateFunc func(t *testing.T, result cqlDataMap, jobErr *joberror.JobError)
 	}{
 		{
 			name: "fetch SELECT statement (oracle and test)",
@@ -439,7 +439,7 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 					}),
 				}
 			},
-			validateFunc: func(t *testing.T, result map[[32]byte]cqlData, jobErr *joberror.JobError) {
+			validateFunc: func(t *testing.T, result cqlDataMap, jobErr *joberror.JobError) {
 				t.Helper()
 				require.NotNil(t, result, "result should not be nil")
 				require.NotEmpty(t, result, "result should not be empty")
@@ -490,7 +490,7 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 					}),
 				}
 			},
-			validateFunc: func(t *testing.T, result map[[32]byte]cqlData, jobErr *joberror.JobError) {
+			validateFunc: func(t *testing.T, result cqlDataMap, jobErr *joberror.JobError) {
 				t.Helper()
 				require.NotEmpty(t, result, "should have results")
 				data := result[jobErr.Hash()]
@@ -534,7 +534,7 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 					}),
 				}
 			},
-			validateFunc: func(t *testing.T, result map[[32]byte]cqlData, jobErr *joberror.JobError) {
+			validateFunc: func(t *testing.T, result cqlDataMap, jobErr *joberror.JobError) {
 				t.Helper()
 				require.NotEmpty(t, result, "should have results")
 				data := result[jobErr.Hash()]
@@ -576,7 +576,7 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 					PartitionKeys: pkValues,
 				}
 			},
-			validateFunc: func(t *testing.T, result map[[32]byte]cqlData, jobErr *joberror.JobError) {
+			validateFunc: func(t *testing.T, result cqlDataMap, jobErr *joberror.JobError) {
 				t.Helper()
 				require.NotEmpty(t, result, "should have results")
 				data := result[jobErr.Hash()]
@@ -938,6 +938,8 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 	}
 
 	for i, tt := range tests {
+		// Rebind loop variables to avoid closure capture issues when running in parallel
+		i, tt := i, tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pkValue := fmt.Sprintf("error_key_%d", i)
@@ -963,7 +965,8 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 
 			// Verify the error was stored correctly
 			var storedError string
-			err = session.Query(
+			// Use a new err variable to avoid racing on the outer 'err'
+			err := session.Query(
 				fmt.Sprintf("SELECT error FROM %s.%s WHERE pk0 = ? AND ty = ?", logsKS, logsTable),
 				pkValue,
 				stmtlogger.TypeOracle,
