@@ -170,7 +170,7 @@ func (m *Mutation) Do(ctx context.Context) error {
 			m.status.AddWriteError(*jobErr)
 			if m.status.HasReachedErrorCount() {
 				m.stopFlag.SetSoft(true)
-				return errors.New("mutation job stopped due to errors")
+				return ErrMutationJobStopped
 			}
 			// Continue procesjobErr)
 			//			if m.status.HasReachedEsing; transient errors should not halt immediately
@@ -179,7 +179,7 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 		if m.status.HasReachedErrorCount() {
 			m.stopFlag.SetSoft(true)
-			return errors.New("mutation job stopped due to errors")
+			return ErrMutationJobStopped
 		}
 	}
 

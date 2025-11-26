@@ -82,14 +82,14 @@ func TestExponentialBackoffCapped(t *testing.T) {
 			attempt:  0,
 			maxDelay: 5 * time.Second,
 			minDelay: 0,
-			expected: 10 * time.Millisecond,
+			expected: 50 * time.Millisecond,
 		},
 		{
 			name:     "negative minDelay defaults to 10ms",
 			attempt:  0,
 			maxDelay: 5 * time.Second,
 			minDelay: -100 * time.Millisecond,
-			expected: 10 * time.Millisecond,
+			expected: 50 * time.Millisecond,
 		},
 		{
 			name:     "negative attempt returns minDelay",
@@ -182,12 +182,12 @@ func TestExponentialBackoffCapped_DefaultMinDelay(t *testing.T) {
 		{
 			name:     "zero minDelay uses default 10ms",
 			minDelay: 0,
-			expected: 10 * time.Millisecond,
+			expected: 50 * time.Millisecond,
 		},
 		{
 			name:     "negative minDelay uses default 10ms",
 			minDelay: -5 * time.Millisecond,
-			expected: 10 * time.Millisecond,
+			expected: 50 * time.Millisecond,
 		},
 	}
 

@@ -938,8 +938,9 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 	}
 
 	for i, tt := range tests {
+		// Shadow loop variables to avoid data race with t.Parallel subtests
+		i, tt := i, tt
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			pkValue := fmt.Sprintf("error_key_%d", i)
 
 			// Insert statement log with specific error
@@ -963,7 +964,7 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 
 			// Verify the error was stored correctly
 			var storedError string
-			err = session.Query(
+			err := session.Query(
 				fmt.Sprintf("SELECT error FROM %s.%s WHERE pk0 = ? AND ty = ?", logsKS, logsTable),
 				pkValue,
 				stmtlogger.TypeOracle,

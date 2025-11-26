@@ -150,16 +150,25 @@ func (j *Jobs) Run(
 					workerID := i
 					g.Go(func() error {
 						log.Debug("mutation worker started", zap.Int("worker_id", workerID))
-						err := mutation.Do(base)
-						if err != nil && !errors.Is(err, context.Canceled) {
+						// Use the errgroup context so that mutation workers are
+						// canceled together with the rest of the job set (like validation)
+						// and respect error propagation uniformly in Mixed mode.
+						err := mutation.Do(gCtx)
+						switch {
+						case err == nil || errors.Is(err, context.Canceled):
+							log.Debug("mutation worker finished", zap.Int("worker_id", workerID))
+							return nil
+						case errors.Is(err, ErrMutationJobStopped):
+							// Graceful shutdown due to error budget reached
+							log.Debug("mutation worker finished (error budget reached)", zap.Int("worker_id", workerID))
+							return nil
+						default:
 							log.Error("mutation worker finished with error",
 								zap.Int("worker_id", workerID),
 								zap.Error(err),
 							)
-						} else {
-							log.Debug("mutation worker finished", zap.Int("worker_id", workerID))
+							return err
 						}
-						return err
 					})
 				}
 			case ReadMode:
@@ -186,15 +195,21 @@ func (j *Jobs) Run(
 					g.Go(func() error {
 						log.Debug("validation worker started", zap.Int("worker_id", workerID))
 						err := validation.Do(gCtx)
-						if err != nil && !errors.Is(err, context.Canceled) {
+						switch {
+						case err == nil || errors.Is(err, context.Canceled):
+							log.Debug("validation worker finished", zap.Int("worker_id", workerID))
+							return nil
+						case errors.Is(err, ErrValidationJobStopped):
+							// Graceful shutdown due to error budget reached
+							log.Debug("validation worker finished (error budget reached)", zap.Int("worker_id", workerID))
+							return nil
+						default:
 							log.Error("validation worker finished with error",
 								zap.Int("worker_id", workerID),
 								zap.Error(err),
 							)
-						} else {
-							log.Debug("validation worker finished", zap.Int("worker_id", workerID))
+							return err
 						}
-						return err
 					})
 				}
 			}

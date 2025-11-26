@@ -28,7 +28,7 @@ func ExponentialBackoffCapped(attempt int, maxDelay, minDelay time.Duration) tim
 		return 0
 	}
 	if minDelay <= 0 {
-		minDelay = 10 * time.Millisecond
+		minDelay = 50 * time.Millisecond
 	}
 
 	if attempt <= 0 {
