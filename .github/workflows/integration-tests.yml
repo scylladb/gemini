@@ -5,11 +5,13 @@ on:
     branches:
       - master
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     branches:
       - master
 
 jobs:
   build:
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'test/integration')
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
