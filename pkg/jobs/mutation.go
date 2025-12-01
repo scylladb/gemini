@@ -161,7 +161,16 @@ func (m *Mutation) Do(ctx context.Context) error {
 		}
 
 		if errors.Is(err, ErrNoStatement) {
-			return nil
+			// No statement generated at this moment, back off briefly and retry
+			timer := utils.GetTimer(100 * time.Millisecond)
+			select {
+			case <-timer.C:
+				utils.PutTimer(timer)
+				continue
+			case <-ctx.Done():
+				utils.PutTimer(timer)
+				return nil
+			}
 		}
 
 		var jobErr *joberror.JobError

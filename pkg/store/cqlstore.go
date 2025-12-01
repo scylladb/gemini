@@ -90,7 +90,7 @@ func newCQLStore(
 		zap.String("consistency", cfg.Consistency),
 	)
 
-	testSession, err := createCluster(cfg, logger.With(zap.String("system", system)))
+	testSession, err := CreateCluster(cfg, logger.With(zap.String("system", system)))
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +387,7 @@ const (
 	HostSelectionDefault    HostSelectionPolicy = ""
 )
 
-func getHostSelectionPolicy(policy HostSelectionPolicy, hosts []string) gocql.HostSelectionPolicy {
+func GetHostSelectionPolicy(policy HostSelectionPolicy, hosts []string) gocql.HostSelectionPolicy {
 	switch policy {
 	case HostSelectionRoundRobin:
 		return gocql.RoundRobinHostPolicy()
@@ -404,7 +404,7 @@ func getHostSelectionPolicy(policy HostSelectionPolicy, hosts []string) gocql.Ho
 	}
 }
 
-func createCluster(
+func CreateCluster(
 	config ScyllaClusterConfig,
 	logger *zap.Logger,
 ) (*gocql.ClusterConfig, error) {
@@ -435,10 +435,10 @@ func createCluster(
 		InitialInterval: 100 * time.Millisecond,
 		MaxInterval:     config.ConnectTimeout,
 	}
+	cluster.InitialReconnectionPolicy = cluster.ReconnectionPolicy
 	cluster.Consistency = c
 	cluster.DefaultTimestamp = !config.UseServerSideTimestamps
-	cluster.PoolConfig.HostSelectionPolicy = getHostSelectionPolicy(config.HostSelectionPolicy, config.Hosts)
-
+	cluster.PoolConfig.HostSelectionPolicy = GetHostSelectionPolicy(config.HostSelectionPolicy, config.Hosts)
 	if config.Username != "" && config.Password != "" {
 		cluster.Authenticator = gocql.PasswordAuthenticator{
 			Username: config.Username,

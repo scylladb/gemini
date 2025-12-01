@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"reflect"
 	"strings"
 	"time"
 
@@ -100,326 +101,342 @@ func (r Row) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-//nolint:gocyclo
+// rowsCmp compares two rows column-by-column using their value order.
+// It supports a wide range of scalar types and falls back to string
+// comparison for differing concrete types.
 func rowsCmp(i, j Row) int {
-	switch mis := i.Get("pk0").(type) {
+	maximum := len(i.values)
+	if len(j.values) < maximum {
+		maximum = len(j.values)
+	}
+	for idx := 0; idx < maximum; idx++ {
+		if c := compareValues(i.values[idx], j.values[idx]); c != 0 {
+			return c
+		}
+	}
+	// All common columns equal; shorter row sorts first
+	switch {
+	case len(i.values) < len(j.values):
+		return -1
+	case len(i.values) > len(j.values):
+		return 1
+	default:
+		return 0
+	}
+}
+
+//nolint:gocyclo
+func compareValues(a, b any) int {
+	if a == nil && b == nil {
+		return 0
+	}
+	if a == nil {
+		return -1
+	}
+	if b == nil {
+		return 1
+	}
+
+	ta := reflect.TypeOf(a)
+	tb := reflect.TypeOf(b)
+	if ta != tb {
+		// Fallback to string representation when types differ
+		return strings.Compare(fmt.Sprint(a), fmt.Sprint(b))
+	}
+
+	switch av := a.(type) {
 	case []byte:
-		mjs, _ := j.Get("pk0").([]byte)
-		return bytes.Compare(mis, mjs)
+		return bytes.Compare(av, b.([]byte))
 	case *[]byte:
-		mjs, _ := j.Get("pk0").(*[]byte)
-		if mis == nil && mjs == nil {
+		bv := b.(*[]byte)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return bytes.Compare(*mis, *mjs)
+		return bytes.Compare(*av, *bv)
 	case string:
-		mjs, _ := j.Get("pk0").(string)
-		return strings.Compare(mis, mjs)
+		return strings.Compare(av, b.(string))
 	case *string:
-		mjs, _ := j.Get("pk0").(*string)
-		if mis == nil && mjs == nil {
+		bv := b.(*string)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return strings.Compare(*mis, *mjs)
+		return strings.Compare(*av, *bv)
 	case bool:
-		mjs, _ := j.Get("pk0").(bool)
-		if mis == mjs {
+		bv := b.(bool)
+		if av == bv {
 			return 0
 		}
-		if !mis && mjs {
+		if !av && bv {
 			return -1
 		}
 		return 1
 	case *bool:
-		mjs, _ := j.Get("pk0").(*bool)
-		if mis == nil && mjs == nil {
+		bv := b.(*bool)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		if *mis == *mjs {
+		if *av == *bv {
 			return 0
 		}
-		if !*mis && *mjs {
+		if !*av && *bv {
 			return -1
 		}
 		return 1
 	case float32:
-		mjs, _ := j.Get("pk0").(float32)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(float32))
 	case *float32:
-		mjs, _ := j.Get("pk0").(*float32)
-		if mis == nil && mjs == nil {
+		bv := b.(*float32)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case float64:
-		mjs, _ := j.Get("pk0").(float64)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(float64))
 	case *float64:
-		mjs, _ := j.Get("pk0").(*float64)
-		if mis == nil && mjs == nil {
+		bv := b.(*float64)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case int:
-		mjs, _ := j.Get("pk0").(int)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(int))
 	case *int:
-		mjs, _ := j.Get("pk0").(*int)
-		if mis == nil && mjs == nil {
+		bv := b.(*int)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case int8:
-		mjs, _ := j.Get("pk0").(int8)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(int8))
 	case *int8:
-		mjs, _ := j.Get("pk0").(*int8)
-		if mis == nil && mjs == nil {
+		bv := b.(*int8)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case int16:
-		mjs, _ := j.Get("pk0").(int16)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(int16))
 	case *int16:
-		mjs, _ := j.Get("pk0").(*int16)
-		if mis == nil && mjs == nil {
+		bv := b.(*int16)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case int32:
-		mjs, _ := j.Get("pk0").(int32)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(int32))
 	case *int32:
-		mjs, _ := j.Get("pk0").(*int32)
-		if mis == nil && mjs == nil {
+		bv := b.(*int32)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case int64:
-		mjs, _ := j.Get("pk0").(int64)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(int64))
 	case *int64:
-		mjs, _ := j.Get("pk0").(*int64)
-		if mis == nil && mjs == nil {
+		bv := b.(*int64)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case uint:
-		mjs, _ := j.Get("pk0").(uint)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(uint))
 	case *uint:
-		mjs, _ := j.Get("pk0").(*uint)
-		if mis == nil && mjs == nil {
+		bv := b.(*uint)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case uint8:
-		mjs, _ := j.Get("pk0").(uint8)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(uint8))
 	case *uint8:
-		mjs, _ := j.Get("pk0").(*uint8)
-		if mis == nil && mjs == nil {
+		bv := b.(*uint8)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case uint16:
-		mjs, _ := j.Get("pk0").(uint16)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(uint16))
 	case *uint16:
-		mjs, _ := j.Get("pk0").(*uint16)
-		if mis == nil && mjs == nil {
+		bv := b.(*uint16)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case uint32:
-		mjs, _ := j.Get("pk0").(uint32)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(uint32))
 	case *uint32:
-		mjs, _ := j.Get("pk0").(*uint32)
-		if mis == nil && mjs == nil {
+		bv := b.(*uint32)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case uint64:
-		mjs, _ := j.Get("pk0").(uint64)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(uint64))
 	case *uint64:
-		mjs, _ := j.Get("pk0").(*uint64)
-		if mis == nil && mjs == nil {
+		bv := b.(*uint64)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case gocql.UUID:
-		mjs, _ := j.Get("pk0").(gocql.UUID)
-		return bytes.Compare(mis[:], mjs[:])
+		bv := b.(gocql.UUID)
+		return bytes.Compare(av[:], bv[:])
 	case *gocql.UUID:
-		mjs, _ := j.Get("pk0").(*gocql.UUID)
-		if mis == nil && mjs == nil {
+		bv := b.(*gocql.UUID)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return bytes.Compare(mis[:], mjs[:])
+		return bytes.Compare(av[:], bv[:])
 	case time.Time:
-		mjs, _ := j.Get("pk0").(time.Time)
-		return mis.Compare(mjs)
+		return av.Compare(b.(time.Time))
 	case *time.Time:
-		mjs, _ := j.Get("pk0").(*time.Time)
-		if mis == nil && mjs == nil {
+		bv := b.(*time.Time)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return mis.Compare(*mjs)
+		return av.Compare(*bv)
 	case time.Duration:
-		mjs, _ := j.Get("pk0").(time.Duration)
-		return cmp.Compare(mis, mjs)
+		return cmp.Compare(av, b.(time.Duration))
 	case *time.Duration:
-		mjs, _ := j.Get("pk0").(*time.Duration)
-		if mis == nil && mjs == nil {
+		bv := b.(*time.Duration)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-		return cmp.Compare(*mis, *mjs)
+		return cmp.Compare(*av, *bv)
 	case *big.Int:
-		mjs, _ := j.Get("pk0").(*big.Int)
-		return mis.Cmp(mjs)
-	case **big.Int:
-		mjs, _ := j.Get("pk0").(**big.Int)
-		if mis == nil && mjs == nil {
+		bv := b.(*big.Int)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-
-		return (**mis).Cmp(*mjs)
+		return av.Cmp(bv)
 	case *inf.Dec:
-		mjs, _ := j.Get("pk0").(*inf.Dec)
-		return mis.Cmp(mjs)
-	case **inf.Dec:
-		mjs, _ := j.Get("pk0").(**inf.Dec)
-		if mis == nil && mjs == nil {
+		bv := b.(*inf.Dec)
+		if av == nil && bv == nil {
 			return 0
 		}
-		if mis == nil {
+		if av == nil {
 			return -1
 		}
-		if mjs == nil {
+		if bv == nil {
 			return 1
 		}
-
-		return (*mis).Cmp(*mjs)
-	case nil:
-		return 0
+		return av.Cmp(bv)
 	default:
-		panic(fmt.Sprintf("unhandled type [%T][%v]\n", mis, mis))
+		// As a safety hatch, fallback to string comparison
+		return strings.Compare(fmt.Sprint(a), fmt.Sprint(b))
 	}
 }

@@ -24,6 +24,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/scylladb/gemini/pkg/distributions"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/partitions"
 	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/status"
@@ -113,16 +114,24 @@ func (j *Jobs) Run(
 	log.Info("start jobs", zap.String("mode", mode))
 	defer log.Info("stop jobs")
 
-	g, gCtx := errgroup.WithContext(base)
+	timeoutCtx, cancel := context.WithTimeout(base, duration+1*time.Second)
+	defer cancel()
+
+	g, gCtx := errgroup.WithContext(timeoutCtx)
 
 	for _, table := range j.schema.Tables {
 		generator := partitions.New(gCtx, j.random, idxFunc, table, partsConfig, partsCount)
 		log.Debug("processing table", zap.String("table", table.Name))
 
-		time.AfterFunc(duration+1*time.Second, func() {
-			log.Debug("warmup phase timeout reached, setting soft stop")
-			stopFlag.SetSoft(false)
-		})
+		// Additionally, request a graceful stop of workers after the duration
+		// so that loops depending on the stop flag can exit promptly.
+		if duration > 0 {
+			time.AfterFunc(duration+1*time.Second, func() {
+				log.Debug("workload timeout reached, setting soft stop (no parent propagation)")
+				// Do not propagate to parent; each Run call manages its own lifecycle.
+				stopFlag.SetSoft(false)
+			})
+		}
 
 		for _, m := range j.parseMode(mode) {
 			switch m {
@@ -149,6 +158,8 @@ func (j *Jobs) Run(
 
 					workerID := i
 					g.Go(func() error {
+						metrics.WorkersCurrent.WithLabelValues("mutation").Inc()
+						defer metrics.WorkersCurrent.WithLabelValues("mutation").Dec()
 						log.Debug("mutation worker started", zap.Int("worker_id", workerID))
 						// Use the errgroup context so that mutation workers are
 						// canceled together with the rest of the job set (like validation)
@@ -193,6 +204,9 @@ func (j *Jobs) Run(
 
 					workerID := i
 					g.Go(func() error {
+						metrics.WorkersCurrent.WithLabelValues("validation").Inc()
+						defer metrics.WorkersCurrent.WithLabelValues("validation").Dec()
+
 						log.Debug("validation worker started", zap.Int("worker_id", workerID))
 						err := validation.Do(gCtx)
 						switch {

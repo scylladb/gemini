@@ -27,10 +27,6 @@ type ErrorRowDifference struct {
 }
 
 func (e ErrorRowDifference) Error() string {
-	if e.Diff != "" {
-		return fmt.Sprintf("rows differ (-%+v +%+v): %+v", e.OracleRow, e.TestRow, e.Diff)
-	}
-
 	if e.MissingInTest == nil || e.MissingInOracle == nil {
 		return fmt.Sprintf(
 			"row count differ (test store rows %d, oracle store rows %d, detailed information will be at last attempt)",
@@ -40,10 +36,11 @@ func (e ErrorRowDifference) Error() string {
 	}
 
 	return fmt.Sprintf(
-		"row count differ (test has %d rows, oracle has %d rows, test is missing rows: %v, oracle is missing rows: %v)",
+		"row count differ (test has %d rows, oracle has %d rows, test is missing rows: %+v, oracle is missing rows: %+v, diff: %+v)",
 		e.TestRows,
 		e.OracleRows,
 		e.MissingInTest,
 		e.MissingInOracle,
+		e.Diff,
 	)
 }

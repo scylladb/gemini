@@ -16,7 +16,7 @@ package stmtlogger
 
 import (
 	"io"
-	"sync/atomic"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -62,9 +62,10 @@ type (
 	}
 
 	Logger struct {
-		closer  io.Closer
-		channel atomic.Pointer[chan Item]
-		metrics metrics.ChannelMetrics
+		closer io.Closer
+		ch     chan Item
+		mu     sync.RWMutex
+		closed bool
 	}
 
 	options struct {
@@ -101,8 +102,6 @@ func NewLogger(opts ...Option) (*Logger, error) {
 		channel: make(chan Item, defaultChanSize),
 	}
 
-	chMetrics := metrics.NewChannelMetrics("statement_logger", "statement_logger")
-
 	for _, opt := range opts {
 		if err := opt(&o); err != nil {
 			return nil, err
@@ -110,31 +109,53 @@ func NewLogger(opts ...Option) (*Logger, error) {
 	}
 
 	l := &Logger{
-		metrics: chMetrics,
-		closer:  o.innerLogger,
+		closer: o.innerLogger,
+		ch:     o.channel,
 	}
-
-	l.channel.Store(&o.channel)
 
 	return l, nil
 }
 
 func (l *Logger) LogStmt(item Item) error {
+	if item.StatementType.IsSchema() || item.StatementType.IsSelect() {
+		return nil
+	}
+
 	if l.closer == nil {
 		return nil
 	}
 
-	if ch := l.channel.Load(); ch != nil {
-		*ch <- item
-		l.metrics.Inc()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	if l.closed || l.ch == nil {
+		return nil
 	}
+
+	l.ch <- item
+	metrics.StatementLoggerItems.Inc()
+	metrics.StatementLoggerEnqueuedTotal.Inc()
 
 	return nil
 }
 
 func (l *Logger) Close() error {
-	old := l.channel.Swap(nil)
-	close(*old)
+	// Take exclusive lock to block new LogStmt and wait for in-flight sends
+	// to complete before closing the channel.
+	l.mu.Lock()
+	if l.closed {
+		// Already closed: release lock and just close inner closer below.
+		l.mu.Unlock()
+		return nil
+	}
+
+	l.closed = true
+	ch := l.ch
+	l.ch = nil
+	l.mu.Unlock()
+	if ch != nil {
+		close(ch)
+	}
 
 	if l.closer != nil {
 		return l.closer.Close()

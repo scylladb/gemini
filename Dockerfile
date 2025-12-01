@@ -37,7 +37,6 @@ ENTRYPOINT ["gemini"]
 FROM base-production AS production
 
 COPY --from=build /gemini/bin/gemini /usr/local/bin/gemini
-COPY --from=build /gemini/version.json /version.json
 
 FROM base-production AS production-goreleaser
 

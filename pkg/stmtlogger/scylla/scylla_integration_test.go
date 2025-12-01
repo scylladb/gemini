@@ -1,3 +1,5 @@
+//go:build testing
+
 // Copyright 2025 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");

@@ -16,19 +16,26 @@
 package scylla
 
 import (
+	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
 
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -410,8 +417,6 @@ func TestLogger_Insert(t *testing.T) {
 }
 
 func TestLogger_Close(t *testing.T) {
-	t.Parallel()
-
 	logger := zaptest.NewLogger(t)
 
 	mockLogger := &Logger{
@@ -439,6 +444,139 @@ func TestLogger_Close(t *testing.T) {
 	mu.Lock()
 	assert.Equal(t, 2, completed)
 	mu.Unlock()
+}
+
+func TestCqlDataMap_MarshalJSON(t *testing.T) {
+	var k1, k2 [32]byte
+	copy(k1[:], bytes.Repeat([]byte{0xAB}, 32))
+	copy(k2[:], bytes.Repeat([]byte{0xCD}, 32))
+
+	m := cqlDataMap{
+		k1: {partitionKeys: map[string][]any{"pk": {1}}, mutationFragments: []json.RawMessage{json.RawMessage(`{"a":1}`)}},
+		k2: {partitionKeys: map[string][]any{"pk": {2}}, statements: []json.RawMessage{json.RawMessage(`{"b":2}`)}},
+	}
+
+	bs, err := json.Marshal(m)
+	require.NoError(t, err)
+
+	// It should be a JSON object with two keys (hex-encoded)
+	var obj map[string]any
+	require.NoError(t, json.Unmarshal(bs, &obj))
+	assert.Len(t, obj, 2)
+	// keys should be 64-char hex strings
+	for k := range obj {
+		assert.Equal(t, 64, len(k))
+		_, err = os.ReadFile("/dev/null") // no-op to silence lint on err shadowing
+		_ = err
+	}
+}
+
+func TestStatementFlusher_WritesAndFlushes(t *testing.T) {
+	lg := &Logger{logger: zaptest.NewLogger(t)}
+
+	dir := t.TempDir()
+	oraclePath := filepath.Join(dir, "oracle.jsonl")
+	testPath := filepath.Join(dir, "test.jsonl")
+
+	// reset counter
+	// Note: prometheus counters cannot be set backwards; we'll only assert it increases
+	beforeOracle := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("oracle_file"))
+	beforeTest := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("test_file"))
+
+	ch := make(chan statementChData, 2)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		lg.statementFlusher(ch, oraclePath, testPath)
+	}()
+
+	// Build one oracle and one test item
+	je := &joberror.JobError{
+		Timestamp: time.Now(),
+		Query:     "SELECT 1",
+		Message:   "boom",
+	}
+	val := cqlData{partitionKeys: map[string][]any{"pk": {"a"}}, statements: []json.RawMessage{json.RawMessage(`{"x":1}`)}}
+	data := cqlDataMap{}
+	var key [32]byte
+	copy(key[:], bytes.Repeat([]byte{1}, 32))
+	data[key] = val
+
+	ch <- statementChData{ty: stmtlogger.TypeOracle, Data: data, Error: je}
+	ch <- statementChData{ty: stmtlogger.TypeTest, Data: data, Error: je}
+	close(ch)
+	// Wait for flusher to finish to avoid races on files and metrics
+	wg.Wait()
+
+	// Read files and ensure they have exactly one line each and are valid JSON
+	readAndCheck := func(p string) string {
+		f, err := os.Open(p)
+		require.NoError(t, err)
+		defer f.Close()
+		r := bufio.NewScanner(f)
+		var lines []string
+		for r.Scan() {
+			lines = append(lines, r.Text())
+		}
+		require.NoError(t, r.Err())
+		require.Equal(t, 1, len(lines))
+		// Must be valid JSON and contain our query
+		var line Line
+		require.NoError(t, json.Unmarshal([]byte(lines[0]), &line))
+		assert.Equal(t, "SELECT 1", line.Query)
+		return lines[0]
+	}
+
+	oracleJSON := readAndCheck(oraclePath)
+	testJSON := readAndCheck(testPath)
+	assert.True(t, strings.Contains(oracleJSON, "SELECT 1"))
+	assert.True(t, strings.Contains(testJSON, "SELECT 1"))
+
+	// Counters should have incremented at least once for each file
+	afterOracle := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("oracle_file"))
+	afterTest := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("test_file"))
+	assert.Greater(t, afterOracle, beforeOracle)
+	assert.Greater(t, afterTest, beforeTest)
+}
+
+func TestFetchErrors_DedupAndFanout(t *testing.T) {
+	lg := &Logger{logger: zaptest.NewLogger(t)}
+
+	// Channel to receive items
+	out := make(chan statementChData, 10)
+
+	// Prepare two job errors with the same hash (by copying the same struct)
+	base := &joberror.JobError{Timestamp: time.Now(), Query: "Q", Message: "M"}
+	// Ensure deterministic identical hash by using same content
+	je1 := *base
+	je2 := *base
+
+	// Replace poolCallback via fetchHook to avoid real DB calls and to observe fanout
+	var calls atomic.Int64
+	lg.fetchHook = func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError) (cqlDataMap, error) {
+		calls.Add(1)
+		return cqlDataMap{}, nil
+	}
+
+	// Start fetchErrors which fans out to both storages and deduplicates by hash
+	in := make(chan *joberror.JobError, 2)
+	go lg.fetchErrors(out, in)
+
+	in <- &je1
+	in <- &je2 // duplicate; should be ignored by dedupe
+	close(in)
+
+	// Drain output until it's closed
+	var received int
+	for item := range out {
+		_ = item
+		received++
+	}
+
+	// Expect exactly two calls (oracle + test) despite two inputs with same hash
+	assert.Equal(t, int64(2), calls.Load())
+	assert.Equal(t, 2, received)
 }
 
 // Benchmarks

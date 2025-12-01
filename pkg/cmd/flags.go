@@ -196,7 +196,7 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		Uint64VarP(&partitionCount, "partition-count", "", 2_000_000, "Number of Scylla Partitions")
 	cmd.Flags().
-		StringArrayVarP(&deletedPartitionsTimeBucket, "deleted-partitions-time-bucket", "", []string{"1m", "10m", "1h"}, "Time after to check if data resurrection has occurred for the deleted partitions")
+		StringArrayVarP(&deletedPartitionsTimeBucket, "deleted-partitions-time-bucket", "", []string{}, "Time after to check if data resurrection has occurred for the deleted partitions")
 	cmd.Flags().
 		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "zipf",
 			"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
