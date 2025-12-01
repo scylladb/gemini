@@ -62,6 +62,7 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string) store.Config
 		OracleClusterConfig: oracleConfig,
 		OracleStatementFile: filepath.Join(directory, "oracle_statements.jsonl"),
 		TestStatementFile:   filepath.Join(directory, "test_statements.jsonl"),
+		MinimumDelay:        25 * time.Millisecond,
 		TestClusterConfig: store.ScyllaClusterConfig{
 			Name:                    stmtlogger.TypeTest,
 			HostSelectionPolicy:     store.HostSelectionTokenAware,

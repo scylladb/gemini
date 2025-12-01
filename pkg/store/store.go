@@ -98,6 +98,7 @@ type (
 		AsyncObjectStabilizationAttempts int
 		AsyncObjectStabilizationDelay    time.Duration
 		UseServerSideTimestamps          bool
+		MinimumDelay                     time.Duration
 	}
 )
 
@@ -124,8 +125,8 @@ func New(
 		cfg.MaxRetriesMutate = 10
 	}
 
-	if cfg.MaxRetriesMutateSleep <= 50*time.Millisecond {
-		cfg.MaxRetriesMutateSleep = 50 * time.Millisecond
+	if cfg.MaxRetriesMutateSleep <= 0 {
+		cfg.MaxRetriesMutateSleep = 10 * time.Millisecond
 	}
 
 	if cfg.AsyncObjectStabilizationAttempts <= 0 {
@@ -133,7 +134,11 @@ func New(
 	}
 
 	if cfg.AsyncObjectStabilizationDelay <= 0 {
-		cfg.AsyncObjectStabilizationDelay = 10 * time.Millisecond
+		cfg.AsyncObjectStabilizationDelay = 25 * time.Millisecond
+	}
+
+	if cfg.MinimumDelay <= 0 {
+		cfg.MinimumDelay = 25 * time.Millisecond
 	}
 
 	logger.Debug("creating test store", zap.Strings("hosts", cfg.TestClusterConfig.Hosts))
@@ -218,6 +223,7 @@ func New(
 		mutationRetrySleep:   cfg.MaxRetriesMutateSleep,
 		validationRetries:    cfg.AsyncObjectStabilizationAttempts,
 		validationRetrySleep: cfg.AsyncObjectStabilizationDelay,
+		minimumDelay:         cfg.MinimumDelay,
 	}
 
 	logger.Debug("store created successfully")
@@ -232,6 +238,7 @@ type delegatingStore struct {
 	mutationRetrySleep   time.Duration
 	mutationRetries      int
 	validationRetrySleep time.Duration
+	minimumDelay         time.Duration
 	validationRetries    int
 	serverSideTimestamps bool
 }
@@ -489,7 +496,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 			ds.logMutationRetry(attempt+1, maxAttempts, cumulativeResult, nextRetryTest, nextRetryOracle)
 
 			// Apply exponential backoff delay
-			delay := utils.ExponentialBackoffCapped(attempt, ds.mutationRetrySleep, 50*time.Millisecond)
+			delay := utils.ExponentialBackoffCapped(attempt, ds.mutationRetrySleep, ds.minimumDelay)
 			timer := utils.GetTimer(delay)
 			select {
 			case <-timer.C:
@@ -636,9 +643,9 @@ func (ds delegatingStore) Check(
 			}
 		}
 
-		// If not last attempt, wait with backoff before retrying
+		// If not last attempt, wait with backoff before retryings
 		if attempt < maxAttempts-1 {
-			delay := utils.ExponentialBackoffCapped(attempt, ds.validationRetrySleep, 10*time.Millisecond)
+			delay := utils.ExponentialBackoffCapped(attempt, ds.validationRetrySleep, ds.minimumDelay)
 			timer := utils.GetTimer(delay)
 			select {
 			case <-timer.C:
