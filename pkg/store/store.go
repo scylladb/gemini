@@ -35,7 +35,6 @@ import (
 	"github.com/scylladb/gemini/pkg/stmtlogger/scylla"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
-	"github.com/scylladb/gemini/pkg/workpool"
 )
 
 var comparers = []cmp.Option{
@@ -99,13 +98,13 @@ type (
 		AsyncObjectStabilizationAttempts int
 		AsyncObjectStabilizationDelay    time.Duration
 		UseServerSideTimestamps          bool
+		MinimumDelay                     time.Duration
 	}
 )
 
 func New(
 	keyspace, table string,
 	partitionKeyColumns typedef.Columns,
-	workers *workpool.Pool,
 	schema *typedef.Schema,
 	cfg Config,
 	logger *zap.Logger,
@@ -126,8 +125,8 @@ func New(
 		cfg.MaxRetriesMutate = 10
 	}
 
-	if cfg.MaxRetriesMutateSleep <= 50*time.Millisecond {
-		cfg.MaxRetriesMutateSleep = 50 * time.Millisecond
+	if cfg.MaxRetriesMutateSleep <= 0 {
+		cfg.MaxRetriesMutateSleep = 10 * time.Millisecond
 	}
 
 	if cfg.AsyncObjectStabilizationAttempts <= 0 {
@@ -135,7 +134,11 @@ func New(
 	}
 
 	if cfg.AsyncObjectStabilizationDelay <= 0 {
-		cfg.AsyncObjectStabilizationDelay = 10 * time.Millisecond
+		cfg.AsyncObjectStabilizationDelay = 25 * time.Millisecond
+	}
+
+	if cfg.MinimumDelay <= 0 {
+		cfg.MinimumDelay = 25 * time.Millisecond
 	}
 
 	logger.Debug("creating test store", zap.Strings("hosts", cfg.TestClusterConfig.Hosts))
@@ -187,7 +190,6 @@ func New(
 				cfg.OracleStatementFile,
 				cfg.TestStatementFile,
 				e.GetChannel(),
-				workers,
 				logger.With(zap.String("component", "statement_logger")),
 			)),
 		)
@@ -212,7 +214,6 @@ func New(
 	}
 
 	ds := &delegatingStore{
-		workers:              workers,
 		testStore:            testStore,
 		oracleStore:          oracleStore,
 		logger:               logger.Named("delegating_store"),
@@ -222,6 +223,7 @@ func New(
 		mutationRetrySleep:   cfg.MaxRetriesMutateSleep,
 		validationRetries:    cfg.AsyncObjectStabilizationAttempts,
 		validationRetrySleep: cfg.AsyncObjectStabilizationDelay,
+		minimumDelay:         cfg.MinimumDelay,
 	}
 
 	logger.Debug("store created successfully")
@@ -229,7 +231,6 @@ func New(
 }
 
 type delegatingStore struct {
-	workers              *workpool.Pool
 	oracleStore          storeLoader
 	testStore            storeLoader
 	logger               *zap.Logger
@@ -237,6 +238,7 @@ type delegatingStore struct {
 	mutationRetrySleep   time.Duration
 	mutationRetries      int
 	validationRetrySleep time.Duration
+	minimumDelay         time.Duration
 	validationRetries    int
 	serverSideTimestamps bool
 }
@@ -285,10 +287,10 @@ type mutationResult struct {
 	oracleDone bool
 }
 
-// calculateExponentialBackoff returns an exponential backoff delay where mutationRetrySleep is the maximum cap.
-func (ds delegatingStore) calculateExponentialBackoff(attempt int) time.Duration {
-	// Use a small minimum delay and double each attempt, capped by ds.mutationRetrySleep.
-	return utils.ExponentialBackoffCapped(attempt, ds.mutationRetrySleep, 10*time.Millisecond)
+// mutationChanRes is a tagged result for mutation goroutines
+type mutationChanRes struct {
+	err    error
+	oracle bool
 }
 
 // executeParallelMutations executes mutations on stores that need to be retried
@@ -309,24 +311,33 @@ func (ds delegatingStore) executeParallelMutations(
 	}
 	doCtx := WithContextData(ctx, ctxData)
 
-	var testCh, oracleCh chan mo.Result[any]
+	// Use a single channel for both mutations
+	ch := make(chan mutationChanRes, 2)
 
-	// Start test mutation only if we need to retry it
+	expected := 0
 	if retryTest {
-		testCh = ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
-			return nil, ds.testStore.mutate(ctx, stmt, timestamp)
-		})
+		expected++
+		go func() {
+			err := ds.testStore.mutate(doCtx, stmt, timestamp)
+			select {
+			case ch <- mutationChanRes{oracle: false, err: err}:
+			case <-doCtx.Done():
+			}
+		}()
 	}
-
-	// Start oracle mutation only if we need to retry it and it exists
 	if retryOracle && ds.oracleStore != nil {
-		oracleCh = ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
-			return nil, ds.oracleStore.mutate(ctx, stmt, timestamp)
-		})
+		expected++
+		go func() {
+			err := ds.oracleStore.mutate(doCtx, stmt, timestamp)
+			select {
+			case ch <- mutationChanRes{oracle: true, err: err}:
+			case <-doCtx.Done():
+			}
+		}()
 	}
 
 	// Wait for results
-	ds.waitForMutationResults(doCtx, testCh, oracleCh, &result, retryTest, retryOracle)
+	ds.waitForMutationResults(doCtx, ch, &result, retryTest, retryOracle, expected)
 
 	return result
 }
@@ -334,71 +345,27 @@ func (ds delegatingStore) executeParallelMutations(
 // waitForMutationResults waits for mutation results and updates the result struct
 //
 //nolint:gocyclo
-func (ds delegatingStore) waitForMutationResults(ctx context.Context, testCh, oracleCh chan mo.Result[any], result *mutationResult, expectTest, expectOracle bool) {
-	testPending := testCh != nil
-	oraclePending := oracleCh != nil
-
-	for testPending || oraclePending {
-		switch {
-		case testPending && oraclePending:
-			select {
-			case testRes := <-testCh:
-				ds.workers.Release(testCh)
-				result.testDone = true
-				testPending = false
-				if testRes.IsError() {
-					result.testErr = testRes.Error()
-				}
-
-			case oracleRes := <-oracleCh:
-				ds.workers.Release(oracleCh)
+func (ds delegatingStore) waitForMutationResults(ctx context.Context, ch chan mutationChanRes, result *mutationResult, expectTest, expectOracle bool, expected int) {
+	received := 0
+	for received < expected {
+		select {
+		case r := <-ch:
+			if r.oracle {
 				result.oracleDone = true
-				oraclePending = false
-				if oracleRes.IsError() {
-					result.oracleErr = oracleRes.Error()
-				}
-
-			case <-ctx.Done():
-				if testPending {
-					ds.workers.Release(testCh)
-					result.testErr = ctx.Err()
-				}
-				if oraclePending {
-					ds.workers.Release(oracleCh)
-					result.oracleErr = ctx.Err()
-				}
-				return
-			}
-		case testPending:
-			select {
-			case testRes := <-testCh:
-				ds.workers.Release(testCh)
+				result.oracleErr = r.err
+			} else {
 				result.testDone = true
-				testPending = false
-				if testRes.IsError() {
-					result.testErr = testRes.Error()
-				}
-
-			case <-ctx.Done():
-				ds.workers.Release(testCh)
+				result.testErr = r.err
+			}
+			received++
+		case <-ctx.Done():
+			if expectTest && !result.testDone {
 				result.testErr = ctx.Err()
-				return
 			}
-		case oraclePending:
-			select {
-			case oracleRes := <-oracleCh:
-				ds.workers.Release(oracleCh)
-				result.oracleDone = true
-				oraclePending = false
-				if oracleRes.IsError() {
-					result.oracleErr = oracleRes.Error()
-				}
-
-			case <-ctx.Done():
-				ds.workers.Release(oracleCh)
+			if expectOracle && !result.oracleDone {
 				result.oracleErr = ctx.Err()
-				return
 			}
+			return
 		}
 	}
 
@@ -529,7 +496,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 			ds.logMutationRetry(attempt+1, maxAttempts, cumulativeResult, nextRetryTest, nextRetryOracle)
 
 			// Apply exponential backoff delay
-			delay := ds.calculateExponentialBackoff(attempt)
+			delay := utils.ExponentialBackoffCapped(attempt, ds.mutationRetrySleep, ds.minimumDelay)
 			timer := utils.GetTimer(delay)
 			select {
 			case <-timer.C:
@@ -603,57 +570,55 @@ func (ds delegatingStore) Check(
 				return count, nil
 			}
 		} else {
-			// Run iterators in parallel using worker pool
-			testIterCh := ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
-				iter := ds.testStore.loadIter(ctx, stmt)
-				rows, err := iter.Collect()
-				return rows, err
-			})
-
-			oracleIterCh := ds.workers.Send(doCtx, func(ctx context.Context) (any, error) {
-				iter := ds.oracleStore.loadIter(ctx, stmt)
-				rows, err := iter.Collect()
-				return rows, err
-			})
-
-			// Wait for test result
-			var testResult mo.Result[any]
-			select {
-			case testResult = <-testIterCh:
-			case <-doCtx.Done():
-				ds.workers.Release(testIterCh)
-				ds.workers.Release(oracleIterCh)
-				return 0, doCtx.Err()
+			// Run iterators in parallel using a single channel (size 2)
+			type rowsTagged struct {
+				err    error
+				rows   Rows
+				oracle bool
 			}
-			ds.workers.Release(testIterCh)
 
-			// Wait for oracle result
-			var oracleResult mo.Result[any]
-			select {
-			case oracleResult = <-oracleIterCh:
-			case <-doCtx.Done():
-				ds.workers.Release(oracleIterCh)
-				return 0, doCtx.Err()
+			ch := make(chan rowsTagged, 2)
+
+			go func() {
+				iter := ds.testStore.loadIter(doCtx, stmt)
+				rows, err := iter.Collect()
+				select {
+				case ch <- rowsTagged{oracle: false, rows: rows, err: err}:
+				case <-doCtx.Done():
+				}
+			}()
+
+			go func() {
+				iter := ds.oracleStore.loadIter(doCtx, stmt)
+				rows, err := iter.Collect()
+				select {
+				case ch <- rowsTagged{oracle: true, rows: rows, err: err}:
+				case <-doCtx.Done():
+				}
+			}()
+
+			var tRes, oRes rowsTagged
+			// Wait for both results or context cancellation
+			received := 0
+			for received < 2 {
+				select {
+				case r := <-ch:
+					if r.oracle {
+						oRes = r
+					} else {
+						tRes = r
+					}
+					received++
+				case <-doCtx.Done():
+					return 0, doCtx.Err()
+				}
 			}
-			ds.workers.Release(oracleIterCh)
 
 			duration := time.Since(attemptStart)
 
 			// Extract results
-			var testRows, oracleRows Rows
-			var testErr, oracleErr error
-
-			if testResult.IsError() {
-				testErr = testResult.Error()
-			} else if testResult.MustGet() != nil {
-				testRows = testResult.MustGet().(Rows)
-			}
-
-			if oracleResult.IsError() {
-				oracleErr = oracleResult.Error()
-			} else if oracleResult.MustGet() != nil {
-				oracleRows = oracleResult.MustGet().(Rows)
-			}
+			testRows, oracleRows := tRes.rows, oRes.rows
+			testErr, oracleErr := tRes.err, oRes.err
 
 			// Record any errors that occurred
 			if testErr != nil {
@@ -665,6 +630,7 @@ func (ds delegatingStore) Check(
 
 			// Check if comparison succeeded
 			if testErr == nil && oracleErr == nil {
+				// Compare results normally; if both sides are empty this will succeed with count 0.
 				result := CompareCollectedRows(table, testRows, oracleRows)
 				compErr := result.ToError()
 				if compErr == nil {
@@ -677,9 +643,9 @@ func (ds delegatingStore) Check(
 			}
 		}
 
-		// If not last attempt, wait with backoff before retrying
+		// If not last attempt, wait with backoff before retryings
 		if attempt < maxAttempts-1 {
-			delay := utils.ExponentialBackoffCapped(attempt, ds.validationRetrySleep, 10*time.Millisecond)
+			delay := utils.ExponentialBackoffCapped(attempt, ds.validationRetrySleep, ds.minimumDelay)
 			timer := utils.GetTimer(delay)
 			select {
 			case <-timer.C:

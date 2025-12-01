@@ -186,6 +186,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		UseServerSideTimestamps:          useServerSideTimestamps,
 		OracleStatementFile:              oracleStatementLogFile,
 		TestStatementFile:                testStatementLogFile,
+		MinimumDelay:                     minimumDelay,
 		TestClusterConfig: store.ScyllaClusterConfig{
 			Name:                    stmtlogger.TypeTest,
 			Hosts:                   testClusterHost,

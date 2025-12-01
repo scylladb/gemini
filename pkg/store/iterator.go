@@ -16,6 +16,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -247,6 +248,8 @@ func formatValue(v any) string {
 	case string:
 		return val
 	default:
-		return ""
+		// Fallback to generic string formatting so we don't lose information
+		// for types like int, time.Time, etc.
+		return fmt.Sprint(val)
 	}
 }

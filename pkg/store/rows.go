@@ -17,6 +17,7 @@ package store
 import (
 	"bytes"
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strings"
@@ -74,6 +75,29 @@ func (r Rows) Swap(i, j int) {
 
 func (r Rows) Less(i, j int) bool {
 	return rowsCmp(r[i], r[j]) < 0
+}
+
+// MarshalJSON provides a readable JSON representation of a Row.
+//
+// The Row type stores values internally as a slice with a map of column
+// names to indices. Since the internal fields are unexported, the default
+// JSON encoder would serialize a Row as an empty object ({}).
+//
+// This custom marshaler converts the internal representation into a
+// map[columnName]value so logs and errors include meaningful row content.
+func (r Row) MarshalJSON() ([]byte, error) {
+	// Build a temporary map to serialize column values by name.
+	// Pre-size the map for efficiency.
+	out := make(map[string]any, len(r.columns))
+	for name, idx := range r.columns {
+		// Guard against out-of-range indexes in case of malformed rows
+		if idx >= 0 && idx < len(r.values) {
+			out[name] = r.values[idx]
+		} else {
+			out[name] = nil
+		}
+	}
+	return json.Marshal(out)
 }
 
 //nolint:gocyclo

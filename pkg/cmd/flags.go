@@ -64,6 +64,7 @@ var (
 	normalDistSigma                  float64
 	tracingOutFile                   string
 	useCounters                      bool
+	minimumDelay                     time.Duration
 	asyncObjectStabilizationAttempts int
 	asyncObjectStabilizationDelay    time.Duration
 	useLWT                           bool
@@ -240,4 +241,6 @@ func setupFlags(cmd *cobra.Command) {
 		StringVarP(&statementLogFileCompression, "statement-log-file-compression", "", "none", "Compression algorithm to use for statement log files")
 	cmd.Flags().
 		StringVarP(&statementRatios, "statement-ratios", "", "", "Statement ratios configuration in JSON format (e.g., '{\"mutation_ratios\":{\"insert_ratio\":0.7,\"update_ratio\":0.2,\"delete_ratio\":0.1}}')")
+	cmd.Flags().
+		DurationVarP(&minimumDelay, "minimum-delay", "", 25*time.Microsecond, "Minimum delay between mutations")
 }
