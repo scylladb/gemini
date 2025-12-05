@@ -35,17 +35,18 @@ import (
 )
 
 type cqlStatements struct {
+	valuePool               sync.Pool
+	session                 *gocql.Session
+	oracleSession           func() (*gocql.Session, error)
+	testSession             func() (*gocql.Session, error)
+	newBatch                func(ctx context.Context) *gocql.Batch
+	execBatch               func(ctx context.Context, batch *gocql.Batch) error
+	execQuery               func(ctx context.Context, stmt string, args ...any) error
 	mutationFragmentsSelect string
 	oracleSelect            string
 	testSelect              string
 	insertStmt              string
-
-	session       *gocql.Session
-	oracleSession func() (*gocql.Session, error)
-	testSession   func() (*gocql.Session, error)
-
-	valuePool     sync.Pool
-	partitionKeys typedef.Columns
+	partitionKeys           typedef.Columns
 }
 
 type cqlData struct {
@@ -145,10 +146,59 @@ func newStatements(
 			},
 		},
 		partitionKeys: partitionKeys,
+		newBatch: func(ctx context.Context) *gocql.Batch {
+			return session.BatchWithContext(ctx, gocql.UnloggedBatch)
+		},
+		execBatch: func(_ context.Context, batch *gocql.Batch) error {
+			return session.ExecuteBatch(batch)
+		},
+		execQuery: func(ctx context.Context, stmt string, args ...any) error {
+			q := session.QueryWithContext(ctx, stmt, args...)
+			defer q.Release()
+			return q.Exec()
+		},
 	}, nil
 }
 
 func (c *cqlStatements) Insert(ctx context.Context, item stmtlogger.Item) error {
+	valuesPtr := c.buildArgs(item)
+	defer c.releaseArgs(valuesPtr)
+
+	q := c.session.QueryWithContext(ctx, c.insertStmt, *valuesPtr...)
+	defer q.Release()
+
+	if err := q.Exec(); err != nil && !errors.Is(err, context.Canceled) {
+		return err
+	}
+
+	return nil
+}
+
+func (c *cqlStatements) buildArgs(item stmtlogger.Item) *[]any {
+	valuesPtr := c.valuePool.Get().(*[]any)
+	// reset capacity but keep underlying storage
+	*valuesPtr = (*valuesPtr)[:0]
+	*valuesPtr = c.fillArgs(*valuesPtr, item)
+	return valuesPtr
+}
+
+// releaseArgs returns a previously borrowed args slice to the pool.
+func (c *cqlStatements) releaseArgs(valuesPtr *[]any) {
+	*valuesPtr = (*valuesPtr)[:0]
+	c.valuePool.Put(valuesPtr)
+}
+
+// argsCap returns the number of elements we will bind for an insert.
+func (c *cqlStatements) argsCap() int {
+	return c.partitionKeys.LenValues() + len(additionalColumnsArr)
+}
+
+// fillArgs fills dst with the arguments for the provided item and returns the
+// resulting slice. dst is truncated to length 0 but capacity is preserved.
+func (c *cqlStatements) fillArgs(dst []any, item stmtlogger.Item) []any {
+	// truncate to zero length, keep capacity
+	dst = dst[:0]
+
 	var itemErr string
 	if item.Error.IsLeft() {
 		if errVal := item.Error.MustLeft(); errVal != nil {
@@ -158,14 +208,8 @@ func (c *cqlStatements) Insert(ctx context.Context, item stmtlogger.Item) error 
 		itemErr = item.Error.MustRight()
 	}
 
-	valuesPtr := c.valuePool.Get().(*[]any)
-	defer func() {
-		*valuesPtr = (*valuesPtr)[:0]
-		c.valuePool.Put(valuesPtr)
-	}()
-
-	*valuesPtr = append(*valuesPtr, item.PartitionKeys.ToCQLValues(c.partitionKeys)...)
-	*valuesPtr = append(*valuesPtr,
+	dst = append(dst, item.PartitionKeys.ToCQLValues(c.partitionKeys)...)
+	dst = append(dst,
 		item.Start.Time,
 		item.Type,
 		item.Statement,
@@ -177,14 +221,7 @@ func (c *cqlStatements) Insert(ctx context.Context, item stmtlogger.Item) error 
 		item.Duration.Duration,
 	)
 
-	q := c.session.QueryWithContext(ctx, c.insertStmt, *valuesPtr...)
-	defer q.Release()
-
-	if err := q.Exec(); err != nil && !errors.Is(err, context.Canceled) {
-		return err
-	}
-
-	return nil
+	return dst
 }
 
 func fetchPartitionKeys(ctx context.Context, session *gocql.Session, stmt string, values []any) ([]json.RawMessage, error) {

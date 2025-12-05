@@ -142,9 +142,9 @@ func TestExponentialBackoffCapped(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := ExponentialBackoffCapped(tt.attempt, tt.maxDelay, tt.minDelay)
+			result := ExponentialBackoff(tt.attempt, tt.maxDelay, tt.minDelay)
 			if result != tt.expected {
-				t.Errorf("ExponentialBackoffCapped(%d, %v, %v) = %v, want %v",
+				t.Errorf("ExponentialBackoff(%d, %v, %v) = %v, want %v",
 					tt.attempt, tt.maxDelay, tt.minDelay, result, tt.expected)
 			}
 		})
@@ -159,7 +159,7 @@ func TestExponentialBackoffCapped_ExponentialGrowth(t *testing.T) {
 
 	// Test that each attempt doubles the previous (until capped)
 	for attempt := range 10 {
-		delay := ExponentialBackoffCapped(attempt, maxDelay, minDelay)
+		delay := ExponentialBackoff(attempt, maxDelay, minDelay)
 		expected := minDelay << uint(attempt)
 		if expected > maxDelay {
 			expected = maxDelay
@@ -194,9 +194,9 @@ func TestExponentialBackoffCapped_DefaultMinDelay(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := ExponentialBackoffCapped(0, time.Second, tt.minDelay)
+			result := ExponentialBackoff(0, time.Second, tt.minDelay)
 			if result != tt.expected {
-				t.Errorf("ExponentialBackoffCapped(0, 1s, %v) = %v, want %v",
+				t.Errorf("ExponentialBackoff(0, 1s, %v) = %v, want %v",
 					tt.minDelay, result, tt.expected)
 			}
 		})
@@ -212,7 +212,7 @@ func TestExponentialBackoffCapped_OverflowProtection(t *testing.T) {
 
 	// Use a large attempt number that causes bit shift overflow
 	largeAttempt := 100
-	result := ExponentialBackoffCapped(largeAttempt, maxDelay, minDelay)
+	result := ExponentialBackoff(largeAttempt, maxDelay, minDelay)
 
 	// When bit shift overflows, it wraps to 0, which triggers maxDelay <= 0 check
 	// This is actually the current behavior of the implementation
@@ -222,7 +222,7 @@ func TestExponentialBackoffCapped_OverflowProtection(t *testing.T) {
 
 	// Test with smaller but still large attempt that should be capped
 	mediumAttempt := 25 // This should exceed maxDelay and be capped
-	result2 := ExponentialBackoffCapped(mediumAttempt, maxDelay, minDelay)
+	result2 := ExponentialBackoff(mediumAttempt, maxDelay, minDelay)
 	if result2 != maxDelay {
 		t.Errorf("Medium large attempt should be capped: got %v, want %v", result2, maxDelay)
 	}
@@ -239,26 +239,26 @@ func BenchmarkExponentialBackoffCapped(b *testing.B) {
 
 	b.ResetTimer()
 	for i := range b.N {
-		_ = ExponentialBackoffCapped(i%20, maxDelay, minDelay)
+		_ = ExponentialBackoff(i%20, maxDelay, minDelay)
 	}
 }
 
 func BenchmarkExponentialBackoffCapped_EdgeCases(b *testing.B) {
 	b.Run("ZeroMaxDelay", func(b *testing.B) {
 		for range b.N {
-			_ = ExponentialBackoffCapped(5, 0, 10*time.Millisecond)
+			_ = ExponentialBackoff(5, 0, 10*time.Millisecond)
 		}
 	})
 
 	b.Run("ZeroMinDelay", func(b *testing.B) {
 		for range b.N {
-			_ = ExponentialBackoffCapped(5, time.Second, 0)
+			_ = ExponentialBackoff(5, time.Second, 0)
 		}
 	})
 
 	b.Run("LargeAttempt", func(b *testing.B) {
 		for range b.N {
-			_ = ExponentialBackoffCapped(50, time.Minute, time.Millisecond)
+			_ = ExponentialBackoff(50, time.Minute, time.Millisecond)
 		}
 	})
 }
@@ -271,7 +271,7 @@ func TestExponentialBackoffCapped_Property_NeverExceedsMax(t *testing.T) {
 	minDelay := 10 * time.Millisecond
 
 	for attempt := range 50 {
-		result := ExponentialBackoffCapped(attempt, maxDelay, minDelay)
+		result := ExponentialBackoff(attempt, maxDelay, minDelay)
 		if result > maxDelay {
 			t.Errorf("Attempt %d exceeded maxDelay: got %v, max %v", attempt, result, maxDelay)
 		}
@@ -287,7 +287,7 @@ func TestExponentialBackoffCapped_Property_Monotonic(t *testing.T) {
 
 	var prev time.Duration
 	for attempt := range 20 {
-		current := ExponentialBackoffCapped(attempt, maxDelay, minDelay)
+		current := ExponentialBackoff(attempt, maxDelay, minDelay)
 		if attempt > 0 && current < prev {
 			t.Errorf("Backoff decreased from attempt %d to %d: %v -> %v",
 				attempt-1, attempt, prev, current)
@@ -303,7 +303,7 @@ func TestExponentialBackoffCapped_MinEqualsMax(t *testing.T) {
 	delay := 100 * time.Millisecond
 
 	for attempt := range 10 {
-		result := ExponentialBackoffCapped(attempt, delay, delay)
+		result := ExponentialBackoff(attempt, delay, delay)
 		if result != delay {
 			t.Errorf("Attempt %d with minDelay=maxDelay: got %v, want %v",
 				attempt, result, delay)
@@ -335,7 +335,7 @@ func TestExponentialBackoffCapped_MathematicalCorrectness(t *testing.T) {
 		t.Run("", func(t *testing.T) {
 			t.Parallel()
 			assert := require.New(t)
-			result := ExponentialBackoffCapped(tt.attempt, maxDelay, minDelay)
+			result := ExponentialBackoff(tt.attempt, maxDelay, minDelay)
 			assert.Equal(tt.expected, result, "Attempt %d: got %v, want %v", tt.attempt, result, tt.expected)
 		})
 	}

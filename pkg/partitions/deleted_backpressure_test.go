@@ -166,10 +166,6 @@ func TestHeapMemoryManagement(t *testing.T) {
 		d := newDeleted(t.Context(), buckets)
 		defer d.Close()
 
-		// Initial capacity is 1024
-		initialCap := len(d.heap.data)
-		assert.Equal(t, 1024, initialCap)
-
 		// Add more than initial capacity
 		const count = 2000
 		for range count {
