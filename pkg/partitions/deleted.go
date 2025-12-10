@@ -17,6 +17,7 @@ package partitions
 import (
 	"container/heap"
 	"context"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -65,9 +66,13 @@ type (
 	}
 )
 
-const initialCapacity = 1024
+const initialCapacity = 4096
 
 func newDeleted(base context.Context, timeBuckets []time.Duration, start ...bool) *deletedPartitions {
+	// Always return a valid instance so callers can safely use it even when
+	// delete buckets are not configured. In that case, we disable background
+	// processing and channel emission, but still track counters.
+
 	ctx, cancel := context.WithCancel(base)
 
 	h := deletedPartitionHeap{
@@ -77,13 +82,23 @@ func newDeleted(base context.Context, timeBuckets []time.Duration, start ...bool
 
 	heap.Init(&h)
 
+	var ch chan *typedef.Values
+	if len(timeBuckets) > 0 {
+		ch = make(chan *typedef.Values, 50_000)
+	} else {
+		// When disabled, leave channel nil; reads from it are non-blocking in
+		// select with default and nobody should range over it in this mode.
+		ch = nil
+	}
+
 	d := &deletedPartitions{
-		heap:         h,
-		ch:           make(chan *typedef.Values, 100),
-		ctx:          ctx,
-		cancel:       cancel,
-		buckets:      timeBuckets,
-		batchSize:    16, // Process up to 16 items per batch for better throughput
+		heap:    h,
+		ch:      ch,
+		ctx:     ctx,
+		cancel:  cancel,
+		buckets: timeBuckets,
+		// Increase batch size so the emitter drains cohorts faster without tight loops
+		batchSize:    64,
 		lastShrinkNs: time.Now().UnixNano(),
 	}
 
@@ -93,7 +108,8 @@ func newDeleted(base context.Context, timeBuckets []time.Duration, start ...bool
 		s = start[0]
 	}
 
-	if s {
+	// Only start background processing if enabled and requested.
+	if s && len(timeBuckets) > 0 {
 		go d.start(100 * time.Millisecond)
 	}
 
@@ -348,7 +364,9 @@ func (d *deletedPartitions) processReady() time.Duration {
 				continue
 			}
 
-			earliest.readyAt = now.Add(d.buckets[earliest.counter])
+			// Re-schedule with jitter to prevent cohort alignment ("thundering herd")
+			next := d.buckets[earliest.counter]
+			earliest.readyAt = now.Add(next).Add(jitterDuration(next))
 			earliest.counter++
 
 			d.heap.fixInline(0)
@@ -367,8 +385,13 @@ func (d *deletedPartitions) processReady() time.Duration {
 
 	// Update next ready time or clear it
 	if d.heap.Len() > 0 {
-		d.nextReadyNs.Store(d.heap.data[0].readyAt.UnixNano())
-		return d.heap.data[0].readyAt.Sub(now)
+		next := d.heap.data[0].readyAt
+		d.nextReadyNs.Store(next.UnixNano())
+		// If the next item is already ready (<= now), keep draining aggressively
+		if !next.After(now) {
+			return time.Millisecond
+		}
+		return next.Sub(now)
 	}
 
 	d.nextReadyNs.Store(0)
@@ -388,7 +411,8 @@ func (d *deletedPartitions) Delete(values *typedef.Values) {
 	}
 
 	now := time.Now()
-	readyAt := now.Add(d.buckets[0])
+	// Apply jitter to avoid aligning many items on the exact same boundary
+	readyAt := now.Add(d.buckets[0]).Add(jitterDuration(d.buckets[0]))
 	readyAtNs := readyAt.UnixNano()
 
 	dp := deletedPartition{
@@ -418,8 +442,15 @@ func (d *deletedPartitions) DeleteBulk(values []*typedef.Values) {
 		return
 	}
 
+	// If no buckets configured, just count the deletions and return.
+	if len(d.buckets) == 0 {
+		d.deleted.Add(uint64(len(values)))
+		return
+	}
+
 	now := time.Now()
-	readyAt := now.Add(d.buckets[0])
+	// Apply the same jitter policy for bulk scheduling
+	readyAt := now.Add(d.buckets[0]).Add(jitterDuration(d.buckets[0]))
 	readyAtNs := readyAt.UnixNano()
 
 	d.mu.Lock()
@@ -442,6 +473,31 @@ func (d *deletedPartitions) DeleteBulk(values []*typedef.Values) {
 	d.mu.Unlock()
 
 	d.deleted.Add(uint64(len(values)))
+}
+
+// jitterDuration adds a bounded random delay to the given bucket duration to
+// spread revalidation over time and prevent synchronized bursts.
+// It returns a random duration in [0, min(20% of d, 5s)].
+// For non-positive d it returns 0.
+//
+//go:inline
+func jitterDuration(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	maxDuration := time.Duration(float64(d) * 0.2)
+	if maxDuration > 5*time.Second {
+		maxDuration = 5 * time.Second
+	}
+	if maxDuration <= 0 {
+		return 0
+	}
+	// Use math/rand/v2 global functions which are safe for concurrent use.
+	n := rand.Int64N(int64(maxDuration))
+	if n <= 0 {
+		return 0
+	}
+	return time.Duration(n)
 }
 
 // Close stops the background processor
