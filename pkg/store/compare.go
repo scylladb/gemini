@@ -30,76 +30,76 @@ import (
 
 // CompareCollectedRows compares already collected rows from both sides
 func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) ComparisonResult {
-    result := ComparisonResult{}
+	result := ComparisonResult{}
 
-    // Handle empty result sets
-    if len(testRows) == 0 && len(oracleRows) == 0 {
-        return result
-    }
+	// Handle empty result sets
+	if len(testRows) == 0 && len(oracleRows) == 0 {
+		return result
+	}
 
-    testRows = deduplicateRows(table, testRows)
-    oracleRows = deduplicateRows(table, oracleRows)
+	testRows = deduplicateRows(table, testRows)
+	oracleRows = deduplicateRows(table, oracleRows)
 
-    // Sort both sides (stable) to aid deterministic behavior when rendering diffs.
-    // Note: comparison below is key-based and order-independent.
-    if len(testRows) > 1 {
-        slices.SortStableFunc(testRows, rowsCmp)
-    }
-    if len(oracleRows) > 1 {
-        slices.SortStableFunc(oracleRows, rowsCmp)
-    }
+	// Sort both sides (stable) to aid deterministic behavior when rendering diffs.
+	// Note: comparison below is key-based and order-independent.
+	if len(testRows) > 1 {
+		slices.SortStableFunc(testRows, rowsCmp)
+	}
+	if len(oracleRows) > 1 {
+		slices.SortStableFunc(oracleRows, rowsCmp)
+	}
 
-    // Fast-path: if rows are deeply equal after sort, all match.
-    if reflect.DeepEqual(testRows, oracleRows) {
-        return ComparisonResult{MatchCount: len(testRows)}
-    }
+	// Fast-path: if rows are deeply equal after sort, all match.
+	if reflect.DeepEqual(testRows, oracleRows) {
+		return ComparisonResult{MatchCount: len(testRows)}
+	}
 
-    // If row counts differ, report only set differences and keep MatchCount = 0.
-    if len(testRows) != len(oracleRows) {
-        testSet := pks(table, testRows)
-        oracleSet := pks(table, oracleRows)
+	// If row counts differ, report only set differences and keep MatchCount = 0.
+	if len(testRows) != len(oracleRows) {
+		testSet := pks(table, testRows)
+		oracleSet := pks(table, oracleRows)
 
-        // Build pk -> row maps for both sides
-        testRowMap := buildRowMap(table, testRows)
-        oracleRowMap := buildRowMap(table, oracleRows)
+		// Build pk -> row maps for both sides
+		testRowMap := buildRowMap(table, testRows)
+		oracleRowMap := buildRowMap(table, oracleRows)
 
-        // Rows present only in oracle
-        for _, pk := range oracleSet.List() {
-            if !testSet.Has(pk) {
-                if row, ok := oracleRowMap[pk]; ok {
-                    result.OracleOnlyRows = append(result.OracleOnlyRows, row)
-                }
-            }
-        }
+		// Rows present only in oracle
+		for _, pk := range oracleSet.List() {
+			if !testSet.Has(pk) {
+				if row, ok := oracleRowMap[pk]; ok {
+					result.OracleOnlyRows = append(result.OracleOnlyRows, row)
+				}
+			}
+		}
 
-        // Rows present only in test
-        for _, pk := range testSet.List() {
-            if !oracleSet.Has(pk) {
-                if row, ok := testRowMap[pk]; ok {
-                    result.TestOnlyRows = append(result.TestOnlyRows, row)
-                }
-            }
-        }
+		// Rows present only in test
+		for _, pk := range testSet.List() {
+			if !oracleSet.Has(pk) {
+				if row, ok := testRowMap[pk]; ok {
+					result.TestOnlyRows = append(result.TestOnlyRows, row)
+				}
+			}
+		}
 
-        return result
-    }
+		return result
+	}
 
-    // Same number of rows: compare by index after sorting, producing value diffs or matches.
-    for i := range testRows {
-        tRow := testRows[i]
-        oRow := oracleRows[i]
-        if diff := diffRows(table, oRow, tRow); diff != "" {
-            result.DifferentRows = append(result.DifferentRows, RowDifference{
-                TestRow:   tRow,
-                OracleRow: oRow,
-                Diff:      diff,
-            })
-        } else {
-            result.MatchCount++
-        }
-    }
+	// Same number of rows: compare by index after sorting, producing value diffs or matches.
+	for i := range testRows {
+		tRow := testRows[i]
+		oRow := oracleRows[i]
+		if diff := diffRows(table, oRow, tRow); diff != "" {
+			result.DifferentRows = append(result.DifferentRows, RowDifference{
+				TestRow:   tRow,
+				OracleRow: oRow,
+				Diff:      diff,
+			})
+		} else {
+			result.MatchCount++
+		}
+	}
 
-    return result
+	return result
 }
 
 // buildRowMap creates a map from pk string to Row for efficient lookup
@@ -154,22 +154,22 @@ func deduplicateRows(table *typedef.Table, rows Rows) Rows {
 
 // ToError converts ComparisonResult to an error if there are differences
 func (cr ComparisonResult) ToError() error {
-    if cr.TestError != nil || cr.OracleError != nil {
-        return multierr.Combine(cr.TestError, cr.OracleError)
-    }
+	if cr.TestError != nil || cr.OracleError != nil {
+		return multierr.Combine(cr.TestError, cr.OracleError)
+	}
 
-    var err error
+	var err error
 
-    if len(cr.TestOnlyRows) > 0 || len(cr.OracleOnlyRows) > 0 {
-        // For row-count mismatches we report only the unmatched counts,
-        // excluding matched rows from the totals to satisfy existing tests.
-        err = multierr.Append(err, ErrorRowDifference{
-            MissingInTest:   rowsToStrings(cr.OracleOnlyRows),
-            MissingInOracle: rowsToStrings(cr.TestOnlyRows),
-            TestRows:        len(cr.TestOnlyRows),
-            OracleRows:      len(cr.OracleOnlyRows),
-        })
-    }
+	if len(cr.TestOnlyRows) > 0 || len(cr.OracleOnlyRows) > 0 {
+		// For row-count mismatches we report only the unmatched counts,
+		// excluding matched rows from the totals to satisfy existing tests.
+		err = multierr.Append(err, ErrorRowDifference{
+			MissingInTest:   rowsToStrings(cr.OracleOnlyRows),
+			MissingInOracle: rowsToStrings(cr.TestOnlyRows),
+			TestRows:        len(cr.TestOnlyRows),
+			OracleRows:      len(cr.OracleOnlyRows),
+		})
+	}
 
 	for _, diff := range cr.DifferentRows {
 		err = multierr.Append(err, ErrorRowDifference{
