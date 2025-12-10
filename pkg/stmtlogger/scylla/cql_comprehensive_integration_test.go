@@ -72,9 +72,9 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 	testErr := errors.New("test error")
 
 	tests := []struct {
+		expectedColumns map[string]interface{}
 		name            string
 		item            stmtlogger.Item
-		expectedColumns map[string]interface{}
 	}{
 		{
 			name: "insert with nil error (Left)",
@@ -398,9 +398,9 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 	})
 
 	tests := []struct {
-		name         string
 		setupFunc    func(t *testing.T) *joberror.JobError
 		validateFunc func(t *testing.T, result cqlDataMap, jobErr *joberror.JobError)
+		name         string
 	}{
 		{
 			name: "fetch SELECT statement (oracle and test)",
