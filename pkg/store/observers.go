@@ -177,7 +177,8 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 	if data == nil {
 		return
 	}
-	instance := query.Host.ConnectAddressAndPort()
+
+	instance := query.Host.ListenAddress().String()
 	var errStr string
 	if query.Err != nil {
 		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, query.Err.Error()).Inc()

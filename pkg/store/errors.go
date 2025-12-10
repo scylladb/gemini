@@ -80,9 +80,12 @@ func (ve ValidationError) Error() string {
 		}
 	}
 
-	sb.WriteString("\n\nAttempt details:")
-	for _, attempt := range ve.Attempts {
-		sb.WriteString(fmt.Sprintf("\n  %s", attempt.String()))
+	// Only include the last attempt to keep logs concise and focused on the
+	// final discrepancy the system cares about.
+	if len(ve.Attempts) > 0 {
+		last := ve.Attempts[len(ve.Attempts)-1]
+		sb.WriteString("\n\nLast attempt:")
+		sb.WriteString(fmt.Sprintf("\n  %s", last.String()))
 	}
 
 	if ve.FinalError != nil {

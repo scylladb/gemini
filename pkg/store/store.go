@@ -18,16 +18,12 @@ import (
 	"context"
 	"errors"
 	"io"
-	"math/big"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	pkgerrors "github.com/pkg/errors"
 	"github.com/samber/mo"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
-	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/replication"
@@ -36,18 +32,6 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
-
-var comparers = []cmp.Option{
-	cmp.AllowUnexported(Row{}),
-	cmpopts.SortMaps(func(x, y *inf.Dec) bool {
-		return x.Cmp(y) < 0
-	}),
-	cmp.Comparer(func(x, y *inf.Dec) bool {
-		return x.Cmp(y) == 0
-	}), cmp.Comparer(func(x, y *big.Int) bool {
-		return x.Cmp(y) == 0
-	}),
-}
 
 type loader interface {
 	load(context.Context, *typedef.Stmt) (Rows, error)
@@ -154,7 +138,6 @@ func New(
 	logger.Debug("test store created successfully")
 
 	var oracleStore storeLoader
-
 	if cfg.OracleClusterConfig != nil {
 		logger.Debug("creating oracle store", zap.Strings("hosts", cfg.OracleClusterConfig.Hosts))
 		//nolint:govet
@@ -170,37 +153,41 @@ func New(
 		oracleStore = oracleStoreImpl
 		logger.Debug("oracle store created successfully")
 
-		logger.Debug("creating statement logger with oracle cluster")
+		if cfg.OracleStatementFile != "" && cfg.TestStatementFile != "" {
+			logger.Debug("creating statement logger with oracle cluster")
 
-		ch := make(chan stmtlogger.Item, 2_000)
+			ch := make(chan stmtlogger.Item, 50_000)
 
-		statementLogger, err = stmtlogger.NewLogger(
-			stmtlogger.WithChannel(ch),
-			stmtlogger.WithLogger(scylla.New(
-				keyspace,
-				table,
-				oracleStoreImpl.getSession,
-				testStore.getSession,
-				cfg.OracleClusterConfig.Hosts,
-				cfg.OracleClusterConfig.Username,
-				cfg.OracleClusterConfig.Password,
-				partitionKeyColumns,
-				cfg.OracleClusterConfig.Replication,
-				ch,
-				cfg.OracleStatementFile,
-				cfg.TestStatementFile,
-				e.GetChannel(),
-				logger.With(zap.String("component", "statement_logger")),
-			)),
-		)
+			statementLogger, err = stmtlogger.NewLogger(
+				stmtlogger.WithChannel(ch),
+				stmtlogger.WithLogger(scylla.New(
+					keyspace,
+					table,
+					oracleStoreImpl.getSession,
+					testStore.getSession,
+					cfg.OracleClusterConfig.Hosts,
+					cfg.OracleClusterConfig.Username,
+					cfg.OracleClusterConfig.Password,
+					partitionKeyColumns,
+					cfg.OracleClusterConfig.Replication,
+					ch,
+					cfg.OracleStatementFile,
+					cfg.TestStatementFile,
+					e.GetChannel(),
+					logger.With(zap.String("component", "statement_logger")),
+				)),
+			)
 
-		oracleStoreImpl.SetLogger(statementLogger, true)
-		testStore.SetLogger(statementLogger, true)
+			oracleStoreImpl.SetLogger(statementLogger, true)
+			testStore.SetLogger(statementLogger, true)
 
-		if err != nil {
-			return nil, errors.Join(err, errors.New("failed to create statement logger"))
+			if err != nil {
+				return nil, errors.Join(err, errors.New("failed to create statement logger"))
+			}
+			logger.Debug("statement logger created successfully")
+		} else {
+			logger.Warn("both oracle and test statement files must be provided to enable statement logging; statement logging disabled")
 		}
-		logger.Debug("statement logger created successfully")
 	}
 
 	if err = testStore.Init(); err != nil {
@@ -243,6 +230,16 @@ type delegatingStore struct {
 	serverSideTimestamps bool
 }
 
+// getLogger returns a non-nil logger. If delegatingStore.logger is nil (e.g.,
+// in unit tests where delegatingStore is constructed directly), it returns
+// zap.NewNop() to avoid nil pointer dereferences during logging.
+func (ds delegatingStore) getLogger() *zap.Logger {
+	if ds.logger != nil {
+		return ds.logger
+	}
+	return zap.NewNop()
+}
+
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef.Stmt) error {
 	ctx = WithContextData(ctx, &ContextData{
 		GeminiAttempt: 0,
@@ -273,7 +270,7 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef
 				ds.testStore.name(),
 			)
 		}
-		ds.logger.Debug("oracle store created successfully")
+		ds.getLogger().Debug("oracle store created successfully")
 	}
 
 	return nil
@@ -422,7 +419,7 @@ func (ds delegatingStore) logMutationRetry(attempt, maxAttempts int, result muta
 			zap.Strings("successful_stores", successfulStores),
 			zap.Strings("retrying_stores", retryingStores))
 
-		ds.logger.Warn("mutation failed, retrying with exponential backoff", fields...)
+		ds.getLogger().Warn("mutation failed, retrying with exponential backoff", fields...)
 	}
 }
 
@@ -481,7 +478,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 					successfulStores = append(successfulStores, "oracle")
 				}
 
-				ds.logger.Info("mutation succeeded after retries",
+				ds.getLogger().Info("mutation succeeded after retries",
 					zap.Int("attempts", attempt+1),
 					zap.Strings("successful_stores", successfulStores))
 			}
@@ -496,7 +493,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 			ds.logMutationRetry(attempt+1, maxAttempts, cumulativeResult, nextRetryTest, nextRetryOracle)
 
 			// Apply exponential backoff delay
-			delay := utils.ExponentialBackoffCapped(attempt, ds.mutationRetrySleep, ds.minimumDelay)
+			delay := utils.Backoff(utils.ExponentialBackoffStrategy, attempt, ds.mutationRetrySleep, ds.minimumDelay)
 			timer := utils.GetTimer(delay)
 			select {
 			case <-timer.C:
@@ -527,7 +524,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 
 	mutationErr.Finalize(finalErr)
 
-	ds.logger.Error("mutation failed after all retry attempts",
+	ds.getLogger().Error("mutation failed after all retry attempts",
 		zap.Int("total_attempts", maxAttempts),
 		zap.Bool("test_store_success", mutationErr.TestStoreSuccess),
 		zap.Bool("oracle_store_success", mutationErr.OracleStoreSuccess),
@@ -560,14 +557,13 @@ func (ds delegatingStore) Check(
 
 		// If there is no oracle, just count test rows
 		if ds.oracleStore == nil {
-			testIter := ds.testStore.loadIter(doCtx, stmt)
-			count, testErr := testIter.Count()
+			testRows, testErr := ds.testStore.load(doCtx, stmt)
 			duration := time.Since(attemptStart)
 
 			if testErr != nil {
 				validationErr.AddAttempt(attempt, TypeTest, testErr, duration)
 			} else {
-				return count, nil
+				return len(testRows), nil
 			}
 		} else {
 			// Run iterators in parallel using a single channel (size 2)
@@ -580,8 +576,7 @@ func (ds delegatingStore) Check(
 			ch := make(chan rowsTagged, 2)
 
 			go func() {
-				iter := ds.testStore.loadIter(doCtx, stmt)
-				rows, err := iter.Collect()
+				rows, err := ds.testStore.load(doCtx, stmt)
 				select {
 				case ch <- rowsTagged{oracle: false, rows: rows, err: err}:
 				case <-doCtx.Done():
@@ -589,8 +584,7 @@ func (ds delegatingStore) Check(
 			}()
 
 			go func() {
-				iter := ds.oracleStore.loadIter(doCtx, stmt)
-				rows, err := iter.Collect()
+				rows, err := ds.oracleStore.load(doCtx, stmt)
 				select {
 				case ch <- rowsTagged{oracle: true, rows: rows, err: err}:
 				case <-doCtx.Done():
@@ -643,9 +637,8 @@ func (ds delegatingStore) Check(
 			}
 		}
 
-		// If not last attempt, wait with backoff before retryings
 		if attempt < maxAttempts-1 {
-			delay := utils.ExponentialBackoffCapped(attempt, ds.validationRetrySleep, ds.minimumDelay)
+			delay := utils.Backoff(utils.LinearBackoffStrategy, attempt, ds.validationRetrySleep, ds.minimumDelay)
 			timer := utils.GetTimer(delay)
 			select {
 			case <-timer.C:
@@ -682,18 +675,18 @@ func (ds delegatingStore) Check(
 }
 
 func (ds delegatingStore) Close() error {
-	ds.logger.Info("closing store")
+	ds.getLogger().Info("closing store")
 
 	var err error
 	if ds.statementLogger != nil {
-		ds.logger.Debug("closing statement logger")
+		ds.getLogger().Debug("closing statement logger")
 		err = multierr.Append(err, ds.statementLogger.Close())
 	}
 
 	if err != nil {
-		ds.logger.Error("store closed with errors", zap.Error(err))
+		ds.getLogger().Error("store closed with errors", zap.Error(err))
 	} else {
-		ds.logger.Debug("store closed successfully")
+		ds.getLogger().Debug("store closed successfully")
 	}
 
 	return err
