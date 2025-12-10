@@ -229,9 +229,18 @@ func (w *Workload) Run(base context.Context) error {
 		w.logger.Debug("main workload completed")
 	}
 
-	// If any errors were recorded during the workload, surface them to the caller
-	if w.status.HasErrors() {
-		return w.status.Errors
+	// If any errors were recorded during the workload, surface them to the caller.
+	// Prefer returning the collected error list when available; otherwise, synthesize
+	// a non-nil error from the counters so callers can reliably detect failures.
+	if w.status.HasErrors() || w.status.Errors.Len() > 0 {
+		if w.status.Errors.Len() > 0 {
+			return w.status.Errors
+		}
+		return errors.Errorf(
+			"gemini encountered errors (write_errors=%d, read_errors=%d)",
+			w.status.WriteErrors.Load(),
+			w.status.ReadErrors.Load(),
+		)
 	}
 
 	return nil

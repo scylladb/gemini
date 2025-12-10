@@ -506,23 +506,23 @@ func (s *Logger) insertWorker() {
 // the logger is only partially initialized in tests. Schema and SELECT
 // statements are ignored to mirror production behavior.
 func (s *Logger) insert(it stmtlogger.Item) {
-    // Update dequeued metrics as insertWorker does when consuming from channel.
-    metrics.StatementLoggerItems.Dec()
-    metrics.StatementLoggerDequeuedTotal.Inc()
+	// Update dequeued metrics as insertWorker does when consuming from channel.
+	metrics.StatementLoggerItems.Dec()
+	metrics.StatementLoggerDequeuedTotal.Inc()
 
-    // Ignore schema and select statements
-    if it.StatementType.IsSchema() || it.StatementType.IsSelect() {
-        return
-    }
+	// Ignore schema and select statements
+	if it.StatementType.IsSchema() || it.StatementType.IsSelect() {
+		return
+	}
 
-    // If cqlStatements is not initialized (as in some unit tests), do nothing.
-    if s == nil || s.cqlStatements == nil {
-        return
-    }
+	// If cqlStatements is not initialized (as in some unit tests), do nothing.
+	if s == nil || s.cqlStatements == nil {
+		return
+	}
 
-    // Build arguments and execute a single insert query.
-    args := s.cqlStatements.fillArgs(make([]any, 0, s.cqlStatements.argsCap()), it)
-    _ = s.execQuery(context.Background(), s.cqlStatements.insertStmt, args...)
+	// Build arguments and execute a single insert query.
+	args := s.cqlStatements.fillArgs(make([]any, 0, s.cqlStatements.argsCap()), it)
+	_ = s.execQuery(context.Background(), s.cqlStatements.insertStmt, args...)
 }
 
 func (s *Logger) openStatementFile(name string) (*bufio.Writer, func() error, error) {
