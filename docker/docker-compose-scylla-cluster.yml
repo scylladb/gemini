@@ -9,7 +9,7 @@ networks:
 
 services:
   gemini-oracle:
-    image: scylladb/scylla:${SCYLLA_ORACLE_VERSION:-6.2}
+    image: scylladb/scylla:${SCYLLA_ORACLE_VERSION:-2025.1}
     container_name: gemini-oracle
     restart: unless-stopped
     command: --smp 8 --memory 4096M --api-address 0.0.0.0
@@ -22,7 +22,7 @@ services:
         ipv4_address: 172.30.0.2
 
   gemini-test-1:
-    image: scylladb/scylla:${SCYLLA_TEST_VERSION:-2025.1}
+    image: scylladb/scylla:${SCYLLA_TEST_VERSION:-2025.3}
     container_name: gemini-test-1
     restart: unless-stopped
     command: --smp 3 --memory 1024M --api-address 0.0.0.0
@@ -34,7 +34,7 @@ services:
       gemini:
         ipv4_address: 172.30.0.3
   gemini-test-2:
-    image: scylladb/scylla:${SCYLLA_TEST_VERSION:-2025.1}
+    image: scylladb/scylla:${SCYLLA_TEST_VERSION:-2025.3}
     container_name: gemini-test-2
     restart: unless-stopped
     command: --smp 2 --memory 1024M --api-address 0.0.0.0 --seeds=gemini-test-1
@@ -46,7 +46,7 @@ services:
       gemini:
         ipv4_address: 172.30.0.4
   gemini-test-3:
-    image: scylladb/scylla:${SCYLLA_TEST_VERSION:-2025.1}
+    image: scylladb/scylla:${SCYLLA_TEST_VERSION:-2025.3}
     container_name: gemini-test-3
     restart: unless-stopped
     command: --smp 2 --memory 1024M --api-address 0.0.0.0 --seeds=gemini-test-1

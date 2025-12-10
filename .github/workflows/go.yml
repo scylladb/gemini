@@ -12,6 +12,7 @@ on:
 
 jobs:
   build:
+    timeout-minutes: 6
     name: Lint Test and Build
     runs-on: ubuntu-24.04
     steps:
@@ -40,8 +41,6 @@ jobs:
           export GEMINI_USE_DOCKER_SCYLLA=true
           export GEMINI_TEST_CLUSTER_IP=192.168.100.3
           export GEMINI_ORACLE_CLUSTER_IP=192.168.100.2
-          echo "Test cluster IP: $TEST_CLUSTER_IP"
-          echo "Oracle cluster IP: $ORACLE_CLUSTER_IP"
 
           make test
       - uses: golangci/golangci-lint-action@v9
