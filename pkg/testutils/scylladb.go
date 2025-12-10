@@ -240,8 +240,11 @@ func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 			TestHosts:       testScylla.TestHosts,
 			TestContainer:   testScylla.TestContainer,
 			OracleContainer: oracleScylla.OracleContainer,
-			TestCluster:     testScylla.TestCluster,
-			OracleCluster:   oracleScylla.OracleCluster,
+			// Provide fresh ClusterConfig instances for use by stores to avoid
+			// reusing a ClusterConfig that already created a session (which would panic
+			// due to sharing host selection policy between sessions).
+			TestCluster:   createClusterConfig(testScylla.TestHosts...),
+			OracleCluster: createClusterConfig(oracleScylla.TestHosts...),
 		}
 	}
 
