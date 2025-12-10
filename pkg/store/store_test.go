@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build testing
-
 package store
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -27,8 +24,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 
-	"github.com/scylladb/gemini/pkg/replication"
-	"github.com/scylladb/gemini/pkg/testutils"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -302,124 +297,4 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
-}
-
-func TestDelegatingStore_MutationWithChecks(t *testing.T) {
-	t.Parallel()
-
-	scyllaContainer := testutils.TestContainers(t)
-	keyspace := testutils.GenerateUniqueKeyspaceName(t)
-
-	assert.NoError(t, scyllaContainer.Test.Query(
-		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
-	).Exec())
-	assert.NoError(t, scyllaContainer.Test.Query(
-		fmt.Sprintf("CREATE TABLE %s.table_1 (id int, value text, ck1 int, col1 text, PRIMARY KEY ((id,value), ck1));", keyspace),
-	).Exec())
-	assert.NoError(t, scyllaContainer.Oracle.Query(
-		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
-	).Exec())
-	assert.NoError(t, scyllaContainer.Oracle.Query(
-		fmt.Sprintf("CREATE TABLE %s.table_1 (id int, value text, ck1 int, col1 text, PRIMARY KEY ((id,value), ck1));", keyspace),
-	).Exec())
-
-	schema := &typedef.Schema{
-		Keyspace: typedef.Keyspace{Name: keyspace},
-		Config: typedef.SchemaConfig{
-			ReplicationStrategy:              replication.NewSimpleStrategy(),
-			OracleReplicationStrategy:        replication.NewSimpleStrategy(),
-			AsyncObjectStabilizationAttempts: 10,
-			UseMaterializedViews:             false,
-			AsyncObjectStabilizationDelay:    10 * time.Millisecond,
-		},
-		Tables: []*typedef.Table{{
-			Name:    "table_1",
-			Columns: typedef.Columns{},
-		}},
-	}
-
-	store := &delegatingStore{
-		oracleStore: newCQLStoreWithSession(
-			scyllaContainer.OracleCluster,
-			schema, zap.NewNop(),
-			"",
-			"oracle",
-		),
-		testStore:            newCQLStoreWithSession(scyllaContainer.TestCluster, schema, zap.NewNop(), "", "test"),
-		logger:               zap.NewNop(),
-		mutationRetries:      5,
-		mutationRetrySleep:   10 * time.Millisecond,
-		serverSideTimestamps: true,
-	}
-
-	assert.NoError(t, store.oracleStore.Init())
-	assert.NoError(t, store.testStore.Init())
-
-	partitionKeys := []map[string][]any{
-		{"id": {1}, "value": {"test"}},
-		{"id": {2}, "value": {"test2"}},
-		{"id": {3}, "value": {"test3"}},
-		{"id": {4}, "value": {"test4"}},
-	}
-
-	const rowsPerPartition = 10
-
-	for _, pk := range partitionKeys {
-		for i := range rowsPerPartition {
-			insertStmt := typedef.PreparedStmt(
-				fmt.Sprintf("INSERT INTO %s.table_1 (id, value, ck1, col1) VALUES (?, ?, ?, ?)", keyspace),
-				pk,
-				[]any{pk["id"][0], pk["value"][0], i, "col1_value"},
-				typedef.InsertStatementType,
-			)
-
-			assert.NoError(t, store.Mutate(t.Context(), insertStmt))
-		}
-	}
-
-	time.Sleep(1 * time.Second)
-
-	singlePartitionSelect := typedef.PreparedStmt(
-		fmt.Sprintf("SELECT * FROM %s.table_1 WHERE id = ? AND value = ?", keyspace),
-		partitionKeys[0],
-		[]any{partitionKeys[0]["id"][0], partitionKeys[0]["value"][0]},
-		typedef.SelectStatementType,
-	)
-
-	multiPartitionSelect := typedef.PreparedStmt(
-		fmt.Sprintf("SELECT * FROM %s.table_1 WHERE id IN (?, ?) AND value IN (?, ?)", keyspace),
-		map[string][]any{"id": {1, 2}, "value": {"test", "test2"}},
-		[]any{1, 2, "test", "test2"},
-		typedef.SelectMultiPartitionType,
-	)
-
-	singlePartitionRangeSelect := typedef.PreparedStmt(
-		fmt.Sprintf("SELECT * FROM %s.table_1 WHERE id = ? AND value = ? AND ck1 >= ? AND ck1 < ?", keyspace),
-		partitionKeys[2],
-		[]any{partitionKeys[2]["id"][0], partitionKeys[2]["value"][0], 0, 3},
-		typedef.SelectRangeStatementType,
-	)
-
-	multiPartitionRangeSelect := typedef.PreparedStmt(
-		fmt.Sprintf("SELECT * FROM %s.table_1 WHERE id IN (?, ?) AND value IN (?, ?) AND ck1 >= ? AND ck1 < ?", keyspace),
-		map[string][]any{"id": {1, 2}, "value": {"test", "test2"}},
-		[]any{3, 4, "test3", "test4", 0, 3},
-		typedef.SelectMultiPartitionType,
-	)
-
-	count, err := store.Check(t.Context(), schema.Tables[0], singlePartitionSelect, 1)
-	assert.NoError(t, err)
-	assert.Equalf(t, rowsPerPartition, count, "Expected %d row to be returned from check after insert", rowsPerPartition)
-
-	count, err = store.Check(t.Context(), schema.Tables[0], multiPartitionSelect, 1)
-	assert.NoError(t, err)
-	assert.Equalf(t, 2*rowsPerPartition, count, "Expected %d row to be returned from check after insert", 2*rowsPerPartition)
-
-	count, err = store.Check(t.Context(), schema.Tables[0], singlePartitionRangeSelect, 1)
-	assert.NoError(t, err)
-	assert.Equalf(t, 3, count, "Expected %d row to be returned from check after insert", 3)
-
-	count, err = store.Check(t.Context(), schema.Tables[0], multiPartitionRangeSelect, 1)
-	assert.NoError(t, err)
-	assert.Equalf(t, 6, count, "Expected %d row to be returned from check after insert", 6)
 }

@@ -17,13 +17,20 @@ package utils
 
 import "time"
 
-// ExponentialBackoffCapped returns an exponential backoff delay for the given attempt,
+type BackoffStrategy byte
+
+const (
+	ExponentialBackoffStrategy BackoffStrategy = iota
+	LinearBackoffStrategy
+)
+
+// ExponentialBackoff returns an exponential backoff delay for the given attempt,
 // starting at minDelay and doubling each retry, capped at maxDelay.
 //
 // attempt should start at 0 for the first retry delay.
 // If minDelay <= 0, it defaults to 10ms. If maxDelay <= 0, it returns 0.
 // If minDelay > maxDelay, maxDelay is returned.
-func ExponentialBackoffCapped(attempt int, maxDelay, minDelay time.Duration) time.Duration {
+func ExponentialBackoff(attempt int, maxDelay, minDelay time.Duration) time.Duration {
 	if maxDelay <= 0 {
 		return 0
 	}
@@ -43,4 +50,19 @@ func ExponentialBackoffCapped(attempt int, maxDelay, minDelay time.Duration) tim
 		delay = maxDelay
 	}
 	return delay
+}
+
+func LinearBackoff(attempt int, delay time.Duration) time.Duration {
+	return delay * time.Duration(attempt)
+}
+
+func Backoff(strategy BackoffStrategy, attempt int, maxDelay, minDelay time.Duration) time.Duration {
+	switch strategy {
+	case ExponentialBackoffStrategy:
+		return ExponentialBackoff(attempt, maxDelay, minDelay)
+	case LinearBackoffStrategy:
+		return LinearBackoff(attempt, maxDelay)
+	default:
+		panic("unknown backoff strategy")
+	}
 }
