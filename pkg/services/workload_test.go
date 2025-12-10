@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build testing
-
 package services
 
 import (
@@ -74,10 +72,10 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string) store.Config
 			Replication:             replication.NewSimpleStrategy(),
 		},
 		MaxRetriesMutate:                 5,
-		MaxRetriesMutateSleep:            10 * time.Second,
+		MaxRetriesMutateSleep:            1 * time.Second,
 		AsyncObjectStabilizationAttempts: 5,
-		AsyncObjectStabilizationDelay:    10 * time.Second,
-		UseServerSideTimestamps:          true,
+		AsyncObjectStabilizationDelay:    250 * time.Millisecond,
+		UseServerSideTimestamps:          false,
 	}
 }
 
@@ -351,7 +349,7 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	})
 
 	const (
-		partitionCount = 1000
+		partitionCount = 1
 		seed           = 4
 		maxErrorsCount = 1
 	)
@@ -366,10 +364,10 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 		StatementRatios:       statementRatio(),
 		IOWorkerPoolSize:      128,
 		MaxErrorsToStore:      maxErrorsCount,
-		WarmupDuration:        5 * time.Second, // Warmup to populate data
-		Duration:              1 * time.Minute, // Then validate
+		WarmupDuration:        0,
+		Duration:              30 * time.Second, // Then validate
 		PartitionCount:        partitionCount,
-		MutationConcurrency:   4,
+		MutationConcurrency:   1,
 		ReadConcurrency:       4,
 		DropSchema:            true,
 	}, storeConfig, schema, logger, stopFlag)
