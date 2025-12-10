@@ -29,7 +29,6 @@ import (
 )
 
 func formatRows(sb *strings.Builder, key string, value any) string {
-	sb.Reset()
 	sb.WriteString(key)
 	sb.WriteByte('=')
 
@@ -83,19 +82,29 @@ func pks(t *typedef.Table, rows Rows) *strset.Set {
 		return strset.NewWithSize(0)
 	}
 
-	keySet := strset.NewWithSize(len(rows) * (len(t.PartitionKeys) + len(t.ClusteringKeys)))
+	keySet := strset.NewWithSize(len(rows))
 
 	var sb strings.Builder
 	sb.Grow(64)
 
 	for _, row := range rows {
+		// Reset string builder for each row to build composite key
+		sb.Reset()
+
+		// Build composite key from all partition and clustering keys
 		for _, pk := range t.PartitionKeys {
-			keySet.Add(formatRows(&sb, pk.Name, row.Get(pk.Name)))
+			formatRows(&sb, pk.Name, row.Get(pk.Name))
+			sb.WriteByte(',')
 		}
 
 		for _, ck := range t.ClusteringKeys {
-			keySet.Add(formatRows(&sb, ck.Name, row.Get(ck.Name)))
+			formatRows(&sb, ck.Name, row.Get(ck.Name))
+			sb.WriteByte(',')
 		}
+
+		// Add the composite key (trimming trailing comma)
+		compositeKey := strings.TrimRight(sb.String(), ",")
+		keySet.Add(compositeKey)
 	}
 
 	return keySet
