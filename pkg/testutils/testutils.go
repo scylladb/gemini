@@ -27,11 +27,14 @@ type (
 	ScyllaContainer struct {
 		OracleContainer testcontainers.Container
 		TestContainer   testcontainers.Container
+		OracleCluster   *gocql.ClusterConfig
+		TestCluster     *gocql.ClusterConfig
 		Oracle          *gocql.Session
 		Test            *gocql.Session
 		OracleHosts     []string
 		TestHosts       []string
 	}
+
 	ManagedScylla struct {
 		Container testcontainers.Container
 		Session   *gocql.Session
