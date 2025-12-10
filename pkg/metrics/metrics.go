@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"runtime/metrics"
 	"time"
 
 	"github.com/pkg/errors"
@@ -121,33 +122,6 @@ var (
 		},
 		[]string{"cluster", "host"},
 	)
-	GeneratorEmittedValues = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "generated_emitted_values",
-		},
-		[]string{"table"},
-	)
-
-	GeneratorDroppedValues = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "generated_dropped_values",
-		},
-		[]string{"table", "type"},
-	)
-
-	MemoryMetrics = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "memory_footprint",
-		},
-		[]string{"type", "context"},
-	)
-
-	FileSizeMetrics = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "file_size_bytes",
-		},
-		[]string{"file"},
-	)
 
 	ExecutionErrors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -166,12 +140,72 @@ var (
 		},
 		[]string{"table"},
 	)
+
+	StatementLoggerEnqueuedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "statement_logger_enqueued_total",
+			Help: "Total number of items enqueued into the statement logger.",
+		},
+	)
+
+	StatementLoggerDequeuedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "statement_logger_dequeued_total",
+			Help: "Total number of items dequeued from the statement logger.",
+		},
+	)
+
+	StatementLoggerItems = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "statement_logger_items",
+			Help: "Total number of statement log items successfully.",
+		},
+	)
+
+	StatementLoggerFlushes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "statement_logger_flushes_total",
+			Help: "Number of flush operations performed by the statement logger per sink.",
+		},
+		[]string{"sink"},
+	)
+
+	StatementErrorLastTS = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "stmt_error_last_timestamp_seconds",
+			Help: "Unix timestamp of the last error seen for this label set.",
+		},
+		[]string{
+			"keyspace",
+			"table",
+			"stmt_type",
+			"stmt_storage",
+			"error",
+			"stmt_logger",
+			"partition_hash",
+		},
+	)
+
+	WorkersCurrent = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "workers_current",
+			Help: "Current number of active workers per job.",
+		},
+		[]string{"job"},
+	)
+
+	mutexWaitSeconds = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "go_sync_mutex_wait_total_seconds",
+			Help: "Total time goroutines spent waiting on sync.Mutex and RWMutex",
+		},
+	)
 )
 
 func init() {
 	r := prometheus.WrapRegistererWithPrefix("gemini_", registerer)
 
-	r.MustRegister(channelMetrics, ExecutionTime)
+	r.MustRegister(ExecutionTime, mutexWaitSeconds)
 
 	r.MustRegister(
 		CQLRequests,
@@ -184,14 +218,16 @@ func init() {
 		GoCQLQueryErrors,
 		GoCQLBatchQueries,
 		GoCQLBatches,
-		GeneratorEmittedValues,
-		GeneratorDroppedValues,
-		MemoryMetrics,
-		FileSizeMetrics,
 		ExecutionErrors,
 		CQLErrorRequests,
 		GeminiInformation,
 		ValidatedRows,
+		StatementLoggerEnqueuedTotal,
+		StatementLoggerDequeuedTotal,
+		StatementLoggerItems,
+		StatementLoggerFlushes,
+		StatementErrorLastTS,
+		WorkersCurrent,
 	)
 
 	r.MustRegister(
@@ -255,6 +291,34 @@ func StartMetricsServer(ctx context.Context, bind string) {
 		<-ctx.Done()
 		if err := server.Shutdown(context.Background()); err != nil {
 			log.Println(err)
+		}
+	}()
+
+	go func() {
+		samples := []metrics.Sample{
+			{Name: "/sync/mutex/wait/total:seconds"},
+		}
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		var lastMutexWait float64
+
+		for {
+			select {
+			case <-ticker.C:
+				metrics.Read(samples)
+				v := samples[0].Value
+				// Value is a float64 for :seconds
+				seconds := v.Float64()
+
+				delta := seconds - lastMutexWait
+				if delta < 0 {
+					delta = 0
+				}
+				mutexWaitSeconds.Add(delta)
+				lastMutexWait = seconds
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 }

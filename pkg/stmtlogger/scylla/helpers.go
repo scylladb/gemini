@@ -40,10 +40,9 @@ func newSession(hosts []string, username, password string, logger *zap.Logger) (
 	cluster.ConnectTimeout = 60 * time.Second
 	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
 		Min:        time.Second,
-		Max:        60 * time.Second,
+		Max:        10 * time.Second,
 		NumRetries: 5,
 	}
-	cluster.PageSize = 10_000
 	cluster.Compressor = &gocql.SnappyCompressor{}
 
 	if username != "" && password != "" {
