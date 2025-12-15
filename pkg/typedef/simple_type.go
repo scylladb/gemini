@@ -216,13 +216,13 @@ func (st SimpleType) ValueVariationsNumber(p RangeConfig) float64 {
 		return 86400000000000
 	case TypeVarint, TypeTimeuuid, TypeUuid, TypeBigint, TypeTimestamp, TypeDecimal,
 		TypeDouble, TypeDuration:
-		return 2 ^ 64
+		return math.MaxUint64
 	case TypeInet, TypeInt, TypeFloat:
-		return 2 ^ 32
+		return math.MaxUint32
 	case TypeSmallint:
-		return 2 ^ 16
+		return math.MaxUint16
 	case TypeTinyint:
-		return 2 ^ 8
+		return math.MaxUint8
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", st))
 	}

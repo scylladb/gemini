@@ -282,5 +282,5 @@ func (ct *CounterType) Indexable() bool {
 // ValueVariationsNumber returns number of bytes generated value holds
 func (ct *CounterType) ValueVariationsNumber(_ RangeConfig) float64 {
 	// As a type, counters are a 64-bit signed integer
-	return 2 ^ 64
+	return math.MaxUint64
 }
