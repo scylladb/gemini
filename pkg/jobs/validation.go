@@ -36,15 +36,16 @@ import (
 )
 
 type Validation struct {
-	generator    partitions.Interface
-	store        store.Store
-	table        *typedef.Table
-	statement    *statements.Generator
-	status       *status.GlobalStatus
-	stopFlag     *stop.Flag
-	keyspaceName string
-	maxAttempts  int
-	delay        time.Duration
+	generator     partitions.Interface
+	store         store.Store
+	table         *typedef.Table
+	statement     *statements.Generator
+	status        *status.GlobalStatus
+	stopFlag      *stop.Flag
+	keyspaceName  string
+	maxAttempts   int
+	selectColumns []string
+	delay         time.Duration
 }
 
 func NewValidation(
@@ -80,15 +81,16 @@ func NewValidation(
 	)
 
 	return &Validation{
-		table:        table,
-		keyspaceName: schema.Keyspace.Name,
-		statement:    statementGenerator,
-		generator:    generator,
-		status:       status,
-		stopFlag:     stopFlag,
-		store:        store,
-		maxAttempts:  maxAttempts,
-		delay:        delay,
+		table:         table,
+		keyspaceName:  schema.Keyspace.Name,
+		statement:     statementGenerator,
+		generator:     generator,
+		status:        status,
+		stopFlag:      stopFlag,
+		store:         store,
+		maxAttempts:   maxAttempts,
+		selectColumns: table.SelectColumnNames(),
+		delay:         delay,
 	}
 }
 
@@ -136,7 +138,7 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 // createSelectStmtForPartitionKeys creates a SELECT statement for specific partition key values
 func (v *Validation) createSelectStmtForPartitionKeys(partitionKeyValues *typedef.Values) *typedef.Stmt {
 	keyspaceAndTable := v.keyspaceName + "." + v.table.Name
-	builder := qb.Select(keyspaceAndTable)
+	builder := qb.Select(keyspaceAndTable).Columns(v.selectColumns...)
 
 	for _, pk := range v.table.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))

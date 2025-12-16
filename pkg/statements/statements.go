@@ -60,6 +60,7 @@ type Generator struct {
 	ratioController  *RatioController
 	keyspace         string
 	keyspaceAndTable string
+	selectColumns    []string
 	useLWT           bool
 }
 
@@ -81,6 +82,7 @@ func New(
 		useLWT:           useLWT,
 		generator:        valueGenerator,
 		ratioController:  ratioController,
+		selectColumns:    table.SelectColumnNames(),
 	}
 }
 

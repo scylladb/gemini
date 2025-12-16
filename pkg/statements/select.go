@@ -75,7 +75,7 @@ func (g *Generator) genSelectSinglePartitionQuery(ctx context.Context) (*typedef
 func (g *Generator) getSelectSinglePartitionKeys(_ context.Context) (typedef.PartitionKeys, *qb.SelectBuilder, error) {
 	partitionKeys := g.generator.Next()
 
-	builder := qb.Select(g.keyspaceAndTable)
+	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
 	for _, pk := range g.table.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
 	}
@@ -86,7 +86,7 @@ func (g *Generator) getSelectSinglePartitionKeys(_ context.Context) (typedef.Par
 }
 
 func (g *Generator) buildSelectMultiPartitionsKey(_ context.Context) (*typedef.Values, *qb.SelectBuilder, error) {
-	builder := qb.Select(g.keyspaceAndTable)
+	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
 
 	numQueryPKs := g.getMultiplePartitionKeys()
 	pks := typedef.NewValues(g.table.PartitionKeys.Len())
@@ -182,7 +182,7 @@ func (g *Generator) genMultiplePartitionClusteringRangeQuery(ctx context.Context
 func (g *Generator) genSingleIndexQuery() *typedef.Stmt {
 	idxCount := g.getIndex(0)
 	values := make([]any, 0, idxCount)
-	builder := qb.Select(g.keyspaceAndTable).AllowFiltering()
+	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...).AllowFiltering()
 
 	g.table.RLock()
 	defer g.table.RUnlock()
