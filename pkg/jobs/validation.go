@@ -43,8 +43,8 @@ type Validation struct {
 	status        *status.GlobalStatus
 	stopFlag      *stop.Flag
 	keyspaceName  string
-	maxAttempts   int
 	selectColumns []string
+	maxAttempts   int
 	delay         time.Duration
 }
 
