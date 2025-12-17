@@ -1,5 +1,4 @@
 export default {
-  parserPreset: 'conventional-changelog-atom',
   formatter: '@commitlint/format',
   rules: {
     "header-max-length": [2, "always", 120],
