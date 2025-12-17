@@ -71,7 +71,7 @@ func TestCreateSelectStmtForPartitionKeys(t *testing.T) {
 			partitionKeyValues: typedef.NewValuesFromMap(map[string][]any{
 				"pk1": {int32(123)},
 			}),
-			expectedQuery: "SELECT * FROM test_keyspace.test_table WHERE pk1=? ",
+			expectedQuery: "SELECT pk1 FROM test_keyspace.test_table WHERE pk1=? ",
 		},
 		{
 			name: "multiple partition keys",
@@ -87,7 +87,7 @@ func TestCreateSelectStmtForPartitionKeys(t *testing.T) {
 				"pk1": {int32(123)},
 				"pk2": {"test_value"},
 			}),
-			expectedQuery: "SELECT * FROM test_keyspace.test_table WHERE pk1=? AND pk2=? ",
+			expectedQuery: "SELECT pk1,pk2 FROM test_keyspace.test_table WHERE pk1=? AND pk2=? ",
 		},
 		{
 			name: "uuid partition key",
@@ -101,7 +101,7 @@ func TestCreateSelectStmtForPartitionKeys(t *testing.T) {
 			partitionKeyValues: typedef.NewValuesFromMap(map[string][]any{
 				"user_id": {"550e8400-e29b-41d4-a716-446655440000"},
 			}),
-			expectedQuery: "SELECT * FROM my_keyspace.users WHERE user_id=? ",
+			expectedQuery: "SELECT user_id FROM my_keyspace.users WHERE user_id=? ",
 		},
 	}
 
@@ -110,8 +110,9 @@ func TestCreateSelectStmtForPartitionKeys(t *testing.T) {
 			t.Parallel()
 
 			v := &Validation{
-				table:        tt.table,
-				keyspaceName: tt.keyspaceName,
+				table:         tt.table,
+				keyspaceName:  tt.keyspaceName,
+				selectColumns: tt.table.SelectColumnNames(),
 			}
 
 			stmt := v.createSelectStmtForPartitionKeys(tt.partitionKeyValues)
@@ -143,9 +144,10 @@ func TestValidateDeletedPartition_Success(t *testing.T) {
 	}
 
 	v := &Validation{
-		table:        table,
-		keyspaceName: "test_keyspace",
-		store:        mockSt,
+		table:         table,
+		keyspaceName:  "test_keyspace",
+		store:         mockSt,
+		selectColumns: table.SelectColumnNames(),
 	}
 
 	partitionKeyValues := typedef.NewValuesFromMap(map[string][]any{
@@ -177,9 +179,10 @@ func TestValidateDeletedPartition_StoreError(t *testing.T) {
 	}
 
 	v := &Validation{
-		table:        table,
-		keyspaceName: "test_keyspace",
-		store:        mockSt,
+		table:         table,
+		keyspaceName:  "test_keyspace",
+		store:         mockSt,
+		selectColumns: table.SelectColumnNames(),
 	}
 
 	partitionKeyValues := typedef.NewValuesFromMap(map[string][]any{
@@ -215,9 +218,10 @@ func TestValidateDeletedPartition_ContextCanceled(t *testing.T) {
 	}
 
 	v := &Validation{
-		table:        table,
-		keyspaceName: "test_keyspace",
-		store:        mockSt,
+		table:         table,
+		keyspaceName:  "test_keyspace",
+		store:         mockSt,
+		selectColumns: table.SelectColumnNames(),
 	}
 
 	partitionKeyValues := typedef.NewValuesFromMap(map[string][]any{
@@ -249,9 +253,10 @@ func TestValidateDeletedPartition_ContextDeadlineExceeded(t *testing.T) {
 	}
 
 	v := &Validation{
-		table:        table,
-		keyspaceName: "test_keyspace",
-		store:        mockSt,
+		table:         table,
+		keyspaceName:  "test_keyspace",
+		store:         mockSt,
+		selectColumns: table.SelectColumnNames(),
 	}
 
 	partitionKeyValues := typedef.NewValuesFromMap(map[string][]any{
@@ -288,9 +293,10 @@ func TestValidateDeletedPartition_MultiplePartitionKeys(t *testing.T) {
 	}
 
 	v := &Validation{
-		table:        table,
-		keyspaceName: "test_keyspace",
-		store:        mockSt,
+		table:         table,
+		keyspaceName:  "test_keyspace",
+		store:         mockSt,
+		selectColumns: table.SelectColumnNames(),
 	}
 
 	partitionKeyValues := typedef.NewValuesFromMap(map[string][]any{

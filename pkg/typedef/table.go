@@ -44,6 +44,22 @@ func (t *Table) PartitionKeysLenValues() int {
 	return t.partitionKeysLenValues
 }
 
+func (t *Table) SelectColumnNames() []string {
+	columns := make([]string, 0, len(t.PartitionKeys)+len(t.ClusteringKeys)+len(t.Columns))
+
+	for _, pk := range t.PartitionKeys {
+		columns = append(columns, pk.Name)
+	}
+	for _, ck := range t.ClusteringKeys {
+		columns = append(columns, ck.Name)
+	}
+	for _, col := range t.Columns {
+		columns = append(columns, col.Name)
+	}
+
+	return columns
+}
+
 func (t *Table) IsCounterTable() bool {
 	if len(t.Columns) != 1 {
 		return false

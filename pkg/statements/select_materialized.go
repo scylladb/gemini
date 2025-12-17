@@ -25,6 +25,22 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
+func materializedViewColumns(mv *typedef.MaterializedView) []string {
+	columns := make([]string, 0, len(mv.PartitionKeys)+len(mv.ClusteringKeys)+1)
+
+	for _, pk := range mv.PartitionKeys {
+		columns = append(columns, pk.Name)
+	}
+	for _, ck := range mv.ClusteringKeys {
+		columns = append(columns, ck.Name)
+	}
+	if mv.NonPrimaryKey.IsPresent() {
+		columns = append(columns, mv.NonPrimaryKey.MustGet().Name)
+	}
+
+	return columns
+}
+
 func (g *Generator) SelectFromMaterializedView(ctx context.Context) (*typedef.Stmt, error) {
 	mv := &g.table.MaterializedViews[utils.RandInt2(g.random, 0, len(g.table.MaterializedViews))]
 
@@ -45,7 +61,7 @@ func (g *Generator) SelectFromMaterializedView(ctx context.Context) (*typedef.St
 func (g *Generator) genSinglePartitionQueryMv(ctx context.Context, mv *typedef.MaterializedView) (*typedef.Stmt, error) {
 	pk := g.generator.Next()
 
-	builder := qb.Select(g.keyspace + "." + mv.Name)
+	builder := qb.Select(g.keyspace + "." + mv.Name).Columns(materializedViewColumns(mv)...)
 
 	for _, p := range mv.PartitionKeys {
 		builder = builder.Where(qb.Eq(p.Name))
@@ -64,7 +80,7 @@ func (g *Generator) genSinglePartitionQueryMv(ctx context.Context, mv *typedef.M
 func (g *Generator) genMultiplePartitionQueryMv(ctx context.Context, mv *typedef.MaterializedView) (*typedef.Stmt, error) {
 	numQueryPKs := utils.RandInt2(g.random, 2, mv.PartitionKeys.Len())
 	values := make([]any, 0, numQueryPKs*mv.PartitionKeys.LenValues())
-	builder := qb.Select(g.keyspace + "." + mv.Name)
+	builder := qb.Select(g.keyspace + "." + mv.Name).Columns(materializedViewColumns(mv)...)
 
 	for _, pk := range mv.PartitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
