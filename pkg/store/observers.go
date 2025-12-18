@@ -16,7 +16,9 @@ package store
 
 import (
 	"context"
+	"net"
 	"slices"
+	"strconv"
 	"sync"
 
 	"github.com/gocql/gocql"
@@ -129,7 +131,7 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 	if data == nil {
 		return
 	}
-	instance := batch.Host.ConnectAddressAndPort()
+	instance := net.JoinHostPort(batch.Host.ConnectAddress().String(), strconv.Itoa(batch.Host.Port()))
 
 	var errStr string
 
@@ -178,7 +180,8 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 		return
 	}
 
-	instance := query.Host.ListenAddress().String()
+	instance := net.JoinHostPort(query.Host.ConnectAddress().String(), strconv.Itoa(query.Host.Port()))
+
 	var errStr string
 	if query.Err != nil {
 		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, query.Err.Error()).Inc()
