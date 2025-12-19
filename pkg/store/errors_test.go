@@ -15,8 +15,8 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
-	"regexp"
 	"testing"
 	"time"
 
@@ -26,11 +26,10 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func TestValidationError_Error_OnlyLastAttempt(t *testing.T) {
+func TestValidationError_Error_FinalOnly(t *testing.T) {
 	stmt := &typedef.Stmt{Query: "SELECT * FROM ks.tbl WHERE pk0=?"}
-	table := &typedef.Table{Name: "tbl"}
 
-	ve := NewValidationError("Validation failed", stmt, table)
+	ve := NewValidationError("Validation failed", stmt)
 	ve.StartTime = time.Now().Add(-500 * time.Millisecond)
 
 	// Add multiple attempts
@@ -42,29 +41,9 @@ func TestValidationError_Error_OnlyLastAttempt(t *testing.T) {
 
 	msg := ve.Error()
 
-	// Basic summary
-	if !regexp.MustCompile(`Validation failed failed after 2 attempts \(took`).MatchString(msg) {
-		t.Fatalf("expected summary with attempts count, got:\n%s", msg)
-	}
-	if !regexp.MustCompile(`on table tbl`).MatchString(msg) {
-		t.Fatalf("expected table name in error, got:\n%s", msg)
-	}
-	if !regexp.MustCompile(`with query: SELECT \* FROM ks.tbl WHERE pk0=\?`).MatchString(msg) {
-		t.Fatalf("expected query in error, got:\n%s", msg)
-	}
-
-	// Only last attempt should be present
-	if !regexp.MustCompile(`Last attempt:\n\s+attempt 1 \[oracle \(took`).MatchString(msg) {
-		t.Fatalf("expected only last attempt details, got:\n%s", msg)
-	}
-	if regexp.MustCompile(`attempt 0 \[test`).MatchString(msg) {
-		t.Fatalf("should not list earlier attempts, got:\n%s", msg)
-	}
-
-	// Final error included
-	if !regexp.MustCompile(`Final error: final difference`).MatchString(msg) {
-		t.Fatalf("expected final error message, got:\n%s", msg)
-	}
+	assert.Equal(t, "final difference", msg)
+	assert.Equal(t, 2, ve.TotalAttempts)
+	assert.ErrorIs(t, ve, lastErr)
 }
 
 func TestErrorRowDifference_Error_CountsOnly(t *testing.T) {
@@ -83,58 +62,52 @@ func TestErrorRowDifference_Error_WithMissingLists(t *testing.T) {
 		OracleRows:      1,
 	}
 	msg := e.Error()
-	assert.Contains(t, msg, "test is missing rows: [r1]")
-	assert.Contains(t, msg, "oracle is missing rows: [r2]")
+	assert.Contains(t, msg, "missing_in_test=[r1]")
+	assert.Contains(t, msg, "missing_in_oracle=[r2]")
+}
+
+func TestErrorRowDifference_Error_WithDiff(t *testing.T) {
+	t.Parallel()
+	diff := "pk: pk0=a\n- col1: 1\n+ col1: 2\n"
+	e := ErrorRowDifference{Diff: diff}
+	assert.Equal(t, diff, e.Error())
 }
 
 func TestValidationError_Utilities(t *testing.T) {
 	t.Parallel()
 
 	stmt := &typedef.Stmt{Query: "SELECT x"}
-	table := &typedef.Table{Name: "t"}
 
-	ve := NewValidationError("validation", stmt, table)
+	ve := NewValidationError("validation", stmt)
 	e1 := errors.New("e1")
-	e2 := errors.New("e2")
 
 	// Add attempts on both stores
 	ve.AddAttempt(0, TypeTest, e1, 10*time.Millisecond)
-	ve.AddAttempt(1, TypeOracle, e2, 5*time.Millisecond)
-
-	// GetAttemptsByStore
-	ts := ve.GetAttemptsByStore(TypeTest)
-	os := ve.GetAttemptsByStore(TypeOracle)
-	require.Len(t, ts, 1)
-	require.Len(t, os, 1)
-	assert.Equal(t, e1, ts[0].Error)
-	assert.Equal(t, e2, os[0].Error)
-
-	// GetLastAttempt
-	la := ve.GetLastAttempt()
-	require.NotNil(t, la)
-	assert.Equal(t, 1, la.Attempt)
-	assert.Equal(t, TypeOracle, la.Store)
-
-	// GetLastAttemptByStore
-	laTest := ve.GetLastAttemptByStore(TypeTest)
-	require.NotNil(t, laTest)
-	assert.Equal(t, 0, laTest.Attempt)
-	laOracle := ve.GetLastAttemptByStore(TypeOracle)
-	require.NotNil(t, laOracle)
-	assert.Equal(t, 1, laOracle.Attempt)
-
-	// HasStore
-	assert.True(t, ve.HasStore(TypeTest))
-	assert.True(t, ve.HasStore(TypeOracle))
 
 	// Finalize and Error/Unwrap/Is
 	final := errors.New("final")
 	ve.Finalize(final)
 	msg := ve.Error()
-	assert.Contains(t, msg, "failed after 2 attempts")
+	assert.Equal(t, final.Error(), msg)
 	assert.ErrorIs(t, ve, final) // Unwrap
-	assert.ErrorIs(t, ve, e1)    // Is matches attempt error
-	assert.ErrorIs(t, ve, e2)    // Is matches attempt error
+	assert.False(t, errors.Is(ve, e1))
+}
+
+func TestValidationError_MarshalJSON_SanitizesAttemptsAndTable(t *testing.T) {
+	t.Parallel()
+
+	stmt := &typedef.Stmt{Query: "SELECT * FROM ks.tbl WHERE pk0=?"}
+
+	ve := NewValidationError("Validation failed", stmt)
+	ve.AddAttempt(0, TypeTest, errors.New("temporary network failure"), 5*time.Millisecond)
+	ve.Finalize(errors.New("final difference"))
+
+	data, err := json.Marshal(ve)
+	require.NoError(t, err)
+	jsonStr := string(data)
+
+	assert.Contains(t, jsonStr, `"final_error":"final difference"`)
+	assert.Contains(t, jsonStr, `"statement"`)
 }
 
 func TestMutationError_Utilities(t *testing.T) {
@@ -152,11 +125,5 @@ func TestMutationError_Utilities(t *testing.T) {
 	assert.Contains(t, msg, "Store status: test=true, oracle=false")
 
 	// Is/Unwrap
-	e1 := errors.New("attempt-1")
-	e2 := errors.New("attempt-2")
-	me.AddAttempt(0, TypeTest, e1, 1*time.Millisecond)
-	me.AddAttempt(1, TypeOracle, e2, 1*time.Millisecond)
-	assert.ErrorIs(t, me, e1)
-	assert.ErrorIs(t, me, e2)
 	assert.ErrorIs(t, me, me.FinalError)
 }

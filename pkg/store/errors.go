@@ -15,6 +15,7 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -31,68 +32,53 @@ const (
 	TypeOracle Type = "oracle"
 )
 
-// AttemptError represents an error that occurred during a specific attempt
-type AttemptError struct {
-	Timestamp time.Time     `json:"timestamp"`
-	Error     error         `json:"error"`
-	Store     Type          `json:"store"`
-	Attempt   int           `json:"attempt"`
-	Duration  time.Duration `json:"duration,omitempty"`
-}
-
-// String returns a formatted string representation of the attempt error
-func (ae AttemptError) String() string {
-	durationStr := ""
-	if ae.Duration > 0 {
-		durationStr = fmt.Sprintf(" (took %v)", ae.Duration)
-	}
-	return fmt.Sprintf("attempt %d [%s%s]: %v", ae.Attempt, ae.Store, durationStr, ae.Error)
-}
-
 // ValidationError represents a comprehensive validation error with all attempts
 type ValidationError struct {
-	StartTime     time.Time      `json:"start_time"`
-	EndTime       time.Time      `json:"end_time"`
-	FinalError    error          `json:"final_error"`
-	Statement     *typedef.Stmt  `json:"statement"`
-	Table         *typedef.Table `json:"table"`
-	Operation     string         `json:"operation"`
-	Attempts      []AttemptError `json:"attempts"`
-	TotalAttempts int            `json:"total_attempts"`
+	StartTime     time.Time     `json:"start_time"`
+	EndTime       time.Time     `json:"end_time"`
+	FinalError    error         `json:"-"`
+	Statement     *typedef.Stmt `json:"statement"`
+	Operation     string        `json:"operation"`
+	TotalAttempts int           `json:"total_attempts"`
 }
 
 // Error implements the error interface
 func (ve ValidationError) Error() string {
-	var sb strings.Builder
-
-	duration := ve.EndTime.Sub(ve.StartTime)
-	sb.WriteString(fmt.Sprintf("%s failed after %d attempts (took %v)",
-		ve.Operation, ve.TotalAttempts, duration))
-
-	if ve.Table != nil {
-		sb.WriteString(fmt.Sprintf(" on table %s", ve.Table.Name))
-	}
-
-	if ve.Statement != nil {
-		sb.WriteString(fmt.Sprintf(" with query: %s", ve.Statement.Query))
-		if ve.Statement.PartitionKeys.Values != nil && ve.Statement.PartitionKeys.Values.Len() > 0 {
-			sb.WriteString(fmt.Sprintf(" (has %d partition keys)", ve.Statement.PartitionKeys.Values.Len()))
-		}
-	}
-
-	// Only include the last attempt to keep logs concise and focused on the
-	// final discrepancy the system cares about.
-	if len(ve.Attempts) > 0 {
-		last := ve.Attempts[len(ve.Attempts)-1]
-		sb.WriteString("\n\nLast attempt:")
-		sb.WriteString(fmt.Sprintf("\n  %s", last.String()))
-	}
-
 	if ve.FinalError != nil {
-		sb.WriteString(fmt.Sprintf("\n\nFinal error: %v", ve.FinalError))
+		return ve.FinalError.Error()
 	}
 
-	return sb.String()
+	if ve.Operation != "" {
+		return fmt.Sprintf("%s failed", ve.Operation)
+	}
+
+	return "validation failed"
+}
+
+// MarshalJSON strips verbose attempt and table data while keeping core context.
+func (ve ValidationError) MarshalJSON() ([]byte, error) {
+	finalErr := ""
+	if ve.FinalError != nil {
+		finalErr = ve.FinalError.Error()
+	}
+
+	payload := struct {
+		StartTime     time.Time     `json:"start_time"`
+		EndTime       time.Time     `json:"end_time"`
+		FinalError    string        `json:"final_error"`
+		Statement     *typedef.Stmt `json:"statement,omitempty"`
+		Operation     string        `json:"operation,omitempty"`
+		TotalAttempts int           `json:"total_attempts,omitempty"`
+	}{
+		StartTime:     ve.StartTime,
+		EndTime:       ve.EndTime,
+		FinalError:    finalErr,
+		Statement:     ve.Statement,
+		Operation:     ve.Operation,
+		TotalAttempts: ve.TotalAttempts,
+	}
+
+	return json.Marshal(payload)
 }
 
 // Unwrap implements error unwrapping for proper error chain support
@@ -102,81 +88,29 @@ func (ve ValidationError) Unwrap() error {
 
 // Is implements error comparison for proper errors.Is() support
 func (ve ValidationError) Is(target error) bool {
-	// Check if any of the attempt errors matches the target
-	for _, attempt := range ve.Attempts {
-		if errors.Is(attempt.Error, target) {
-			return true
-		}
-	}
-	return false
+	return errors.Is(ve.FinalError, target)
 }
 
 // AddAttempt adds an attempt error to the validation error
 func (ve *ValidationError) AddAttempt(attempt int, store Type, err error, duration time.Duration) {
-	ve.Attempts = append(ve.Attempts, AttemptError{
-		Attempt:   attempt,
-		Timestamp: time.Now().UTC(),
-		Store:     store,
-		Error:     err,
-		Duration:  duration,
-	})
-}
-
-// GetAttemptsByStore returns all attempts for a specific store
-func (ve ValidationError) GetAttemptsByStore(store Type) []AttemptError {
-	var attempts []AttemptError
-	for _, attempt := range ve.Attempts {
-		if attempt.Store == store {
-			attempts = append(attempts, attempt)
-		}
-	}
-	return attempts
-}
-
-// GetLastAttempt returns the last attempt error, or nil if no attempts
-func (ve ValidationError) GetLastAttempt() *AttemptError {
-	if len(ve.Attempts) == 0 {
-		return nil
-	}
-	return &ve.Attempts[len(ve.Attempts)-1]
-}
-
-// GetLastAttemptByStore returns the last attempt error for a specific store
-func (ve ValidationError) GetLastAttemptByStore(store Type) *AttemptError {
-	for i := len(ve.Attempts) - 1; i >= 0; i-- {
-		if ve.Attempts[i].Store == store {
-			return &ve.Attempts[i]
-		}
-	}
-	return nil
-}
-
-// HasStore returns true if any attempts were made on the specified store
-func (ve ValidationError) HasStore(store Type) bool {
-	for _, attempt := range ve.Attempts {
-		if attempt.Store == store {
-			return true
-		}
-	}
-	return false
+	ve.TotalAttempts++
 }
 
 // NewValidationError creates a new ValidationError
-func NewValidationError(operation string, stmt *typedef.Stmt, table *typedef.Table) *ValidationError {
+func NewValidationError(operation string, stmt *typedef.Stmt) *ValidationError {
 	return &ValidationError{
 		Operation: operation,
 		Statement: stmt,
-		Table:     table,
 		StartTime: time.Now().UTC(),
-		Attempts:  make([]AttemptError, 0),
 	}
 }
 
 // Finalize marks the validation error as complete
 func (ve *ValidationError) Finalize(finalError error) {
 	ve.EndTime = time.Now().UTC()
-	ve.TotalAttempts = len(ve.Attempts)
-	ve.FinalError = finalError
+	if finalError != nil {
+		ve.FinalError = finalError
+	}
 }
 
 // StoreMutationError represents a comprehensive mutation error with all attempts
@@ -192,9 +126,7 @@ func NewStoreMutationError(stmt *typedef.Stmt, table *typedef.Table) *MutationEr
 		ValidationError: ValidationError{
 			Operation: "mutation",
 			Statement: stmt,
-			Table:     table,
 			StartTime: time.Now().UTC(),
-			Attempts:  make([]AttemptError, 0),
 		},
 	}
 }
@@ -228,11 +160,5 @@ func (me MutationError) Unwrap() error {
 
 // Is implements error comparison for proper errors.Is() support
 func (me MutationError) Is(target error) bool {
-	// Check if any of the attempt errors matches the target
-	for _, attempt := range me.Attempts {
-		if errors.Is(attempt.Error, target) {
-			return true
-		}
-	}
-	return false
+	return errors.Is(me.FinalError, target)
 }
