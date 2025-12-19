@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -39,11 +40,11 @@ type ValidationError struct {
 	FinalError    error         `json:"-"`
 	Statement     *typedef.Stmt `json:"statement"`
 	Operation     string        `json:"operation"`
-	TotalAttempts int           `json:"total_attempts"`
+	TotalAttempts atomic.Uint64 `json:"total_attempts"`
 }
 
 // Error implements the error interface
-func (ve ValidationError) Error() string {
+func (ve *ValidationError) Error() string {
 	if ve.FinalError != nil {
 		return ve.FinalError.Error()
 	}
@@ -56,7 +57,7 @@ func (ve ValidationError) Error() string {
 }
 
 // MarshalJSON strips verbose attempt and table data while keeping core context.
-func (ve ValidationError) MarshalJSON() ([]byte, error) {
+func (ve *ValidationError) MarshalJSON() ([]byte, error) {
 	finalErr := ""
 	if ve.FinalError != nil {
 		finalErr = ve.FinalError.Error()
@@ -68,32 +69,32 @@ func (ve ValidationError) MarshalJSON() ([]byte, error) {
 		FinalError    string        `json:"final_error"`
 		Statement     *typedef.Stmt `json:"statement,omitempty"`
 		Operation     string        `json:"operation,omitempty"`
-		TotalAttempts int           `json:"total_attempts,omitempty"`
+		TotalAttempts uint64        `json:"total_attempts,omitempty"`
 	}{
 		StartTime:     ve.StartTime,
 		EndTime:       ve.EndTime,
 		FinalError:    finalErr,
 		Statement:     ve.Statement,
 		Operation:     ve.Operation,
-		TotalAttempts: ve.TotalAttempts,
+		TotalAttempts: ve.TotalAttempts.Load(),
 	}
 
 	return json.Marshal(payload)
 }
 
 // Unwrap implements error unwrapping for proper error chain support
-func (ve ValidationError) Unwrap() error {
+func (ve *ValidationError) Unwrap() error {
 	return ve.FinalError
 }
 
 // Is implements error comparison for proper errors.Is() support
-func (ve ValidationError) Is(target error) bool {
+func (ve *ValidationError) Is(target error) bool {
 	return errors.Is(ve.FinalError, target)
 }
 
-// AddAttempt adds an attempt error to the validation error
-func (ve *ValidationError) AddAttempt(attempt int, store Type, err error, duration time.Duration) {
-	ve.TotalAttempts++
+// AddAttempt increments attempts; detailed per-attempt data is intentionally discarded to keep errors small.
+func (ve *ValidationError) AddAttempt(_ error) {
+	ve.TotalAttempts.Add(1)
 }
 
 // NewValidationError creates a new ValidationError
@@ -121,7 +122,7 @@ type MutationError struct {
 }
 
 // NewStoreMutationError creates a new StoreMutationError
-func NewStoreMutationError(stmt *typedef.Stmt, table *typedef.Table) *MutationError {
+func NewStoreMutationError(stmt *typedef.Stmt) *MutationError {
 	return &MutationError{
 		ValidationError: ValidationError{
 			Operation: "mutation",
@@ -142,7 +143,7 @@ func (me *MutationError) SetStoreSuccess(store Type, success bool) {
 }
 
 // Error implements the error interface with mutation-specific details
-func (me MutationError) Error() string {
+func (me *MutationError) Error() string {
 	base := me.ValidationError.Error()
 
 	var sb strings.Builder
@@ -154,11 +155,11 @@ func (me MutationError) Error() string {
 }
 
 // Unwrap implements error unwrapping for proper error chain support
-func (me MutationError) Unwrap() error {
+func (me *MutationError) Unwrap() error {
 	return me.FinalError
 }
 
 // Is implements error comparison for proper errors.Is() support
-func (me MutationError) Is(target error) bool {
+func (me *MutationError) Is(target error) bool {
 	return errors.Is(me.FinalError, target)
 }

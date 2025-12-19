@@ -43,5 +43,4 @@ func (e ErrorRowDifference) Error() string {
 			e.OracleRows,
 		)
 	}
-
 }

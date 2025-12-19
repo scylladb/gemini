@@ -33,8 +33,8 @@ func TestValidationError_Error_FinalOnly(t *testing.T) {
 	ve.StartTime = time.Now().Add(-500 * time.Millisecond)
 
 	// Add multiple attempts
-	ve.AddAttempt(0, TypeTest, errors.New("temporary network failure"), 5*time.Millisecond)
-	ve.AddAttempt(1, TypeOracle, errors.New("rows differ: - col1: a + col1: b"), 7*time.Millisecond)
+	ve.AddAttempt(errors.New("temporary network failure"))
+	ve.AddAttempt(errors.New("rows differ: - col1: a + col1: b"))
 
 	lastErr := errors.New("final difference")
 	ve.Finalize(lastErr)
@@ -42,7 +42,7 @@ func TestValidationError_Error_FinalOnly(t *testing.T) {
 	msg := ve.Error()
 
 	assert.Equal(t, "final difference", msg)
-	assert.Equal(t, 2, ve.TotalAttempts)
+	assert.Equal(t, uint64(2), ve.TotalAttempts.Load())
 	assert.ErrorIs(t, ve, lastErr)
 }
 
@@ -82,7 +82,7 @@ func TestValidationError_Utilities(t *testing.T) {
 	e1 := errors.New("e1")
 
 	// Add attempts on both stores
-	ve.AddAttempt(0, TypeTest, e1, 10*time.Millisecond)
+	ve.AddAttempt(e1)
 
 	// Finalize and Error/Unwrap/Is
 	final := errors.New("final")
@@ -99,7 +99,7 @@ func TestValidationError_MarshalJSON_SanitizesAttemptsAndTable(t *testing.T) {
 	stmt := &typedef.Stmt{Query: "SELECT * FROM ks.tbl WHERE pk0=?"}
 
 	ve := NewValidationError("Validation failed", stmt)
-	ve.AddAttempt(0, TypeTest, errors.New("temporary network failure"), 5*time.Millisecond)
+	ve.AddAttempt(errors.New("temporary network failure"))
 	ve.Finalize(errors.New("final difference"))
 
 	data, err := json.Marshal(ve)
@@ -114,7 +114,7 @@ func TestMutationError_Utilities(t *testing.T) {
 	t.Parallel()
 
 	stmt := &typedef.Stmt{Query: "UPDATE t SET v=1 WHERE k=1"}
-	me := NewStoreMutationError(stmt, nil)
+	me := NewStoreMutationError(stmt)
 
 	// Set store success flags and verify Error report suffix
 	me.SetStoreSuccess(TypeTest, true)
