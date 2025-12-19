@@ -30,7 +30,7 @@ import (
 
 // CompareCollectedRows compares already collected rows from both sides
 func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) ComparisonResult {
-	result := ComparisonResult{}
+	result := ComparisonResult{Table: table}
 
 	// Handle empty result sets
 	if len(testRows) == 0 && len(oracleRows) == 0 {
@@ -51,7 +51,7 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 
 	// Fast-path: if rows are deeply equal after sort, all match.
 	if reflect.DeepEqual(testRows, oracleRows) {
-		return ComparisonResult{MatchCount: len(testRows)}
+		return ComparisonResult{Table: table, MatchCount: len(testRows)}
 	}
 
 	// If row counts differ, report only set differences and keep MatchCount = 0.
@@ -164,8 +164,8 @@ func (cr ComparisonResult) ToError() error {
 		// For row-count mismatches we report only the unmatched counts,
 		// excluding matched rows from the totals to satisfy existing tests.
 		err = multierr.Append(err, ErrorRowDifference{
-			MissingInTest:   rowsToStrings(cr.OracleOnlyRows),
-			MissingInOracle: rowsToStrings(cr.TestOnlyRows),
+			MissingInTest:   rowsToKeyStrings(cr.Table, cr.OracleOnlyRows),
+			MissingInOracle: rowsToKeyStrings(cr.Table, cr.TestOnlyRows),
 			TestRows:        len(cr.TestOnlyRows),
 			OracleRows:      len(cr.OracleOnlyRows),
 		})
@@ -182,14 +182,40 @@ func (cr ComparisonResult) ToError() error {
 	return err
 }
 
-// rowsToStrings converts rows to string representations for error reporting
-func rowsToStrings(rows []Row) []string {
+// rowsToKeyStrings renders only the primary and clustering key values for compact error reporting.
+func rowsToKeyStrings(table *typedef.Table, rows []Row) []string {
+	if len(rows) == 0 {
+		return nil
+	}
+
 	result := make([]string, len(rows))
 	for i, row := range rows {
-		bytes, _ := json.Marshal(row)
-		result[i] = string(bytes)
+		result[i] = rowKeyString(table, row)
 	}
+
 	return result
+}
+
+func rowKeyString(table *typedef.Table, row Row) string {
+	if table == nil {
+		bytes, _ := json.Marshal(row)
+		return string(bytes)
+	}
+
+	var sb strings.Builder
+	sb.Grow(64)
+
+	for _, pk := range table.PartitionKeys {
+		formatRows(&sb, pk.Name, row.Get(pk.Name))
+		sb.WriteByte(',')
+	}
+
+	for _, ck := range table.ClusteringKeys {
+		formatRows(&sb, ck.Name, row.Get(ck.Name))
+		sb.WriteByte(',')
+	}
+
+	return strings.TrimRight(sb.String(), ",")
 }
 
 // diffRows produces an editor-friendly unified diff between two rows.

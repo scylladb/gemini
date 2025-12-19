@@ -528,7 +528,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		zap.Int("total_attempts", maxAttempts),
 		zap.Bool("test_store_success", mutationErr.TestStoreSuccess),
 		zap.Bool("oracle_store_success", mutationErr.OracleStoreSuccess),
-		zap.Int("total_attempt_errors", len(mutationErr.Attempts)),
+		zap.Int("total_attempt_errors", mutationErr.TotalAttempts),
 		zap.Error(mutationErr))
 
 	return mutationErr
@@ -541,11 +541,12 @@ func (ds delegatingStore) Check(
 	stmt *typedef.Stmt,
 	_ int,
 ) (int, error) {
-	validationErr := NewValidationError("validation", stmt, table)
+	validationErr := NewValidationError("validation", stmt)
 	maxAttempts := ds.validationRetries
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}
+	var lastErr error
 
 	for attempt := range maxAttempts {
 		attemptStart := time.Now()
@@ -617,9 +618,11 @@ func (ds delegatingStore) Check(
 			// Record any errors that occurred
 			if testErr != nil {
 				validationErr.AddAttempt(attempt, TypeTest, testErr, duration)
+				lastErr = testErr
 			}
 			if oracleErr != nil {
 				validationErr.AddAttempt(attempt, TypeOracle, oracleErr, duration)
+				lastErr = oracleErr
 			}
 
 			// Check if comparison succeeded
@@ -634,6 +637,7 @@ func (ds delegatingStore) Check(
 
 				// Found differences, record them
 				validationErr.AddAttempt(attempt, TypeTest, compErr, duration)
+				lastErr = compErr
 			}
 		}
 
@@ -655,7 +659,7 @@ func (ds delegatingStore) Check(
 	}
 
 	// All attempts failed
-	if len(validationErr.Attempts) == 0 {
+	if validationErr.TotalAttempts == 0 {
 		return 0, nil
 	}
 
@@ -664,12 +668,7 @@ func (ds delegatingStore) Check(
 	}
 
 	// Finalize the validation error with summary
-	lastAttempt := validationErr.GetLastAttempt()
-	var finalErr error
-	if lastAttempt != nil {
-		finalErr = lastAttempt.Error
-	}
-	validationErr.Finalize(finalErr)
+	validationErr.Finalize(lastErr)
 
 	return 0, validationErr
 }

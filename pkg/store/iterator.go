@@ -25,6 +25,7 @@ type RowIterator func(yield func(Row, error) bool)
 
 // ComparisonResult represents the result of comparing two row iterators
 type ComparisonResult struct {
+	Table          *typedef.Table
 	TestError      error
 	OracleError    error
 	TestOnlyRows   []Row
@@ -75,7 +76,7 @@ func (ri RowIterator) Count() (int, error) {
 // ZipAndCompare compares two row iterators row-by-row and returns detailed comparison results
 // This version sorts both sides before comparison to handle unordered results
 func ZipAndCompare(_ context.Context, table *typedef.Table, testIter, oracleIter RowIterator) ComparisonResult {
-	result := ComparisonResult{}
+	result := ComparisonResult{Table: table}
 
 	// Collect both sides - we need to sort them for comparison
 	testRows, testErr := testIter.Collect()

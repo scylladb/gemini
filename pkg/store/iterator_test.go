@@ -820,16 +820,27 @@ func TestBuildRowMap_CreatesCompositePKs(t *testing.T) {
 	}
 }
 
-func TestRowsToStrings_AndFormatRowForError(t *testing.T) {
+func TestRowsToKeyStrings_AndFormatRowForError(t *testing.T) {
 	t.Parallel()
 
-	rWithPK := NewRow([]string{"pk0", "v"}, []any{"key1", 10})
+	table := &typedef.Table{
+		PartitionKeys: []typedef.ColumnDef{{Name: "pk0"}},
+		ClusteringKeys: []typedef.ColumnDef{
+			{Name: "ck0"},
+		},
+	}
+
+	rWithPK := NewRow([]string{"pk0", "ck0", "v"}, []any{"key1", "c1", 10})
 	rNoPK := NewRow([]string{"other"}, []any{"x"})
 
-	list := rowsToStrings([]Row{rWithPK, rNoPK})
-	require.Len(t, list, 2)
-	assert.Equal(t, `{"pk0":"key1","v":10}`, list[0])
-	assert.Equal(t, `{"other":"x"}`, list[1])
+	list := rowsToKeyStrings(table, []Row{rWithPK})
+	require.Len(t, list, 1)
+	assert.Equal(t, "pk0=key1,ck0=c1", list[0])
+
+	// Fallback to JSON when table information is not available
+	noKeyList := rowsToKeyStrings(nil, []Row{rNoPK})
+	require.Len(t, noKeyList, 1)
+	assert.Equal(t, `{"other":"x"}`, noKeyList[0])
 }
 
 func TestCanonicalValueString_Edges(t *testing.T) {
