@@ -431,12 +431,11 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		ts = mo.Some(time.Now().UTC())
 	}
 
-	mutationErr := NewStoreMutationError(stmt, nil)
+	mutationErr := NewStoreMutationError(stmt)
 	var cumulativeResult mutationResult
 	maxAttempts := ds.mutationRetries + 1 // +1 for the initial attempt
 
 	for attempt := range maxAttempts {
-		attemptStart := time.Now()
 
 		// Determine which stores need to be tried/retried
 		retryTest := attempt == 0 || cumulativeResult.testErr != nil
@@ -444,14 +443,12 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 
 		// Execute mutations only on stores that need to be retried
 		attemptResult := ds.executeParallelMutations(ctx, stmt, ts, attempt, retryTest, retryOracle)
-		duration := time.Since(attemptStart)
-
 		// Record any errors that occurred during this attempt
 		if attemptResult.testErr != nil {
-			mutationErr.AddAttempt(attempt, TypeTest, attemptResult.testErr, duration)
+			mutationErr.AddAttempt(attemptResult.testErr)
 		}
 		if attemptResult.oracleErr != nil {
-			mutationErr.AddAttempt(attempt, TypeOracle, attemptResult.oracleErr, duration)
+			mutationErr.AddAttempt(attemptResult.oracleErr)
 		}
 
 		// Update cumulative result with new attempts
@@ -528,7 +525,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		zap.Int("total_attempts", maxAttempts),
 		zap.Bool("test_store_success", mutationErr.TestStoreSuccess),
 		zap.Bool("oracle_store_success", mutationErr.OracleStoreSuccess),
-		zap.Int("total_attempt_errors", mutationErr.TotalAttempts),
+		zap.Uint64("total_attempt_errors", mutationErr.TotalAttempts.Load()),
 		zap.Error(mutationErr))
 
 	return mutationErr
@@ -549,7 +546,6 @@ func (ds delegatingStore) Check(
 	var lastErr error
 
 	for attempt := range maxAttempts {
-		attemptStart := time.Now()
 		doCtx := WithContextData(ctx, &ContextData{
 			GeminiAttempt: attempt,
 			Statement:     stmt,
@@ -559,10 +555,10 @@ func (ds delegatingStore) Check(
 		// If there is no oracle, just count test rows
 		if ds.oracleStore == nil {
 			testRows, testErr := ds.testStore.load(doCtx, stmt)
-			duration := time.Since(attemptStart)
 
 			if testErr != nil {
-				validationErr.AddAttempt(attempt, TypeTest, testErr, duration)
+				validationErr.AddAttempt(testErr)
+				lastErr = testErr
 			} else {
 				return len(testRows), nil
 			}
@@ -609,19 +605,17 @@ func (ds delegatingStore) Check(
 				}
 			}
 
-			duration := time.Since(attemptStart)
-
 			// Extract results
 			testRows, oracleRows := tRes.rows, oRes.rows
 			testErr, oracleErr := tRes.err, oRes.err
 
 			// Record any errors that occurred
 			if testErr != nil {
-				validationErr.AddAttempt(attempt, TypeTest, testErr, duration)
+				validationErr.AddAttempt(testErr)
 				lastErr = testErr
 			}
 			if oracleErr != nil {
-				validationErr.AddAttempt(attempt, TypeOracle, oracleErr, duration)
+				validationErr.AddAttempt(oracleErr)
 				lastErr = oracleErr
 			}
 
@@ -636,7 +630,7 @@ func (ds delegatingStore) Check(
 				}
 
 				// Found differences, record them
-				validationErr.AddAttempt(attempt, TypeTest, compErr, duration)
+				validationErr.AddAttempt(compErr)
 				lastErr = compErr
 			}
 		}
@@ -659,7 +653,7 @@ func (ds delegatingStore) Check(
 	}
 
 	// All attempts failed
-	if validationErr.TotalAttempts == 0 {
+	if validationErr.TotalAttempts.Load() == 0 {
 		return 0, nil
 	}
 
