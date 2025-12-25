@@ -68,7 +68,7 @@ func Test_formatRows_AllTypes(t *testing.T) {
 	assert.Equal(t, "dec=12.34", formatRows(sb.reset(), "dec", dec))
 
 	// nil
-	assert.Equal(t, "n=", formatRows(sb.reset(), "n", nil))
+	assert.Equal(t, "n=null", formatRows(sb.reset(), "n", nil))
 
 	// []byte
 	assert.Equal(t, "b=abc", formatRows(sb.reset(), "b", []byte("abc")))
@@ -103,6 +103,47 @@ func Test_pks_WithAndWithoutClusteringKeys(t *testing.T) {
 	assert.Equal(t, 2, set2.Size(), "Expected 2 unique partition keys")
 	assert.True(t, set2.Has("pk0=1"))
 	assert.True(t, set2.Has("pk0=2"))
+}
+
+func Test_formatRows_Pointers(t *testing.T) {
+	t.Parallel()
+
+	var sb stringsBuilder
+
+	// Test pointer types that are commonly returned from the database
+	// These should use direct type assertions
+	f64 := 3.14
+	assert.Equal(t, "f64=3.14", formatRows(sb.reset(), "f64", &f64))
+
+	f32 := float32(2.71)
+	assert.Equal(t, "f32=2.71", formatRows(sb.reset(), "f32", &f32))
+
+	s := "hello"
+	assert.Equal(t, "s=hello", formatRows(sb.reset(), "s", &s))
+
+	i64 := int64(42)
+	assert.Equal(t, "i64=42", formatRows(sb.reset(), "i64", &i64))
+
+	i32 := int32(32)
+	assert.Equal(t, "i32=32", formatRows(sb.reset(), "i32", &i32))
+
+	i := int(99)
+	assert.Equal(t, "i=99", formatRows(sb.reset(), "i", &i))
+
+	b := true
+	assert.Equal(t, "b=true", formatRows(sb.reset(), "b", &b))
+
+	bFalse := false
+	assert.Equal(t, "bf=false", formatRows(sb.reset(), "bf", &bFalse))
+
+	// Test nil pointer
+	var nilPtr *string
+	assert.Equal(t, "null=null", formatRows(sb.reset(), "null", nilPtr))
+
+	// Verify no pointer addresses (0xc0...) are present in output for single-level pointers
+	result := formatRows(sb.reset(), "key", &f64)
+	assert.NotContains(t, result, "0x", "Should not contain pointer addresses")
+	assert.NotContains(t, result, "*float64", "Should not contain pointer type info")
 }
 
 // stringsBuilder is a tiny helper to reuse a builder in tests
