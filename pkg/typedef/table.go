@@ -102,7 +102,7 @@ func (t *Table) RUnlock() {
 func (t *Table) SupportsChanges() bool {
 	// If the table has materialized views, it does not support schema changes.
 	// Scylla does not allow schema changes on tables with materialized views.
-	return len(t.MaterializedViews) != 0
+	return len(t.MaterializedViews) == 0
 }
 
 func (t *Table) Init(s *Schema) {
