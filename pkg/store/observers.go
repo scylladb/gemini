@@ -126,6 +126,15 @@ func NewClusterObserver(
 	return c
 }
 
+func (c *ClusterObserver) incGoCQLQueryError(instance string, err error) {
+	if err == nil {
+		return
+	}
+	metrics.GoCQLQueryErrors.
+		WithLabelValues(string(c.clusterName), instance, err.Error()).
+		Inc()
+}
+
 func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedBatch) {
 	data := MustGetContextData(ctx)
 	if data == nil {
@@ -137,7 +146,7 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 
 	if batch.Err != nil {
 		errStr = batch.Err.Error()
-		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, batch.Err.Error()).Inc()
+		c.incGoCQLQueryError(instance, batch.Err)
 
 		switch {
 		case errors.Is(batch.Err, gocql.ErrConnectionClosed) || errors.Is(batch.Err, gocql.ErrHostDown):
