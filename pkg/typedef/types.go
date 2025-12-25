@@ -233,7 +233,7 @@ type CounterType struct {
 }
 
 func (ct *CounterType) CQLType() gocql.TypeInfo {
-	return goCQLTypeMap[gocql.TypeMap]
+	return goCQLTypeMap[gocql.TypeCounter]
 }
 
 func (ct *CounterType) Name() string {
