@@ -68,7 +68,7 @@ func Test_formatRows_AllTypes(t *testing.T) {
 	assert.Equal(t, "dec=12.34", formatRows(sb.reset(), "dec", dec))
 
 	// nil
-	assert.Equal(t, "n=", formatRows(sb.reset(), "n", nil))
+	assert.Equal(t, "n=null", formatRows(sb.reset(), "n", nil))
 
 	// []byte
 	assert.Equal(t, "b=abc", formatRows(sb.reset(), "b", []byte("abc")))
@@ -138,7 +138,7 @@ func Test_formatRows_Pointers(t *testing.T) {
 
 	// Test nil pointer
 	var nilPtr *string
-	assert.Equal(t, "null=", formatRows(sb.reset(), "null", nilPtr))
+	assert.Equal(t, "null=null", formatRows(sb.reset(), "null", nilPtr))
 
 	// Verify no pointer addresses (0xc0...) are present in output for single-level pointers
 	result := formatRows(sb.reset(), "key", &f64)
