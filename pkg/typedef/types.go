@@ -34,6 +34,9 @@ const (
 	TypeTuple = "tuple"
 )
 
+// GoCQLProtoVersion4 is the protocol version accepted by gocql for NativeType constructor.
+const GoCQLProtoVersion4 = 4
+
 // nolint:revive
 const (
 	TypeAscii     = SimpleType("ascii")
@@ -96,7 +99,7 @@ var (
 	AllTypes = append(append(SimpleTypes{}, PkTypes...), TypeBoolean, TypeDuration)
 )
 
-var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
+var gocqlTypeMap = map[gocql.Type]gocql.TypeInfo{
 	gocql.TypeAscii:     gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeAscii, ""),
 	gocql.TypeBigInt:    gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeBigInt, ""),
 	gocql.TypeBlob:      gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeBlob, ""),
@@ -171,12 +174,12 @@ func (mt *MapType) GenJSONValue(r utils.Random, p RangeConfig) any {
 
 func (mt *MapType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxMapSize+1)
-	vals := reflect.MakeMap(
-		reflect.MapOf(
-			reflect.TypeOf(mt.KeyType.GenValue(r, p)[0]),
-			reflect.TypeOf(mt.ValueType.GenValue(r, p)[0]),
-		),
-	)
+	// Generate a single example value to determine the key and value types
+	keySample := mt.KeyType.GenValue(r, p)[0]
+	valSample := mt.ValueType.GenValue(r, p)[0]
+	keyType := reflect.TypeOf(keySample)
+	valType := reflect.TypeOf(valSample)
+	vals := reflect.MakeMap(reflect.MapOf(keyType, valType))
 
 	for range count {
 		vals.SetMapIndex(
@@ -196,7 +199,7 @@ func (mt *MapType) GenValue(r utils.Random, p RangeConfig) []any {
 			reflect.TypeOf(mt.ValueType.GenValue(r, p)[0]),
 		),
 	)
-	for i := 0; i < count; i++ {
+	for range count {
 		vals.SetMapIndex(
 			reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]),
 			reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]),
@@ -233,7 +236,7 @@ type CounterType struct {
 }
 
 func (ct *CounterType) CQLType() gocql.TypeInfo {
-	return goCQLTypeMap[gocql.TypeMap]
+	return goCQLTypeMap[gocql.TypeCounter]
 }
 
 func (ct *CounterType) Name() string {
