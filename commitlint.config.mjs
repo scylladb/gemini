@@ -8,7 +8,7 @@ export default {
     'subject-min-length': [2, 'always', 10],
     'type-enum': [2, 'always', ['ci', 'docs', 'feature', 'fix', 'improvement', 'perf', 'refactor', 'revert', 'style', 'test', 'unit-test', 'build']],
     'type-empty': [2, 'never'],
-    'scope-empty': [2, 'never'],
+    'scope-empty': [1, 'never'],
     'scope-min-length': [2, 'always', 3],
     'body-min-length': [1, 'always', 15],
     'body-max-line-length': [2, 'always', 120],
