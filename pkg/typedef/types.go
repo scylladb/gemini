@@ -34,6 +34,9 @@ const (
 	TypeTuple = "tuple"
 )
 
+// GoCQLProtoVersion4 is the protocol version accepted by gocql for NativeType constructor.
+const GoCQLProtoVersion4 = 4
+
 // nolint:revive
 const (
 	TypeAscii     = SimpleType("ascii")
