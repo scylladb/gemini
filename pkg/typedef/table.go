@@ -22,26 +22,18 @@ import (
 type KnownIssues map[string]bool
 
 type Table struct {
-	schema                 *Schema
-	Name                   string             `json:"name"`
-	PartitionKeys          Columns            `json:"partition_keys"`
-	ClusteringKeys         Columns            `json:"clustering_keys"`
-	Columns                Columns            `json:"columns"`
-	Indexes                []IndexDef         `json:"indexes,omitempty"`
-	MaterializedViews      []MaterializedView `json:"materialized_views,omitempty"`
-	KnownIssues            KnownIssues        `json:"known_issues"`
-	TableOptions           []string           `json:"table_options,omitempty"`
-	partitionKeysLenValues int
+	schema            *Schema
+	Name              string             `json:"name"`
+	PartitionKeys     Columns            `json:"partition_keys"`
+	ClusteringKeys    Columns            `json:"clustering_keys"`
+	Columns           Columns            `json:"columns"`
+	Indexes           []IndexDef         `json:"indexes,omitempty"`
+	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
+	KnownIssues       KnownIssues        `json:"known_issues"`
+	TableOptions      []string           `json:"table_options,omitempty"`
 
 	// mu protects the table during schema changes
 	mu sync.RWMutex
-}
-
-func (t *Table) PartitionKeysLenValues() int {
-	if t.partitionKeysLenValues == 0 {
-		t.partitionKeysLenValues = t.PartitionKeys.LenValues()
-	}
-	return t.partitionKeysLenValues
 }
 
 func (t *Table) SelectColumnNames() []string {
@@ -61,11 +53,13 @@ func (t *Table) SelectColumnNames() []string {
 }
 
 func (t *Table) IsCounterTable() bool {
-	if len(t.Columns) != 1 {
-		return false
+	for _, col := range t.Columns {
+		if _, ok := col.Type.(*CounterType); ok {
+			return true
+		}
 	}
-	_, ok := t.Columns[0].Type.(*CounterType)
-	return ok
+
+	return false
 }
 
 func (t *Table) Lock() {
@@ -102,7 +96,7 @@ func (t *Table) RUnlock() {
 func (t *Table) SupportsChanges() bool {
 	// If the table has materialized views, it does not support schema changes.
 	// Scylla does not allow schema changes on tables with materialized views.
-	return len(t.MaterializedViews) != 0
+	return len(t.MaterializedViews) == 0
 }
 
 func (t *Table) Init(s *Schema) {
@@ -125,15 +119,18 @@ func (t *Table) ValidColumnsForDelete() Columns {
 			}
 		}
 	}
+
 	if len(t.MaterializedViews) != 0 {
 		for _, mv := range t.MaterializedViews {
-			if mv.HaveNonPrimaryKey() {
-				nonPrimCol := mv.NonPrimaryKey.MustGet()
-				for j := range validCols {
-					if validCols[j].Name == nonPrimCol.Name {
-						validCols = slices.Delete(validCols, j, j+1)
-						break
-					}
+			if !mv.HaveNonPrimaryKey() {
+				continue
+			}
+
+			nonPrimCol := mv.NonPrimaryKey.MustGet()
+			for j := range validCols {
+				if validCols[j].Name == nonPrimCol.Name {
+					validCols = slices.Delete(validCols, j, j+1)
+					break
 				}
 			}
 		}
