@@ -111,19 +111,32 @@ func Test_formatRows_Pointers(t *testing.T) {
 	var sb stringsBuilder
 
 	// Test pointer types that are commonly returned from the database
+	// These should use the fast path (direct type assertions)
 	f64 := 3.14
 	assert.Equal(t, "f64=3.14", formatRows(sb.reset(), "f64", &f64))
+
+	f32 := float32(2.71)
+	assert.Equal(t, "f32=2.71", formatRows(sb.reset(), "f32", &f32))
 
 	s := "hello"
 	assert.Equal(t, "s=hello", formatRows(sb.reset(), "s", &s))
 
-	i := int64(42)
-	assert.Equal(t, "i=42", formatRows(sb.reset(), "i", &i))
+	i64 := int64(42)
+	assert.Equal(t, "i64=42", formatRows(sb.reset(), "i64", &i64))
+
+	i32 := int32(32)
+	assert.Equal(t, "i32=32", formatRows(sb.reset(), "i32", &i32))
+
+	i := int(99)
+	assert.Equal(t, "i=99", formatRows(sb.reset(), "i", &i))
 
 	b := true
 	assert.Equal(t, "b=true", formatRows(sb.reset(), "b", &b))
 
-	// Test nested pointers
+	bFalse := false
+	assert.Equal(t, "bf=false", formatRows(sb.reset(), "bf", &bFalse))
+
+	// Test nested pointers (should use slow path - reflection)
 	pf64 := &f64
 	ppf64 := &pf64
 	assert.Equal(t, "nested=3.14", formatRows(sb.reset(), "nested", ppf64))

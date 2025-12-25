@@ -53,7 +53,51 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 		return sb.String()
 	}
 
-	// Dereference pointers to get the actual value
+	// Fast path: Handle common pointer types with direct type assertions
+	// This avoids reflection overhead for the most frequent cases
+	switch v := value.(type) {
+	case *float64:
+		if v != nil {
+			sb.WriteString(strconv.FormatFloat(*v, 'G', -1, 64))
+		}
+		return sb.String()
+	case *float32:
+		if v != nil {
+			sb.WriteString(strconv.FormatFloat(float64(*v), 'G', -1, 32))
+		}
+		return sb.String()
+	case *int64:
+		if v != nil {
+			sb.WriteString(strconv.FormatInt(*v, 10))
+		}
+		return sb.String()
+	case *int32:
+		if v != nil {
+			sb.WriteString(strconv.FormatInt(int64(*v), 10))
+		}
+		return sb.String()
+	case *int:
+		if v != nil {
+			sb.WriteString(strconv.FormatInt(int64(*v), 10))
+		}
+		return sb.String()
+	case *string:
+		if v != nil {
+			sb.WriteString(*v)
+		}
+		return sb.String()
+	case *bool:
+		if v != nil {
+			if *v {
+				sb.WriteString("true")
+			} else {
+				sb.WriteString("false")
+			}
+		}
+		return sb.String()
+	}
+
+	// Slow path: Use reflection for uncommon pointer types
 	rv := reflect.ValueOf(value)
 	for rv.Kind() == reflect.Ptr {
 		if rv.IsNil() {
