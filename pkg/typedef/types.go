@@ -96,7 +96,7 @@ var (
 	AllTypes = append(append(SimpleTypes{}, PkTypes...), TypeBoolean, TypeDuration)
 )
 
-var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
+var gocqlTypeMap = map[gocql.Type]gocql.TypeInfo{
 	gocql.TypeAscii:     gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeAscii, ""),
 	gocql.TypeBigInt:    gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeBigInt, ""),
 	gocql.TypeBlob:      gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeBlob, ""),
