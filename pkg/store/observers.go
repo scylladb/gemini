@@ -189,7 +189,7 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 
 		switch {
 		case errors.Is(query.Err, gocql.ErrConnectionClosed) || errors.Is(query.Err, gocql.ErrHostDown):
-			c.goCQLConnections.Get(instance, data.Statement.QueryType).Dec()
+			c.goCQLConnections.Get(instance, 0).Dec()
 		case errors.Is(query.Err, gocql.ErrNoConnections):
 			c.goCQLConnections.Get(instance, 0).Set(0)
 		default:
