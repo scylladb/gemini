@@ -213,7 +213,7 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 			PartitionKeys: data.Statement.PartitionKeys.Values,
 		})
 		if err != nil {
-			c.appLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("query", query))
+			c.appLogger.Error("failed to log query statement", zap.Error(err), zap.Any("query", query))
 		}
 	}
 
