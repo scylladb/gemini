@@ -10,7 +10,7 @@ export default {
     'type-empty': [2, 'never'],
     'scope-empty': [2, 'never'],
     'scope-min-length': [2, 'always', 3],
-    'body-min-length': [2, 'always', 15],
+    'body-min-length': [1, 'always', 15],
     'body-max-line-length': [2, 'always', 120],
     'body-leading-blank': [2, 'always'],
   },
