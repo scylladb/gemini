@@ -171,12 +171,12 @@ func (mt *MapType) GenJSONValue(r utils.Random, p RangeConfig) any {
 
 func (mt *MapType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxMapSize+1)
-	vals := reflect.MakeMap(
-		reflect.MapOf(
-			reflect.TypeOf(mt.KeyType.GenValue(r, p)[0]),
-			reflect.TypeOf(mt.ValueType.GenValue(r, p)[0]),
-		),
-	)
+	// Generate a single example value to determine the key and value types
+	keySample := mt.KeyType.GenValue(r, p)[0]
+	valSample := mt.ValueType.GenValue(r, p)[0]
+	keyType := reflect.TypeOf(keySample)
+	valType := reflect.TypeOf(valSample)
+	vals := reflect.MakeMap(reflect.MapOf(keyType, valType))
 
 	for range count {
 		vals.SetMapIndex(
