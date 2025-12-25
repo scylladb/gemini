@@ -17,6 +17,7 @@ package store
 import (
 	"fmt"
 	"math/big"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -32,7 +33,40 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 	sb.WriteString(key)
 	sb.WriteByte('=')
 
+	// Handle nil values
+	if value == nil {
+		return sb.String()
+	}
+
+	// Special cases: *big.Int and *inf.Dec should be handled before dereferencing
+	// because their public API expects pointer receivers
 	switch v := value.(type) {
+	case *big.Int:
+		if v != nil {
+			sb.WriteString(v.String())
+		}
+		return sb.String()
+	case *inf.Dec:
+		if v != nil {
+			sb.WriteString(v.String())
+		}
+		return sb.String()
+	}
+
+	// Dereference pointers to get the actual value
+	rv := reflect.ValueOf(value)
+	for rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			// Nil pointer - return empty value
+			return sb.String()
+		}
+		rv = rv.Elem()
+	}
+	
+	// Get the dereferenced value
+	v := rv.Interface()
+
+	switch v := v.(type) {
 	case float32:
 		sb.WriteString(strconv.FormatFloat(float64(v), 'G', -1, 32))
 	case float64:
@@ -55,11 +89,6 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 		sb.WriteString(v.String())
 	case time.Time:
 		sb.WriteString(v.Format(time.DateTime))
-	case *big.Int:
-		sb.WriteString(v.String())
-	case *inf.Dec:
-		sb.WriteString(v.String())
-	case nil:
 	case []byte:
 		sb.Write(v)
 	case string:
@@ -70,8 +99,15 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 		sb.WriteString(strconv.FormatInt(int64(v), 10))
 	case int64:
 		sb.WriteString(strconv.FormatInt(v, 10))
+	case bool:
+		if v {
+			sb.WriteString("true")
+		} else {
+			sb.WriteString("false")
+		}
 	default:
-		_, _ = fmt.Fprintf(sb, "%#v", v)
+		// Fall back to %v (not %#v) to avoid printing pointer addresses
+		_, _ = fmt.Fprintf(sb, "%v", v)
 	}
 
 	return sb.String()

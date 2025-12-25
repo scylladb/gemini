@@ -105,6 +105,39 @@ func Test_pks_WithAndWithoutClusteringKeys(t *testing.T) {
 	assert.True(t, set2.Has("pk0=2"))
 }
 
+func Test_formatRows_Pointers(t *testing.T) {
+	t.Parallel()
+
+	var sb stringsBuilder
+
+	// Test pointer types that are commonly returned from the database
+	f64 := 3.14
+	assert.Equal(t, "f64=3.14", formatRows(sb.reset(), "f64", &f64))
+
+	s := "hello"
+	assert.Equal(t, "s=hello", formatRows(sb.reset(), "s", &s))
+
+	i := int64(42)
+	assert.Equal(t, "i=42", formatRows(sb.reset(), "i", &i))
+
+	b := true
+	assert.Equal(t, "b=true", formatRows(sb.reset(), "b", &b))
+
+	// Test nested pointers
+	pf64 := &f64
+	ppf64 := &pf64
+	assert.Equal(t, "nested=3.14", formatRows(sb.reset(), "nested", ppf64))
+
+	// Test nil pointer
+	var nilPtr *string
+	assert.Equal(t, "null=", formatRows(sb.reset(), "null", nilPtr))
+
+	// Verify no pointer addresses (0xc0...) are present in output
+	result := formatRows(sb.reset(), "key", &f64)
+	assert.NotContains(t, result, "0x", "Should not contain pointer addresses")
+	assert.NotContains(t, result, "*float64", "Should not contain pointer type info")
+}
+
 // stringsBuilder is a tiny helper to reuse a builder in tests
 type stringsBuilder struct{ b strings.Builder }
 
