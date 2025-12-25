@@ -17,7 +17,6 @@ package store
 import (
 	"fmt"
 	"math/big"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -38,79 +37,91 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 		return sb.String()
 	}
 
-	// Special cases: *big.Int and *inf.Dec should be handled before dereferencing
-	// because their public API expects pointer receivers
+	// Handle all types including pointers using type switch
+	// For pointer types, check for nil and dereference
 	switch v := value.(type) {
-	case *big.Int:
-		if v != nil {
-			sb.WriteString(v.String())
-		}
-		return sb.String()
-	case *inf.Dec:
-		if v != nil {
-			sb.WriteString(v.String())
-		}
-		return sb.String()
-	}
-
-	// Fast path: Handle common pointer types with direct type assertions
-	// This avoids reflection overhead for the most frequent cases
-	switch v := value.(type) {
+	// Pointer types - check for nil and dereference
 	case *float64:
 		if v != nil {
 			sb.WriteString(strconv.FormatFloat(*v, 'G', -1, 64))
 		}
-		return sb.String()
 	case *float32:
 		if v != nil {
 			sb.WriteString(strconv.FormatFloat(float64(*v), 'G', -1, 32))
 		}
-		return sb.String()
 	case *int64:
 		if v != nil {
 			sb.WriteString(strconv.FormatInt(*v, 10))
 		}
-		return sb.String()
 	case *int32:
 		if v != nil {
 			sb.WriteString(strconv.FormatInt(int64(*v), 10))
 		}
-		return sb.String()
+	case *int16:
+		if v != nil {
+			sb.WriteString(strconv.FormatInt(int64(*v), 10))
+		}
+	case *int8:
+		if v != nil {
+			sb.WriteString(strconv.FormatInt(int64(*v), 10))
+		}
 	case *int:
 		if v != nil {
 			sb.WriteString(strconv.FormatInt(int64(*v), 10))
 		}
-		return sb.String()
+	case *uint64:
+		if v != nil {
+			sb.WriteString(strconv.FormatUint(*v, 10))
+		}
+	case *uint32:
+		if v != nil {
+			sb.WriteString(strconv.FormatUint(uint64(*v), 10))
+		}
+	case *uint16:
+		if v != nil {
+			sb.WriteString(strconv.FormatUint(uint64(*v), 10))
+		}
+	case *uint8:
+		if v != nil {
+			sb.WriteString(strconv.FormatUint(uint64(*v), 10))
+		}
+	case *uint:
+		if v != nil {
+			sb.WriteString(strconv.FormatUint(uint64(*v), 10))
+		}
 	case *string:
 		if v != nil {
 			sb.WriteString(*v)
 		}
-		return sb.String()
 	case *bool:
 		if v != nil {
-			if *v {
-				sb.WriteString("true")
-			} else {
-				sb.WriteString("false")
-			}
+			sb.WriteString(strconv.FormatBool(*v))
 		}
-		return sb.String()
-	}
-
-	// Slow path: Use reflection for uncommon pointer types
-	rv := reflect.ValueOf(value)
-	for rv.Kind() == reflect.Ptr {
-		if rv.IsNil() {
-			// Nil pointer - return empty value
-			return sb.String()
+	case *time.Time:
+		if v != nil {
+			sb.WriteString(v.Format(time.DateTime))
 		}
-		rv = rv.Elem()
-	}
-	
-	// Get the dereferenced value
-	v := rv.Interface()
-
-	switch v := v.(type) {
+	case *gocql.UUID:
+		if v != nil {
+			sb.WriteString(v.String())
+		}
+	case *time.Duration:
+		if v != nil {
+			_, _ = fmt.Fprintf(sb, "%v", *v)
+		}
+	case *big.Int:
+		if v != nil {
+			sb.WriteString(v.String())
+		}
+	case *inf.Dec:
+		if v != nil {
+			sb.WriteString(v.String())
+		}
+	case *[]byte:
+		if v != nil {
+			sb.Write(*v)
+		}
+	// Non-pointer types
 	case float32:
 		sb.WriteString(strconv.FormatFloat(float64(v), 'G', -1, 32))
 	case float64:
@@ -119,6 +130,12 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 		sb.WriteString(strconv.FormatInt(int64(v), 10))
 	case int16:
 		sb.WriteString(strconv.FormatInt(int64(v), 10))
+	case int:
+		sb.WriteString(strconv.FormatInt(int64(v), 10))
+	case int32:
+		sb.WriteString(strconv.FormatInt(int64(v), 10))
+	case int64:
+		sb.WriteString(strconv.FormatInt(v, 10))
 	case uint:
 		sb.WriteString(strconv.FormatUint(uint64(v), 10))
 	case uint8:
@@ -133,22 +150,14 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 		sb.WriteString(v.String())
 	case time.Time:
 		sb.WriteString(v.Format(time.DateTime))
+	case time.Duration:
+		_, _ = fmt.Fprintf(sb, "%v", v)
 	case []byte:
 		sb.Write(v)
 	case string:
 		sb.WriteString(v)
-	case int:
-		sb.WriteString(strconv.FormatInt(int64(v), 10))
-	case int32:
-		sb.WriteString(strconv.FormatInt(int64(v), 10))
-	case int64:
-		sb.WriteString(strconv.FormatInt(v, 10))
 	case bool:
-		if v {
-			sb.WriteString("true")
-		} else {
-			sb.WriteString("false")
-		}
+		sb.WriteString(strconv.FormatBool(v))
 	default:
 		// Fall back to %v (not %#v) to avoid printing pointer addresses
 		_, _ = fmt.Fprintf(sb, "%v", v)

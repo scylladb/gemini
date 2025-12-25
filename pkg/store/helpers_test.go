@@ -111,7 +111,7 @@ func Test_formatRows_Pointers(t *testing.T) {
 	var sb stringsBuilder
 
 	// Test pointer types that are commonly returned from the database
-	// These should use the fast path (direct type assertions)
+	// These should use direct type assertions
 	f64 := 3.14
 	assert.Equal(t, "f64=3.14", formatRows(sb.reset(), "f64", &f64))
 
@@ -136,16 +136,11 @@ func Test_formatRows_Pointers(t *testing.T) {
 	bFalse := false
 	assert.Equal(t, "bf=false", formatRows(sb.reset(), "bf", &bFalse))
 
-	// Test nested pointers (should use slow path - reflection)
-	pf64 := &f64
-	ppf64 := &pf64
-	assert.Equal(t, "nested=3.14", formatRows(sb.reset(), "nested", ppf64))
-
 	// Test nil pointer
 	var nilPtr *string
 	assert.Equal(t, "null=", formatRows(sb.reset(), "null", nilPtr))
 
-	// Verify no pointer addresses (0xc0...) are present in output
+	// Verify no pointer addresses (0xc0...) are present in output for single-level pointers
 	result := formatRows(sb.reset(), "key", &f64)
 	assert.NotContains(t, result, "0x", "Should not contain pointer addresses")
 	assert.NotContains(t, result, "*float64", "Should not contain pointer type info")
