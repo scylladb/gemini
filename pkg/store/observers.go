@@ -170,8 +170,6 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 
 		c.goCQLBatchQueries.Get(instance, data.Statement.QueryType).Inc()
 	}
-
-	c.goCQLBatchQueries.Get(instance, data.Statement.QueryType).Inc()
 }
 
 func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQuery) {
