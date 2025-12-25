@@ -196,7 +196,7 @@ func (mt *MapType) GenValue(r utils.Random, p RangeConfig) []any {
 			reflect.TypeOf(mt.ValueType.GenValue(r, p)[0]),
 		),
 	)
-	for i := 0; i < count; i++ {
+	for range count {
 		vals.SetMapIndex(
 			reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]),
 			reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]),
