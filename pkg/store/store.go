@@ -267,10 +267,10 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef
 			return pkgerrors.Wrapf(
 				err,
 				"unable to apply mutations to the %s store",
-				ds.testStore.name(),
+				ds.oracleStore.name(),
 			)
 		}
-		ds.getLogger().Debug("oracle store created successfully")
+		ds.getLogger().Debug("oracle mutation applied successfully")
 	}
 
 	return nil
