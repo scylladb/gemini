@@ -126,6 +126,15 @@ func NewClusterObserver(
 	return c
 }
 
+func (c *ClusterObserver) incGoCQLQueryError(instance string, err error) {
+	if err == nil {
+		return
+	}
+	metrics.GoCQLQueryErrors.
+		WithLabelValues(string(c.clusterName), instance, err.Error()).
+		Inc()
+}
+
 func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedBatch) {
 	data := MustGetContextData(ctx)
 	if data == nil {
@@ -137,7 +146,7 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 
 	if batch.Err != nil {
 		errStr = batch.Err.Error()
-		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, batch.Err.Error()).Inc()
+		c.incGoCQLQueryError(instance, batch.Err)
 
 		switch {
 		case errors.Is(batch.Err, gocql.ErrConnectionClosed) || errors.Is(batch.Err, gocql.ErrHostDown):
@@ -170,8 +179,6 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 
 		c.goCQLBatchQueries.Get(instance, data.Statement.QueryType).Inc()
 	}
-
-	c.goCQLBatchQueries.Get(instance, data.Statement.QueryType).Inc()
 }
 
 func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQuery) {
@@ -189,7 +196,7 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 
 		switch {
 		case errors.Is(query.Err, gocql.ErrConnectionClosed) || errors.Is(query.Err, gocql.ErrHostDown):
-			c.goCQLConnections.Get(instance, data.Statement.QueryType).Dec()
+			c.goCQLConnections.Get(instance, 0).Dec()
 		case errors.Is(query.Err, gocql.ErrNoConnections):
 			c.goCQLConnections.Get(instance, 0).Set(0)
 		default:
@@ -213,7 +220,7 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 			PartitionKeys: data.Statement.PartitionKeys.Values,
 		})
 		if err != nil {
-			c.appLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("query", query))
+			c.appLogger.Error("failed to log query statement", zap.Error(err), zap.Any("query", query))
 		}
 	}
 
