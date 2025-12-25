@@ -38,10 +38,19 @@ type Table struct {
 }
 
 func (t *Table) PartitionKeysLenValues() int {
-	if t.partitionKeysLenValues == 0 {
-		t.partitionKeysLenValues = t.PartitionKeys.LenValues()
+	t.mu.RLock()
+	val := t.partitionKeysLenValues
+	t.mu.RUnlock()
+	if val == 0 {
+		t.mu.Lock()
+		// Double-checked locking to avoid race.
+		if t.partitionKeysLenValues == 0 {
+			t.partitionKeysLenValues = t.PartitionKeys.LenValues()
+		}
+		val = t.partitionKeysLenValues
+		t.mu.Unlock()
 	}
-	return t.partitionKeysLenValues
+	return val
 }
 
 func (t *Table) SelectColumnNames() []string {
