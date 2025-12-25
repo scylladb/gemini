@@ -17,9 +17,11 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/gocql/gocql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -64,6 +66,58 @@ func TestErrorRowDifference_Error_WithMissingLists(t *testing.T) {
 	msg := e.Error()
 	assert.Contains(t, msg, "missing_in_test=[r1]")
 	assert.Contains(t, msg, "missing_in_oracle=[r2]")
+}
+
+func TestErrorRowDifference_Error_WithPointerValues(t *testing.T) {
+	t.Parallel()
+
+	// Simulate the scenario from the issue where pointer values are included in error messages
+	table := &typedef.Table{
+		Name: "table1",
+		PartitionKeys: []typedef.ColumnDef{
+			{Name: "pk0", Type: typedef.TypeDouble},
+			{Name: "pk1", Type: typedef.TypeUuid},
+		},
+		ClusteringKeys: []typedef.ColumnDef{
+			{Name: "ck0", Type: typedef.TypeDuration},
+			{Name: "ck1", Type: typedef.TypeText},
+		},
+	}
+
+	// Create rows with pointer values (as returned from the database)
+	// Note: UUIDs are typically not returned as pointers from the database,
+	// but other types like float64, string, and duration commonly are
+	f64Val := 3.14159
+	uuidVal := gocql.TimeUUID()
+	durVal := time.Duration(123456789)
+	strVal := "test_value"
+
+	oracleRow := NewRow(
+		[]string{"pk0", "pk1", "ck0", "ck1", "v"},
+		[]any{&f64Val, uuidVal, &durVal, &strVal, "data"},
+	)
+
+	result := CompareCollectedRows(table, Rows{}, Rows{oracleRow})
+
+	err := result.ToError()
+	require.Error(t, err)
+
+	var rowDiffErr ErrorRowDifference
+	require.ErrorAs(t, err, &rowDiffErr)
+
+	msg := err.Error()
+
+	// Verify actual values are shown, not pointer addresses
+	assert.Contains(t, msg, "pk0=3.14159", "Should show actual float value")
+	assert.Contains(t, msg, fmt.Sprintf("pk1=%s", uuidVal.String()), "Should show actual UUID value")
+	assert.Contains(t, msg, fmt.Sprintf("ck0=%v", durVal), "Should show actual duration value")
+	assert.Contains(t, msg, "ck1=test_value", "Should show actual string value")
+
+	// Verify pointer addresses are NOT shown (the original issue)
+	assert.NotContains(t, msg, "0xc0", "Should not contain pointer addresses")
+	assert.NotContains(t, msg, "*float64", "Should not contain pointer type info")
+	assert.NotContains(t, msg, "*string", "Should not contain pointer type info")
+	assert.NotContains(t, msg, "*time.Duration", "Should not contain pointer type info")
 }
 
 func TestErrorRowDifference_Error_WithDiff(t *testing.T) {
