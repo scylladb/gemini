@@ -34,9 +34,6 @@ const (
 	TypeTuple = "tuple"
 )
 
-// GoCQLProtoVersion4 is the protocol version accepted by gocql for NativeType constructor.
-const GoCQLProtoVersion4 = 4
-
 // nolint:revive
 const (
 	TypeAscii     = SimpleType("ascii")
@@ -99,7 +96,7 @@ var (
 	AllTypes = append(append(SimpleTypes{}, PkTypes...), TypeBoolean, TypeDuration)
 )
 
-var gocqlTypeMap = map[gocql.Type]gocql.TypeInfo{
+var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
 	gocql.TypeAscii:     gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeAscii, ""),
 	gocql.TypeBigInt:    gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeBigInt, ""),
 	gocql.TypeBlob:      gocql.NewNativeType(GoCQLProtoVersion4, gocql.TypeBlob, ""),
