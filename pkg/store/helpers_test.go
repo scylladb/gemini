@@ -37,6 +37,8 @@ func Test_formatRows_AllTypes(t *testing.T) {
 	// Float32/64
 	assert.Equal(t, "f32=3.14", formatRows(sb.reset(), "f32", float32(3.14)))
 	assert.Equal(t, "f64=3.14", formatRows(sb.reset(), "f64", float64(3.14)))
+	f64 := float64(6.28)
+	assert.Equal(t, "pf64=6.28", formatRows(sb.reset(), "pf64", &f64))
 
 	// Various ints / uints
 	assert.Equal(t, "i8=8", formatRows(sb.reset(), "i8", int8(8)))
@@ -54,10 +56,15 @@ func Test_formatRows_AllTypes(t *testing.T) {
 	// UUID
 	uuid := gocql.TimeUUID()
 	assert.Equal(t, "id="+uuid.String(), formatRows(sb.reset(), "id", uuid))
+	assert.Equal(t, "pid="+uuid.String(), formatRows(sb.reset(), "pid", &uuid))
 
 	// time.Time
 	ts := time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
 	assert.Equal(t, "ts=2025-01-02 03:04:05", formatRows(sb.reset(), "ts", ts))
+	assert.Equal(t, "pts=2025-01-02 03:04:05", formatRows(sb.reset(), "pts", &ts))
+	dur := 2 * time.Second
+	assert.Equal(t, "dur=2s", formatRows(sb.reset(), "dur", dur))
+	assert.Equal(t, "pdur=2s", formatRows(sb.reset(), "pdur", &dur))
 
 	// *big.Int
 	bi := big.NewInt(1234567890)
@@ -75,6 +82,8 @@ func Test_formatRows_AllTypes(t *testing.T) {
 
 	// string
 	assert.Equal(t, "s=hello", formatRows(sb.reset(), "s", "hello"))
+	str := "world"
+	assert.Equal(t, "ps=world", formatRows(sb.reset(), "ps", &str))
 }
 
 func Test_pks_WithAndWithoutClusteringKeys(t *testing.T) {

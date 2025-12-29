@@ -17,6 +17,7 @@ package store
 import (
 	"fmt"
 	"math/big"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -32,7 +33,19 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 	sb.WriteString(key)
 	sb.WriteByte('=')
 
-	switch v := value.(type) {
+	v := value
+	if v != nil {
+		rv := reflect.ValueOf(v)
+		for rv.Kind() == reflect.Pointer {
+			if rv.IsNil() {
+				return sb.String()
+			}
+			rv = rv.Elem()
+		}
+		v = rv.Interface()
+	}
+
+	switch v := v.(type) {
 	case float32:
 		sb.WriteString(strconv.FormatFloat(float64(v), 'G', -1, 32))
 	case float64:
@@ -55,10 +68,16 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 		sb.WriteString(v.String())
 	case time.Time:
 		sb.WriteString(v.Format(time.DateTime))
+	case time.Duration:
+		sb.WriteString(v.String())
 	case *big.Int:
 		sb.WriteString(v.String())
+	case big.Int:
+		sb.WriteString((&v).String())
 	case *inf.Dec:
 		sb.WriteString(v.String())
+	case inf.Dec:
+		sb.WriteString((&v).String())
 	case nil:
 	case []byte:
 		sb.Write(v)
