@@ -626,6 +626,43 @@ func TestCompareCollectedRows_UnorderedRows_AreSortedAndMatch(t *testing.T) {
 	assert.Empty(t, result.DifferentRows)
 }
 
+func TestCompareCollectedRows_SortingOrder(t *testing.T) {
+	t.Parallel()
+
+	table := &typedef.Table{
+		PartitionKeys:  []typedef.ColumnDef{{Name: "pk", Type: typedef.TypeInt}},
+		ClusteringKeys: []typedef.ColumnDef{{Name: "ck", Type: typedef.TypeInt}},
+	}
+
+	// Columns are NOT in PK, CK order in the result set
+	oracleRows := Rows{
+		NewRow([]string{"v", "pk", "ck"}, []any{100, 1, 1}),
+		NewRow([]string{"v", "pk", "ck"}, []any{10, 1, 2}),
+	}
+	// If sorted by 'v', Oracle[1] (v=10) would come before Oracle[0] (v=100)
+
+	testRows := Rows{
+		NewRow([]string{"v", "pk", "ck"}, []any{5, 1, 1}),
+		NewRow([]string{"v", "pk", "ck"}, []any{10, 1, 2}),
+	}
+	// If sorted by 'v', Test[0] (v=5) would come before Test[1] (v=10)
+
+	// After sorting by PK, CK:
+	// Oracle: [(100, 1, 1), (10, 1, 2)]
+	// Test:   [(5, 1, 1), (10, 1, 2)]
+	// Index 0: Oracle(100, 1, 1) vs Test(5, 1, 1) -> Same PK, CK. Diff is only V.
+	// Index 1: Oracle(10, 1, 2) vs Test(10, 1, 2) -> Match!
+
+	result := CompareCollectedRows(table, testRows, oracleRows)
+
+	assert.Equal(t, 1, result.MatchCount, "Should have 1 matching row")
+	assert.Equal(t, 1, len(result.DifferentRows), "Should have 1 different row")
+	if len(result.DifferentRows) > 0 {
+		assert.Equal(t, 1, result.DifferentRows[0].OracleRow.Get("ck"), "Different row should be CK=1")
+		assert.Equal(t, 1, result.DifferentRows[0].TestRow.Get("ck"), "Different row should be CK=1")
+	}
+}
+
 func TestCompareCollectedRows_RowCountMismatch_ExtraInOracle(t *testing.T) {
 	t.Parallel()
 

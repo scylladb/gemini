@@ -41,12 +41,26 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 	oracleRows = deduplicateRows(table, oracleRows)
 
 	// Sort both sides (stable) to aid deterministic behavior when rendering diffs.
-	// Note: comparison below is key-based and order-independent.
+	// We sort by partition keys first, then clustering keys to ensure stable
+	// and consistent comparison regardless of the order returned by the database.
+	cmp := func(a, b Row) int {
+		for _, pk := range table.PartitionKeys {
+			if c := compareValues(a.Get(pk.Name), b.Get(pk.Name)); c != 0 {
+				return c
+			}
+		}
+		for _, ck := range table.ClusteringKeys {
+			if c := compareValues(a.Get(ck.Name), b.Get(ck.Name)); c != 0 {
+				return c
+			}
+		}
+		return rowsCmp(a, b)
+	}
 	if len(testRows) > 1 {
-		slices.SortStableFunc(testRows, rowsCmp)
+		slices.SortStableFunc(testRows, cmp)
 	}
 	if len(oracleRows) > 1 {
-		slices.SortStableFunc(oracleRows, rowsCmp)
+		slices.SortStableFunc(oracleRows, cmp)
 	}
 
 	// Fast-path: if rows are deeply equal after sort, all match.
