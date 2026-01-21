@@ -146,8 +146,8 @@ func GetCreateSchema(s *typedef.Schema) []string {
 		}
 		for _, mv := range t.MaterializedViews {
 			var (
-				mvPartitionKeys      []string
-				mvPrimaryKeysNotNull []string
+				mvPartitionKeys      = make([]string, 0, len(mv.PartitionKeys)+len(mv.ClusteringKeys))
+				mvPrimaryKeysNotNull = make([]string, 0, len(mv.PartitionKeys)+len(mv.ClusteringKeys))
 			)
 			for _, pk := range mv.PartitionKeys {
 				mvPartitionKeys = append(mvPartitionKeys, pk.Name)

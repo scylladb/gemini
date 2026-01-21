@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"reflect"
 	"strings"
 	"time"
 
@@ -125,6 +124,42 @@ func rowsCmp(i, j Row) int {
 	}
 }
 
+func comparePtr[T cmp.Ordered](a, b *T) int {
+	if a == nil && b == nil {
+		return 0
+	}
+	if a == nil {
+		return -1
+	}
+	if b == nil {
+		return 1
+	}
+	return cmp.Compare(*a, *b)
+}
+
+func compareBool(a, b bool) int {
+	if a == b {
+		return 0
+	}
+	if !a {
+		return -1
+	}
+	return 1
+}
+
+func compareBoolPtr(a, b *bool) int {
+	if a == nil && b == nil {
+		return 0
+	}
+	if a == nil {
+		return -1
+	}
+	if b == nil {
+		return 1
+	}
+	return compareBool(*a, *b)
+}
+
 //nolint:gocyclo
 func compareValues(a, b any) int {
 	if a == nil && b == nil {
@@ -137,306 +172,205 @@ func compareValues(a, b any) int {
 		return 1
 	}
 
-	ta := reflect.TypeOf(a)
-	tb := reflect.TypeOf(b)
-	if ta != tb {
-		// Fallback to string representation when types differ
-		return strings.Compare(fmt.Sprint(a), fmt.Sprint(b))
-	}
-
 	switch av := a.(type) {
 	case []byte:
-		return bytes.Compare(av, b.([]byte))
+		if bv, ok := b.([]byte); ok {
+			return bytes.Compare(av, bv)
+		}
 	case *[]byte:
-		bv := b.(*[]byte)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*[]byte); ok {
+			if av == nil && bv == nil {
+				return 0
+			}
+			if av == nil {
+				return -1
+			}
+			if bv == nil {
+				return 1
+			}
+			return bytes.Compare(*av, *bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return bytes.Compare(*av, *bv)
 	case string:
-		return strings.Compare(av, b.(string))
+		if bv, ok := b.(string); ok {
+			return strings.Compare(av, bv)
+		}
 	case *string:
-		bv := b.(*string)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*string); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return strings.Compare(*av, *bv)
 	case bool:
-		bv := b.(bool)
-		if av == bv {
-			return 0
+		if bv, ok := b.(bool); ok {
+			return compareBool(av, bv)
 		}
-		if !av && bv {
-			return -1
-		}
-		return 1
 	case *bool:
-		bv := b.(*bool)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*bool); ok {
+			return compareBoolPtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		if *av == *bv {
-			return 0
-		}
-		if !*av && *bv {
-			return -1
-		}
-		return 1
 	case float32:
-		return cmp.Compare(av, b.(float32))
+		if bv, ok := b.(float32); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *float32:
-		bv := b.(*float32)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*float32); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case float64:
-		return cmp.Compare(av, b.(float64))
+		if bv, ok := b.(float64); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *float64:
-		bv := b.(*float64)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*float64); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case int:
-		return cmp.Compare(av, b.(int))
+		if bv, ok := b.(int); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *int:
-		bv := b.(*int)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*int); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case int8:
-		return cmp.Compare(av, b.(int8))
+		if bv, ok := b.(int8); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *int8:
-		bv := b.(*int8)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*int8); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case int16:
-		return cmp.Compare(av, b.(int16))
+		if bv, ok := b.(int16); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *int16:
-		bv := b.(*int16)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*int16); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case int32:
-		return cmp.Compare(av, b.(int32))
+		if bv, ok := b.(int32); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *int32:
-		bv := b.(*int32)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*int32); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case int64:
-		return cmp.Compare(av, b.(int64))
+		if bv, ok := b.(int64); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *int64:
-		bv := b.(*int64)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*int64); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case uint:
-		return cmp.Compare(av, b.(uint))
+		if bv, ok := b.(uint); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *uint:
-		bv := b.(*uint)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*uint); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case uint8:
-		return cmp.Compare(av, b.(uint8))
+		if bv, ok := b.(uint8); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *uint8:
-		bv := b.(*uint8)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*uint8); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case uint16:
-		return cmp.Compare(av, b.(uint16))
+		if bv, ok := b.(uint16); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *uint16:
-		bv := b.(*uint16)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*uint16); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case uint32:
-		return cmp.Compare(av, b.(uint32))
+		if bv, ok := b.(uint32); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *uint32:
-		bv := b.(*uint32)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*uint32); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case uint64:
-		return cmp.Compare(av, b.(uint64))
+		if bv, ok := b.(uint64); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *uint64:
-		bv := b.(*uint64)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*uint64); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case gocql.UUID:
-		bv := b.(gocql.UUID)
-		return bytes.Compare(av[:], bv[:])
+		if bv, ok := b.(gocql.UUID); ok {
+			return bytes.Compare(av[:], bv[:])
+		}
 	case *gocql.UUID:
-		bv := b.(*gocql.UUID)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*gocql.UUID); ok {
+			if av == nil && bv == nil {
+				return 0
+			}
+			if av == nil {
+				return -1
+			}
+			if bv == nil {
+				return 1
+			}
+			return bytes.Compare(av[:], bv[:])
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return bytes.Compare(av[:], bv[:])
 	case time.Time:
-		return av.Compare(b.(time.Time))
+		if bv, ok := b.(time.Time); ok {
+			return av.Compare(bv)
+		}
 	case *time.Time:
-		bv := b.(*time.Time)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*time.Time); ok {
+			if av == nil && bv == nil {
+				return 0
+			}
+			if av == nil {
+				return -1
+			}
+			if bv == nil {
+				return 1
+			}
+			return av.Compare(*bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return av.Compare(*bv)
 	case time.Duration:
-		return cmp.Compare(av, b.(time.Duration))
+		if bv, ok := b.(time.Duration); ok {
+			return cmp.Compare(av, bv)
+		}
 	case *time.Duration:
-		bv := b.(*time.Duration)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*time.Duration); ok {
+			return comparePtr(av, bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return cmp.Compare(*av, *bv)
 	case *big.Int:
-		bv := b.(*big.Int)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*big.Int); ok {
+			if av == nil && bv == nil {
+				return 0
+			}
+			if av == nil {
+				return -1
+			}
+			if bv == nil {
+				return 1
+			}
+			return av.Cmp(bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return av.Cmp(bv)
 	case *inf.Dec:
-		bv := b.(*inf.Dec)
-		if av == nil && bv == nil {
-			return 0
+		if bv, ok := b.(*inf.Dec); ok {
+			if av == nil && bv == nil {
+				return 0
+			}
+			if av == nil {
+				return -1
+			}
+			if bv == nil {
+				return 1
+			}
+			return av.Cmp(bv)
 		}
-		if av == nil {
-			return -1
-		}
-		if bv == nil {
-			return 1
-		}
-		return av.Cmp(bv)
-	default:
-		// As a safety hatch, fallback to string comparison
-		return strings.Compare(fmt.Sprint(a), fmt.Sprint(b))
 	}
+	// Fallback to string representation when types differ or are not handled
+	return strings.Compare(fmt.Sprint(a), fmt.Sprint(b))
 }
