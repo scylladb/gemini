@@ -4,11 +4,14 @@ on:
   push:
     branches:
       - master
+    paths:
+      - '.github/**'
   pull_request:
     types: [opened, synchronize, reopened, labeled]
     branches:
       - master
-
+    paths:
+      - '.github/**'
 jobs:
   build:
     if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'test/integration')
@@ -26,7 +29,7 @@ jobs:
         run: make build
       - uses: actions/upload-artifact@v6
         with:
-          name: bin
+          name: gemini
           path: "./bin"
           if-no-files-found: error
           retention-days: 1
@@ -52,6 +55,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: actions/download-artifact@v7
+        with:
+            name: gemini
       - name: Start ScyllaDB
         id: scylla
         shell: bash
@@ -59,6 +64,10 @@ jobs:
           ulimit -n 65536
           sudo sysctl -w fs.aio-max-nr=30000000
           sudo sysctl -w fs.file-max=30000000
+          if [ -f "./gemini" ]; then
+            mkdir -p ./bin
+            mv ./gemini ./bin/gemini
+          fi
 
           chmod +x ./bin/gemini
           sudo make scylla-setup \
