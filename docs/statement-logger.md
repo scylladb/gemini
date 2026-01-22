@@ -1,115 +1,134 @@
 # Gemini Statement Logger
 
-The Gemini Statement Logger is a comprehensive logging system that captures detailed information about all database statements executed during testing sessions. This feature is particularly valuable for debugging, performance analysis, and understanding the exact behavior of test workloads.
+The Gemini Statement Logger captures database statements executed during testing sessions and stores them both in ScyllaDB and optionally in files. When validation errors occur, Gemini provides the full statement history for the affected partitions, making it easy to reproduce and investigate issues.
 
-## Purpose
+For practical guidance on using statement logs to debug failures, see the [Investigation Guide](investigation.md).
 
-The statement logger serves several critical purposes:
+## How It Works
 
-- **Debugging**: When errors occur, the logger immediately captures the failed statements with full context, making it easier to reproduce and analyze issues
-- **Performance Analysis**: Track execution times and patterns for all statement types
-- **Audit Trail**: Maintain a complete record of all database operations for compliance and review
-- **Test Validation**: Compare statement execution between Oracle (reference) and Test (system under test) clusters
+Gemini logs all mutation statements (INSERT, UPDATE, DELETE) during test execution:
 
-## Overview
+1. **ScyllaDB Storage**: Statements are automatically stored in a dedicated logs keyspace (`<keyspace>_logs`) with a table named `<table>_statements`
+2. **Error Detection**: When a validation error occurs, Gemini fetches all statements for the affected partition
+3. **File Output**: If statement log files are configured, error context is written to JSON files with full statement history
+4. **Mutation Fragments**: For deeper analysis, Gemini can also fetch low-level mutation data using ScyllaDB's MUTATION_FRAGMENTS function
 
-The statement logger operates in real-time, immediately writing statement information to log files when statements are executed or when errors occur. This immediate logging ensures that critical information is captured even if the test run is interrupted unexpectedly.
+## Enabling Statement Logging
 
-### Key Features
+### Basic Setup
 
-- **Immediate Error Logging**: When an error occurs, the statement is immediately logged with full context
-- **Real-time Logging**: All statements are logged as they execute, not buffered until the end
-- **Dual Cluster Support**: Separate logging for Oracle and Test clusters
-- **Multiple Output Formats**: Support for JSON format with optional compression
-- **Comprehensive Data**: Captures statement text, parameters, timing, host information, and error details
-
-### How It Works
-
-The statement logger uses an asynchronous channel-based architecture:
-
-1. **Statement Execution**: When Gemini executes a statement, it creates a log item with all relevant information
-2. **Channel Processing**: Log items are sent through dedicated channels for immediate processing
-3. **File Writing**: Background goroutines continuously write log items to the configured files
-4. **Error Handling**: Failed statements trigger immediate logging to both Oracle and Test statement files
-5. **Compression**: Optional compression (none, gzip, zstd) reduces file sizes for large test runs
-
-## CLI Flags
-
-### Required Flags
-
-For statement logging to be active, you must specify at least one output file:
-
-- **`--test-statement-log-file`**: File path to write Test cluster statements
-- **`--oracle-statement-log-file`**: File path to write Oracle cluster statements
-
-### Optional Flags
-
-- **`--statement-log-file-compression`**: Compression algorithm to use
-  - Options: `none` (default), `gzip`, `zstd`
-  - Example: `--statement-log-file-compression=gzip`
-
-### Usage Examples
+Statement logging to ScyllaDB happens automatically. For file output, specify log files:
 
 ```bash
-# Basic statement logging for both clusters
-gemini --test-statement-log-file=/tmp/test_statements.json \
-       --oracle-statement-log-file=/tmp/oracle_statements.json \
+gemini --test-statement-log-file=test_statements.json \
+       --oracle-statement-log-file=oracle_statements.json \
        --oracle-cluster=192.168.1.10 \
        --test-cluster=192.168.1.20
+```
 
-# With compression to save disk space
-gemini --test-statement-log-file=/tmp/test_statements.json.gz \
-       --oracle-statement-log-file=/tmp/oracle_statements.json.gz \
+### With Compression
+
+For long-running tests, enable compression to save disk space:
+
+```bash
+gemini --test-statement-log-file=test_statements.json.gz \
+       --oracle-statement-log-file=oracle_statements.json.gz \
        --statement-log-file-compression=gzip \
        --oracle-cluster=192.168.1.10 \
        --test-cluster=192.168.1.20
-
-# Only test cluster logging (no validation)
-gemini --test-statement-log-file=/tmp/statements.json \
-       --test-cluster=192.168.1.20
 ```
+
+## CLI Flags
+
+| Flag | Description |
+|------|-------------|
+| `--test-statement-log-file` | File path to write test cluster error context |
+| `--oracle-statement-log-file` | File path to write oracle cluster error context |
+| `--statement-log-file-compression` | Compression: `none` (default), `gzip`, `zstd` |
 
 ## Log File Format
 
-Each log entry is a JSON object containing:
+Each line in the log file represents a partition that had a validation error. The format is:
 
 ```json
 {
-  "s": "2025-01-01T12:00:00Z",           // Start timestamp
-  "partitionKeys": [1, "key"],           // Partition key values
-  "e": "error message",                  // Error (if any)
-  "q": "INSERT INTO...",                 // Statement query
-  "h": "192.168.1.10",                  // Host that executed
-  "v": [1, "value"],                     // Statement parameters
-  "d": 1000000,                         // Duration in nanoseconds
-  "d_a": 1,                             // Driver attempt number
-  "g_a": 1                              // Gemini attempt number
+  "partitionKeys": {"col1": 5, "col2": "value"},
+  "timestamp": "2025-01-20T10:15:30Z",
+  "err": "row mismatch: oracle has 5 rows, test has 3",
+  "query": "SELECT * FROM ks.table1 WHERE col1 = ? AND col2 = ?",
+  "message": "validation failed",
+  "mutationFragments": [...],
+  "statements": [...]
 }
 ```
 
-## Error Handling and Immediate Logging
+### Top-Level Fields
 
-When an error occurs during statement execution:
+| Field | Description |
+|-------|-------------|
+| `partitionKeys` | Map of partition key column names to their values |
+| `timestamp` | When the error was detected |
+| `err` | Error message describing the validation failure |
+| `query` | The SELECT query that detected the mismatch |
+| `message` | Additional context about the error |
+| `mutationFragments` | Low-level mutation data from MUTATION_FRAGMENTS |
+| `statements` | Array of all statements executed on this partition |
 
-1. **Immediate Capture**: The failed statement is immediately logged with full error context
-2. **Dual Logging**: Error information is written to both Oracle and Test statement files (if configured)
-3. **No Buffering**: Error statements bypass any buffering and are written directly to disk
-4. **Complete Context**: Includes the exact statement, parameters, timing, and error message
+### Statement Array Format
 
-This immediate error logging ensures that even if Gemini crashes or is interrupted, the failed statements are preserved for analysis.
+Each entry in the `statements` array:
 
-## Performance Impact
+```json
+{
+  "ts": "2025-01-20T10:14:00Z",
+  "statement": "INSERT INTO ks.table1 (col1, col2, val) VALUES (?, ?, ?)",
+  "values": ["5", "\"value\"", "\"data\""],
+  "host": "192.168.1.10",
+  "attempt": 1,
+  "gemini_attempt": 1,
+  "dur": "1ms"
+}
+```
 
-The statement logger is designed for minimal performance impact:
+| Field | Description |
+|-------|-------------|
+| `ts` | Timestamp when statement was executed |
+| `statement` | The CQL query |
+| `values` | Bound parameter values (as strings) |
+| `host` | Host that executed the query |
+| `attempt` | Driver retry attempt number |
+| `gemini_attempt` | Gemini-level retry attempt number |
+| `error` | Error message (only present if statement failed) |
+| `dur` | Execution duration |
 
-- **Asynchronous Processing**: Logging doesn't block statement execution
-- **Buffered Writes**: File I/O is buffered and batched for efficiency
-- **Optional Compression**: Reduces I/O overhead for large test runs
-- **Channel-based**: Uses Go channels for efficient concurrent processing
+## Querying Statement Logs in ScyllaDB
 
-## Limitations
+Statements are stored in ScyllaDB for direct querying:
 
-- **Disk Space**: Large test runs can generate significant log files
-- **File I/O**: Intensive logging may impact system I/O performance
-- **Memory Usage**: Log items are queued in memory before writing
-- **Single Format**: Currently only supports JSON format output
+```bash
+# Find all statements for a specific partition
+cqlsh -e "SELECT * FROM ks_logs.table1_statements WHERE col1 = 5 AND col2 = 'value';"
+
+# Filter by type (oracle or test)
+cqlsh -e "SELECT * FROM ks_logs.table1_statements WHERE col1 = 5 AND col2 = 'value' AND ty = 'test';"
+```
+
+The logs table schema includes:
+- Partition key columns (matching the original table)
+- `ty` - Type: 'oracle' or 'test'
+- `ddl` - Whether it's a DDL statement
+- `ts` - Timestamp
+- `statement` - The CQL query
+- `values` - Bound parameters
+- `host` - Executing host
+- `attempt` - Driver attempt
+- `gemini_attempt` - Gemini attempt
+- `error` - Error message
+- `dur` - Duration
+
+## Performance Considerations
+
+- **Asynchronous Processing**: Statement logging uses background workers and doesn't block query execution
+- **Batched Writes**: Statements are batched before writing to ScyllaDB for efficiency
+- **Memory Usage**: A fixed-size channel buffers statements before processing
+- **Disk Usage**: File output only contains error context, not all statements
