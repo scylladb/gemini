@@ -104,8 +104,8 @@ func TestComplexTypesAsPartitionKeys(t *testing.T) {
 			// Test 1: Generate values for the complex type
 			t.Run("GenerateValue", func(t *testing.T) {
 				defer func() {
-					if r := recover(); r != nil {
-						t.Errorf("Panic during value generation: %v", r)
+					if rec := recover(); rec != nil {
+						t.Errorf("Panic during value generation: %v", rec)
 					}
 				}()
 
@@ -121,8 +121,8 @@ func TestComplexTypesAsPartitionKeys(t *testing.T) {
 			// Test 2: Create partition keys with complex type
 			t.Run("CreatePartitionKeys", func(t *testing.T) {
 				defer func() {
-					if r := recover(); r != nil {
-						t.Errorf("Panic during partition keys creation: %v", r)
+					if rec := recover(); rec != nil {
+						t.Errorf("Panic during partition keys creation: %v", rec)
 					}
 				}()
 
@@ -148,13 +148,13 @@ func TestComplexTypesAsPartitionKeys(t *testing.T) {
 			// Test 3: Test JSON marshaling (used in hash generation)
 			t.Run("JSONMarshal", func(t *testing.T) {
 				defer func() {
-					if r := recover(); r != nil {
-						t.Errorf("Panic during JSON marshaling: %v", r)
+					if rec := recover(); rec != nil {
+						t.Errorf("Panic during JSON marshaling: %v", rec)
 					}
 				}()
 
 				values := tt.columnType.GenValue(r, config)
-				
+
 				// Try to marshal the values to JSON (as done in JobError.Hash)
 				_, err := json.Marshal(values)
 				if err != nil {
@@ -165,8 +165,8 @@ func TestComplexTypesAsPartitionKeys(t *testing.T) {
 			// Test 4: Test hash generation via JobError (the actual use case from the issue)
 			t.Run("HashGeneration", func(t *testing.T) {
 				defer func() {
-					if r := recover(); r != nil {
-						t.Errorf("Panic during hash generation: %v", r)
+					if rec := recover(); rec != nil {
+						t.Errorf("Panic during hash generation: %v", rec)
 					}
 				}()
 
@@ -212,8 +212,8 @@ func TestComplexTypesAsPartitionKeys(t *testing.T) {
 			// Test 5: Test multiple partition keys with mix of simple and complex types
 			t.Run("MixedPartitionKeys", func(t *testing.T) {
 				defer func() {
-					if r := recover(); r != nil {
-						t.Errorf("Panic during mixed partition keys test: %v", r)
+					if rec := recover(); rec != nil {
+						t.Errorf("Panic during mixed partition keys test: %v", rec)
 					}
 				}()
 
@@ -278,13 +278,13 @@ func TestComplexTypesPartitionKeyValues(t *testing.T) {
 		}
 
 		values := collType.GenValue(r, config)
-		
+
 		// Marshal to JSON to verify it works
 		data, err := json.Marshal(values)
 		if err != nil {
 			t.Errorf("Failed to marshal list collection values: %v", err)
 		}
-		
+
 		if len(data) == 0 {
 			t.Error("Marshaled data is empty")
 		}
@@ -303,13 +303,13 @@ func TestComplexTypesPartitionKeyValues(t *testing.T) {
 		}
 
 		values := mapType.GenValue(r, config)
-		
+
 		// Marshal to JSON to verify it works
 		data, err := json.Marshal(values)
 		if err != nil {
 			t.Errorf("Failed to marshal map type values: %v", err)
 		}
-		
+
 		if len(data) == 0 {
 			t.Error("Marshaled data is empty")
 		}
@@ -327,13 +327,13 @@ func TestComplexTypesPartitionKeyValues(t *testing.T) {
 		}
 
 		values := tupleType.GenValue(r, config)
-		
+
 		// Marshal to JSON to verify it works
 		data, err := json.Marshal(values)
 		if err != nil {
 			t.Errorf("Failed to marshal tuple type values: %v", err)
 		}
-		
+
 		if len(data) == 0 {
 			t.Error("Marshaled data is empty")
 		}
@@ -356,13 +356,13 @@ func TestComplexTypesPartitionKeyValues(t *testing.T) {
 		}
 
 		values := udtType.GenValue(r, config)
-		
+
 		// Marshal to JSON to verify it works
 		data, err := json.Marshal(values)
 		if err != nil {
 			t.Errorf("Failed to marshal UDT type values: %v", err)
 		}
-		
+
 		if len(data) == 0 {
 			t.Error("Marshaled data is empty")
 		}
@@ -425,8 +425,8 @@ func TestOriginalIssueScenario(t *testing.T) {
 
 	// This is where the original error would occur: "Error on get hash for table"
 	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("Panic during hash generation (original issue reproduced): %v", r)
+		if rec := recover(); rec != nil {
+			t.Errorf("Panic during hash generation (original issue reproduced): %v", rec)
 		}
 	}()
 
