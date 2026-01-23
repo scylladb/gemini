@@ -1,0 +1,20 @@
+name: Gemini Integration Tests (On Changes)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - master
+    paths:
+      - ".github/**"
+
+concurrency:
+  group: integration-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-tests:
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'test/integration') }}
+    uses: ./.github/workflows/integration-tests-reusable.yml
+    with:
+      trigger-reason: 'Code changes detected'
