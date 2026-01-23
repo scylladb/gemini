@@ -268,6 +268,7 @@ func TestComplexTypesPartitionKeyValues(t *testing.T) {
 
 	// Test Collection (List) type
 	t.Run("CollectionListValues", func(t *testing.T) {
+		t.Parallel()
 		val := rand.Uint64()
 		r := rand.New(rand.NewPCG(val, val))
 
@@ -292,6 +293,7 @@ func TestComplexTypesPartitionKeyValues(t *testing.T) {
 
 	// Test Map type
 	t.Run("MapTypeValues", func(t *testing.T) {
+		t.Parallel()
 		val := rand.Uint64()
 		r := rand.New(rand.NewPCG(val, val))
 
@@ -317,6 +319,7 @@ func TestComplexTypesPartitionKeyValues(t *testing.T) {
 
 	// Test Tuple type
 	t.Run("TupleTypeValues", func(t *testing.T) {
+		t.Parallel()
 		val := rand.Uint64()
 		r := rand.New(rand.NewPCG(val, val))
 
@@ -341,6 +344,7 @@ func TestComplexTypesPartitionKeyValues(t *testing.T) {
 
 	// Test UDT type
 	t.Run("UDTTypeValues", func(t *testing.T) {
+		t.Parallel()
 		val := rand.Uint64()
 		r := rand.New(rand.NewPCG(val, val))
 
