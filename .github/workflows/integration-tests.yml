@@ -1,102 +1,17 @@
-name: Gemini Integrations Tests
+name: Gemini Integration Tests (Manual/Label)
 
 on:
   push:
     branches:
       - master
-    paths:
-      - '.github/**'
   pull_request:
     types: [opened, synchronize, reopened, labeled]
     branches:
       - master
-    paths:
-      - '.github/**'
+
 jobs:
-  build:
+  integration-tests:
     if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'test/integration')
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: "1.25"
-      - name: Build
-        run: make build
-      - uses: actions/upload-artifact@v6
-        with:
-          name: gemini
-          path: "./bin"
-          if-no-files-found: error
-          retention-days: 1
-  test:
-    timeout-minutes: 10
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}-${{ matrix.duration }}-${{ matrix.warmup }}-${{ matrix.dataset-size }}-${{ matrix.test-scylla-version }}-${{ matrix.oracle-scylla-version }}
-    needs: [build]
-    runs-on: ubuntu-24.04
-    strategy:
-      max-parallel: 4
-      matrix:
-        gemini-features: ["basic", "normal"]
-        gemini-concurrency: [1, 4]
-        duration: ["4m"]
-        warmup: ["1m"]
-        dataset-size: [large]
-        oracle-scylla-version: ["2025.1"]
-        test-scylla-version: ["2025.1", "2025.2", "2025.3"]
-      fail-fast: false
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: actions/download-artifact@v7
-        with:
-            name: gemini
-      - name: Start ScyllaDB
-        id: scylla
-        shell: bash
-        run: |
-          ulimit -n 65536
-          sudo sysctl -w fs.aio-max-nr=30000000
-          sudo sysctl -w fs.file-max=30000000
-          if [ -f "./gemini" ]; then
-            mkdir -p ./bin
-            mv ./gemini ./bin/gemini
-          fi
-
-          chmod +x ./bin/gemini
-          sudo make scylla-setup \
-            SCYLLA_TEST_VERSION=${{ matrix.test-scylla-version }} \
-            SCYLLA_ORACLE_VERSION=${{ matrix.oracle-scylla-version }}
-      - name: Test
-        shell: bash
-        run: |
-          SEED=$(python3 -c "import random; print(random.randint(1, 100))")
-
-          make integration-test \
-          	GEMINI_IO_WORKER_POOL=64 \
-            GEMINI_SEED=$SEED \
-            CONCURRENCY=${{ matrix.gemini-concurrency }} \
-            CQL_FEATURES=${{ matrix.gemini-features }} \
-            DURATION=${{ matrix.duration }} \
-            WARMUP=${{ matrix.warmup }} \
-            DATASET_SIZE=${{ matrix.dataset-size }}
-      - name: Shutdown ScyllaDB
-        shell: bash
-        run: |
-          sudo make scylla-shutdown \
-            SCYLLA_TEST_VERSION=${{ matrix.test-scylla-version }} \
-            SCYLLA_ORACLE_VERSION=${{ matrix.oracle-scylla-version }}
-
-      - uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: results-${{ matrix.gemini-features }}-${{ matrix.gemini-concurrency }}-${{ matrix.duration }}-${{ matrix.warmup }}-${{ matrix.dataset-size }}-${{ matrix.test-scylla-version }}-${{ matrix.oracle-scylla-version }}-${{ github.run_number }}
-          path: ./results
-          if-no-files-found: error
-          retention-days: 1
+    uses: ./.github/workflows/integration-tests-reusable.yml
+    with:
+      trigger-reason: "Manual trigger or integration label"
