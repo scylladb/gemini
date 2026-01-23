@@ -81,6 +81,12 @@ var (
 		TypeVarint,
 	}
 
+	// PartitionKeyTypes defines the types that can be used for partition keys in schema generation.
+	// Currently limited to SimpleTypes for compatibility and simplicity.
+	// Note: Frozen complex types (collections, tuples, UDTs) can also be used as partition keys
+	// in Scylla/Cassandra (see TestComplexTypesAsPartitionKeys_Integration for proof), but are
+	// not included here to maintain backward compatibility and avoid complexity in schema generation.
+	// TODO: Consider adding frozen complex types support when CQLFeature is CQLFeatureAll.
 	PartitionKeyTypes = SimpleTypes{
 		TypeAscii, TypeBigint, TypeDate, TypeDecimal, TypeDouble,
 		TypeFloat, TypeInet, TypeInt, TypeSmallint, TypeText, TypeTime, TypeTimestamp, TypeTimeuuid,
