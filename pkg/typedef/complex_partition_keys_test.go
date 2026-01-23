@@ -26,6 +26,11 @@ import (
 // TestComplexTypesAsPartitionKeys tests if complex types (Collection, Map, Tuple, UDT)
 // can be used as partition keys and if they meet gocql.Marshal requirements.
 // This test verifies the issue: https://github.com/scylladb/gemini/issues/QATOOLS-98
+//
+// IMPORTANT: While this test proves complex types CAN work as partition keys when properly
+// frozen and hashed (using json.Marshal instead of gocql.Marshal), they are currently NOT
+// included in the PartitionKeyTypes list used for schema generation. This is intentional to
+// maintain backward compatibility and avoid complexity. See pkg/typedef/types.go for details.
 func TestComplexTypesAsPartitionKeys(t *testing.T) {
 	t.Parallel()
 
