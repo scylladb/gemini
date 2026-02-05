@@ -118,8 +118,8 @@ func TestClusterObserver_ObserveBatch_Success(t *testing.T) {
 		Statement: typedef.SimpleStmt("INSERT INTO test (id) VALUES (?)", typedef.InsertStatementType),
 	})
 
-	host := &gocql.HostInfo{}
-	host.SetConnectAddress(net.ParseIP("127.0.0.1"))
+	h := gocql.HostInfoBuilder{ConnectAddress: net.ParseIP("127.0.0.1")}.Build()
+	host := &h
 
 	batch := gocql.ObservedBatch{
 		Host:     host,
@@ -147,8 +147,8 @@ func TestClusterObserver_ObserveBatch_WithError(t *testing.T) {
 		Statement: typedef.SimpleStmt("INSERT INTO test (id) VALUES (?)", typedef.InsertStatementType),
 	})
 
-	host := &gocql.HostInfo{}
-	host.SetConnectAddress(net.ParseIP("127.0.0.1"))
+	h := gocql.HostInfoBuilder{ConnectAddress: net.ParseIP("127.0.0.1")}.Build()
+	host := &h
 
 	testCases := []struct {
 		err  error
@@ -202,8 +202,8 @@ func TestClusterObserver_ObserveBatch_NilContextData(t *testing.T) {
 	// Context without ContextData
 	ctx := t.Context()
 
-	host := &gocql.HostInfo{}
-	host.SetConnectAddress(net.ParseIP("127.0.0.1"))
+	h := gocql.HostInfoBuilder{ConnectAddress: net.ParseIP("127.0.0.1")}.Build()
+	host := &h
 
 	batch := gocql.ObservedBatch{
 		Host:     host,
@@ -231,8 +231,8 @@ func TestClusterObserver_ObserveQuery(t *testing.T) {
 		Statement: typedef.SimpleStmt("SELECT * FROM test WHERE id = ?", typedef.SelectStatementType),
 	})
 
-	host := &gocql.HostInfo{}
-	host.SetConnectAddress(net.ParseIP("127.0.0.1"))
+	h := gocql.HostInfoBuilder{ConnectAddress: net.ParseIP("127.0.0.1")}.Build()
+	host := &h
 
 	query := gocql.ObservedQuery{
 		Host:      host,
@@ -257,8 +257,8 @@ func TestClusterObserver_ObserveQuery_WithError(t *testing.T) {
 		Statement: typedef.SimpleStmt("SELECT * FROM test", typedef.SelectStatementType),
 	})
 
-	host := &gocql.HostInfo{}
-	host.SetConnectAddress(net.ParseIP("127.0.0.1"))
+	h := gocql.HostInfoBuilder{ConnectAddress: net.ParseIP("127.0.0.1")}.Build()
+	host := &h
 
 	query := gocql.ObservedQuery{
 		Host:      host,
@@ -281,8 +281,8 @@ func TestClusterObserver_ObserveQuery_NilContextData(t *testing.T) {
 
 	ctx := t.Context()
 
-	host := &gocql.HostInfo{}
-	host.SetConnectAddress(net.ParseIP("127.0.0.1"))
+	h := gocql.HostInfoBuilder{ConnectAddress: net.ParseIP("127.0.0.1")}.Build()
+	host := &h
 
 	query := gocql.ObservedQuery{
 		Host:      host,
@@ -303,9 +303,8 @@ func TestClusterObserver_ObserveConnect(t *testing.T) {
 	logger := zap.NewNop()
 	obs := NewClusterObserver(nil, logger, stmtlogger.TypeTest)
 
-	host := &gocql.HostInfo{}
-	host.SetHostID("test-host-id")
-	host.SetConnectAddress(net.ParseIP("127.0.0.1"))
+	h := gocql.HostInfoBuilder{HostId: "test-host-id", ConnectAddress: net.ParseIP("127.0.0.1")}.Build()
+	host := &h
 
 	connect := gocql.ObservedConnect{
 		Host:  host,
@@ -324,9 +323,8 @@ func TestClusterObserver_ObserveConnect_WithError(t *testing.T) {
 	logger := zap.NewNop()
 	obs := NewClusterObserver(nil, logger, stmtlogger.TypeOracle)
 
-	host := &gocql.HostInfo{}
-	host.SetHostID("test-host-id")
-	host.SetConnectAddress(net.ParseIP("192.168.1.1"))
+	h := gocql.HostInfoBuilder{HostId: "test-host-id", ConnectAddress: net.ParseIP("192.168.1.1")}.Build()
+	host := &h
 
 	connect := gocql.ObservedConnect{
 		Host:  host,
