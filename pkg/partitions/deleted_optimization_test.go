@@ -38,7 +38,7 @@ func TestOptimizationsWork(t *testing.T) {
 	// Test pushInline
 	for i := range 10 {
 		h.pushInline(deletedPartition{
-			values:  typedef.NewValues(1),
+			keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 			readyAt: now.Add(time.Duration(10-i) * time.Millisecond),
 		})
 	}
@@ -82,7 +82,7 @@ func TestInlineVsStdlib(t *testing.T) {
 	}
 	for i := range iterations {
 		h1.pushInline(deletedPartition{
-			values:  typedef.NewValues(1),
+			keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 			readyAt: now.Add(time.Duration(i) * time.Millisecond),
 		})
 	}
@@ -100,7 +100,7 @@ func TestInlineVsStdlib(t *testing.T) {
 	heap.Init(h2)
 	for i := range iterations {
 		heap.Push(h2, deletedPartition{
-			values:  typedef.NewValues(1),
+			keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 			readyAt: now.Add(time.Duration(i) * time.Millisecond),
 		})
 	}

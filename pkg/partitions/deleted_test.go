@@ -51,26 +51,26 @@ func TestDeletedPartitionHeap(t *testing.T) {
 		heap.Init(h)
 
 		now := time.Now()
-		values1 := typedef.NewValues(1)
-		values2 := typedef.NewValues(1)
-		values3 := typedef.NewValues(1)
+		keys1 := typedef.PartitionKeys{Values: typedef.NewValues(1)}
+		keys2 := typedef.PartitionKeys{Values: typedef.NewValues(1)}
+		keys3 := typedef.PartitionKeys{Values: typedef.NewValues(1)}
 
 		// Push in non-chronological order
-		heap.Push(h, deletedPartition{values: values2, readyAt: now.Add(2 * time.Second)})
-		heap.Push(h, deletedPartition{values: values1, readyAt: now.Add(1 * time.Second)})
-		heap.Push(h, deletedPartition{values: values3, readyAt: now.Add(3 * time.Second)})
+		heap.Push(h, deletedPartition{keys: keys2, readyAt: now.Add(2 * time.Second)})
+		heap.Push(h, deletedPartition{keys: keys1, readyAt: now.Add(1 * time.Second)})
+		heap.Push(h, deletedPartition{keys: keys3, readyAt: now.Add(3 * time.Second)})
 
 		assert.Equal(t, 3, h.Len())
 
 		// Pop should return items in chronological order
 		item1 := heap.Pop(h).(deletedPartition)
-		assert.Equal(t, values1, item1.values)
+		assert.Equal(t, keys1, item1.keys)
 
 		item2 := heap.Pop(h).(deletedPartition)
-		assert.Equal(t, values2, item2.values)
+		assert.Equal(t, keys2, item2.keys)
 
 		item3 := heap.Pop(h).(deletedPartition)
-		assert.Equal(t, values3, item3.values)
+		assert.Equal(t, keys3, item3.keys)
 
 		assert.Equal(t, 0, h.Len())
 	})
@@ -85,13 +85,13 @@ func TestDeletedPartitionHeap(t *testing.T) {
 		heap.Init(h)
 
 		now := time.Now()
-		values1 := typedef.NewValues(1)
+		keys1 := typedef.PartitionKeys{Values: typedef.NewValues(1)}
 
-		heap.Push(h, deletedPartition{values: values1, readyAt: now.Add(1 * time.Second)})
+		heap.Push(h, deletedPartition{keys: keys1, readyAt: now.Add(1 * time.Second)})
 
 		// Peek at the top without popping
 		top := h.data[0]
-		assert.Equal(t, values1, top.values)
+		assert.Equal(t, keys1, top.keys)
 		assert.Equal(t, 1, h.Len()) // Still has 1 element
 	})
 
@@ -109,9 +109,9 @@ func TestDeletedPartitionHeap(t *testing.T) {
 
 		// Push items in random order
 		for i := range count {
-			values := typedef.NewValues(1)
+			keys := typedef.PartitionKeys{Values: typedef.NewValues(1)}
 			heap.Push(h, deletedPartition{
-				values:  values,
+				keys:    keys,
 				readyAt: now.Add(time.Duration(count-i) * time.Millisecond),
 			})
 		}
@@ -143,9 +143,9 @@ func TestDeletedPartitionHeap(t *testing.T) {
 
 		// Use optimized push method
 		for i := range count {
-			values := typedef.NewValues(1)
+			keys := typedef.PartitionKeys{Values: typedef.NewValues(1)}
 			h.pushInline(deletedPartition{
-				values:  values,
+				keys:    keys,
 				readyAt: now.Add(time.Duration(count-i) * time.Millisecond),
 			})
 		}
@@ -177,9 +177,9 @@ func TestDeletedPartitionHeap(t *testing.T) {
 
 		// Push many items to trigger growth
 		for i := range count {
-			values := typedef.NewValues(1)
+			keys := typedef.PartitionKeys{Values: typedef.NewValues(1)}
 			h.pushInline(deletedPartition{
-				values:  values,
+				keys:    keys,
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 		}
@@ -217,7 +217,7 @@ func TestDeletedPartitionsBasic(t *testing.T) {
 		defer d.Close()
 
 		values := typedef.NewValues(1)
-		d.Delete(values)
+		d.Delete(typedef.PartitionKeys{Values: values})
 
 		assert.Equal(t, uint64(1), d.deleted.Load())
 		assert.Equal(t, 1, d.Len())
@@ -233,7 +233,7 @@ func TestDeletedPartitionsBasic(t *testing.T) {
 		const count = 10
 		for range count {
 			values := typedef.NewValues(1)
-			d.Delete(values)
+			d.Delete(typedef.PartitionKeys{Values: values})
 		}
 
 		assert.Equal(t, uint64(count), d.deleted.Load())
@@ -253,7 +253,7 @@ func TestDeletedPartitionsTimeBuckets(t *testing.T) {
 		defer d.Close()
 
 		values := typedef.NewValues(1)
-		d.Delete(values)
+		d.Delete(typedef.PartitionKeys{Values: values})
 
 		// Should not be ready immediately
 		select {
@@ -266,7 +266,7 @@ func TestDeletedPartitionsTimeBuckets(t *testing.T) {
 		// Should be ready after delay
 		select {
 		case received := <-d.ch:
-			assert.Equal(t, values, received)
+			assert.Equal(t, values, received.Values)
 		case <-time.After(delay + 100*time.Millisecond):
 			t.Fatal("Partition should be ready after delay")
 		}
@@ -284,7 +284,7 @@ func TestDeletedPartitionsTimeBuckets(t *testing.T) {
 		defer d.Close()
 
 		values := typedef.NewValues(1)
-		d.Delete(values)
+		d.Delete(typedef.PartitionKeys{Values: values})
 
 		// Should receive the partition multiple times (once per bucket + repeated last bucket)
 		receivedCount := 0
@@ -293,7 +293,7 @@ func TestDeletedPartitionsTimeBuckets(t *testing.T) {
 		for receivedCount < len(buckets) {
 			select {
 			case received := <-d.ch:
-				assert.Equal(t, values, received)
+				assert.Equal(t, values, received.Values)
 				receivedCount++
 			case <-timeout:
 				t.Fatalf("Expected %d revalidations, got %d", len(buckets), receivedCount)
@@ -315,15 +315,15 @@ func TestDeletedPartitionsTimeBuckets(t *testing.T) {
 		values2 := typedef.NewValues(1)
 		values3 := typedef.NewValues(1)
 
-		d.Delete(values1)
+		d.Delete(typedef.PartitionKeys{Values: values1})
 		time.Sleep(5 * time.Millisecond)
-		d.Delete(values2)
+		d.Delete(typedef.PartitionKeys{Values: values2})
 		time.Sleep(5 * time.Millisecond)
-		d.Delete(values3)
+		d.Delete(typedef.PartitionKeys{Values: values3})
 
 		// Should receive in order
 		timeout := time.After(200 * time.Millisecond)
-		received := make([]*typedef.Values, 0, 3)
+		received := make([]typedef.PartitionKeys, 0, 3)
 
 		for range 3 {
 			select {
@@ -334,9 +334,9 @@ func TestDeletedPartitionsTimeBuckets(t *testing.T) {
 			}
 		}
 
-		assert.Equal(t, values1, received[0])
-		assert.Equal(t, values2, received[1])
-		assert.Equal(t, values3, received[2])
+		assert.Equal(t, values1, received[0].Values)
+		assert.Equal(t, values2, received[1].Values)
+		assert.Equal(t, values3, received[2].Values)
 	})
 }
 
@@ -362,7 +362,7 @@ func TestDeletedPartitionsConcurrency(t *testing.T) {
 				defer wg.Done()
 				for range deletesPerGoroutine {
 					values := typedef.NewValues(1)
-					d.Delete(values)
+					d.Delete(typedef.PartitionKeys{Values: values})
 				}
 			}()
 		}
@@ -393,7 +393,7 @@ func TestDeletedPartitionsConcurrency(t *testing.T) {
 				defer wg.Done()
 				for range deletesPerWriter {
 					values := typedef.NewValues(1)
-					d.Delete(values)
+					d.Delete(typedef.PartitionKeys{Values: values})
 					time.Sleep(2 * time.Millisecond)
 				}
 			}()
@@ -441,7 +441,7 @@ func TestDeletedPartitionsConcurrency(t *testing.T) {
 			defer wg.Done()
 			for range 100 {
 				values := typedef.NewValues(1)
-				d.Delete(values)
+				d.Delete(typedef.PartitionKeys{Values: values})
 				time.Sleep(1 * time.Millisecond)
 			}
 		}()
@@ -470,12 +470,12 @@ func TestDeletedPartitionsBackgroundProcessor(t *testing.T) {
 		defer d.Close()
 
 		values := typedef.NewValues(1)
-		d.Delete(values)
+		d.Delete(typedef.PartitionKeys{Values: values})
 
 		// Wait for processing
 		select {
 		case received := <-d.ch:
-			assert.Equal(t, values, received)
+			assert.Equal(t, values, received.Values)
 		case <-time.After(200 * time.Millisecond):
 			t.Fatal("Timeout waiting for background processor")
 		}
@@ -489,7 +489,7 @@ func TestDeletedPartitionsBackgroundProcessor(t *testing.T) {
 		defer d.Close()
 
 		values := typedef.NewValues(1)
-		d.Delete(values)
+		d.Delete(typedef.PartitionKeys{Values: values})
 
 		// Should not be ready quickly
 		select {
@@ -510,7 +510,7 @@ func TestDeletedPartitionsBackgroundProcessor(t *testing.T) {
 		d := newDeleted(ctx, buckets)
 
 		values := typedef.NewValues(1)
-		d.Delete(values)
+		d.Delete(typedef.PartitionKeys{Values: values})
 
 		// Cancel context
 		cancel()
@@ -567,7 +567,7 @@ func TestDeletedPartitionsChannelBehavior(t *testing.T) {
 		// Fill channel to capacity (buffer is 100)
 		for range 150 {
 			values := typedef.NewValues(1)
-			d.Delete(values)
+			d.Delete(typedef.PartitionKeys{Values: values})
 		}
 
 		// Wait for processing
@@ -614,7 +614,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 			}
 		}()
 
-		d.Delete(values)
+		d.Delete(typedef.PartitionKeys{Values: values})
 	})
 
 	t.Run("nil_context", func(t *testing.T) {
@@ -640,12 +640,12 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		defer d.Close()
 
 		values := typedef.NewValues(1)
-		d.Delete(values)
+		d.Delete(typedef.PartitionKeys{Values: values})
 
 		// Should be ready after the next background processor tick (100ms)
 		select {
 		case received := <-d.ch:
-			assert.Equal(t, values, received)
+			assert.Equal(t, values, received.Values)
 		case <-time.After(200 * time.Millisecond):
 			t.Fatal("Should receive quickly with zero duration")
 		}
@@ -659,7 +659,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		defer d.Close()
 
 		values := typedef.NewValues(1)
-		d.Delete(values)
+		d.Delete(typedef.PartitionKeys{Values: values})
 
 		// Should not be ready for a very long time
 		select {
@@ -680,7 +680,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		defer d.Close()
 
 		values := typedef.NewValues(1)
-		d.Delete(values)
+		d.Delete(typedef.PartitionKeys{Values: values})
 
 		// Receive multiple times - should use last bucket after exhausting all
 		receivedCount := 0
@@ -724,7 +724,7 @@ func TestDeletedPartitionsIntegration(t *testing.T) {
 			for i := range totalDeletes {
 				values := typedef.NewValues(1)
 				deletedValues[i] = values
-				d.Delete(values)
+				d.Delete(typedef.PartitionKeys{Values: values})
 				time.Sleep(5 * time.Millisecond)
 			}
 		}()
@@ -740,7 +740,7 @@ func TestDeletedPartitionsIntegration(t *testing.T) {
 				if !ok {
 					break consumer
 				}
-				validations[values]++
+				validations[values.Values]++
 			case <-timeout:
 				break consumer
 			}
@@ -772,7 +772,7 @@ func BenchmarkDeletedPartitions(b *testing.B) {
 		b.ResetTimer()
 		for range b.N {
 			values := typedef.NewValues(1)
-			d.Delete(values)
+			d.Delete(typedef.PartitionKeys{Values: values})
 		}
 	})
 
@@ -792,7 +792,7 @@ func BenchmarkDeletedPartitions(b *testing.B) {
 		b.ResetTimer()
 		for range b.N {
 			values := typedef.NewValues(1)
-			d.Delete(values)
+			d.Delete(typedef.PartitionKeys{Values: values})
 		}
 	})
 
@@ -805,7 +805,7 @@ func BenchmarkDeletedPartitions(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				values := typedef.NewValues(1)
-				d.Delete(values)
+				d.Delete(typedef.PartitionKeys{Values: values})
 			}
 		})
 	})

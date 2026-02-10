@@ -43,9 +43,10 @@ func makeTestCQL(partitionKeys typedef.Columns) *cqlStatements {
 
 func makeItem(_ typedef.Columns, pkVals map[string][]any, ty stmtlogger.Type, idx int) stmtlogger.Item {
 	v := typedef.NewValuesFromMap(pkVals)
+	pk := typedef.PartitionKeys{Values: v}
 	return stmtlogger.Item{
 		Start:         stmtlogger.Time{Time: time.Unix(0, int64(idx))},
-		PartitionKeys: v,
+		PartitionKeys: pk,
 		Error:         mo.Right[error, string](""),
 		Statement:     "INSERT ...",
 		Host:          "127.0.0.1",

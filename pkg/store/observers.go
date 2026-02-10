@@ -170,7 +170,12 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 				GeminiAttempt: data.GeminiAttempt,
 				Type:          c.clusterName,
 				StatementType: data.Statement.QueryType,
-				PartitionKeys: data.Statement.PartitionKeys.Values,
+				PartitionKeys: func() typedef.PartitionKeys {
+					if len(data.Statement.PartitionKeys) == 1 {
+						return data.Statement.PartitionKeys[0]
+					}
+					return typedef.PartitionKeys{}
+				}(),
 			})
 			if err != nil {
 				c.appLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("batch", batch))
@@ -206,6 +211,12 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 	duration := query.End.Sub(query.Start)
 
 	if c.logger != nil && !data.Statement.QueryType.IsSelect() {
+		attempts := 0
+		// Protect against possible nil metrics in tests or certain driver paths
+		if query.Metrics != nil {
+			attempts = query.Metrics.Attempts
+		}
+
 		err := c.logger.LogStmt(stmtlogger.Item{
 			Error:         mo.Right[error, string](errStr),
 			Statement:     query.Statement,
@@ -213,11 +224,16 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 			Start:         stmtlogger.Time{Time: query.Start},
 			Duration:      stmtlogger.Duration{Duration: duration},
 			Host:          instance,
-			Attempt:       query.Metrics.Attempts,
+			Attempt:       attempts,
 			GeminiAttempt: data.GeminiAttempt,
 			Type:          c.clusterName,
 			StatementType: data.Statement.QueryType,
-			PartitionKeys: data.Statement.PartitionKeys.Values,
+			PartitionKeys: func() typedef.PartitionKeys {
+				if len(data.Statement.PartitionKeys) == 1 {
+					return data.Statement.PartitionKeys[0]
+				}
+				return typedef.PartitionKeys{}
+			}(),
 		})
 		if err != nil {
 			c.appLogger.Error("failed to log query statement", zap.Error(err), zap.Any("query", query))

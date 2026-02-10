@@ -32,7 +32,7 @@ func TestDeleteBulk(t *testing.T) {
 		defer d.Close()
 
 		// Should handle empty batch gracefully
-		d.DeleteBulk([]*typedef.Values{})
+		d.DeleteBulk([]typedef.PartitionKeys{})
 		assert.Equal(t, 0, d.Len())
 	})
 
@@ -41,7 +41,7 @@ func TestDeleteBulk(t *testing.T) {
 		d := newDeleted(t.Context(), buckets)
 		defer d.Close()
 
-		batch := []*typedef.Values{typedef.NewValues(1)}
+		batch := []typedef.PartitionKeys{{Values: typedef.NewValues(1)}}
 		d.DeleteBulk(batch)
 
 		time.Sleep(10 * time.Millisecond)
@@ -53,9 +53,9 @@ func TestDeleteBulk(t *testing.T) {
 		d := newDeleted(t.Context(), buckets)
 		defer d.Close()
 
-		batch := make([]*typedef.Values, 50)
+		batch := make([]typedef.PartitionKeys, 50)
 		for i := range batch {
-			batch[i] = typedef.NewValues(1)
+			batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
 		}
 		d.DeleteBulk(batch)
 
@@ -69,9 +69,9 @@ func TestDeleteBulk(t *testing.T) {
 		d := newDeleted(t.Context(), buckets)
 		defer d.Close()
 
-		batch := make([]*typedef.Values, 10)
+		batch := make([]typedef.PartitionKeys, 10)
 		for i := range batch {
-			batch[i] = typedef.NewValues(1)
+			batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
 		}
 		d.DeleteBulk(batch)
 
@@ -90,7 +90,7 @@ func TestFastPathOptimization(t *testing.T) {
 		defer d.Close()
 
 		// Add item with future ready time
-		d.Delete(typedef.NewValues(1))
+		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		time.Sleep(10 * time.Millisecond)
 
 		// Process should return quickly via fast path
@@ -110,7 +110,7 @@ func TestFastPathOptimization(t *testing.T) {
 		before := d.nextReadyNs.Load()
 		assert.Equal(t, int64(0), before)
 
-		d.Delete(typedef.NewValues(1))
+		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		time.Sleep(5 * time.Millisecond)
 
 		after := d.nextReadyNs.Load()
@@ -134,7 +134,7 @@ func TestHeapShrinking(t *testing.T) {
 		// Grow to large size
 		for i := range 5000 {
 			h.pushInline(deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 		}
@@ -171,7 +171,7 @@ func TestHeapShrinking(t *testing.T) {
 		// Add moderate number of items
 		for i := range 512 {
 			h.pushInline(deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 		}
@@ -213,7 +213,7 @@ func TestBatchProcessing(t *testing.T) {
 
 		// Add many items
 		for range 100 {
-			d.Delete(typedef.NewValues(1))
+			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		}
 
 		// Wait for all to be ready
@@ -259,7 +259,7 @@ func TestUnixNanoComparison(t *testing.T) {
 		// Add item
 		now := time.Now()
 		h.pushInline(deletedPartition{
-			values:  typedef.NewValues(1),
+			keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 			readyAt: now,
 		})
 
@@ -280,7 +280,7 @@ func TestAdaptiveBackgroundInterval(t *testing.T) {
 		defer d.Close()
 
 		// Add item
-		d.Delete(typedef.NewValues(1))
+		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 
 		// The background processor should adapt its interval
 		time.Sleep(100 * time.Millisecond)
@@ -312,9 +312,9 @@ func TestConcurrentBulkDelete(t *testing.T) {
 
 		for range goroutines {
 			go func() {
-				batch := make([]*typedef.Values, batchSize)
+				batch := make([]typedef.PartitionKeys, batchSize)
 				for i := range batch {
-					batch[i] = typedef.NewValues(1)
+					batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
 				}
 				d.DeleteBulk(batch)
 				done <- true

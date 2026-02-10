@@ -57,7 +57,7 @@ func (g *Generator) genSelectSinglePartitionQuery(ctx context.Context) (*typedef
 	g.table.RLock()
 	defer g.table.RUnlock()
 
-	pks, builder, err := g.getSelectSinglePartitionKeys(ctx)
+	pk, builder, err := g.getSelectSinglePartitionKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -67,8 +67,8 @@ func (g *Generator) genSelectSinglePartitionQuery(ctx context.Context) (*typedef
 	return &typedef.Stmt{
 		QueryType:     typedef.SelectStatementType,
 		Query:         query,
-		PartitionKeys: pks,
-		Values:        pks.Values.ToCQLValues(g.table.PartitionKeys),
+		PartitionKeys: []typedef.PartitionKeys{pk},
+		Values:        pk.Values.ToCQLValues(g.table.PartitionKeys),
 	}, nil
 }
 
@@ -80,27 +80,27 @@ func (g *Generator) getSelectSinglePartitionKeys(_ context.Context) (typedef.Par
 		builder = builder.Where(qb.Eq(pk.Name))
 	}
 
-	return typedef.PartitionKeys{
-		Values: partitionKeys,
-	}, builder, nil
+	return partitionKeys, builder, nil
 }
 
-func (g *Generator) buildSelectMultiPartitionsKey(_ context.Context) (*typedef.Values, *qb.SelectBuilder, error) {
+func (g *Generator) buildSelectMultiPartitionsKey(_ context.Context) ([]typedef.PartitionKeys, *qb.SelectBuilder, *typedef.Values, error) {
 	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
 
 	numQueryPKs := g.getMultiplePartitionKeys()
-	pks := typedef.NewValues(g.table.PartitionKeys.Len())
+	pks := make([]typedef.PartitionKeys, 0, numQueryPKs)
+	combined := typedef.NewValues(g.table.PartitionKeys.Len())
 
 	for range numQueryPKs {
 		pk := g.generator.Next()
-		pks.Merge(pk)
+		pks = append(pks, pk)
+		combined.Merge(pk.Values)
 	}
 
 	for _, pk := range g.table.PartitionKeys {
 		builder.Where(qb.InTuple(pk.Name, numQueryPKs))
 	}
 
-	return pks, builder, nil
+	return pks, builder, combined, nil
 }
 
 //nolint:unused
@@ -126,7 +126,7 @@ func (g *Generator) buildSelectClusteringRange(builder *qb.SelectBuilder, values
 }
 
 func (g *Generator) genSelectMultiplePartitionQuery(ctx context.Context) (*typedef.Stmt, error) {
-	pks, builder, err := g.buildSelectMultiPartitionsKey(ctx)
+	pks, builder, combined, err := g.buildSelectMultiPartitionsKey(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -134,8 +134,8 @@ func (g *Generator) genSelectMultiplePartitionQuery(ctx context.Context) (*typed
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		PartitionKeys: typedef.PartitionKeys{Values: pks},
-		Values:        pks.ToCQLValues(g.table.PartitionKeys),
+		PartitionKeys: pks,
+		Values:        combined.ToCQLValues(g.table.PartitionKeys),
 		QueryType:     typedef.SelectMultiPartitionType,
 		Query:         query,
 	}, nil
@@ -143,17 +143,17 @@ func (g *Generator) genSelectMultiplePartitionQuery(ctx context.Context) (*typed
 
 //nolint:unused
 func (g *Generator) genClusteringRangeQuery(ctx context.Context) (*typedef.Stmt, error) {
-	pks, builder, err := g.getSelectSinglePartitionKeys(ctx)
+	pk, builder, err := g.getSelectSinglePartitionKeys(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	values := g.buildSelectClusteringRange(builder, pks.Values.ToCQLValues(g.table.PartitionKeys))
+	values := g.buildSelectClusteringRange(builder, pk.Values.ToCQLValues(g.table.PartitionKeys))
 
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		PartitionKeys: pks,
+		PartitionKeys: []typedef.PartitionKeys{pk},
 		Values:        values,
 		QueryType:     typedef.SelectRangeStatementType,
 		Query:         query,
@@ -162,18 +162,18 @@ func (g *Generator) genClusteringRangeQuery(ctx context.Context) (*typedef.Stmt,
 
 //nolint:unused
 func (g *Generator) genMultiplePartitionClusteringRangeQuery(ctx context.Context) (*typedef.Stmt, error) {
-	pks, builder, err := g.buildSelectMultiPartitionsKey(ctx)
+	pks, builder, combined, err := g.buildSelectMultiPartitionsKey(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	values := g.buildSelectClusteringRange(builder, pks.ToCQLValues(g.table.PartitionKeys))
+	values := g.buildSelectClusteringRange(builder, combined.ToCQLValues(g.table.PartitionKeys))
 
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
 		QueryType:     typedef.SelectMultiPartitionRangeStatementType,
-		PartitionKeys: typedef.PartitionKeys{Values: pks},
+		PartitionKeys: pks,
 		Values:        values,
 		Query:         query,
 	}, nil
@@ -195,7 +195,7 @@ func (g *Generator) genSingleIndexQuery() *typedef.Stmt {
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		PartitionKeys: typedef.PartitionKeys{},
+		PartitionKeys: nil,
 		Values:        values,
 		QueryType:     typedef.SelectByIndexStatementType,
 		Query:         query,

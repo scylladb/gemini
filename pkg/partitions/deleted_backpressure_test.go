@@ -42,7 +42,7 @@ func TestNoBackpressure(t *testing.T) {
 
 		go func() {
 			for range largeCount {
-				d.Delete(typedef.NewValues(1))
+				d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 			}
 			done <- true
 		}()
@@ -69,9 +69,9 @@ func TestNoBackpressure(t *testing.T) {
 
 		// Add large batch - should never block
 		const batchSize = 5000
-		batch := make([]*typedef.Values, batchSize)
+		batch := make([]typedef.PartitionKeys, batchSize)
 		for i := range batch {
-			batch[i] = typedef.NewValues(1)
+			batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
 		}
 
 		done := make(chan bool, 1)
@@ -110,7 +110,7 @@ func TestNoBackpressure(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				for range itemsPerGoroutine {
-					d.Delete(typedef.NewValues(1))
+					d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 				}
 			}()
 		}
@@ -146,7 +146,7 @@ func TestNoBackpressure(t *testing.T) {
 		// Add many more items than initial capacity
 		const count = 5000
 		for range count {
-			d.Delete(typedef.NewValues(1))
+			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		}
 
 		// All should be in heap
@@ -169,7 +169,7 @@ func TestHeapMemoryManagement(t *testing.T) {
 		// Add more than initial capacity
 		const count = 2000
 		for range count {
-			d.Delete(typedef.NewValues(1))
+			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		}
 
 		// Heap should have grown
@@ -186,7 +186,7 @@ func TestHeapMemoryManagement(t *testing.T) {
 
 		// Add items just past initial capacity
 		for range 1025 {
-			d.Delete(typedef.NewValues(1))
+			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		}
 
 		// Capacity should have doubled
@@ -205,7 +205,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 		defer d.Close()
 
 		// Empty heap should work fine
-		d.Delete(typedef.NewValues(1))
+		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		assert.Equal(t, 1, d.Len())
 	})
 
@@ -217,7 +217,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 		defer d.Close()
 
 		// Should handle empty slice without issue
-		d.DeleteBulk([]*typedef.Values{})
+		d.DeleteBulk([]typedef.PartitionKeys{})
 		assert.Equal(t, 0, d.Len())
 		assert.Equal(t, uint64(0), d.deleted.Load())
 	})
@@ -231,7 +231,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 
 		// Add some items
 		for range 100 {
-			d.Delete(typedef.NewValues(1))
+			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		}
 
 		time.Sleep(50 * time.Millisecond)
@@ -257,8 +257,8 @@ func TestDeleteEdgeCases(t *testing.T) {
 		defer d.Close()
 
 		// Should just increment counter, not add to heap
-		d.Delete(typedef.NewValues(1))
-		d.Delete(typedef.NewValues(1))
+		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
+		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 
 		assert.Equal(t, uint64(2), d.deleted.Load())
 		assert.Equal(t, 0, d.Len()) // Nothing in heap
@@ -270,7 +270,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 		d := newDeleted(t.Context(), []time.Duration{}) // empty buckets
 		defer d.Close()
 
-		d.Delete(typedef.NewValues(1))
+		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 
 		assert.Equal(t, uint64(1), d.deleted.Load())
 		assert.Equal(t, 0, d.Len())
@@ -293,7 +293,7 @@ func BenchmarkDeletePerformance(b *testing.B) {
 
 		b.ResetTimer()
 		for range b.N {
-			d.Delete(typedef.NewValues(1))
+			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		}
 	})
 
@@ -311,11 +311,11 @@ func BenchmarkDeletePerformance(b *testing.B) {
 
 		// Create batches
 		batchSize := 100
-		batches := make([][]*typedef.Values, b.N)
+		batches := make([][]typedef.PartitionKeys, b.N)
 		for i := range b.N {
-			batches[i] = make([]*typedef.Values, batchSize)
+			batches[i] = make([]typedef.PartitionKeys, batchSize)
 			for j := range batchSize {
-				batches[i][j] = typedef.NewValues(1)
+				batches[i][j] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
 			}
 		}
 
@@ -340,7 +340,7 @@ func BenchmarkDeletePerformance(b *testing.B) {
 		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				d.Delete(typedef.NewValues(1))
+				d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 			}
 		})
 	})
@@ -354,7 +354,7 @@ func BenchmarkDeletePerformance(b *testing.B) {
 
 		b.ResetTimer()
 		for range b.N {
-			d.Delete(typedef.NewValues(1))
+			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		}
 	})
 }

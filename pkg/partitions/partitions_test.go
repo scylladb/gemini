@@ -15,6 +15,7 @@
 package partitions
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"sync"
 	"testing"
@@ -59,6 +60,26 @@ func createTestPartitions(t *testing.T, count uint64) *Partitions {
 	return parts
 }
 
+func requirePartitionKeysPopulated(t *testing.T, keys typedef.PartitionKeys) {
+	t.Helper()
+	require.NotNil(t, keys.Values)
+	require.Greater(t, keys.Values.Len(), 0)
+}
+
+func assertPartitionKeysEqual(t *testing.T, left, right typedef.PartitionKeys) {
+	t.Helper()
+	require.NotNil(t, left.Values)
+	require.NotNil(t, right.Values)
+
+	leftKeys := left.Values.Keys()
+	rightKeys := right.Values.Keys()
+	assert.Equal(t, leftKeys, rightKeys)
+
+	for _, key := range leftKeys {
+		assert.Equal(t, left.Values.Get(key), right.Values.Get(key))
+	}
+}
+
 // TestPartitionsGet verifies Get operation
 func TestPartitionsGet(t *testing.T) {
 	t.Parallel()
@@ -68,7 +89,7 @@ func TestPartitionsGet(t *testing.T) {
 	for i := uint64(0); i < 100; i++ {
 		values := parts.Get(i)
 		require.NotNil(t, values)
-		require.NotEmpty(t, values.Data())
+		requirePartitionKeysPopulated(t, values)
 	}
 }
 
@@ -81,7 +102,7 @@ func TestPartitionsNext(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		values := parts.Next()
 		require.NotNil(t, values)
-		require.NotEmpty(t, values.Data())
+		requirePartitionKeysPopulated(t, values)
 	}
 }
 
@@ -95,7 +116,7 @@ func TestPartitionsExtend(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		values := parts.Extend()
 		require.NotNil(t, values)
-		require.NotEmpty(t, values.Data())
+		requirePartitionKeysPopulated(t, values)
 	}
 
 	assert.Equal(t, initialLen+5, parts.Len())
@@ -121,7 +142,7 @@ func TestPartitionsReplace(t *testing.T) {
 	require.NotNil(t, newValues)
 
 	// Verify that values changed
-	assert.Equal(t, oldValues.Data(), replacedValues.Data())
+	assertPartitionKeysEqual(t, oldValues, replacedValues)
 
 	stats := parts.Stats()
 	assert.Equal(t, uint64(1), stats.PartitionsDeleted)
@@ -136,7 +157,7 @@ func TestPartitionsReplaceNext(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		values := parts.ReplaceNext()
 		require.NotNil(t, values)
-		require.NotEmpty(t, values.Data())
+		requirePartitionKeysPopulated(t, values)
 	}
 
 	stats := parts.Stats()
@@ -222,7 +243,7 @@ func TestPartitionsConcurrentGet(t *testing.T) {
 				idx := uint64(r.IntN(1000))
 				values := parts.Get(idx)
 				require.NotNil(t, values)
-				require.NotEmpty(t, values.Data())
+				requirePartitionKeysPopulated(t, values)
 			}
 		}(i)
 	}
@@ -241,14 +262,14 @@ func TestPartitionsConcurrentNext(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 
-	for range concurrency {
+	for i := 0; i < concurrency; i++ {
 		go func() {
 			defer wg.Done()
 
 			for j := 0; j < iterations; j++ {
 				values := parts.Next()
 				require.NotNil(t, values)
-				require.NotEmpty(t, values.Data())
+				requirePartitionKeysPopulated(t, values)
 			}
 		}()
 	}
@@ -267,14 +288,14 @@ func TestPartitionsConcurrentExtend(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 
-	for range concurrency {
+	for i := 0; i < concurrency; i++ {
 		go func() {
 			defer wg.Done()
 
 			for j := 0; j < iterations; j++ {
 				values := parts.Extend()
 				require.NotNil(t, values)
-				require.NotEmpty(t, values.Data())
+				requirePartitionKeysPopulated(t, values)
 			}
 		}()
 	}
@@ -309,7 +330,7 @@ func TestPartitionsConcurrentReplace(t *testing.T) {
 				idx := uint64(r.IntN(1000))
 				values := parts.Replace(idx)
 				require.NotNil(t, values)
-				require.NotEmpty(t, values.Data())
+				requirePartitionKeysPopulated(t, values)
 			}
 		}(i)
 	}
@@ -347,7 +368,7 @@ func TestPartitionsConcurrentMixed(t *testing.T) {
 	}
 
 	// Concurrent Next operations
-	for range concurrency {
+	for i := 0; i < concurrency; i++ {
 		go func() {
 			defer wg.Done()
 
@@ -359,7 +380,7 @@ func TestPartitionsConcurrentMixed(t *testing.T) {
 	}
 
 	// Concurrent Extend operations
-	for range concurrency {
+	for i := 0; i < concurrency; i++ {
 		go func() {
 			defer wg.Done()
 
@@ -487,7 +508,7 @@ func TestPartitionsValuesCopy(t *testing.T) {
 	require.NotNil(t, values2)
 
 	// Values should be equal
-	assert.Equal(t, values1.Data(), values2.Data())
+	assertPartitionKeysEqual(t, values1, values2)
 }
 
 // TestNewPartitionKeys verifies NewPartitionKeys function
@@ -506,7 +527,7 @@ func TestNewPartitionKeys(t *testing.T) {
 
 	pk := NewPartitionKeys(r, table, &config)
 	require.NotNil(t, pk.Values)
-	require.NotEmpty(t, pk.Values.Data())
+	require.Greater(t, pk.Values.Len(), 0)
 }
 
 // TestPartitionSize verifies partition size calculation
@@ -556,7 +577,7 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 	sizes := []uint64{100, 1_000, 10_000, 100_000}
 
 	for _, size := range sizes {
-		b.Run(string(rune(size)), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
 			src, fn := distributions.New(distributions.Uniform, size, 1, 0, 0)
 			table := createTestTable()
 			config := typedef.PartitionRangeConfig{
@@ -565,7 +586,7 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 
 			b.ReportAllocs()
 			b.ResetTimer()
-			for range b.N {
+			for i := 0; i < b.N; i++ {
 				_ = New(b.Context(), rand.New(src), fn, table, config, size)
 			}
 		})

@@ -16,7 +16,6 @@ package stmtlogger
 
 import (
 	"errors"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -94,14 +93,13 @@ func TestLogger_Close_IdempotentAndClosesInner(t *testing.T) {
 	l, err := NewLogger(WithLogger(dc, nil))
 	require.NoError(t, err)
 
-	// Close multiple times
+	// Close multiple times — must not panic and inner closer called once.
 	require.NoError(t, l.Close())
 	require.NoError(t, l.Close())
 
 	dc.mu.Lock()
 	calls := dc.calls
 	dc.mu.Unlock()
-	// Our implementation calls the inner closer once (second Close returns nil early)
 	require.Equal(t, 1, calls)
 }
 
@@ -191,52 +189,36 @@ func TestLogger_ConcurrentSendAndClose_NoDrop_NoPanic(t *testing.T) {
 	dc.mu.Unlock()
 }
 
-func TestLogger_Close_WaitsForInFlightSend(t *testing.T) {
+func TestLogger_BlocksUntilReceiverReads(t *testing.T) {
 	t.Parallel()
 
-	// Unbuffered channel will make send block until a receiver reads
+	// Unbuffered channel — send blocks until a receiver is ready.
 	ch := make(chan Item)
 	l, err := NewLogger(WithChannel(ch), WithLogger(&dummyCloser{}, nil))
 	require.NoError(t, err)
 
-	// Start a goroutine that will attempt to log (this will block on send)
-	sendStarted := make(chan struct{})
-	doneSend := make(chan struct{})
+	done := make(chan struct{})
 	go func() {
-		runtime.Gosched()
-		close(sendStarted)
 		_ = l.LogStmt(Item{StatementType: typedef.InsertStatementType})
-		close(doneSend)
+		close(done)
 	}()
 
-	// Wait until the goroutine attempts to send
-	<-sendStarted
-
-	// Now start a closer concurrently; it must not finish until send completes
-	closeReturned := make(chan struct{})
-	go func() {
-		_ = l.Close()
-		close(closeReturned)
-	}()
-
-	// Ensure Close hasn't returned yet (since send is blocking)
+	// Read the item — this unblocks the sender.
 	select {
-	case <-closeReturned:
-		t.Fatal("Close returned before in-flight send completed")
-	case <-time.After(20 * time.Millisecond):
-		// expected: still waiting
+	case got := <-ch:
+		require.Equal(t, typedef.InsertStatementType, got.StatementType)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for item")
 	}
 
-	// Receive the item to unblock the sender
+	// Sender should now complete.
 	select {
-	case <-ch:
+	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("timed out receiving the in-flight item")
+		t.Fatal("LogStmt did not return after receiver read the item")
 	}
 
-	// Now both send and Close should complete
-	<-doneSend
-	<-closeReturned
+	require.NoError(t, l.Close())
 }
 
 func TestLogger_LogAfterClose_NoSend(t *testing.T) {

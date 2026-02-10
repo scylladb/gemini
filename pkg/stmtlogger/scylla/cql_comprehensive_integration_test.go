@@ -80,10 +80,10 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 			name: "insert with nil error (Left)",
 			item: stmtlogger.Item{
 				Start: stmtlogger.Time{Time: time.Now()},
-				PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+				PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 					"pk0": {"test_key_1"},
 					"pk1": {int32(100)},
-				}),
+				})},
 				Error:         mo.Left[error, string](nil),
 				Statement:     "SELECT * FROM test WHERE pk0 = ? AND pk1 = ?",
 				Host:          "192.168.1.1",
@@ -109,10 +109,10 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 			name: "insert with actual error (Left)",
 			item: stmtlogger.Item{
 				Start: stmtlogger.Time{Time: time.Now()},
-				PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+				PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 					"pk0": {"test_key_2"},
 					"pk1": {int32(200)},
-				}),
+				})},
 				Error:         mo.Left[error, string](testErr),
 				Statement:     "INSERT INTO test (pk0, pk1, col1) VALUES (?, ?, ?)",
 				Host:          "192.168.1.2",
@@ -138,10 +138,10 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 			name: "insert with error string (Right)",
 			item: stmtlogger.Item{
 				Start: stmtlogger.Time{Time: time.Now()},
-				PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+				PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 					"pk0": {"test_key_3"},
 					"pk1": {int32(300)},
-				}),
+				})},
 				Error:         mo.Right[error, string]("custom error message"),
 				Statement:     "UPDATE test SET col1 = ? WHERE pk0 = ? AND pk1 = ?",
 				Host:          "192.168.1.3",
@@ -167,10 +167,10 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 			name: "insert with serialized values (Right)",
 			item: stmtlogger.Item{
 				Start: stmtlogger.Time{Time: time.Now()},
-				PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+				PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 					"pk0": {"test_key_4"},
 					"pk1": {int32(400)},
-				}),
+				})},
 				Error:         mo.Left[error, string](nil),
 				Statement:     "DELETE FROM test WHERE pk0 = ? AND pk1 = ?",
 				Host:          "192.168.1.4",
@@ -196,10 +196,10 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 			name: "insert with nil values (Left)",
 			item: stmtlogger.Item{
 				Start: stmtlogger.Time{Time: time.Now()},
-				PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+				PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 					"pk0": {"test_key_5"},
 					"pk1": {int32(500)},
-				}),
+				})},
 				Error:         mo.Left[error, string](nil),
 				Statement:     "SELECT COUNT(*) FROM test",
 				Host:          "192.168.1.5",
@@ -225,10 +225,10 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 			name: "insert with complex values",
 			item: stmtlogger.Item{
 				Start: stmtlogger.Time{Time: time.Now()},
-				PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+				PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 					"pk0": {"test_key_6"},
 					"pk1": {int32(600)},
-				}),
+				})},
 				Error:         mo.Left[error, string](nil),
 				Statement:     "INSERT INTO test (pk0, pk1, col1, col2, col3) VALUES (?, ?, ?, ?, ?)",
 				Host:          "192.168.1.6",
@@ -279,8 +279,8 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 
 			err = session.Query(
 				query,
-				tt.item.PartitionKeys.Get("pk0")[0],
-				tt.item.PartitionKeys.Get("pk1")[0],
+				tt.item.PartitionKeys.Values.Get("pk0")[0],
+				tt.item.PartitionKeys.Values.Get("pk1")[0],
 				tt.item.Type,
 			).Scan(&pk0, &pk1, &ty, &statement, &host, &attempt, &geminiAttempt, &errorStr, &dur)
 
@@ -301,8 +301,8 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 			var values []string
 			err = session.Query(
 				fmt.Sprintf("SELECT values FROM %s.%s WHERE pk0 = ? AND pk1 = ? AND ty = ?", keyspace, table),
-				tt.item.PartitionKeys.Get("pk0")[0],
-				tt.item.PartitionKeys.Get("pk1")[0],
+				tt.item.PartitionKeys.Values.Get("pk0")[0],
+				tt.item.PartitionKeys.Values.Get("pk1")[0],
 				tt.item.Type,
 			).Scan(&values)
 
@@ -410,10 +410,10 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 				for _, ty := range []stmtlogger.Type{stmtlogger.TypeOracle, stmtlogger.TypeTest} {
 					item := stmtlogger.Item{
 						Start: stmtlogger.Time{Time: time.Now()},
-						PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+						PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 							"pk0": {"fetch_key_1"},
 							"pk1": {int32(1)},
-						}),
+						})},
 						Error:         mo.Left[error, string](nil),
 						Statement:     "SELECT * FROM test WHERE pk0 = ? AND pk1 = ?",
 						Host:          "127.0.0.1",
@@ -461,10 +461,10 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 				for _, ty := range []stmtlogger.Type{stmtlogger.TypeOracle, stmtlogger.TypeTest} {
 					item := stmtlogger.Item{
 						Start: stmtlogger.Time{Time: time.Now()},
-						PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+						PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 							"pk0": {"fetch_key_2"},
 							"pk1": {int32(2)},
-						}),
+						})},
 						Error:         mo.Left[error, string](nil),
 						Statement:     "INSERT INTO test VALUES (?, ?, ?, ?)",
 						Host:          "127.0.0.1",
@@ -505,10 +505,10 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 				for _, ty := range []stmtlogger.Type{stmtlogger.TypeOracle, stmtlogger.TypeTest} {
 					item := stmtlogger.Item{
 						Start: stmtlogger.Time{Time: time.Now()},
-						PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+						PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 							"pk0": {"fetch_key_3"},
 							"pk1": {int32(3)},
-						}),
+						})},
 						Error:         mo.Right[error, string]("update error"),
 						Statement:     "UPDATE test SET col1 = ? WHERE pk0 = ? AND pk1 = ?",
 						Host:          "127.0.0.1",
@@ -553,7 +553,7 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 				for _, ty := range []stmtlogger.Type{stmtlogger.TypeOracle, stmtlogger.TypeTest} {
 					item := stmtlogger.Item{
 						Start:         stmtlogger.Time{Time: time.Now()},
-						PartitionKeys: pkValues,
+						PartitionKeys: typedef.PartitionKeys{Values: pkValues},
 						Error:         mo.Left[error, string](nil),
 						Statement:     "DELETE FROM test WHERE pk0 = ? AND pk1 = ?",
 						Host:          "127.0.0.1",
@@ -714,9 +714,9 @@ func TestCQLStatements_Fetch_MultiPartition_Comprehensive(t *testing.T) {
 				for i := range tt.partitionNum {
 					item := stmtlogger.Item{
 						Start: stmtlogger.Time{Time: time.Now()},
-						PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+						PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 							"pk0": {multiKeys[i]},
-						}),
+						})},
 						Error:         mo.Left[error, string](nil),
 						Statement:     fmt.Sprintf("SELECT * FROM test WHERE pk0 IN (%s)", generatePlaceholders(tt.partitionNum)),
 						Host:          "127.0.0.1",
@@ -803,9 +803,9 @@ func TestCQLStatements_Insert_ConcurrentWrites(t *testing.T) {
 			for j := 0; j < itemsPerWorker; j++ {
 				item := stmtlogger.Item{
 					Start: stmtlogger.Time{Time: time.Now()},
-					PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+					PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 						"pk0": {fmt.Sprintf("worker_%d_item_%d", workerID, j)},
-					}),
+					})},
 					Error:         mo.Left[error, string](nil),
 					Statement:     fmt.Sprintf("INSERT INTO test VALUES (worker_%d, item_%d)", workerID, j),
 					Host:          fmt.Sprintf("192.168.1.%d", workerID),
@@ -947,9 +947,9 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 			// Insert statement log with specific error
 			item := stmtlogger.Item{
 				Start: stmtlogger.Time{Time: time.Now()},
-				PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+				PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 					"pk0": {pkValue},
-				}),
+				})},
 				Error:         tt.error,
 				Statement:     "SELECT * FROM test WHERE pk0 = ?",
 				Host:          "127.0.0.1",

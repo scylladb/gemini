@@ -68,6 +68,7 @@ type (
 		Password                string
 		TracingDir              string
 		Hosts                   []string
+		Port                    int // Optional explicit port for all hosts without a port specified
 		RequestTimeout          time.Duration
 		ConnectTimeout          time.Duration
 		UseServerSideTimestamps bool
@@ -629,9 +630,18 @@ func (ds delegatingStore) Check(
 					return result.MatchCount, nil
 				}
 
-				// Found differences, record them
+				// Found differences, record them and store the comparison results
 				validationErr.AddAttempt(compErr)
 				lastErr = compErr
+
+				// Store all the comparison data for debugging
+				validationErr.ComparisonResults = &ComparisonResults{
+					TestRows:       testRows,
+					OracleRows:     oracleRows,
+					TestOnlyRows:   result.TestOnlyRows,
+					OracleOnlyRows: result.OracleOnlyRows,
+					DifferentRows:  result.DifferentRows,
+				}
 			}
 		}
 
@@ -674,6 +684,14 @@ func (ds delegatingStore) Close() error {
 	if ds.statementLogger != nil {
 		ds.getLogger().Debug("closing statement logger")
 		err = multierr.Append(err, ds.statementLogger.Close())
+	}
+
+	ds.getLogger().Debug("closing test store")
+	err = multierr.Append(err, ds.testStore.Close())
+
+	if ds.oracleStore != nil {
+		ds.getLogger().Debug("closing oracle store")
+		err = multierr.Append(err, ds.oracleStore.Close())
 	}
 
 	if err != nil {

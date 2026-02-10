@@ -36,7 +36,7 @@ func BenchmarkHeapOperations(b *testing.B) {
 		b.ResetTimer()
 		for i := range b.N {
 			h.pushInline(deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 			if h.len >= 1000 {
@@ -56,7 +56,7 @@ func BenchmarkHeapOperations(b *testing.B) {
 		b.ResetTimer()
 		for i := range b.N {
 			heap.Push(h, deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 			if h.len >= 1000 {
@@ -77,7 +77,7 @@ func BenchmarkHeapOperations(b *testing.B) {
 		// Pre-fill
 		for i := range 500 {
 			h.pushInline(deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 		}
@@ -88,7 +88,7 @@ func BenchmarkHeapOperations(b *testing.B) {
 				// Refill
 				for i := range 500 {
 					h.pushInline(deletedPartition{
-						values:  typedef.NewValues(1),
+						keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 						readyAt: now.Add(time.Duration(i) * time.Millisecond),
 					})
 				}
@@ -108,7 +108,7 @@ func BenchmarkHeapOperations(b *testing.B) {
 		// Pre-fill
 		for i := range 500 {
 			heap.Push(h, deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 		}
@@ -119,7 +119,7 @@ func BenchmarkHeapOperations(b *testing.B) {
 				// Refill
 				for i := range 500 {
 					heap.Push(h, deletedPartition{
-						values:  typedef.NewValues(1),
+						keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 						readyAt: now.Add(time.Duration(i) * time.Millisecond),
 					})
 				}
@@ -139,15 +139,15 @@ func BenchmarkHeapOperations(b *testing.B) {
 		for i := range b.N {
 			// Push 3, pop 1
 			h.pushInline(deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 			h.pushInline(deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i+1) * time.Millisecond),
 			})
 			h.pushInline(deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i+2) * time.Millisecond),
 			})
 			if h.len > 0 {
@@ -171,15 +171,15 @@ func BenchmarkHeapOperations(b *testing.B) {
 		for i := range b.N {
 			// Push 3, pop 1
 			heap.Push(h, deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 			heap.Push(h, deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i+1) * time.Millisecond),
 			})
 			heap.Push(h, deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i+2) * time.Millisecond),
 			})
 			if h.len > 0 {
@@ -203,7 +203,7 @@ func BenchmarkHeapOperations(b *testing.B) {
 		// Pre-fill
 		for i := range 500 {
 			h.pushInline(deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 		}
@@ -227,7 +227,7 @@ func BenchmarkHeapOperations(b *testing.B) {
 		// Pre-fill
 		for i := range 500 {
 			heap.Push(h, deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 		}
@@ -255,7 +255,7 @@ func BenchmarkHeapGrowth(b *testing.B) {
 
 			for i := range 1000 {
 				h.pushInline(deletedPartition{
-					values:  typedef.NewValues(1),
+					keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 					readyAt: now.Add(time.Duration(i) * time.Millisecond),
 				})
 			}
@@ -274,7 +274,7 @@ func BenchmarkHeapGrowth(b *testing.B) {
 
 			for i := range 1000 {
 				h.pushInline(deletedPartition{
-					values:  typedef.NewValues(1),
+					keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 					readyAt: now.Add(time.Duration(i) * time.Millisecond),
 				})
 			}
@@ -295,7 +295,7 @@ func BenchmarkMemoryEfficiency(b *testing.B) {
 		b.ReportAllocs()
 		for i := range b.N {
 			h.pushInline(deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 			if h.len >= 9000 {
@@ -316,7 +316,7 @@ func BenchmarkMemoryEfficiency(b *testing.B) {
 		b.ReportAllocs()
 		for i := range b.N {
 			heap.Push(h, deletedPartition{
-				values:  typedef.NewValues(1),
+				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 				readyAt: now.Add(time.Duration(i) * time.Millisecond),
 			})
 			if h.len >= 9000 {
@@ -338,7 +338,7 @@ func BenchmarkBulkOperations(b *testing.B) {
 		b.ResetTimer()
 		for range b.N {
 			values := typedef.NewValues(1)
-			d.Delete(values)
+			d.Delete(typedef.PartitionKeys{Values: values})
 		}
 	})
 
@@ -349,9 +349,9 @@ func BenchmarkBulkOperations(b *testing.B) {
 
 		b.ResetTimer()
 		for range b.N {
-			batch := make([]*typedef.Values, 10)
+			batch := make([]typedef.PartitionKeys, 10)
 			for i := range batch {
-				batch[i] = typedef.NewValues(1)
+				batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
 			}
 			d.DeleteBulk(batch)
 		}
@@ -364,9 +364,9 @@ func BenchmarkBulkOperations(b *testing.B) {
 
 		b.ResetTimer()
 		for range b.N {
-			batch := make([]*typedef.Values, 50)
+			batch := make([]typedef.PartitionKeys, 50)
 			for i := range batch {
-				batch[i] = typedef.NewValues(1)
+				batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
 			}
 			d.DeleteBulk(batch)
 		}
@@ -379,9 +379,9 @@ func BenchmarkBulkOperations(b *testing.B) {
 
 		b.ResetTimer()
 		for range b.N {
-			batch := make([]*typedef.Values, 100)
+			batch := make([]typedef.PartitionKeys, 100)
 			for i := range batch {
-				batch[i] = typedef.NewValues(1)
+				batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
 			}
 			d.DeleteBulk(batch)
 		}
@@ -396,7 +396,7 @@ func BenchmarkFastPath(b *testing.B) {
 		defer d.Close()
 
 		// Add one item with future ready time
-		d.Delete(typedef.NewValues(1))
+		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		time.Sleep(10 * time.Millisecond) // Let it settle
 
 		b.ResetTimer()
@@ -413,7 +413,7 @@ func BenchmarkFastPath(b *testing.B) {
 
 		// Add items that won't be ready
 		for range 100 {
-			d.Delete(typedef.NewValues(1))
+			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		}
 		time.Sleep(10 * time.Millisecond)
 
@@ -436,7 +436,7 @@ func BenchmarkHeapShrinking(b *testing.B) {
 		for range b.N {
 			// Simulate spike
 			for range 5000 {
-				d.Delete(typedef.NewValues(1))
+				d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 			}
 
 			// Wait for processing
@@ -478,9 +478,9 @@ func BenchmarkConcurrentBulk(b *testing.B) {
 		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				batch := make([]*typedef.Values, 10)
+				batch := make([]typedef.PartitionKeys, 10)
 				for i := range batch {
-					batch[i] = typedef.NewValues(1)
+					batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
 				}
 				d.DeleteBulk(batch)
 			}

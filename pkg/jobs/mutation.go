@@ -99,13 +99,18 @@ func (m *Mutation) run(ctx context.Context) error {
 	var mutErr *store.MutationError
 	if errors.As(err, &mutErr) {
 		return &joberror.JobError{
-			Err:           err,
-			Timestamp:     time.Now(),
-			StmtType:      mutateStmt.QueryType,
-			Message:       "Mutation failed: " + err.Error(),
-			Query:         mutateStmt.Query,
-			PartitionKeys: mutateStmt.PartitionKeys.Values,
-			Values:        mutateStmt.Values,
+			Err:       err,
+			Timestamp: time.Now(),
+			StmtType:  mutateStmt.QueryType,
+			Message:   "Mutation failed: " + err.Error(),
+			Query:     mutateStmt.Query,
+			PartitionKeys: func() *typedef.Values {
+				if len(mutateStmt.PartitionKeys) > 0 {
+					return mutateStmt.PartitionKeys[0].Values
+				}
+				return nil
+			}(),
+			Values: mutateStmt.Values,
 		}
 	}
 
@@ -115,13 +120,18 @@ func (m *Mutation) run(ctx context.Context) error {
 	}
 
 	return &joberror.JobError{
-		Err:           err,
-		Timestamp:     time.Now(),
-		StmtType:      mutateStmt.QueryType,
-		Message:       "Mutation failed: " + err.Error(),
-		Query:         mutateStmt.Query,
-		PartitionKeys: mutateStmt.PartitionKeys.Values,
-		Values:        mutateStmt.Values,
+		Err:       err,
+		Timestamp: time.Now(),
+		StmtType:  mutateStmt.QueryType,
+		Message:   "Mutation failed: " + err.Error(),
+		Query:     mutateStmt.Query,
+		PartitionKeys: func() *typedef.Values {
+			if len(mutateStmt.PartitionKeys) > 0 {
+				return mutateStmt.PartitionKeys[0].Values
+			}
+			return nil
+		}(),
+		Values: mutateStmt.Values,
 	}
 }
 

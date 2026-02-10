@@ -216,8 +216,13 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 	)
 
 	acc = multierr.Append(acc, MutationStoreError{
-		Inner:         mutateErr,
-		PartitionKeys: stmt.PartitionKeys.Values,
+		Inner: mutateErr,
+		PartitionKeys: func() *typedef.Values {
+			if len(stmt.PartitionKeys) > 0 {
+				return stmt.PartitionKeys[0].Values
+			}
+			return nil
+		}(),
 	})
 
 	c.cqlErrorRequestsMetric[stmt.QueryType].Inc()
@@ -413,7 +418,12 @@ func CreateCluster(
 		return nil, err
 	}
 
-	cluster := gocql.NewCluster(slices.Clone(config.Hosts)...)
+	hosts := slices.Clone(config.Hosts)
+	cluster := gocql.NewCluster(hosts...)
+
+	if config.Port > 0 {
+		cluster.Port = config.Port
+	}
 
 	cluster.Timeout = config.RequestTimeout
 	cluster.ConnectTimeout = config.ConnectTimeout

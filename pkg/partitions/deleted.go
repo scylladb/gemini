@@ -40,7 +40,8 @@ import (
 type (
 	deletedPartition struct {
 		readyAt time.Time
-		values  *typedef.Values
+		onDone  func()
+		keys    typedef.PartitionKeys
 		counter int
 	}
 
@@ -54,7 +55,7 @@ type (
 
 	deletedPartitions struct {
 		ctx          context.Context
-		ch           chan *typedef.Values
+		ch           chan typedef.PartitionKeys
 		cancel       context.CancelFunc
 		buckets      []time.Duration
 		heap         deletedPartitionHeap
@@ -82,9 +83,9 @@ func newDeleted(base context.Context, timeBuckets []time.Duration, start ...bool
 
 	heap.Init(&h)
 
-	var ch chan *typedef.Values
+	var ch chan typedef.PartitionKeys
 	if len(timeBuckets) > 0 {
-		ch = make(chan *typedef.Values, 50_000)
+		ch = make(chan typedef.PartitionKeys, 50_000)
 	} else {
 		// When disabled, leave channel nil; reads from it are non-blocking in
 		// select with default and nobody should range over it in this mode.
@@ -356,11 +357,15 @@ func (d *deletedPartitions) processReady() time.Duration {
 		}
 
 		select {
-		case d.ch <- earliest.values:
+		case d.ch <- earliest.keys:
 			processed++
 
 			if earliest.counter >= len(d.buckets) {
-				d.heap.popInline()
+				// Final emission done; remove and release original keys once
+				_, _ = d.heap.popInline()
+				if earliest.onDone != nil {
+					earliest.onDone()
+				}
 				continue
 			}
 
@@ -403,10 +408,13 @@ func (d *deletedPartitions) processReady() time.Duration {
 // - Minimal lock time
 // - Atomic update of next ready time
 // - Pre-computed readyAt time
-func (d *deletedPartitions) Delete(values *typedef.Values) {
+func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	// If no buckets configured, just count the deletion
 	if len(d.buckets) == 0 {
 		d.deleted.Add(1)
+		if keys.Release != nil {
+			keys.Release()
+		}
 		return
 	}
 
@@ -416,12 +424,16 @@ func (d *deletedPartitions) Delete(values *typedef.Values) {
 	readyAtNs := readyAt.UnixNano()
 
 	dp := deletedPartition{
-		values:  values,
+		keys:    keys,
 		counter: 1, // Start at 1 since we've already used buckets[0]
 		readyAt: readyAt,
 	}
 
 	d.mu.Lock()
+
+	// Prevent consumers from releasing multiple times; we'll release on final pop
+	dp.onDone = dp.keys.Release
+	dp.keys.Release = nil
 
 	wasEmpty := d.heap.Len() == 0
 	d.heap.pushInline(dp)
@@ -437,14 +449,19 @@ func (d *deletedPartitions) Delete(values *typedef.Values) {
 
 // DeleteBulk adds multiple deleted partitions in a single lock acquisition
 // This is more efficient than calling Delete multiple times when you have many items
-func (d *deletedPartitions) DeleteBulk(values []*typedef.Values) {
-	if len(values) == 0 {
+func (d *deletedPartitions) DeleteBulk(keys []typedef.PartitionKeys) {
+	if len(keys) == 0 {
 		return
 	}
 
 	// If no buckets configured, just count the deletions and return.
 	if len(d.buckets) == 0 {
-		d.deleted.Add(uint64(len(values)))
+		d.deleted.Add(uint64(len(keys)))
+		for _, k := range keys {
+			if k.Release != nil {
+				k.Release()
+			}
+		}
 		return
 	}
 
@@ -458,9 +475,13 @@ func (d *deletedPartitions) DeleteBulk(values []*typedef.Values) {
 	wasEmpty := d.heap.Len() == 0
 	minReadyNs := readyAtNs
 
-	for _, v := range values {
+	for _, k := range keys {
+		// wrap each to defer release until final
+		onDone := k.Release
+		k.Release = nil
 		d.heap.pushInline(deletedPartition{
-			values:  v,
+			keys:    k,
+			onDone:  onDone,
 			counter: 1,
 			readyAt: readyAt,
 		})
@@ -472,7 +493,7 @@ func (d *deletedPartitions) DeleteBulk(values []*typedef.Values) {
 	}
 	d.mu.Unlock()
 
-	d.deleted.Add(uint64(len(values)))
+	d.deleted.Add(uint64(len(keys)))
 }
 
 // jitterDuration adds a bounded random delay to the given bucket duration to

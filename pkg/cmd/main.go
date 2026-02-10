@@ -21,10 +21,14 @@ import (
 	"runtime/trace"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
 func main() {
+	uuid.EnableRandPool()
+
 	runtime.SetMutexProfileFraction(1)
 	runtime.SetBlockProfileRate(1)
 
