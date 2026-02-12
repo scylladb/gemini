@@ -25,6 +25,9 @@
       "packageNames": [
         "!github.com/scylladb/gocql"
       ],
+      "addLabels": [
+        "test/integration"
+      ],
       "enabled": true
     },
     {
@@ -37,11 +40,17 @@
         "minor",
         "patch"
       ],
+      "addLabels": [
+        "test/integration"
+      ],
       "enabled": false
     },
     {
       "packageNames": [
         "github.com/scylladb/gocql"
+      ],
+      "addLabels": [
+        "test/integration"
       ],
       "enabled": true
     }
