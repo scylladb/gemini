@@ -178,13 +178,16 @@ func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
 	}
 
 	part.refCount.Add(1)
+	var once sync.Once
 	return typedef.PartitionKeys{
 		Values: typedef.NewValuesFromMap(out),
 		ID:     id,
 		Release: func() {
-			if part.refCount.Add(-1) == 0 {
-				p.deleteValidation(id)
-			}
+			once.Do(func() {
+				if part.refCount.Add(-1) == 0 {
+					p.deleteValidation(id)
+				}
+			})
 		},
 	}
 }
@@ -203,13 +206,16 @@ func (p *Partitions) valuesCopy(idx uint64) typedef.PartitionKeys {
 	}
 
 	part.refCount.Add(1)
+	var once sync.Once
 	return typedef.PartitionKeys{
 		Values: typedef.NewValuesFromMap(m),
 		ID:     id,
 		Release: func() {
-			if part.refCount.Add(-1) == 0 {
-				p.deleteValidation(id)
-			}
+			once.Do(func() {
+				if part.refCount.Add(-1) == 0 {
+					p.deleteValidation(id)
+				}
+			})
 		},
 	}
 }

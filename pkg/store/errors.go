@@ -165,8 +165,7 @@ func (me *MutationError) Error() string {
 
 	var sb strings.Builder
 	sb.WriteString(base)
-	sb.WriteString(fmt.Sprintf("\n\nStore status: test=%t, oracle=%t",
-		me.TestStoreSuccess, me.OracleStoreSuccess))
+	_, _ = fmt.Fprintf(&sb, "\n\nStore status: test=%t, oracle=%t", me.TestStoreSuccess, me.OracleStoreSuccess)
 
 	return sb.String()
 }
