@@ -16,6 +16,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -113,30 +114,158 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 		metric.Add(float64(validatedRows))
 		v.status.AddValidatedRows(validatedRows)
 		v.status.ReadOp()
+		// track successful validation for involved partitions
+		if v.generator != nil {
+			for i := range stmt.PartitionKeys {
+				pk := &stmt.PartitionKeys[i]
+				v.generator.ValidationSuccess(pk)
+			}
+		}
+		// release all keys after use
+		for i := range stmt.PartitionKeys {
+			if stmt.PartitionKeys[i].Release != nil {
+				stmt.PartitionKeys[i].Release()
+			}
+		}
 		return nil
 	}
 
 	if errors.Is(err, context.DeadlineExceeded) {
+		// release all keys before returning
+		for i := range stmt.PartitionKeys {
+			if stmt.PartitionKeys[i].Release != nil {
+				stmt.PartitionKeys[i].Release()
+			}
+		}
 		return nil
 	}
 
 	if errors.Is(err, context.Canceled) {
+		// release all keys before returning
+		for i := range stmt.PartitionKeys {
+			if stmt.PartitionKeys[i].Release != nil {
+				stmt.PartitionKeys[i].Release()
+			}
+		}
 		return nil
 	}
 
+	// final failure after retries — track failure for involved partitions
+	if v.generator != nil {
+		for i := range stmt.PartitionKeys {
+			pk := &stmt.PartitionKeys[i]
+			v.generator.ValidationFailure(pk)
+		}
+	}
+	// release all keys after use
+	for i := range stmt.PartitionKeys {
+		if stmt.PartitionKeys[i].Release != nil {
+			stmt.PartitionKeys[i].Release()
+		}
+	}
+
+	return v.buildJobError(err, stmt, "Validation failed: "+err.Error())
+}
+
+// extractComparisonResults extracts comparison results from a store.ValidationError
+// and converts store.Rows to json.RawMessage for the joberror format.
+func extractComparisonResults(err error) *joberror.ComparisonResults {
+	var valErr *store.ValidationError
+	if !errors.As(err, &valErr) || valErr.ComparisonResults == nil {
+		return nil
+	}
+
+	cr := valErr.ComparisonResults
+
+	return &joberror.ComparisonResults{
+		TestRows:       marshalRows(cr.TestRows),
+		OracleRows:     marshalRows(cr.OracleRows),
+		TestOnlyRows:   marshalRows(cr.TestOnlyRows),
+		OracleOnlyRows: marshalRows(cr.OracleOnlyRows),
+		DifferentRows:  marshalDifferentRows(cr.DifferentRows),
+	}
+}
+
+func marshalRows(rows store.Rows) []json.RawMessage {
+	if len(rows) == 0 {
+		return nil
+	}
+	result := make([]json.RawMessage, 0, len(rows))
+	for _, row := range rows {
+		data, err := json.Marshal(row)
+		if err != nil {
+			continue
+		}
+		result = append(result, data)
+	}
+	return result
+}
+
+func marshalDifferentRows(diffs []store.RowDifference) []joberror.RowDiff {
+	if len(diffs) == 0 {
+		return nil
+	}
+	result := make([]joberror.RowDiff, 0, len(diffs))
+	for _, d := range diffs {
+		testData, _ := json.Marshal(d.TestRow)
+		oracleData, _ := json.Marshal(d.OracleRow)
+		result = append(result, joberror.RowDiff{
+			TestRow:   testData,
+			OracleRow: oracleData,
+			Diff:      d.Diff,
+		})
+	}
+	return result
+}
+
+// collectLastValidations gathers validation timing data for all partition keys in the statement.
+func (v *Validation) collectLastValidations(stmt *typedef.Stmt) map[string]joberror.PartitionValidation {
+	if v.generator == nil || len(stmt.PartitionKeys) == 0 {
+		return nil
+	}
+
+	result := make(map[string]joberror.PartitionValidation, len(stmt.PartitionKeys))
+	for i := range stmt.PartitionKeys {
+		pk := &stmt.PartitionKeys[i]
+		first, last, failure, recent := v.generator.ValidationStats(pk.ID)
+		if first == 0 && last == 0 && failure == 0 {
+			continue
+		}
+		result[pk.ID.String()] = joberror.PartitionValidation{
+			FirstSuccessNS: first,
+			LastSuccessNS:  last,
+			LastFailureNS:  failure,
+			Recent:         recent,
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// buildJobError creates a JobError with ComparisonResults and LastValidations populated.
+func (v *Validation) buildJobError(err error, stmt *typedef.Stmt, message string) *joberror.JobError {
 	return &joberror.JobError{
-		Timestamp:     time.Now(),
-		Err:           err,
-		StmtType:      stmt.QueryType,
-		Message:       "Validation failed: " + err.Error(),
-		Query:         stmt.Query,
-		PartitionKeys: stmt.PartitionKeys.Values,
-		Values:        stmt.Values,
+		Timestamp: time.Now(),
+		Err:       err,
+		StmtType:  stmt.QueryType,
+		Message:   message,
+		Query:     stmt.Query,
+		PartitionKeys: func() *typedef.Values {
+			if len(stmt.PartitionKeys) > 0 {
+				return stmt.PartitionKeys[0].Values
+			}
+			return nil
+		}(),
+		Values:          stmt.Values,
+		Results:         extractComparisonResults(err),
+		LastValidations: v.collectLastValidations(stmt),
 	}
 }
 
 // createSelectStmtForPartitionKeys creates a SELECT statement for specific partition key values
-func (v *Validation) createSelectStmtForPartitionKeys(partitionKeyValues *typedef.Values) *typedef.Stmt {
+func (v *Validation) createSelectStmtForPartitionKeys(keys typedef.PartitionKeys) *typedef.Stmt {
 	keyspaceAndTable := v.keyspaceName + "." + v.table.Name
 	builder := qb.Select(keyspaceAndTable).Columns(v.selectColumns...)
 
@@ -147,36 +276,41 @@ func (v *Validation) createSelectStmtForPartitionKeys(partitionKeyValues *typede
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		QueryType: typedef.SelectStatementType,
-		Query:     query,
-		PartitionKeys: typedef.PartitionKeys{
-			Values: partitionKeyValues,
-		},
-		Values: partitionKeyValues.ToCQLValues(v.table.PartitionKeys),
+		QueryType:     typedef.SelectStatementType,
+		Query:         query,
+		PartitionKeys: []typedef.PartitionKeys{keys},
+		Values:        keys.Values.ToCQLValues(v.table.PartitionKeys),
 	}
 }
 
 // validateDeletedPartition validates a deleted partition by verifying it no longer exists.
 // The partition should have been deleted from both test and oracle clusters, so we expect
 // zero rows to be returned.
-func (v *Validation) validateDeletedPartition(ctx context.Context, partitionKeyValues *typedef.Values) error {
-	stmt := v.createSelectStmtForPartitionKeys(partitionKeyValues)
+func (v *Validation) validateDeletedPartition(ctx context.Context, keys typedef.PartitionKeys) error {
+	stmt := v.createSelectStmtForPartitionKeys(keys)
+
+	// Ensure partition keys are released when we're done
+	defer func() {
+		if keys.Release != nil {
+			keys.Release()
+		}
+	}()
 
 	if _, err := v.store.Check(ctx, v.table, stmt, 0); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return err
 		}
-		return &joberror.JobError{
-			Timestamp:     time.Now(),
-			Err:           err,
-			StmtType:      stmt.QueryType,
-			Message:       "Deleted partition validation failed (difference found): " + err.Error(),
-			Query:         stmt.Query,
-			PartitionKeys: stmt.PartitionKeys.Values,
-			Values:        stmt.Values,
+		// final failure after retries for deleted partition
+		if v.generator != nil {
+			v.generator.ValidationFailure(&stmt.PartitionKeys[0])
 		}
+		return v.buildJobError(err, stmt, "Deleted partition validation failed (difference found): "+err.Error())
 	}
 
+	// success
+	if v.generator != nil {
+		v.generator.ValidationSuccess(&stmt.PartitionKeys[0])
+	}
 	return nil
 }
 
@@ -189,13 +323,16 @@ func (v *Validation) Do(ctx context.Context) error {
 
 	validatedRowsMetric := metrics.ValidatedRows.WithLabelValues(v.table.Name)
 	deletedPartitionsCh := v.generator.Deleted()
+	defer func() {
+		// no-op
+	}()
 
 	for !v.stopFlag.IsHardOrSoft() {
 		// Check for deleted partitions to validate or perform regular validation
 		select {
 		case <-ctx.Done():
 			return nil
-		case deletedPartition, ok := <-deletedPartitionsCh:
+		case deletedKeys, ok := <-deletedPartitionsCh:
 			if !ok {
 				// Channel closed, stop processing deleted partitions
 				deletedPartitionsCh = nil
@@ -204,7 +341,7 @@ func (v *Validation) Do(ctx context.Context) error {
 
 			// Validate that the deleted partition is actually gone
 			err := executionTime.RunFuncE(func() error {
-				return v.validateDeletedPartition(ctx, deletedPartition)
+				return v.validateDeletedPartition(ctx, deletedKeys)
 			})
 
 			if err == nil {

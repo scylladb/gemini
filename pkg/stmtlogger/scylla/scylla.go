@@ -39,12 +39,11 @@ import (
 )
 
 const (
-	committerBatchSize            = 64
-	statementChBuffer             = 1000
-	statementFlusherFlushInterval = 750 * time.Millisecond
-	statementFileBufferSize       = 32 * 1024
-	statementDirPerm              = 0o755
-	statementFilePerm             = 0o644
+	committerBatchSize      = 64
+	statementChBuffer       = 1000
+	statementFileBufferSize = 32 * 1024
+	statementDirPerm        = 0o755
+	statementFilePerm       = 0o644
 	// Delay before fetching statements for a job error to ensure all statements are persisted and ready
 	statementErrorFetchDelay = 30 * time.Second
 )
@@ -67,8 +66,22 @@ type (
 		ty    stmtlogger.Type
 	}
 
+	// PartitionInfo represents a single partition with its keys and validation data
+	PartitionInfo struct {
+		PartitionKeys   map[string]any                `json:"partitionKeys"`
+		LastValidations map[string]LastValidationData `json:"lastValidations,omitempty"`
+	}
+
+	// LastValidationData stores validation timing information for a partition
+	LastValidationData struct {
+		Recent         []uint64 `json:"recent,omitempty"`
+		FirstSuccessNS uint64   `json:"firstSuccessNS,omitempty"`
+		LastSuccessNS  uint64   `json:"lastSuccessNS,omitempty"`
+		LastFailureNS  uint64   `json:"lastFailureNS,omitempty"`
+	}
+
 	Line struct {
-		PartitionKeys     map[string][]any  `json:"partitionKeys"`
+		PartitionKeys     []PartitionInfo   `json:"partitionKeys"`
 		Timestamp         time.Time         `json:"timestamp"`
 		Err               string            `json:"err,omitempty"`
 		Query             string            `json:"query"`
@@ -150,6 +163,7 @@ func New(
 		workerCount = 2
 	}
 	for range workerCount {
+		logger.wg.Add(1)
 		go logger.insertWorker()
 	}
 	logger.curWorkers.Store(int32(workerCount))
@@ -157,7 +171,9 @@ func New(
 	if oracleStatementsFile != "" || testStatementsFile != "" {
 		l.Debug("starting error logger goroutine")
 		statementCh := make(chan statementChData, statementChBuffer)
+		logger.wg.Add(1)
 		go logger.fetchErrors(statementCh, e)
+		logger.wg.Add(1)
 		go logger.statementFlusher(statementCh, oracleStatementsFile, testStatementsFile)
 	} else {
 		l.Debug("statement file logging disabled: no files provided")
@@ -168,7 +184,6 @@ func New(
 
 //nolint:gocyclo
 func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, testStatements string) {
-	s.wg.Add(1)
 	defer s.wg.Done()
 
 	metrics.WorkersCurrent.WithLabelValues("scylla_logger_statement_flusher").Inc()
@@ -251,8 +266,12 @@ func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, t
 			if item.Error.Err != nil {
 				errStr = item.Error.Err.Error()
 			}
+
+			// Reorganize partitionKeys from flat map to array of PartitionInfo
+			partitionInfos := reorganizePartitionKeys(val.partitionKeys, item.Error)
+
 			l := Line{
-				PartitionKeys:     val.partitionKeys,
+				PartitionKeys:     partitionInfos,
 				Timestamp:         item.Error.Timestamp,
 				Err:               errStr,
 				Query:             item.Error.Query,
@@ -347,7 +366,6 @@ func (s *Logger) poolCallback(ctx context.Context, ty stmtlogger.Type, jobError 
 func (s *Logger) fetchErrors(items chan<- statementChData, ch <-chan *joberror.JobError) {
 	metrics.WorkersCurrent.WithLabelValues("scylla_logger_error_fetcher").Inc()
 	defer metrics.WorkersCurrent.WithLabelValues("scylla_logger_error_fetcher").Dec()
-	s.wg.Add(1)
 	defer s.wg.Done()
 	seen := make(map[[32]byte]bool)
 	wg := &sync.WaitGroup{}
@@ -434,7 +452,6 @@ func (s *Logger) executeBatchWithFallback(ctx context.Context, batch *gocql.Batc
 
 func (s *Logger) insertWorker() {
 	metrics.WorkersCurrent.WithLabelValues("scylla_logger_inserter").Inc()
-	s.wg.Add(1)
 	defer func() {
 		s.logger.Debug("committer worker exiting")
 		metrics.WorkersCurrent.WithLabelValues("scylla_logger_inserter").Dec()

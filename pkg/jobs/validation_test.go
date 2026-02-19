@@ -115,12 +115,13 @@ func TestCreateSelectStmtForPartitionKeys(t *testing.T) {
 				selectColumns: tt.table.SelectColumnNames(),
 			}
 
-			stmt := v.createSelectStmtForPartitionKeys(tt.partitionKeyValues)
+			stmt := v.createSelectStmtForPartitionKeys(typedef.PartitionKeys{Values: tt.partitionKeyValues})
 
 			require.NotNil(t, stmt)
 			require.Equal(t, typedef.SelectStatementType, stmt.QueryType)
 			require.Equal(t, tt.expectedQuery, stmt.Query)
-			require.Equal(t, tt.partitionKeyValues, stmt.PartitionKeys.Values)
+			require.Len(t, stmt.PartitionKeys, 1)
+			require.Equal(t, tt.partitionKeyValues, stmt.PartitionKeys[0].Values)
 			require.Len(t, stmt.Values, len(tt.table.PartitionKeys))
 		})
 	}
@@ -155,7 +156,7 @@ func TestValidateDeletedPartition_Success(t *testing.T) {
 	})
 
 	ctx := t.Context()
-	err := v.validateDeletedPartition(ctx, partitionKeyValues)
+	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues})
 
 	require.NoError(t, err)
 }
@@ -191,7 +192,7 @@ func TestValidateDeletedPartition_StoreError(t *testing.T) {
 
 	ctx := t.Context()
 
-	err := v.validateDeletedPartition(ctx, partitionKeyValues)
+	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues})
 
 	require.Error(t, err)
 
@@ -230,7 +231,7 @@ func TestValidateDeletedPartition_ContextCanceled(t *testing.T) {
 
 	ctx := t.Context()
 
-	err := v.validateDeletedPartition(ctx, partitionKeyValues)
+	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues})
 
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
@@ -264,7 +265,7 @@ func TestValidateDeletedPartition_ContextDeadlineExceeded(t *testing.T) {
 	})
 
 	ctx := t.Context()
-	err := v.validateDeletedPartition(ctx, partitionKeyValues)
+	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues})
 
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.DeadlineExceeded))
@@ -306,7 +307,7 @@ func TestValidateDeletedPartition_MultiplePartitionKeys(t *testing.T) {
 	})
 
 	ctx := t.Context()
-	err := v.validateDeletedPartition(ctx, partitionKeyValues)
+	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues})
 
 	// Should succeed - partition is deleted (0 rows)
 	require.NoError(t, err)

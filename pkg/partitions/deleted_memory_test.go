@@ -30,8 +30,7 @@ func TestHeapMemoryEfficiency(t *testing.T) {
 	// Add many items
 	const count = 10000
 	for range count {
-		values := typedef.NewValues(1)
-		d.Delete(values)
+		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 	}
 
 	// Check that we didn't allocate excessively
@@ -69,9 +68,8 @@ func TestHeapGrowthPattern(t *testing.T) {
 
 	// Add items and track capacity changes
 	for i := range 100 {
-		values := typedef.NewValues(1)
 		h.pushInline(deletedPartition{
-			values:  values,
+			keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
 			readyAt: time.Now().Add(time.Duration(i) * time.Millisecond),
 		})
 

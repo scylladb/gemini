@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -41,12 +42,25 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string) store.Config
 	tb.Helper()
 	var oracleConfig *store.ScyllaClusterConfig
 
+	// Allow overriding ports via environment for external clusters (e.g., docker-compose)
+	parsePort := func(env string) int {
+		if v := os.Getenv(env); v != "" {
+			if p, err := strconv.Atoi(v); err == nil && p > 0 {
+				return p
+			}
+		}
+		return 0
+	}
+	testPort := parsePort("GEMINI_TEST_PORT")
+	oraclePort := parsePort("GEMINI_ORACLE_PORT")
+
 	if len(oracleHosts) > 0 {
 		oracleConfig = &store.ScyllaClusterConfig{
 			Name:                    stmtlogger.TypeOracle,
 			HostSelectionPolicy:     store.HostSelectionTokenAware,
 			Consistency:             gocql.Quorum.String(),
 			Hosts:                   oracleHosts,
+			Port:                    oraclePort,
 			RequestTimeout:          10 * time.Second,
 			ConnectTimeout:          10 * time.Second,
 			UseServerSideTimestamps: true,
@@ -66,6 +80,7 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string) store.Config
 			HostSelectionPolicy:     store.HostSelectionTokenAware,
 			Consistency:             gocql.Quorum.String(),
 			Hosts:                   testHosts,
+			Port:                    testPort,
 			RequestTimeout:          10 * time.Second,
 			ConnectTimeout:          10 * time.Second,
 			UseServerSideTimestamps: false,

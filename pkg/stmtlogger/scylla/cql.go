@@ -208,7 +208,7 @@ func (c *cqlStatements) fillArgs(dst []any, item stmtlogger.Item) []any {
 		itemErr = item.Error.MustRight()
 	}
 
-	dst = append(dst, item.PartitionKeys.ToCQLValues(c.partitionKeys)...)
+	dst = append(dst, item.PartitionKeys.Values.ToCQLValues(c.partitionKeys)...)
 	dst = append(dst,
 		item.Start.Time,
 		item.Type,

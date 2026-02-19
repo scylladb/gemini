@@ -106,8 +106,11 @@ func createScyllaNetwork(tb testing.TB) *testcontainers.DockerNetwork {
 	return sharedNetwork
 }
 
-func createClusterConfig(hosts ...string) *gocql.ClusterConfig {
+func createClusterConfig(port int, hosts ...string) *gocql.ClusterConfig {
 	cluster := gocql.NewCluster(hosts...)
+	if port > 0 {
+		cluster.Port = port
+	}
 	cluster.Timeout = 10 * time.Second
 	cluster.ConnectTimeout = 10 * time.Second
 	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
@@ -121,10 +124,10 @@ func createClusterConfig(hosts ...string) *gocql.ClusterConfig {
 	return cluster
 }
 
-func createScyllaSession(tb testing.TB, hosts ...string) *ScyllaContainer {
+func createScyllaSession(tb testing.TB, port int, hosts ...string) *ScyllaContainer {
 	tb.Helper()
 
-	testCluster := createClusterConfig(hosts...)
+	testCluster := createClusterConfig(port, hosts...)
 	if err := testCluster.Validate(); err != nil {
 		tb.Fatalf("failed to validate test ScyllaDB cluster: %v", err)
 	}
@@ -153,11 +156,27 @@ func spawnScylla(tb testing.TB, name, version string, sharedNetwork *testcontain
 	spawningScyllaMutex.Lock()
 	defer spawningScyllaMutex.Unlock()
 
-	scyllaContainer, err := scylladb.Run(tb.Context(),
-		"scylladb/scylla:"+version,
+	var opts []testcontainers.ContainerCustomizer
+	opts = append(opts,
 		scylladb.WithCustomCommands("--memory=512M", "--smp=1", "--developer-mode=1", "--overprovisioned=1"),
 		scylladb.WithShardAwareness(),
 		network.WithNetwork([]string{ContainerNetworkName}, sharedNetwork),
+	)
+
+	switch name {
+	case "oracle":
+		if p := os.Getenv("GEMINI_ORACLE_PORT"); p != "" {
+			opts = append(opts, testcontainers.WithExposedPorts(p+":9042/tcp"))
+		}
+	case "test":
+		if p := os.Getenv("GEMINI_TEST_PORT"); p != "" {
+			opts = append(opts, testcontainers.WithExposedPorts(p+":9042/tcp"))
+		}
+	}
+
+	scyllaContainer, err := scylladb.Run(tb.Context(),
+		"scylladb/scylla:"+version,
+		opts...,
 	)
 	if err != nil {
 		tb.Fatalf("failed to start %s ScyllaDB container: %v", name, err)
@@ -167,7 +186,10 @@ func spawnScylla(tb testing.TB, name, version string, sharedNetwork *testcontain
 		_ = scyllaContainer.Terminate(tb.Context())
 	})
 
-	container := createScyllaSession(tb, Must(scyllaContainer.ContainerIP(tb.Context())))
+	host := Must(scyllaContainer.Host(tb.Context()))
+	port := Must(scyllaContainer.MappedPort(tb.Context(), "9042/tcp"))
+
+	container := createScyllaSession(tb, int(Must(strconv.ParseInt(port.Port(), 10, 32))), host)
 	switch name {
 	case "oracle":
 		container.OracleContainer = scyllaContainer
@@ -206,13 +228,21 @@ func SingleScylla(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 			tb.Fatal("GEMINI_TEST_CLUSTER_IP is not set")
 		}
 
-		return createScyllaSession(tb, strings.Split(hosts, ",")...)
+		portStr, ok := os.LookupEnv("GEMINI_TEST_PORT")
+		if !ok || portStr == "" {
+			portStr = "9042"
+		}
+
+		port := int(Must(strconv.ParseInt(portStr, 10, 32)))
+
+		return createScyllaSession(tb, port, strings.Split(hosts, ",")...)
 	}
 
 	tb.Fatal("GEMINI_USE_DOCKER_SCYLLA is set to false, but using in-memory ScyllaDB is not supported in this build")
 	return nil
 }
 
+//nolint:gocyclo
 func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 	tb.Helper()
 	val, exists := os.LookupEnv("GEMINI_USE_DOCKER_SCYLLA")
@@ -233,6 +263,20 @@ func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 		oracleScylla := spawnScylla(tb, "oracle", oracleVersion, sharedNetwork)
 		testScylla := spawnScylla(tb, "test", testVersion, sharedNetwork)
 
+		oraclePortStr, ok := os.LookupEnv("GEMINI_ORACLE_PORT")
+		if !ok || oraclePortStr != "" {
+			oraclePortStr = "9042"
+		}
+
+		oraclePort := int(Must(strconv.ParseInt(oraclePortStr, 10, 32)))
+
+		testPortStr, ok := os.LookupEnv("GEMINI_TEST_PORT")
+		if !ok || testPortStr == "" {
+			testPortStr = "9042"
+		}
+
+		testPort := int(Must(strconv.ParseInt(testPortStr, 10, 32)))
+
 		return &ScyllaContainer{
 			Oracle:          oracleScylla.Test,
 			OracleHosts:     oracleScylla.TestHosts,
@@ -243,8 +287,8 @@ func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 			// Provide fresh ClusterConfig instances for use by stores to avoid
 			// reusing a ClusterConfig that already created a session (which would panic
 			// due to sharing host selection policy between sessions).
-			TestCluster:   createClusterConfig(testScylla.TestHosts...),
-			OracleCluster: createClusterConfig(oracleScylla.TestHosts...),
+			TestCluster:   createClusterConfig(testPort, testScylla.TestHosts...),
+			OracleCluster: createClusterConfig(oraclePort, oracleScylla.TestHosts...),
 		}
 	}
 
@@ -267,16 +311,30 @@ func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 			return nil
 		}
 
-		oracleSession := createScyllaSession(tb, strings.Split(oracleHosts, ",")...)
-		testSession := createScyllaSession(tb, strings.Split(testHosts, ",")...)
+		oraclePortStr, ok := os.LookupEnv("GEMINI_ORACLE_PORT")
+		if !ok || oraclePortStr == "" {
+			oraclePortStr = "9042"
+		}
+
+		oraclePort := int(Must(strconv.ParseInt(oraclePortStr, 10, 32)))
+
+		testPortStr, ok := os.LookupEnv("GEMINI_TEST_PORT")
+		if !ok || testPortStr == "" {
+			testPortStr = "9042"
+		}
+
+		testPort := int(Must(strconv.ParseInt(testPortStr, 10, 32)))
+
+		oracleSession := createScyllaSession(tb, oraclePort, strings.Split(oracleHosts, ",")...)
+		testSession := createScyllaSession(tb, testPort, strings.Split(testHosts, ",")...)
 
 		return &ScyllaContainer{
 			Oracle:        oracleSession.Test,
 			OracleHosts:   oracleSession.TestHosts,
-			OracleCluster: createClusterConfig(strings.Split(oracleHosts, ",")...),
+			OracleCluster: createClusterConfig(oraclePort, strings.Split(oracleHosts, ",")...),
 			Test:          testSession.Test,
 			TestHosts:     testSession.TestHosts,
-			TestCluster:   createClusterConfig(strings.Split(testHosts, ",")...),
+			TestCluster:   createClusterConfig(testPort, strings.Split(testHosts, ",")...),
 		}
 	}
 

@@ -32,7 +32,8 @@ func TestDeletedQuickCheck(t *testing.T) {
 	t.Log("Created deleted partitions tracker")
 
 	values := typedef.NewValues(1)
-	d.Delete(values)
+	keys := typedef.PartitionKeys{Values: values}
+	d.Delete(keys)
 
 	t.Log("Deleted partition, checking heap state...")
 
@@ -57,7 +58,7 @@ func TestDeletedQuickCheck(t *testing.T) {
 
 	select {
 	case received := <-d.ch:
-		if received != values {
+		if received.Values != values {
 			t.Fatal("Received wrong values")
 		}
 		t.Log("✓ Successfully received partition")

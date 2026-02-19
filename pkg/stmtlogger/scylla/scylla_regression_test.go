@@ -47,6 +47,7 @@ func TestStatementFlusher_JSONMarshalRegression(t *testing.T) {
 	ch := make(chan statementChData, 2)
 
 	// Start the flusher
+	s.wg.Add(1)
 	go s.statementFlusher(ch, oraclePath, testPath)
 
 	// Create a sample JobError and associated data
@@ -146,16 +147,20 @@ func TestStatementFlusher_JSONMarshalRegression(t *testing.T) {
 			t.Fatalf("unexpected message in %s: got %q want %q", path, out.Message, jobErr.Message)
 		}
 		// Validate PKs copied through
-		if got := out.PartitionKeys["pk0"]; len(got) != 1 || got[0] != "abc" {
-			t.Fatalf("unexpected pk0 in %s: %#v", path, out.PartitionKeys["pk0"])
+		if len(out.PartitionKeys) != 1 {
+			t.Fatalf("expected 1 partition, got %d in %s", len(out.PartitionKeys), path)
+		}
+		got := out.PartitionKeys[0]
+		if got.PartitionKeys["pk0"] != "abc" {
+			t.Fatalf("unexpected pk0 in %s: %#v", path, got.PartitionKeys["pk0"])
 		}
 		{
-			got := out.PartitionKeys["pk1"]
-			if len(got) != 1 {
-				t.Fatalf("unexpected pk1 length in %s: %#v", path, got)
+			pk1Val := got.PartitionKeys["pk1"]
+			if pk1Val == nil {
+				t.Fatalf("unexpected nil pk1 in %s", path)
 			}
 			var ok bool
-			switch v := got[0].(type) {
+			switch v := pk1Val.(type) {
 			case float64:
 				ok = int(v) == 7
 			case int:
@@ -174,7 +179,7 @@ func TestStatementFlusher_JSONMarshalRegression(t *testing.T) {
 				ok = false
 			}
 			if !ok {
-				t.Fatalf("unexpected pk1 in %s: %#v", path, out.PartitionKeys["pk1"])
+				t.Fatalf("unexpected pk1 in %s: %#v", path, got.PartitionKeys["pk1"])
 			}
 		}
 

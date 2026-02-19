@@ -29,15 +29,41 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
+// RowDiff represents a difference between test and oracle rows
+type RowDiff struct {
+	Diff      string          `json:"diff,omitempty"`
+	TestRow   json.RawMessage `json:"testRow,omitempty"`
+	OracleRow json.RawMessage `json:"oracleRow,omitempty"`
+}
+
+// ComparisonResults stores the results from both test and oracle for debugging
+type ComparisonResults struct {
+	TestRows       []json.RawMessage `json:"testRows,omitempty"`
+	OracleRows     []json.RawMessage `json:"oracleRows,omitempty"`
+	TestOnlyRows   []json.RawMessage `json:"testOnlyRows,omitempty"`
+	OracleOnlyRows []json.RawMessage `json:"oracleOnlyRows,omitempty"`
+	DifferentRows  []RowDiff         `json:"differentRows,omitempty"`
+}
+
+// PartitionValidation stores validation timing data for a specific partition.
+type PartitionValidation struct {
+	Recent         []uint64 `json:"recent,omitempty"`
+	FirstSuccessNS uint64   `json:"firstSuccessNS,omitempty"`
+	LastSuccessNS  uint64   `json:"lastSuccessNS,omitempty"`
+	LastFailureNS  uint64   `json:"lastFailureNS,omitempty"`
+}
+
 type JobError struct {
-	Timestamp     time.Time             `json:"timestamp"`
-	Err           error                 `json:"err,omitempty"`
-	PartitionKeys *typedef.Values       `json:"partition-keys"`
-	Message       string                `json:"message"`
-	Query         string                `json:"query"`
-	Values        []any                 `json:"values,omitempty"`
-	StmtType      typedef.StatementType `json:"stmt-type"`
-	hash          [32]byte
+	Timestamp       time.Time                      `json:"timestamp"`
+	Err             error                          `json:"err,omitempty"`
+	PartitionKeys   *typedef.Values                `json:"partition-keys"`
+	Results         *ComparisonResults             `json:"results,omitempty"`
+	LastValidations map[string]PartitionValidation `json:"lastValidations,omitempty"`
+	Message         string                         `json:"message"`
+	Query           string                         `json:"query"`
+	Values          []any                          `json:"values,omitempty"`
+	hash            [32]byte
+	StmtType        typedef.StatementType `json:"stmt-type"`
 }
 
 func (j *JobError) Error() string {
@@ -100,22 +126,21 @@ func (el *ErrorList) AddError(err JobError) {
 	el.mu.Lock()
 	defer el.mu.Unlock()
 
-	if len(el.errors) <= el.limit {
+	if len(el.errors) < el.limit {
 		el.errors = append(el.errors, err)
-		if !el.channelClosed.Load() {
-			el.ch <- &err
+		if el.ch != nil {
+			el.ch <- &el.errors[len(el.errors)-1]
 		}
 	}
 }
 
 func (el *ErrorList) Errors() []JobError {
-	out := make([]JobError, el.limit)
-
 	el.mu.Lock()
-	n := copy(out, el.errors[:len(el.errors)])
+	out := make([]JobError, len(el.errors))
+	copy(out, el.errors)
 	el.mu.Unlock()
 
-	return out[:n]
+	return out
 }
 
 func (el *ErrorList) MarshalJSON() ([]byte, error) {
@@ -141,6 +166,7 @@ func (el *ErrorList) Error() string {
 
 	for i, err := range errors {
 		builder.WriteString(strconv.FormatInt(int64(i), 10))
+		builder.WriteString(": ")
 		builder.WriteString(err.Error())
 		builder.WriteString("\n")
 	}
@@ -153,8 +179,16 @@ func (el *ErrorList) GetChannel() <-chan *JobError {
 }
 
 func (el *ErrorList) Close() error {
+	el.mu.Lock()
 	el.channelClosed.Store(true)
-	close(el.ch)
+	ch := el.ch
+	el.ch = nil
+	el.mu.Unlock()
+
+	if ch != nil {
+		close(ch)
+	}
+
 	return nil
 }
 

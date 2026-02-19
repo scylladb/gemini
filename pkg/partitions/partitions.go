@@ -22,6 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/random"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -31,24 +33,31 @@ import (
 type (
 	Interface interface {
 		Stats() Stats
-		Get(idx uint64) *typedef.Values
-		Next() *typedef.Values
+		Get(idx uint64) typedef.PartitionKeys
+		Next() typedef.PartitionKeys
 
-		Extend() *typedef.Values
-		ReplaceNext() *typedef.Values
-		Replace(idx uint64) *typedef.Values
+		Extend() typedef.PartitionKeys
+		ReplaceNext() typedef.PartitionKeys
+		Replace(idx uint64) typedef.PartitionKeys
 		ReplaceWithoutOld(idx uint64)
 		ReplaceNextWithoutOld()
 
-		Deleted() <-chan *typedef.Values
+		Deleted() <-chan typedef.PartitionKeys
+
+		// Validation tracking
+		ValidationSuccess(values *typedef.PartitionKeys)
+		ValidationFailure(values *typedef.PartitionKeys)
+		ValidationStats(id uuid.UUID) (first, last, failure uint64, recent []uint64)
 
 		Len() uint64
 		Close()
 	}
 
 	Partition struct {
-		values []any
-		mu     sync.RWMutex
+		values   []any
+		id       uuid.UUID
+		refCount atomic.Int32
+		mu       sync.RWMutex
 	}
 
 	partitions struct {
@@ -60,12 +69,14 @@ type (
 	}
 
 	Partitions struct {
-		table   *typedef.Table
-		idxFunc distributions.DistributionFunc
-		deleted *deletedPartitions
-		r       random.GoRoutineSafeRandom
-		config  typedef.PartitionRangeConfig
-		parts   partitions
+		table         *typedef.Table
+		idxFunc       distributions.DistributionFunc
+		deleted       *deletedPartitions
+		validationMap map[uuid.UUID]*typedef.ValidationData
+		r             random.GoRoutineSafeRandom
+		config        typedef.PartitionRangeConfig
+		parts         partitions
+		validationMu  sync.RWMutex
 	}
 
 	Stats struct {
@@ -91,11 +102,12 @@ func New(ctx context.Context, r rand.Source, idxFunc distributions.DistributionF
 			partitionValuesLen: uint64(partitionValuesLen),
 			parts:              parts,
 		},
-		deleted: newDeleted(ctx, config.DeleteBuckets, false),
-		r:       *random.NewGoRoutineSafeRandom(r),
-		table:   table,
-		config:  config,
-		idxFunc: idxFunc,
+		deleted:       newDeleted(ctx, config.DeleteBuckets, false),
+		r:             *random.NewGoRoutineSafeRandom(r),
+		table:         table,
+		config:        config,
+		idxFunc:       idxFunc,
+		validationMap: make(map[uuid.UUID]*typedef.ValidationData),
 	}
 
 	// Only start deleted-partitions processing when time buckets are configured.
@@ -125,7 +137,7 @@ func (p *Partitions) partition(idx uint64) *Partition {
 	return part
 }
 
-func (p *Partitions) valuesNoLock(part *Partition) *typedef.Values {
+func (p *Partitions) valuesNoLock(part *Partition) typedef.PartitionKeys {
 	out := make(map[string][]any, p.parts.partitionValuesLen)
 
 	for i, col := range p.table.PartitionKeys {
@@ -133,14 +145,30 @@ func (p *Partitions) valuesNoLock(part *Partition) *typedef.Values {
 		out[col.Name] = append(out[col.Name], part.values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
 	}
 
-	return typedef.NewValuesFromMap(out)
+	part.refCount.Add(1)
+	return typedef.PartitionKeys{
+		Values: typedef.NewValuesFromMap(out),
+		ID:     part.id,
+		Release: func() {
+			if part.refCount.Add(-1) == 0 {
+				p.deleteValidation(part.id)
+			}
+		},
+	}
 }
 
-func (p *Partitions) values(idx uint64) *typedef.Values {
+func (p *Partitions) deleteValidation(id uuid.UUID) {
+	p.validationMu.Lock()
+	delete(p.validationMap, id)
+	p.validationMu.Unlock()
+}
+
+func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
 	part := p.partition(idx)
 	part.mu.RLock()
 	// Copy the slice reference while holding the lock
 	values := part.values
+	id := part.id
 	part.mu.RUnlock()
 
 	// Build the result outside the lock to minimize contention
@@ -149,13 +177,26 @@ func (p *Partitions) values(idx uint64) *typedef.Values {
 		out[col.Name] = append(out[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
 	}
 
-	return typedef.NewValuesFromMap(out)
+	part.refCount.Add(1)
+	var once sync.Once
+	return typedef.PartitionKeys{
+		Values: typedef.NewValuesFromMap(out),
+		ID:     id,
+		Release: func() {
+			once.Do(func() {
+				if part.refCount.Add(-1) == 0 {
+					p.deleteValidation(id)
+				}
+			})
+		},
+	}
 }
 
-func (p *Partitions) valuesCopy(idx uint64) *typedef.Values {
+func (p *Partitions) valuesCopy(idx uint64) typedef.PartitionKeys {
 	part := p.partition(idx)
 	part.mu.RLock()
 	values := part.values
+	id := part.id
 	part.mu.RUnlock()
 
 	// Build result outside lock
@@ -164,7 +205,19 @@ func (p *Partitions) valuesCopy(idx uint64) *typedef.Values {
 		m[col.Name] = append(m[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
 	}
 
-	return typedef.NewValuesFromMap(m)
+	part.refCount.Add(1)
+	var once sync.Once
+	return typedef.PartitionKeys{
+		Values: typedef.NewValuesFromMap(m),
+		ID:     id,
+		Release: func() {
+			once.Do(func() {
+				if part.refCount.Add(-1) == 0 {
+					p.deleteValidation(id)
+				}
+			})
+		},
+	}
 }
 
 func (p *Partitions) fill(idx uint64) {
@@ -178,10 +231,19 @@ func (p *Partitions) fill(idx uint64) {
 		))
 	}
 
-	part := p.partition(idx)
-	part.mu.Lock()
-	part.values = values
-	part.mu.Unlock()
+	id, _ := uuid.NewV7()
+	p.validationMu.Lock()
+	if _, ok := p.validationMap[id]; !ok {
+		p.validationMap[id] = &typedef.ValidationData{}
+	}
+	p.validationMu.Unlock()
+
+	p.parts.mu.Lock()
+	p.parts.parts[idx] = &Partition{
+		values: values,
+		id:     id,
+	}
+	p.parts.mu.Unlock()
 }
 
 func (p *Partitions) Stats() Stats {
@@ -208,15 +270,15 @@ func (p *Partitions) Stats() Stats {
 	}
 }
 
-func (p *Partitions) Get(idx uint64) *typedef.Values {
+func (p *Partitions) Get(idx uint64) typedef.PartitionKeys {
 	return p.values(idx)
 }
 
-func (p *Partitions) Next() *typedef.Values {
+func (p *Partitions) Next() typedef.PartitionKeys {
 	return p.Get(p.idxFunc())
 }
 
-func (p *Partitions) Extend() *typedef.Values {
+func (p *Partitions) Extend() typedef.PartitionKeys {
 	// Generate values outside the lock to minimize lock hold time
 	values := generateValue(&p.r, p.table, &p.config)
 	if uint64(len(values)) != p.parts.partitionValuesLen {
@@ -227,11 +289,19 @@ func (p *Partitions) Extend() *typedef.Values {
 		))
 	}
 
+	id, _ := uuid.NewV7()
+	p.validationMu.Lock()
+	if _, ok := p.validationMap[id]; !ok {
+		p.validationMap[id] = &typedef.ValidationData{}
+	}
+	p.validationMu.Unlock()
+
 	// Hold lock while extending slice AND initializing the new partition
 	// to prevent other goroutines from accessing it during reallocation
 	p.parts.mu.Lock()
 	newIdx := uint64(len(p.parts.parts))
-	p.parts.parts = append(p.parts.parts, &Partition{values: values})
+	part := &Partition{values: values, id: id}
+	p.parts.parts = append(p.parts.parts, part)
 	p.parts.mu.Unlock()
 
 	p.parts.count.Add(1)
@@ -240,7 +310,7 @@ func (p *Partitions) Extend() *typedef.Values {
 	return p.valuesCopy(newIdx)
 }
 
-func (p *Partitions) Replace(idx uint64) *typedef.Values {
+func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
 	values := generateValue(&p.r, p.table, &p.config)
 	if uint64(len(values)) != p.parts.partitionValuesLen {
 		panic(fmt.Sprintf(
@@ -250,19 +320,27 @@ func (p *Partitions) Replace(idx uint64) *typedef.Values {
 		))
 	}
 
-	part := p.partition(idx)
-	part.mu.Lock()
-	oldValues := p.valuesNoLock(part)
-	part.values = values
-	part.mu.Unlock()
+	id, _ := uuid.NewV7()
+	p.validationMu.Lock()
+	if _, ok := p.validationMap[id]; !ok {
+		p.validationMap[id] = &typedef.ValidationData{}
+	}
+	p.validationMu.Unlock()
+
+	p.parts.mu.Lock()
+	oldPart := p.parts.parts[idx]
+	p.parts.parts[idx] = &Partition{values: values, id: id}
+	p.parts.mu.Unlock()
+
+	oldKeys := p.valuesNoLock(oldPart)
 
 	if p.deleted != nil {
-		p.deleted.Delete(oldValues)
+		p.deleted.Delete(oldKeys)
 	}
-	return oldValues
+	return oldKeys
 }
 
-func (p *Partitions) Deleted() <-chan *typedef.Values {
+func (p *Partitions) Deleted() <-chan typedef.PartitionKeys {
 	if p.deleted == nil {
 		return nil
 	}
@@ -270,7 +348,7 @@ func (p *Partitions) Deleted() <-chan *typedef.Values {
 	return p.deleted.ch
 }
 
-func (p *Partitions) ReplaceNext() *typedef.Values {
+func (p *Partitions) ReplaceNext() typedef.PartitionKeys {
 	return p.Replace(p.idxFunc())
 }
 
@@ -296,6 +374,57 @@ func (p *Partitions) Close() {
 	if p.deleted != nil {
 		p.deleted.Close()
 	}
+}
+
+func (p *Partitions) ValidationSuccess(keys *typedef.PartitionKeys) {
+	if keys == nil {
+		return
+	}
+	now := uint64(time.Now().UTC().UnixNano())
+	p.validationMu.RLock()
+	data, ok := p.validationMap[keys.ID]
+	p.validationMu.RUnlock()
+	if !ok {
+		return
+	}
+	data.FirstSuccessNS.CompareAndSwap(0, now)
+	data.LastSuccessNS.Store(now)
+	pos := data.RecentIdx.Add(1) - 1
+	data.Recent[pos%uint64(len(data.Recent))].Store(now)
+}
+
+func (p *Partitions) ValidationFailure(keys *typedef.PartitionKeys) {
+	if keys == nil {
+		return
+	}
+	now := uint64(time.Now().UTC().UnixNano())
+	p.validationMu.RLock()
+	data, ok := p.validationMap[keys.ID]
+	p.validationMu.RUnlock()
+	if !ok {
+		return
+	}
+	data.LastFailureNS.Store(now)
+}
+
+func (p *Partitions) ValidationStats(id uuid.UUID) (first, last, failure uint64, recent []uint64) {
+	p.validationMu.RLock()
+	data, ok := p.validationMap[id]
+	p.validationMu.RUnlock()
+	if !ok {
+		return 0, 0, 0, nil
+	}
+	first = data.FirstSuccessNS.Load()
+	last = data.LastSuccessNS.Load()
+	failure = data.LastFailureNS.Load()
+	recent = make([]uint64, 0, len(data.Recent))
+	for i := range data.Recent {
+		val := data.Recent[i].Load()
+		if val != 0 {
+			recent = append(recent, val)
+		}
+	}
+	return first, last, failure, recent
 }
 
 func generateValue(r utils.Random, table *typedef.Table, config typedef.RangeConfig) []any {

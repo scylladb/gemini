@@ -40,17 +40,21 @@ type (
 	Type string
 
 	Item struct {
-		Start         Time                     `json:"s"`
-		PartitionKeys *typedef.Values          `json:"partitionKeys"`
-		Error         mo.Either[error, string] `json:"e,omitempty"`
-		Statement     string                   `json:"q"`
-		Host          string                   `json:"h"`
-		Type          Type                     `json:"-"`
-		Values        mo.Either[[]any, []byte] `json:"v"`
-		Duration      Duration                 `json:"d"`
-		Attempt       int                      `json:"d_a"`
-		GeminiAttempt int                      `json:"g_a"`
-		StatementType typedef.StatementType    `json:"-"`
+		PartitionKeys  typedef.PartitionKeys    `json:"partitionKeys"`
+		Start          Time                     `json:"s"`
+		Error          mo.Either[error, string] `json:"e,omitempty"`
+		Statement      string                   `json:"q"`
+		Host           string                   `json:"h"`
+		Type           Type                     `json:"-"`
+		Values         mo.Either[[]any, []byte] `json:"v"`
+		RecentSuccess  []uint64                 `json:"rs,omitempty"`
+		Duration       Duration                 `json:"d"`
+		FirstSuccessNS uint64                   `json:"fs,omitempty"`
+		LastSuccessNS  uint64                   `json:"ls,omitempty"`
+		LastFailureNS  uint64                   `json:"lf,omitempty"`
+		Attempt        int                      `json:"d_a"`
+		GeminiAttempt  int                      `json:"g_a"`
+		StatementType  typedef.StatementType    `json:"-"`
 	}
 
 	Duration struct {
@@ -61,11 +65,18 @@ type (
 		Time time.Time
 	}
 
+	ValidationHuman struct {
+		First   string   `json:"first,omitempty"`
+		Last    string   `json:"last,omitempty"`
+		Failure string   `json:"failure,omitempty"`
+		Recent  []string `json:"recent,omitempty"`
+	}
+
 	Logger struct {
-		closer io.Closer
-		ch     chan Item
-		mu     sync.RWMutex
-		closed bool
+		closer    io.Closer
+		ch        chan Item
+		done      chan struct{}
+		closeOnce sync.Once
 	}
 
 	options struct {
@@ -111,13 +122,17 @@ func NewLogger(opts ...Option) (*Logger, error) {
 	l := &Logger{
 		closer: o.innerLogger,
 		ch:     o.channel,
+		done:   make(chan struct{}),
 	}
 
 	return l, nil
 }
 
 func (l *Logger) LogStmt(item Item) error {
-	if item.StatementType.IsSchema() || item.StatementType.IsSelect() {
+	if item.StatementType.IsSchema() {
+		return nil
+	}
+	if item.StatementType.IsSelect() && item.FirstSuccessNS == 0 && item.LastSuccessNS == 0 && item.LastFailureNS == 0 {
 		return nil
 	}
 
@@ -125,43 +140,44 @@ func (l *Logger) LogStmt(item Item) error {
 		return nil
 	}
 
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-
-	if l.closed || l.ch == nil {
+	select {
+	case <-l.done:
+		// Logger already closed — discard quietly.
 		return nil
+	default:
 	}
 
-	l.ch <- item
-	metrics.StatementLoggerItems.Inc()
-	metrics.StatementLoggerEnqueuedTotal.Inc()
+	// Block until the item is accepted or the logger is closed.
+	// No mutex is held here, so Close() is never starved.
+	select {
+	case l.ch <- item:
+		metrics.StatementLoggerItems.Inc()
+		metrics.StatementLoggerEnqueuedTotal.Inc()
+	case <-l.done:
+		// Logger closed while we were waiting — discard.
+	}
 
 	return nil
 }
 
 func (l *Logger) Close() error {
-	// Take exclusive lock to block new LogStmt and wait for in-flight sends
-	// to complete before closing the channel.
-	l.mu.Lock()
-	if l.closed {
-		// Already closed: release lock and just close inner closer below.
-		l.mu.Unlock()
-		return nil
-	}
+	var innerErr error
 
-	l.closed = true
-	ch := l.ch
-	l.ch = nil
-	l.mu.Unlock()
-	if ch != nil {
-		close(ch)
-	}
+	l.closeOnce.Do(func() {
+		// Signal all in-flight and future LogStmt calls to bail out.
+		close(l.done)
 
-	if l.closer != nil {
-		return l.closer.Close()
-	}
+		// Close the data channel so downstream consumers see EOF.
+		if l.ch != nil {
+			close(l.ch)
+		}
 
-	return nil
+		if l.closer != nil {
+			innerErr = l.closer.Close()
+		}
+	})
+
+	return innerErr
 }
 
 func (i Item) MemoryFootprint() uint64 {

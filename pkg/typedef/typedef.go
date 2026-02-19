@@ -20,9 +20,11 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
+	"github.com/google/uuid"
 	"github.com/scylladb/gocqlx/v3/qb"
 	"golang.org/x/exp/maps"
 
@@ -90,11 +92,13 @@ func (q SimpleQuery) ToCql() (stmt string, names []string) {
 
 type (
 	PartitionKeys struct {
-		Values *Values
+		Values  *Values
+		Release func() `json:"-"`
+		ID      uuid.UUID
 	}
 
 	Stmt struct {
-		PartitionKeys PartitionKeys
+		PartitionKeys []PartitionKeys
 		Query         string
 		Values        []any
 		QueryType     StatementType
@@ -105,15 +109,6 @@ func SimpleStmt(query string, queryType StatementType) *Stmt {
 	return &Stmt{
 		Query:     query,
 		QueryType: queryType,
-	}
-}
-
-func PreparedStmt(query string, pks map[string][]any, values []any, queryType StatementType) *Stmt {
-	return &Stmt{
-		Query:         query,
-		Values:        values,
-		QueryType:     queryType,
-		PartitionKeys: PartitionKeys{Values: NewValuesFromMap(pks)},
 	}
 }
 
@@ -294,6 +289,14 @@ type Values struct {
 	mu sync.RWMutex
 }
 
+type ValidationData struct {
+	FirstSuccessNS atomic.Uint64
+	LastSuccessNS  atomic.Uint64
+	LastFailureNS  atomic.Uint64
+	Recent         [5]atomic.Uint64
+	RecentIdx      atomic.Uint64
+}
+
 func NewValues(initial int) *Values {
 	return &Values{
 		data: make(map[string][]any, initial),
@@ -330,6 +333,9 @@ func (v *Values) Keys() []string {
 }
 
 func (v *Values) Len() int {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
 	return len(v.data)
 }
 
@@ -350,10 +356,12 @@ func (v *Values) ToCQLValues(pks Columns) []any {
 }
 
 func (v *Values) Merge(values *Values) {
-	values.mu.RLock()
+	// Lock receiver first, then argument — consistent ordering prevents ABBA deadlock
+	// when two Values merge into each other concurrently.
 	v.mu.Lock()
-	defer v.mu.Unlock()
+	values.mu.RLock()
 	defer values.mu.RUnlock()
+	defer v.mu.Unlock()
 
 	for k, value := range values.data {
 		v.data[k] = append(v.data[k], value...)
@@ -411,6 +419,7 @@ func (v *Values) UnmarshalJSON(data []byte) error {
 func (v *PartitionKeys) Copy() PartitionKeys {
 	return PartitionKeys{
 		Values: v.Values.Copy(),
+		ID:     v.ID,
 	}
 }
 
@@ -427,6 +436,9 @@ func (v *Values) Copy() *Values {
 }
 
 func (v *Values) Data() []any {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
 	values := make([]any, 0, len(v.data))
 
 	keys := make([]string, 0, len(v.data))

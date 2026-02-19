@@ -35,12 +35,29 @@ const (
 
 // ValidationError represents a comprehensive validation error with all attempts
 type ValidationError struct {
-	StartTime     time.Time     `json:"start_time"`
-	EndTime       time.Time     `json:"end_time"`
-	FinalError    error         `json:"-"`
-	Statement     *typedef.Stmt `json:"statement"`
-	Operation     string        `json:"operation"`
-	TotalAttempts atomic.Uint64 `json:"total_attempts"`
+	StartTime         time.Time          `json:"start_time"`
+	EndTime           time.Time          `json:"end_time"`
+	FinalError        error              `json:"-"`
+	Statement         *typedef.Stmt      `json:"statement"`
+	ComparisonResults *ComparisonResults `json:"comparison_results,omitempty"`
+	Operation         string             `json:"operation"`
+	TotalAttempts     atomic.Uint64      `json:"total_attempts"`
+}
+
+// ComparisonResults stores the comparison data from the last validation attempt
+type ComparisonResults struct {
+	TestRows       Rows            `json:"testRows,omitempty"`
+	OracleRows     Rows            `json:"oracleRows,omitempty"`
+	TestOnlyRows   Rows            `json:"testOnlyRows,omitempty"`
+	OracleOnlyRows Rows            `json:"oracleOnlyRows,omitempty"`
+	DifferentRows  []RowDifference `json:"differentRows,omitempty"`
+}
+
+// RowDiffData represents a difference between a test and oracle row
+type RowDiffData struct {
+	Diff      string `json:"diff,omitempty"`
+	TestRow   Row    `json:"testRow,omitempty"`
+	OracleRow Row    `json:"oracleRow,omitempty"`
 }
 
 // Error implements the error interface
@@ -148,8 +165,7 @@ func (me *MutationError) Error() string {
 
 	var sb strings.Builder
 	sb.WriteString(base)
-	sb.WriteString(fmt.Sprintf("\n\nStore status: test=%t, oracle=%t",
-		me.TestStoreSuccess, me.OracleStoreSuccess))
+	_, _ = fmt.Fprintf(&sb, "\n\nStore status: test=%t, oracle=%t", me.TestStoreSuccess, me.OracleStoreSuccess)
 
 	return sb.String()
 }

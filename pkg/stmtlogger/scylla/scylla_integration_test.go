@@ -171,9 +171,9 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 			name: "insert with left error",
 			item: stmtlogger.Item{
 				Start: stmtlogger.Time{Time: time.Now()},
-				PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+				PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 					"pk0": {"test_key_1"},
-				}),
+				})},
 				Error:         mo.Left[error, string](nil),
 				Statement:     "SELECT * FROM test WHERE pk0 = ?",
 				Host:          "127.0.0.1",
@@ -189,9 +189,9 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 			name: "insert with right error string",
 			item: stmtlogger.Item{
 				Start: stmtlogger.Time{Time: time.Now()},
-				PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+				PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 					"pk0": {"test_key_2"},
-				}),
+				})},
 				Error:         mo.Right[error, string]("test error message"),
 				Statement:     "INSERT INTO test VALUES (?)",
 				Host:          "127.0.0.1",
@@ -207,9 +207,9 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 			name: "insert with actual error",
 			item: stmtlogger.Item{
 				Start: stmtlogger.Time{Time: time.Now()},
-				PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+				PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 					"pk0": {"test_key_3"},
-				}),
+				})},
 				Error:         mo.Left[error, string](assert.AnError),
 				Statement:     "UPDATE test SET col1 = ? WHERE pk0 = ?",
 				Host:          "127.0.0.1",
@@ -233,7 +233,7 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 			var count int
 			err = session.Query(
 				fmt.Sprintf("SELECT COUNT(*) FROM %s.%s WHERE pk0 = ? AND ty = ?", keyspace, table),
-				tt.item.PartitionKeys.Get("pk0")[0],
+				tt.item.PartitionKeys.Values.Get("pk0")[0],
 				tt.item.Type,
 			).Scan(&count)
 			assert.NoError(t, err)
@@ -357,9 +357,9 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 	// Insert statement logs for both oracle and test
 	oracleItem := stmtlogger.Item{
 		Start: stmtlogger.Time{Time: time.Now()},
-		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+		PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 			"pk0": {"test_key"},
-		}),
+		})},
 		Error:         mo.Left[error, string](nil),
 		Statement:     "SELECT * FROM test WHERE pk0 = ?",
 		Host:          "127.0.0.1",
@@ -376,9 +376,9 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 
 	testItem := stmtlogger.Item{
 		Start: stmtlogger.Time{Time: time.Now()},
-		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+		PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 			"pk0": {"test_key"},
-		}),
+		})},
 		Error:         mo.Left[error, string](nil),
 		Statement:     "INSERT INTO test VALUES (?)",
 		Host:          "127.0.0.1",
@@ -518,9 +518,9 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 	for i, key := range []string{"key1", "key2", "key3"} {
 		item := stmtlogger.Item{
 			Start: stmtlogger.Time{Time: time.Now().Add(time.Duration(i) * time.Millisecond)},
-			PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+			PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 				"pk0": {key},
-			}),
+			})},
 			Error:         mo.Left[error, string](nil),
 			Statement:     fmt.Sprintf("SELECT * FROM test WHERE pk0 = '%s'", key),
 			Host:          "127.0.0.1",
@@ -733,9 +733,9 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		itemCh <- stmtlogger.Item{
 			Start: stmtlogger.Time{Time: time.Now()},
-			PartitionKeys: typedef.NewValuesFromMap(map[string][]any{
+			PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
 				"pk0": {fmt.Sprintf("key_%d", i)},
-			}),
+			})},
 			Error:         mo.Left[error, string](nil),
 			Statement:     fmt.Sprintf("SELECT * FROM test WHERE pk0 = 'key_%d'", i),
 			Host:          "127.0.0.1",
@@ -803,6 +803,7 @@ func TestLogger_StatementFlusher_Integration(t *testing.T) {
 
 	ch := make(chan statementChData, 10)
 
+	mockLogger.wg.Add(1)
 	go mockLogger.statementFlusher(ch, oracleFile, testFile)
 
 	// Send data

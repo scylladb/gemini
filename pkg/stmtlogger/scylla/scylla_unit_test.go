@@ -221,9 +221,13 @@ func TestLine_JSONMarshaling(t *testing.T) {
 		{
 			name: "complete line",
 			line: Line{
-				PartitionKeys: map[string][]any{
-					"pk0": {"key1"},
-					"pk1": {123},
+				PartitionKeys: []PartitionInfo{
+					{
+						PartitionKeys: map[string]any{
+							"pk0": "key1",
+							"pk1": 123,
+						},
+					},
 				},
 				Timestamp: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 				Query:     "SELECT * FROM test",
@@ -239,17 +243,21 @@ func TestLine_JSONMarshaling(t *testing.T) {
 		{
 			name: "line with error",
 			line: Line{
-				PartitionKeys: map[string][]any{"pk0": {"key"}},
-				Timestamp:     time.Now(),
-				Err:           "assert.AnError general error for testing",
-				Query:         "INSERT INTO test VALUES (?)",
-				Message:       "error occurred",
+				PartitionKeys: []PartitionInfo{
+					{
+						PartitionKeys: map[string]any{"pk0": "key"},
+					},
+				},
+				Timestamp: time.Now(),
+				Err:       "assert.AnError general error for testing",
+				Query:     "INSERT INTO test VALUES (?)",
+				Message:   "error occurred",
 			},
 		},
 		{
 			name: "minimal line",
 			line: Line{
-				PartitionKeys: map[string][]any{},
+				PartitionKeys: []PartitionInfo{},
 				Timestamp:     time.Now(),
 			},
 		},
@@ -485,6 +493,7 @@ func TestStatementFlusher_WritesAndFlushes(t *testing.T) {
 
 	ch := make(chan statementChData, 2)
 	var wg sync.WaitGroup
+	lg.wg.Add(1) // statementFlusher expects the caller to have incremented wg
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -561,6 +570,7 @@ func TestFetchErrors_DedupAndFanout(t *testing.T) {
 
 	// Start fetchErrors which fans out to both storages and deduplicates by hash
 	in := make(chan *joberror.JobError, 2)
+	lg.wg.Add(1)
 	go lg.fetchErrors(out, in)
 
 	in <- &je1
@@ -624,9 +634,13 @@ func BenchmarkBuildCreateTableQuery(b *testing.B) {
 
 func BenchmarkLine_Marshal(b *testing.B) {
 	line := Line{
-		PartitionKeys: map[string][]any{
-			"pk0": {"key1"},
-			"pk1": {123},
+		PartitionKeys: []PartitionInfo{
+			{
+				PartitionKeys: map[string]any{
+					"pk0": "key1",
+					"pk1": 123,
+				},
+			},
 		},
 		Timestamp: time.Now(),
 		Query:     "SELECT * FROM test",

@@ -50,10 +50,13 @@ func (g *Generator) deleteMultiplePartitions(_ context.Context) (*typedef.Stmt, 
 	builder := qb.Delete(g.keyspaceAndTable)
 
 	numQueryPKs := g.getMultiplePartitionKeys()
-	pks := typedef.NewValues(g.table.PartitionKeys.Len())
+	pks := make([]typedef.PartitionKeys, 0, numQueryPKs)
+	combined := typedef.NewValues(g.table.PartitionKeys.Len())
 
 	for range numQueryPKs {
-		pks.Merge(g.generator.ReplaceNext())
+		pk := g.generator.ReplaceNext()
+		pks = append(pks, pk)
+		combined.Merge(pk.Values)
 	}
 
 	for _, pk := range g.table.PartitionKeys {
@@ -63,8 +66,8 @@ func (g *Generator) deleteMultiplePartitions(_ context.Context) (*typedef.Stmt, 
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		PartitionKeys: typedef.PartitionKeys{Values: pks},
-		Values:        pks.ToCQLValues(g.table.PartitionKeys),
+		PartitionKeys: pks,
+		Values:        combined.ToCQLValues(g.table.PartitionKeys),
 		QueryType:     typedef.DeleteMultiplePartitionsType,
 		Query:         query,
 	}, nil
@@ -78,13 +81,13 @@ func (g *Generator) deleteSinglePartition(_ context.Context) (*typedef.Stmt, err
 
 	for _, pk := range g.table.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
-		values = append(values, pks.Get(pk.Name)...)
+		values = append(values, pks.Values.Get(pk.Name)...)
 	}
 
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		PartitionKeys: typedef.PartitionKeys{Values: pks},
+		PartitionKeys: []typedef.PartitionKeys{pks},
 		Values:        values,
 		QueryType:     typedef.DeleteWholePartitionType,
 		Query:         query,
