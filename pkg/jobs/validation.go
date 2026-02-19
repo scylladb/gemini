@@ -289,6 +289,13 @@ func (v *Validation) createSelectStmtForPartitionKeys(keys typedef.PartitionKeys
 func (v *Validation) validateDeletedPartition(ctx context.Context, keys typedef.PartitionKeys) error {
 	stmt := v.createSelectStmtForPartitionKeys(keys)
 
+	// Ensure partition keys are released when we're done
+	defer func() {
+		if keys.Release != nil {
+			keys.Release()
+		}
+	}()
+
 	if _, err := v.store.Check(ctx, v.table, stmt, 0); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return err

@@ -82,6 +82,15 @@ func (m *Mutation) run(ctx context.Context) error {
 		return err
 	}
 
+	// Ensure partition keys are released when we're done with the statement
+	defer func() {
+		for i := range mutateStmt.PartitionKeys {
+			if mutateStmt.PartitionKeys[i].Release != nil {
+				mutateStmt.PartitionKeys[i].Release()
+			}
+		}
+	}()
+
 	err = m.store.Mutate(ctx, mutateStmt)
 
 	if err == nil {
