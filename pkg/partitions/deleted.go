@@ -419,6 +419,8 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	}
 
 	now := time.Now()
+	// Record when the partition was actually deleted
+	keys.DeletedAtNS = uint64(now.UnixNano())
 	// Apply jitter to avoid aligning many items on the exact same boundary
 	readyAt := now.Add(d.buckets[0]).Add(jitterDuration(d.buckets[0]))
 	readyAtNs := readyAt.UnixNano()

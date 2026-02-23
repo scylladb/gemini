@@ -25,6 +25,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -51,6 +53,7 @@ type PartitionValidation struct {
 	FirstSuccessNS uint64   `json:"firstSuccessNS,omitempty"`
 	LastSuccessNS  uint64   `json:"lastSuccessNS,omitempty"`
 	LastFailureNS  uint64   `json:"lastFailureNS,omitempty"`
+	SuccessCount   uint64   `json:"successCount,omitempty"`
 }
 
 type JobError struct {
@@ -62,6 +65,8 @@ type JobError struct {
 	Message         string                         `json:"message"`
 	Query           string                         `json:"query"`
 	Values          []any                          `json:"values,omitempty"`
+	PartitionID     uuid.UUID                      `json:"partitionId,omitempty"`
+	DeletionTimeNS  uint64                         `json:"deletionTimeNS,omitempty"`
 	hash            [32]byte
 	StmtType        typedef.StatementType `json:"stmt-type"`
 }

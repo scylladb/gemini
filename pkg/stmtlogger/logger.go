@@ -40,14 +40,14 @@ type (
 	Type string
 
 	Item struct {
-		PartitionKeys  typedef.PartitionKeys    `json:"partitionKeys"`
 		Start          Time                     `json:"s"`
 		Error          mo.Either[error, string] `json:"e,omitempty"`
+		Type           Type                     `json:"-"`
 		Statement      string                   `json:"q"`
 		Host           string                   `json:"h"`
-		Type           Type                     `json:"-"`
 		Values         mo.Either[[]any, []byte] `json:"v"`
 		RecentSuccess  []uint64                 `json:"rs,omitempty"`
+		PartitionKeys  typedef.PartitionKeys    `json:"partitionKeys"`
 		Duration       Duration                 `json:"d"`
 		FirstSuccessNS uint64                   `json:"fs,omitempty"`
 		LastSuccessNS  uint64                   `json:"ls,omitempty"`

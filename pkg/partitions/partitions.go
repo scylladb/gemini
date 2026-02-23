@@ -47,7 +47,7 @@ type (
 		// Validation tracking
 		ValidationSuccess(values *typedef.PartitionKeys)
 		ValidationFailure(values *typedef.PartitionKeys)
-		ValidationStats(id uuid.UUID) (first, last, failure uint64, recent []uint64)
+		ValidationStats(id uuid.UUID) (first, last, failure uint64, recent []uint64, successCount uint64)
 
 		Len() uint64
 		Close()
@@ -389,6 +389,7 @@ func (p *Partitions) ValidationSuccess(keys *typedef.PartitionKeys) {
 	}
 	data.FirstSuccessNS.CompareAndSwap(0, now)
 	data.LastSuccessNS.Store(now)
+	data.SuccessCount.Add(1)
 	pos := data.RecentIdx.Add(1) - 1
 	data.Recent[pos%uint64(len(data.Recent))].Store(now)
 }
@@ -407,16 +408,17 @@ func (p *Partitions) ValidationFailure(keys *typedef.PartitionKeys) {
 	data.LastFailureNS.Store(now)
 }
 
-func (p *Partitions) ValidationStats(id uuid.UUID) (first, last, failure uint64, recent []uint64) {
+func (p *Partitions) ValidationStats(id uuid.UUID) (first, last, failure uint64, recent []uint64, successCount uint64) {
 	p.validationMu.RLock()
 	data, ok := p.validationMap[id]
 	p.validationMu.RUnlock()
 	if !ok {
-		return 0, 0, 0, nil
+		return 0, 0, 0, nil, 0
 	}
 	first = data.FirstSuccessNS.Load()
 	last = data.LastSuccessNS.Load()
 	failure = data.LastFailureNS.Load()
+	successCount = data.SuccessCount.Load()
 	recent = make([]uint64, 0, len(data.Recent))
 	for i := range data.Recent {
 		val := data.Recent[i].Load()
@@ -424,7 +426,7 @@ func (p *Partitions) ValidationStats(id uuid.UUID) (first, last, failure uint64,
 			recent = append(recent, val)
 		}
 	}
-	return first, last, failure, recent
+	return first, last, failure, recent, successCount
 }
 
 func generateValue(r utils.Random, table *typedef.Table, config typedef.RangeConfig) []any {

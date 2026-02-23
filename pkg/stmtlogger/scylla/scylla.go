@@ -78,6 +78,7 @@ type (
 		FirstSuccessNS uint64   `json:"firstSuccessNS,omitempty"`
 		LastSuccessNS  uint64   `json:"lastSuccessNS,omitempty"`
 		LastFailureNS  uint64   `json:"lastFailureNS,omitempty"`
+		SuccessCount   uint64   `json:"successCount,omitempty"`
 	}
 
 	Line struct {

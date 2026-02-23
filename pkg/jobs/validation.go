@@ -227,7 +227,7 @@ func (v *Validation) collectLastValidations(stmt *typedef.Stmt) map[string]jober
 	result := make(map[string]joberror.PartitionValidation, len(stmt.PartitionKeys))
 	for i := range stmt.PartitionKeys {
 		pk := &stmt.PartitionKeys[i]
-		first, last, failure, recent := v.generator.ValidationStats(pk.ID)
+		first, last, failure, recent, successCount := v.generator.ValidationStats(pk.ID)
 		if first == 0 && last == 0 && failure == 0 {
 			continue
 		}
@@ -236,6 +236,7 @@ func (v *Validation) collectLastValidations(stmt *typedef.Stmt) map[string]jober
 			LastSuccessNS:  last,
 			LastFailureNS:  failure,
 			Recent:         recent,
+			SuccessCount:   successCount,
 		}
 	}
 	if len(result) == 0 {
@@ -286,7 +287,7 @@ func (v *Validation) createSelectStmtForPartitionKeys(keys typedef.PartitionKeys
 // validateDeletedPartition validates a deleted partition by verifying it no longer exists.
 // The partition should have been deleted from both test and oracle clusters, so we expect
 // zero rows to be returned.
-func (v *Validation) validateDeletedPartition(ctx context.Context, keys typedef.PartitionKeys) error {
+func (v *Validation) validateDeletedPartition(ctx context.Context, keys typedef.PartitionKeys, deletionTimeNS uint64) error {
 	stmt := v.createSelectStmtForPartitionKeys(keys)
 
 	// Ensure partition keys are released when we're done
@@ -304,7 +305,9 @@ func (v *Validation) validateDeletedPartition(ctx context.Context, keys typedef.
 		if v.generator != nil {
 			v.generator.ValidationFailure(&stmt.PartitionKeys[0])
 		}
-		return v.buildJobError(err, stmt, "Deleted partition validation failed (difference found): "+err.Error())
+		jobErr := v.buildJobError(err, stmt, "Deleted partition validation failed (difference found): "+err.Error())
+		jobErr.DeletionTimeNS = deletionTimeNS
+		return jobErr
 	}
 
 	// success
@@ -340,8 +343,9 @@ func (v *Validation) Do(ctx context.Context) error {
 			}
 
 			// Validate that the deleted partition is actually gone
+			deletionNS := deletedKeys.DeletedAtNS
 			err := executionTime.RunFuncE(func() error {
-				return v.validateDeletedPartition(ctx, deletedKeys)
+				return v.validateDeletedPartition(ctx, deletedKeys, deletionNS)
 			})
 
 			if err == nil {

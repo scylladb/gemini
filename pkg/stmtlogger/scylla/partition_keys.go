@@ -87,6 +87,7 @@ func reorganizePartitionKeys(flatKeys map[string][]any, jobErr *joberror.JobErro
 					LastSuccessNS:  v.LastSuccessNS,
 					LastFailureNS:  v.LastFailureNS,
 					Recent:         v.Recent,
+					SuccessCount:   v.SuccessCount,
 				}
 			}
 			result[0].LastValidations = validations
@@ -101,6 +102,7 @@ func reorganizePartitionKeys(flatKeys map[string][]any, jobErr *joberror.JobErro
 					LastSuccessNS:  v.LastSuccessNS,
 					LastFailureNS:  v.LastFailureNS,
 					Recent:         v.Recent,
+					SuccessCount:   v.SuccessCount,
 				}
 			}
 			for i := range result {

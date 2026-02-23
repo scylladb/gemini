@@ -103,6 +103,7 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 	logger.Debug("generating schema changes")
 
 	globalStatus := status.NewGlobalStatus(config.MaxErrorsToStore)
+	globalStatus.SetStatementFiles(storeConfig.TestStatementFile, storeConfig.OracleStatementFile)
 	logger.Debug("creating workpool", zap.Int("size", config.IOWorkerPoolSize))
 
 	logger.Debug("creating store")
