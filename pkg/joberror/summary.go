@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -29,8 +30,10 @@ import (
 )
 
 const (
-	notAvailable = "-"
-	tsLayout     = "2006-01-02 15:04:05.000 UTC"
+	notAvailable   = "-"
+	tsLayout       = "2006-01-02 15:04:05.000 UTC"
+	scannerInitBuf = 32 * 1024 * 1024
+	scannerMaxBuf  = 256 * 1024 * 1024
 )
 
 type stmtLogEntry struct {
@@ -49,12 +52,15 @@ type stmtLogLine struct {
 type (
 	stmtIndex          map[string][]stmtLogLine
 	StmtClusterSummary struct {
-		FirstWriteTime *time.Time `json:"first_write_time,omitempty"`
-		LastWriteTime  *time.Time `json:"last_write_time,omitempty"`
-		Hosts          []string   `json:"hosts,omitempty"`
-		WriteCount     int        `json:"write_count"`
-		DeleteCount    int        `json:"delete_count"`
-		WriteErrors    int        `json:"write_errors"`
+		FirstWriteTime  *time.Time `json:"first_write_time,omitempty"`
+		LastWriteTime   *time.Time `json:"last_write_time,omitempty"`
+		FirstDeleteTime *time.Time `json:"first_delete_time,omitempty"`
+		LastDeleteTime  *time.Time `json:"last_delete_time,omitempty"`
+		Hosts           []string   `json:"hosts,omitempty"`
+		WriteCount      int        `json:"write_count"`
+		DeleteCount     int        `json:"delete_count"`
+		WriteErrors     int        `json:"write_errors"`
+		DeleteErrors    int        `json:"delete_errors"`
 	}
 )
 
@@ -92,7 +98,8 @@ func buildStmtIndex(path string) stmtIndex {
 	defer func() { _ = f.Close() }()
 	idx := make(stmtIndex)
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
+
+	sc.Buffer(make([]byte, scannerInitBuf), scannerMaxBuf)
 	for sc.Scan() {
 		raw := sc.Bytes()
 		if len(raw) == 0 {
@@ -162,6 +169,10 @@ func buildStmtKeyFromValues(v partitionKeyReader) string {
 		return ""
 	}
 	keys := v.Keys()
+	// Values.Keys() already returns sorted keys, but we sort here explicitly to
+	// match the contract of stmtFileKeyFromRaw and guard against future
+	// partitionKeyReader implementations that may not guarantee order.
+	sort.Strings(keys)
 	if len(keys) == 0 {
 		return ""
 	}
@@ -176,55 +187,134 @@ func buildStmtKeyFromValues(v partitionKeyReader) string {
 		if len(vals) == 0 {
 			continue
 		}
-		b, _ := json.Marshal(vals[0])
+		// Encode the first value as canonical JSON.
+		// When partition-key values have been round-tripped through
+		// json.Unmarshal (e.g. via Values.UnmarshalJSON), numeric types
+		// arrive as float64.  For whole-number floats we must emit an
+		// integer representation so the key matches what stmtFileKeyFromRaw
+		// produces from the raw bytes written by the statement flusher
+		// (which marshals the original int32/int64 directly).
+		// Example: float64(4200000000000000) → json.Marshal → "4.2e+15"
+		//          int64(4200000000000000)   → json.Marshal → "4200000000000000"
+		// Using json.Number("4200000000000000") makes both paths produce
+		// identical bytes.
+		val := vals[0]
+		if f, ok := val.(float64); ok {
+			if i64 := int64(f); float64(i64) == f {
+				val = json.Number(strconv.FormatInt(i64, 10))
+			}
+		}
+		b, _ := json.Marshal(val)
 		sb.Write(b)
 	}
 	return sb.String()
 }
 
-func summariseStatements(lines []stmtLogLine) StmtClusterSummary {
-	s := StmtClusterSummary{}
-	seen := make(map[string]struct{})
+// updateTimeWindow expands the [*first, *last] closed time interval to include ts.
+// Calling it with a zero ts is a no-op.
+func updateTimeWindow(first, last **time.Time, ts time.Time) {
+	if ts.IsZero() {
+		return
+	}
+	if *first == nil || ts.Before(**first) {
+		*first = &ts
+	}
+	if *last == nil || ts.After(**last) {
+		*last = &ts
+	}
+}
+
+func parseStatements(lines []stmtLogLine) []stmtLogEntry {
+	var out []stmtLogEntry
 	for _, line := range lines {
 		for _, raw := range line.Statements {
-			var entry stmtLogEntry
-			if err := json.Unmarshal(raw, &entry); err != nil {
-				continue
-			}
-			upper := strings.ToUpper(strings.TrimSpace(entry.Statement))
-			isWrite := strings.HasPrefix(upper, "INSERT") || strings.HasPrefix(upper, "UPDATE")
-			isDel := strings.HasPrefix(upper, "DELETE")
-			if !isWrite && !isDel {
-				continue
-			}
-			if !entry.Timestamp.IsZero() {
-				ts := entry.Timestamp.UTC()
-				if s.FirstWriteTime == nil || ts.Before(*s.FirstWriteTime) {
-					s.FirstWriteTime = &ts
-				}
-				if s.LastWriteTime == nil || ts.After(*s.LastWriteTime) {
-					s.LastWriteTime = &ts
-				}
-			}
-			if isWrite {
-				s.WriteCount++
-			}
-			if isDel {
-				s.DeleteCount++
-			}
-			if entry.Error != "" {
-				s.WriteErrors++
-			}
-			if entry.Host != "" {
-				if _, exists := seen[entry.Host]; !exists {
-					seen[entry.Host] = struct{}{}
-					s.Hosts = append(s.Hosts, entry.Host)
-				}
+			var e stmtLogEntry
+			if err := json.Unmarshal(raw, &e); err == nil {
+				out = append(out, e)
 			}
 		}
 	}
+	return out
+}
+
+// statementKind reports whether stmt is a write (INSERT/UPDATE) or a delete.
+func statementKind(stmt string) (isWrite, isDel bool) {
+	upper := strings.ToUpper(strings.TrimSpace(stmt))
+	isWrite = strings.HasPrefix(upper, "INSERT") || strings.HasPrefix(upper, "UPDATE")
+	isDel = strings.HasPrefix(upper, "DELETE")
+	return isWrite, isDel
+}
+
+func trackHost(seen map[string]struct{}, hosts *[]string, host string) {
+	if host == "" {
+		return
+	}
+	if _, exists := seen[host]; !exists {
+		seen[host] = struct{}{}
+		*hosts = append(*hosts, host)
+	}
+}
+
+func summariseStatements(lines []stmtLogLine) StmtClusterSummary {
+	s := StmtClusterSummary{}
+	seen := make(map[string]struct{})
+	for _, entry := range parseStatements(lines) {
+		isWrite, isDel := statementKind(entry.Statement)
+		if !isWrite && !isDel {
+			continue
+		}
+		ts := entry.Timestamp.UTC()
+		if isWrite {
+			updateTimeWindow(&s.FirstWriteTime, &s.LastWriteTime, ts)
+			s.WriteCount++
+			if entry.Error != "" {
+				s.WriteErrors++
+			}
+		}
+		if isDel {
+			updateTimeWindow(&s.FirstDeleteTime, &s.LastDeleteTime, ts)
+			s.DeleteCount++
+			if entry.Error != "" {
+				s.DeleteErrors++
+			}
+		}
+		trackHost(seen, &s.Hosts, entry.Host)
+	}
 	sort.Strings(s.Hosts)
 	return s
+}
+
+func resolveInsertTime(e JobError, testStats, oracleStats StmtClusterSummary) *time.Time {
+	// Try each recorded partition ID; for multi-partition statements use the
+	// earliest valid UUIDv7 timestamp so the write→corruption gap is as accurate
+	// as possible (it reflects when the first partition was written).
+	var earliest *time.Time
+	for _, id := range e.PartitionIDs {
+		if t := uuidv7Time(id); !t.IsZero() {
+			if earliest == nil || t.Before(*earliest) {
+				t := t // capture loop variable
+				earliest = &t
+			}
+		}
+	}
+	if earliest != nil {
+		return earliest
+	}
+	if testStats.FirstWriteTime != nil {
+		return testStats.FirstWriteTime
+	}
+	if oracleStats.FirstWriteTime != nil {
+		return oracleStats.FirstWriteTime
+	}
+	for _, pv := range e.LastValidations {
+		if pv.FirstSuccessNS != 0 {
+			t := nsToTime(pv.FirstSuccessNS)
+			if earliest == nil || t.Before(*earliest) {
+				earliest = &t
+			}
+		}
+	}
+	return earliest
 }
 
 //nolint:gocyclo
@@ -244,26 +334,7 @@ func BuildCorruptionEntries(errors []JobError, testIdx, oracleIdx stmtIndex) []C
 		}
 		testStats := summariseStatements(testLines)
 		oracleStats := summariseStatements(oracleLines)
-		var insertTime *time.Time
-		if t := uuidv7Time(e.PartitionID); !t.IsZero() {
-			insertTime = &t
-		}
-		if insertTime == nil {
-			insertTime = testStats.FirstWriteTime
-		}
-		if insertTime == nil {
-			insertTime = oracleStats.FirstWriteTime
-		}
-		if insertTime == nil {
-			for _, pv := range e.LastValidations {
-				if pv.FirstSuccessNS != 0 {
-					t := nsToTime(pv.FirstSuccessNS)
-					if insertTime == nil || t.Before(*insertTime) {
-						insertTime = &t
-					}
-				}
-			}
-		}
+		insertTime := resolveInsertTime(e, testStats, oracleStats)
 		var lastSuccess *time.Time
 		var successCount uint64
 		for _, pv := range e.LastValidations {
@@ -337,12 +408,18 @@ func PrintCorruptionSummary(w io.Writer, entries []CorruptionEntry) {
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "  EVENT\tTIME\tDETAIL")
 		_, _ = fmt.Fprintln(tw, "  ─────\t────\t──────")
-		_, _ = fmt.Fprintf(tw, "  First write (test)\t%s\t%d writes, %d deletes, %d errors\n",
-			optionalTime(e.TestCluster.FirstWriteTime), e.TestCluster.WriteCount, e.TestCluster.DeleteCount, e.TestCluster.WriteErrors)
-		_, _ = fmt.Fprintf(tw, "  Last write  (test)\t%s\t\n", optionalTime(e.TestCluster.LastWriteTime))
-		_, _ = fmt.Fprintf(tw, "  First write (oracle)\t%s\t%d writes, %d deletes, %d errors\n",
-			optionalTime(e.OracleCluster.FirstWriteTime), e.OracleCluster.WriteCount, e.OracleCluster.DeleteCount, e.OracleCluster.WriteErrors)
-		_, _ = fmt.Fprintf(tw, "  Last write  (oracle)\t%s\t\n", optionalTime(e.OracleCluster.LastWriteTime))
+		_, _ = fmt.Fprintf(tw, "  First write  (test)\t%s\t%d writes, %d write errors\n",
+			optionalTime(e.TestCluster.FirstWriteTime), e.TestCluster.WriteCount, e.TestCluster.WriteErrors)
+		_, _ = fmt.Fprintf(tw, "  Last write   (test)\t%s\t\n", optionalTime(e.TestCluster.LastWriteTime))
+		_, _ = fmt.Fprintf(tw, "  First delete (test)\t%s\t%d deletes, %d delete errors\n",
+			optionalTime(e.TestCluster.FirstDeleteTime), e.TestCluster.DeleteCount, e.TestCluster.DeleteErrors)
+		_, _ = fmt.Fprintf(tw, "  Last delete  (test)\t%s\t\n", optionalTime(e.TestCluster.LastDeleteTime))
+		_, _ = fmt.Fprintf(tw, "  First write  (oracle)\t%s\t%d writes, %d write errors\n",
+			optionalTime(e.OracleCluster.FirstWriteTime), e.OracleCluster.WriteCount, e.OracleCluster.WriteErrors)
+		_, _ = fmt.Fprintf(tw, "  Last write   (oracle)\t%s\t\n", optionalTime(e.OracleCluster.LastWriteTime))
+		_, _ = fmt.Fprintf(tw, "  First delete (oracle)\t%s\t%d deletes, %d delete errors\n",
+			optionalTime(e.OracleCluster.FirstDeleteTime), e.OracleCluster.DeleteCount, e.OracleCluster.DeleteErrors)
+		_, _ = fmt.Fprintf(tw, "  Last delete  (oracle)\t%s\t\n", optionalTime(e.OracleCluster.LastDeleteTime))
 		_, _ = fmt.Fprintf(tw, "  Partition created\t%s\t(UUIDv7 / first write)\n", optionalTime(e.InsertedAt))
 		_, _ = fmt.Fprintf(tw, "  Last validation ok\t%s\t%d successful validation(s)\n",
 			optionalTime(e.LastSuccessfulValidation), e.SuccessfulValidations)
@@ -446,12 +523,11 @@ func nsToTime(ns uint64) time.Time {
 }
 
 func uuidv7Time(id uuid.UUID) time.Time {
-	if id == (uuid.UUID{}) || id[6]>>4 != 7 {
+	if id == uuid.Nil || id[6]>>4 != 7 {
 		return time.Time{}
 	}
-	ms := int64(id[0])<<40 | int64(id[1])<<32 | int64(id[2])<<24 |
-		int64(id[3])<<16 | int64(id[4])<<8 | int64(id[5])
-	return time.Unix(ms/1000, (ms%1000)*int64(time.Millisecond)).UTC()
+
+	return time.Unix(id.Time().UnixTime())
 }
 
 func errorKindFromResults(r *ComparisonResults) string {
@@ -460,7 +536,7 @@ func errorKindFromResults(r *ComparisonResults) string {
 	}
 	switch {
 	case len(r.OracleOnlyRows) > 0 && len(r.TestOnlyRows) > 0:
-		return "row count mismatch (missing in both test and oracle)"
+		return "missing rows in test and oracle"
 	case len(r.OracleOnlyRows) > 0:
 		return "missing in test"
 	case len(r.TestOnlyRows) > 0:

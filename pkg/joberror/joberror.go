@@ -65,7 +65,7 @@ type JobError struct {
 	Message         string                         `json:"message"`
 	Query           string                         `json:"query"`
 	Values          []any                          `json:"values,omitempty"`
-	PartitionID     uuid.UUID                      `json:"partitionId,omitempty"`
+	PartitionIDs    []uuid.UUID                    `json:"partitionIds,omitempty"`
 	DeletionTimeNS  uint64                         `json:"deletionTimeNS,omitempty"`
 	hash            [32]byte
 	StmtType        typedef.StatementType `json:"stmt-type"`

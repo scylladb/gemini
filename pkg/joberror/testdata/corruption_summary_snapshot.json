@@ -1,0 +1,107 @@
+[
+  {
+    "corruption_detected_at": "2026-02-23T09:10:00Z",
+    "last_successful_validation": "2026-02-23T09:08:00Z",
+    "inserted_at": "2026-02-23T09:00:00Z",
+    "message": "row present in oracle but missing from test cluster",
+    "partition_keys": "pk0=101, pk1=session-alpha",
+    "write_to_corruption_gap": "10m0s",
+    "error_kind": "missing in test",
+    "failing_query": "SELECT pk0, pk1, col FROM ks.tbl WHERE pk0=? AND pk1=?",
+    "test_cluster": {
+      "first_write_time": "2026-02-23T09:00:00Z",
+      "last_write_time": "2026-02-23T09:01:30Z",
+      "hosts": [
+        "10.0.0.1",
+        "10.0.0.2"
+      ],
+      "write_count": 3,
+      "delete_count": 0,
+      "write_errors": 0,
+      "delete_errors": 0
+    },
+    "oracle_cluster": {
+      "first_write_time": "2026-02-23T09:00:01Z",
+      "last_write_time": "2026-02-23T09:00:31Z",
+      "hosts": [
+        "oracle-1"
+      ],
+      "write_count": 2,
+      "delete_count": 0,
+      "write_errors": 0,
+      "delete_errors": 0
+    },
+    "successful_validations": 24,
+    "diff_oracle_only_rows": 1
+  },
+  {
+    "corruption_detected_at": "2026-02-23T09:12:00Z",
+    "last_successful_validation": "2026-02-23T09:11:00Z",
+    "inserted_at": "2026-02-23T09:00:05Z",
+    "message": "field value differs between test and oracle",
+    "partition_keys": "pk0=202, pk1=session-beta",
+    "write_to_corruption_gap": "11m55s",
+    "error_kind": "field value mismatch",
+    "failing_query": "SELECT pk0, pk1, col FROM ks.tbl WHERE pk0=? AND pk1=?",
+    "field_diffs": [
+      "- col: 42\n+ col: 99"
+    ],
+    "test_cluster": {
+      "first_write_time": "2026-02-23T09:00:05Z",
+      "last_write_time": "2026-02-23T09:00:05Z",
+      "hosts": [
+        "10.0.0.3"
+      ],
+      "write_count": 1,
+      "delete_count": 0,
+      "write_errors": 0,
+      "delete_errors": 0
+    },
+    "oracle_cluster": {
+      "first_write_time": "2026-02-23T09:00:06Z",
+      "last_write_time": "2026-02-23T09:00:06Z",
+      "hosts": [
+        "oracle-1"
+      ],
+      "write_count": 1,
+      "delete_count": 0,
+      "write_errors": 0,
+      "delete_errors": 0
+    },
+    "successful_validations": 33,
+    "diff_field_mismatches": 1
+  },
+  {
+    "corruption_detected_at": "2026-02-23T09:15:00Z",
+    "last_successful_validation": "2026-02-23T09:14:00Z",
+    "deleted_at": "2026-02-23T09:16:00Z",
+    "inserted_at": "2026-02-23T09:00:10Z",
+    "message": "row present in test but missing from oracle",
+    "partition_keys": "pk0=303, pk1=session-gamma",
+    "write_to_corruption_gap": "14m50s",
+    "error_kind": "missing in oracle",
+    "failing_query": "SELECT pk0, pk1, col FROM ks.tbl WHERE pk0=? AND pk1=?",
+    "test_cluster": {
+      "first_write_time": "2026-02-23T09:00:10Z",
+      "last_write_time": "2026-02-23T09:00:10Z",
+      "first_delete_time": "2026-02-23T09:00:20Z",
+      "last_delete_time": "2026-02-23T09:00:20Z",
+      "hosts": [
+        "10.0.0.1",
+        "10.0.0.2"
+      ],
+      "write_count": 1,
+      "delete_count": 1,
+      "write_errors": 0,
+      "delete_errors": 0
+    },
+    "oracle_cluster": {
+      "write_count": 0,
+      "delete_count": 0,
+      "write_errors": 0,
+      "delete_errors": 0
+    },
+    "successful_validations": 41,
+    "diff_test_only_rows": 1
+  }
+]

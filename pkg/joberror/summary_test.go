@@ -17,6 +17,7 @@ package joberror
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,8 @@ import (
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
+
+var update = flag.Bool("update", false, "regenerate golden snapshot files")
 
 func tp(t time.Time) *time.Time { return &t }
 func writeStmtFile(t *testing.T, lines ...string) string {
@@ -148,7 +151,7 @@ func TestErrorKindFromResults_FieldMismatch(t *testing.T) {
 
 func TestErrorKindFromResults_BothMissing(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "row count mismatch (missing in both test and oracle)", errorKindFromResults(
+	assert.Equal(t, "missing rows in test and oracle", errorKindFromResults(
 		&ComparisonResults{
 			OracleOnlyRows: []json.RawMessage{[]byte(`{}`)},
 			TestOnlyRows:   []json.RawMessage{[]byte(`{}`)},
@@ -203,6 +206,25 @@ func TestBuildStmtKeyFromValues_MultiColumn(t *testing.T) {
 	v := typedef.NewValuesFromMap(map[string][]any{"pk0": {int32(1)}, "pk1": {int32(2)}, "pk2": {"foo"}})
 	got := buildStmtKeyFromValues(v)
 	assert.Equal(t, `pk0=1,pk1=2,pk2="foo"`, got)
+}
+
+func TestBuildStmtKeyFromValues_Float64AsInt(t *testing.T) {
+	t.Parallel()
+
+	// Small integer: float64(42) and int32(42) must produce identical keys.
+	vFloat := typedef.NewValuesFromMap(map[string][]any{"pk0": {float64(42)}})
+	vInt := typedef.NewValuesFromMap(map[string][]any{"pk0": {int32(42)}})
+	assert.Equal(t, buildStmtKeyFromValues(vInt), buildStmtKeyFromValues(vFloat), "small integer mismatch")
+
+	// Large integer beyond float64 safe-integer range would differ without normalisation.
+	const bigInt = int64(4_200_000_000_000_000)
+	vBig := typedef.NewValuesFromMap(map[string][]any{"pk0": {float64(bigInt)}})
+	vBigInt := typedef.NewValuesFromMap(map[string][]any{"pk0": {bigInt}})
+	assert.Equal(t, buildStmtKeyFromValues(vBigInt), buildStmtKeyFromValues(vBig), "large integer mismatch")
+
+	// Non-integer float must not be mangled.
+	vFrac := typedef.NewValuesFromMap(map[string][]any{"pk0": {float64(1.5)}})
+	assert.Equal(t, `pk0=1.5`, buildStmtKeyFromValues(vFrac))
 }
 
 func TestFormatPartitionKeys_MultiColumn(t *testing.T) {
@@ -278,6 +300,7 @@ func TestSummariseStatements_Empty(t *testing.T) {
 	s := summariseStatements(nil)
 	assert.Zero(t, s.WriteCount)
 	assert.Nil(t, s.FirstWriteTime)
+	assert.Nil(t, s.FirstDeleteTime)
 }
 
 func TestSummariseStatements_CountsWrites(t *testing.T) {
@@ -297,7 +320,11 @@ func TestSummariseStatements_CountsWrites(t *testing.T) {
 	require.NotNil(t, s.FirstWriteTime)
 	assert.Equal(t, ts1.UTC(), *s.FirstWriteTime)
 	require.NotNil(t, s.LastWriteTime)
-	assert.Equal(t, ts3.UTC(), *s.LastWriteTime)
+	assert.Equal(t, ts2.UTC(), *s.LastWriteTime)
+	require.NotNil(t, s.FirstDeleteTime)
+	assert.Equal(t, ts3.UTC(), *s.FirstDeleteTime)
+	require.NotNil(t, s.LastDeleteTime)
+	assert.Equal(t, ts3.UTC(), *s.LastDeleteTime)
 }
 
 func TestSummariseStatements_IgnoresSelect(t *testing.T) {
@@ -309,6 +336,7 @@ func TestSummariseStatements_IgnoresSelect(t *testing.T) {
 	}})
 	assert.Zero(t, s.WriteCount)
 	assert.Nil(t, s.FirstWriteTime)
+	assert.Nil(t, s.FirstDeleteTime)
 }
 
 func TestSummariseStatements_TracksHosts(t *testing.T) {
@@ -333,6 +361,20 @@ func TestSummariseStatements_CountsWriteErrors(t *testing.T) {
 	}})
 	assert.Equal(t, 2, s.WriteCount)
 	assert.Equal(t, 1, s.WriteErrors)
+	assert.Equal(t, 0, s.DeleteErrors)
+}
+
+func TestSummariseStatements_CountsDeleteErrors(t *testing.T) {
+	t.Parallel()
+	s := summariseStatements([]stmtLogLine{{
+		Statements: rawEntries(t, []stmtLogEntry{
+			{Timestamp: time.Now(), Statement: "DELETE FROM ks.t WHERE pk0=?", Error: "timeout"},
+			{Timestamp: time.Now(), Statement: "DELETE FROM ks.t WHERE pk0=?"},
+		}),
+	}})
+	assert.Equal(t, 2, s.DeleteCount)
+	assert.Equal(t, 1, s.DeleteErrors)
+	assert.Equal(t, 0, s.WriteErrors)
 }
 
 func TestBuildCorruptionEntries_Empty(t *testing.T) {
@@ -347,7 +389,7 @@ func TestBuildCorruptionEntries_InsertionTimeFromUUIDv7(t *testing.T) {
 	require.NoError(t, err)
 	entries := BuildCorruptionEntries([]JobError{{
 		Timestamp:     time.Now().UTC(),
-		PartitionID:   id,
+		PartitionIDs:  []uuid.UUID{id},
 		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"pk0": {int32(1)}}),
 	}}, nil, nil)
 	require.Len(t, entries, 1)
@@ -721,4 +763,176 @@ func TestBuildStmtIndex_RoundTripMultiColumnPK(t *testing.T) {
 	assert.Equal(t, 1, entry.TestCluster.WriteCount)
 	require.NotNil(t, entry.TestCluster.FirstWriteTime)
 	assert.Equal(t, ts.UTC(), *entry.TestCluster.FirstWriteTime)
+}
+
+func buildSnapshotErrors(t *testing.T) ([]JobError, string, string) {
+	t.Helper()
+
+	base := time.Date(2026, 2, 23, 9, 0, 0, 0, time.UTC)
+
+	testFile := writeStmtFile(t,
+		stmtLine(t,
+			map[string]any{"pk0": int32(101), "pk1": "session-alpha"},
+			[]map[string]any{
+				{"ts": base.Format(time.RFC3339Nano), "statement": "INSERT INTO ks.tbl (pk0, pk1) VALUES (?, ?)", "host": "10.0.0.1"},
+				{"ts": base.Add(30 * time.Second).Format(time.RFC3339Nano), "statement": "UPDATE ks.tbl SET col=1 WHERE pk0=? AND pk1=?", "host": "10.0.0.2"},
+				{"ts": base.Add(90 * time.Second).Format(time.RFC3339Nano), "statement": "INSERT INTO ks.tbl (pk0, pk1) VALUES (?, ?)", "host": "10.0.0.1"},
+			},
+		),
+		stmtLine(t,
+			map[string]any{"pk0": int32(202), "pk1": "session-beta"},
+			[]map[string]any{
+				{"ts": base.Add(5 * time.Second).Format(time.RFC3339Nano), "statement": "INSERT INTO ks.tbl (pk0, pk1) VALUES (?, ?)", "host": "10.0.0.3"},
+			},
+		),
+		stmtLine(t,
+			map[string]any{"pk0": int32(303), "pk1": "session-gamma"},
+			[]map[string]any{
+				{"ts": base.Add(10 * time.Second).Format(time.RFC3339Nano), "statement": "INSERT INTO ks.tbl (pk0, pk1) VALUES (?, ?)", "host": "10.0.0.1"},
+				{"ts": base.Add(20 * time.Second).Format(time.RFC3339Nano), "statement": "DELETE FROM ks.tbl WHERE pk0=? AND pk1=?", "host": "10.0.0.2"},
+			},
+		),
+	)
+
+	oracleFile := writeStmtFile(t,
+		stmtLine(t,
+			map[string]any{"pk0": int32(101), "pk1": "session-alpha"},
+			[]map[string]any{
+				{"ts": base.Add(time.Second).Format(time.RFC3339Nano), "statement": "INSERT INTO ks.tbl (pk0, pk1) VALUES (?, ?)", "host": "oracle-1"},
+				{"ts": base.Add(31 * time.Second).Format(time.RFC3339Nano), "statement": "UPDATE ks.tbl SET col=1 WHERE pk0=? AND pk1=?", "host": "oracle-1"},
+			},
+		),
+		stmtLine(t,
+			map[string]any{"pk0": int32(202), "pk1": "session-beta"},
+			[]map[string]any{
+				{"ts": base.Add(6 * time.Second).Format(time.RFC3339Nano), "statement": "INSERT INTO ks.tbl (pk0, pk1) VALUES (?, ?)", "host": "oracle-1"},
+			},
+		),
+	)
+
+	errors := []JobError{
+		{
+			Timestamp:     base.Add(10 * time.Minute),
+			PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"pk0": {int32(101)}, "pk1": {"session-alpha"}}),
+			Query:         "SELECT pk0, pk1, col FROM ks.tbl WHERE pk0=? AND pk1=?",
+			Message:       "row present in oracle but missing from test cluster",
+			LastValidations: map[string]PartitionValidation{
+				"shard-0": {
+					FirstSuccessNS: uint64(base.UnixNano()),
+					LastSuccessNS:  uint64(base.Add(8 * time.Minute).UnixNano()),
+					SuccessCount:   24,
+				},
+			},
+			Results: &ComparisonResults{
+				OracleOnlyRows: []json.RawMessage{[]byte(`{"pk0":101,"pk1":"session-alpha","col":1}`)},
+			},
+		},
+		{
+			Timestamp:     base.Add(12 * time.Minute),
+			PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"pk0": {int32(202)}, "pk1": {"session-beta"}}),
+			Query:         "SELECT pk0, pk1, col FROM ks.tbl WHERE pk0=? AND pk1=?",
+			Message:       "field value differs between test and oracle",
+			LastValidations: map[string]PartitionValidation{
+				"shard-0": {
+					FirstSuccessNS: uint64(base.Add(5 * time.Second).UnixNano()),
+					LastSuccessNS:  uint64(base.Add(11 * time.Minute).UnixNano()),
+					SuccessCount:   33,
+				},
+			},
+			Results: &ComparisonResults{
+				DifferentRows: []RowDiff{
+					{
+						Diff:      "- col: 42\n+ col: 99",
+						TestRow:   json.RawMessage(`{"pk0":202,"pk1":"session-beta","col":42}`),
+						OracleRow: json.RawMessage(`{"pk0":202,"pk1":"session-beta","col":99}`),
+					},
+				},
+			},
+		},
+		{
+			Timestamp:      base.Add(15 * time.Minute),
+			PartitionKeys:  typedef.NewValuesFromMap(map[string][]any{"pk0": {int32(303)}, "pk1": {"session-gamma"}}),
+			Query:          "SELECT pk0, pk1, col FROM ks.tbl WHERE pk0=? AND pk1=?",
+			Message:        "row present in test but missing from oracle",
+			DeletionTimeNS: uint64(base.Add(16 * time.Minute).UnixNano()),
+			LastValidations: map[string]PartitionValidation{
+				"shard-0": {
+					FirstSuccessNS: uint64(base.Add(10 * time.Second).UnixNano()),
+					LastSuccessNS:  uint64(base.Add(14 * time.Minute).UnixNano()),
+					SuccessCount:   41,
+				},
+			},
+			Results: &ComparisonResults{
+				TestOnlyRows: []json.RawMessage{[]byte(`{"pk0":303,"pk1":"session-gamma","col":7}`)},
+			},
+		},
+	}
+
+	return errors, testFile, oracleFile
+}
+
+func TestPrintCorruptionSummary_Snapshot(t *testing.T) {
+	t.Parallel()
+	errors, testFile, oracleFile := buildSnapshotErrors(t)
+
+	entries := ComputeSummary(errors, testFile, oracleFile)
+	require.NotEmpty(t, entries)
+
+	var buf bytes.Buffer
+	PrintCorruptionSummary(&buf, entries)
+	got := buf.String()
+
+	goldenDir := "testdata"
+	require.NoError(t, os.MkdirAll(goldenDir, 0o755))
+	goldenPath := filepath.Join(goldenDir, "corruption_summary_snapshot.txt")
+
+	if *update {
+		require.NoError(t, os.WriteFile(goldenPath, []byte(got), 0o644))
+		t.Logf("golden file updated: %s", goldenPath)
+		return
+	}
+
+	golden, err := os.ReadFile(goldenPath)
+	if os.IsNotExist(err) {
+		require.NoError(t, os.WriteFile(goldenPath, []byte(got), 0o644))
+		t.Logf("golden file created: %s", goldenPath)
+		return
+	}
+	require.NoError(t, err)
+	assert.Equal(t, string(golden), got, "output changed – run with -update to accept new output")
+}
+
+func TestPrintCorruptionSummary_SnapshotJSON(t *testing.T) {
+	t.Parallel()
+	errors, testFile, oracleFile := buildSnapshotErrors(t)
+
+	entries := ComputeSummary(errors, testFile, oracleFile)
+	require.NotEmpty(t, entries)
+
+	b, err := json.MarshalIndent(entries, "", "  ")
+	require.NoError(t, err)
+	got := string(b)
+
+	goldenDir := "testdata"
+	require.NoError(t, os.MkdirAll(goldenDir, 0o755))
+	goldenPath := filepath.Join(goldenDir, "corruption_summary_snapshot.json")
+
+	if *update {
+		require.NoError(t, os.WriteFile(goldenPath, []byte(got), 0o644))
+		t.Logf("golden file updated: %s", goldenPath)
+		return
+	}
+
+	golden, err := os.ReadFile(goldenPath)
+	if os.IsNotExist(err) {
+		require.NoError(t, os.WriteFile(goldenPath, []byte(got), 0o644))
+		t.Logf("golden file created: %s", goldenPath)
+		return
+	}
+	require.NoError(t, err)
+
+	var gotParsed, goldenParsed any
+	require.NoError(t, json.Unmarshal([]byte(got), &gotParsed))
+	require.NoError(t, json.Unmarshal(golden, &goldenParsed))
+	assert.Equal(t, goldenParsed, gotParsed, "JSON output changed – run with -update to accept new output")
 }

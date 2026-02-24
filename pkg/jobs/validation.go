@@ -247,7 +247,7 @@ func (v *Validation) collectLastValidations(stmt *typedef.Stmt) map[string]jober
 
 // buildJobError creates a JobError with ComparisonResults and LastValidations populated.
 func (v *Validation) buildJobError(err error, stmt *typedef.Stmt, message string) *joberror.JobError {
-	return &joberror.JobError{
+	je := &joberror.JobError{
 		Timestamp: time.Now(),
 		Err:       err,
 		StmtType:  stmt.QueryType,
@@ -259,10 +259,12 @@ func (v *Validation) buildJobError(err error, stmt *typedef.Stmt, message string
 			}
 			return nil
 		}(),
+		PartitionIDs:    collectPartitionIDs(stmt.PartitionKeys),
 		Values:          stmt.Values,
 		Results:         extractComparisonResults(err),
 		LastValidations: v.collectLastValidations(stmt),
 	}
+	return je
 }
 
 // createSelectStmtForPartitionKeys creates a SELECT statement for specific partition key values

@@ -64,26 +64,9 @@ func (gs *GlobalStatus) AddReadError(err joberror.JobError) {
 }
 
 func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, version string, info map[string]any) error {
-	result := map[string]any{
-		"result":           gs,
-		"gemini_version":   version,
-		"schemaHash":       schema.GetHash(),
-		"schema":           schema,
-		"statement_ratios": info,
-	}
-	encoder := json.NewEncoder(w)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent(" ", "    ")
-	if err := encoder.Encode(result); err != nil {
-		return errors.Wrap(err, "unable to create json from result")
-	}
-
-	return nil
+	return gs.PrintResultAsJSONWithSummary(w, schema, version, info, nil)
 }
 
-// PrintResultAsJSONWithSummary is like PrintResultAsJSON but also embeds the
-// corruption summary as a top-level "corruption_summary" key so consumers
-// of the JSON file get everything in one place.
 func (gs *GlobalStatus) PrintResultAsJSONWithSummary(w io.Writer, schema *typedef.Schema, version string, info map[string]any, summary []joberror.CorruptionEntry) error {
 	result := map[string]any{
 		"result":           gs,

@@ -41,7 +41,6 @@ func reorganizePartitionKeys(flatKeys map[string][]any, jobErr *joberror.JobErro
 		return nil
 	}
 
-	// Determine the number of partitions by finding the max length of any key's values.
 	numPartitions := 0
 	for _, vals := range flatKeys {
 		if len(vals) > numPartitions {
@@ -74,39 +73,12 @@ func reorganizePartitionKeys(flatKeys map[string][]any, jobErr *joberror.JobErro
 		}
 	}
 
-	// Attach lastValidations from the job error if available.
 	if jobErr != nil && len(jobErr.LastValidations) > 0 {
-		// For single-partition errors the whole map applies to the one partition.
-		// For multi-partition errors the validation data is keyed by partition UUID
-		// which we attach to all partitions (the consumer can correlate by keys).
 		if numPartitions == 1 {
-			validations := make(map[string]LastValidationData, len(jobErr.LastValidations))
-			for id, v := range jobErr.LastValidations {
-				validations[id] = LastValidationData{
-					FirstSuccessNS: v.FirstSuccessNS,
-					LastSuccessNS:  v.LastSuccessNS,
-					LastFailureNS:  v.LastFailureNS,
-					Recent:         v.Recent,
-					SuccessCount:   v.SuccessCount,
-				}
-			}
-			result[0].LastValidations = validations
+			result[0].LastValidations = jobErr.LastValidations
 		} else {
-			// Multiple partitions: distribute validation data across all partitions.
-			// Each partition gets a copy of the full validation map since we can't
-			// correlate partition UUID to position without additional metadata.
-			validations := make(map[string]LastValidationData, len(jobErr.LastValidations))
-			for id, v := range jobErr.LastValidations {
-				validations[id] = LastValidationData{
-					FirstSuccessNS: v.FirstSuccessNS,
-					LastSuccessNS:  v.LastSuccessNS,
-					LastFailureNS:  v.LastFailureNS,
-					Recent:         v.Recent,
-					SuccessCount:   v.SuccessCount,
-				}
-			}
 			for i := range result {
-				result[i].LastValidations = validations
+				result[i].LastValidations = jobErr.LastValidations
 			}
 		}
 	}

@@ -26,7 +26,10 @@ import (
 
 // TestDeleteBulk tests the bulk delete functionality
 func TestDeleteBulk(t *testing.T) {
+	t.Parallel()
+
 	t.Run("bulk_delete_empty", func(t *testing.T) {
+		t.Parallel()
 		buckets := []time.Duration{100 * time.Millisecond}
 		d := newDeleted(t.Context(), buckets)
 		defer d.Close()
@@ -37,6 +40,8 @@ func TestDeleteBulk(t *testing.T) {
 	})
 
 	t.Run("bulk_delete_single", func(t *testing.T) {
+		t.Parallel()
+
 		buckets := []time.Duration{100 * time.Millisecond}
 		d := newDeleted(t.Context(), buckets)
 		defer d.Close()
@@ -65,6 +70,8 @@ func TestDeleteBulk(t *testing.T) {
 	})
 
 	t.Run("bulk_delete_sets_next_ready", func(t *testing.T) {
+		t.Parallel()
+
 		buckets := []time.Duration{100 * time.Millisecond}
 		d := newDeleted(t.Context(), buckets)
 		defer d.Close()
@@ -80,6 +87,55 @@ func TestDeleteBulk(t *testing.T) {
 		nextNs := d.nextReadyNs.Load()
 		assert.Greater(t, nextNs, int64(0))
 	})
+
+	t.Run("bulk_delete_stamps_DeletedAtNS", func(t *testing.T) {
+		t.Parallel()
+		before := time.Now().UnixNano()
+		buckets := []time.Duration{1 * time.Second}  // long bucket so items stay in heap
+		d := newDeleted(t.Context(), buckets, false) // false = don't start background goroutine
+		defer d.Close()
+
+		batch := make([]typedef.PartitionKeys, 5)
+		for i := range batch {
+			batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
+		}
+		d.DeleteBulk(batch)
+		after := time.Now().UnixNano()
+
+		// Verify the original slice elements are stamped (not just the heap copies).
+		for i := range batch {
+			ns := int64(batch[i].DeletedAtNS)
+			assert.Greater(t, ns, before, "batch[%d].DeletedAtNS should be ≥ before", i)
+			assert.LessOrEqual(t, ns, after, "batch[%d].DeletedAtNS should be ≤ after", i)
+		}
+
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		require.Equal(t, 5, d.heap.Len())
+		for i := range d.heap.Len() {
+			ns := int64(d.heap.data[i].keys.DeletedAtNS)
+			assert.Greater(t, ns, before, "heap[%d].keys.DeletedAtNS should be ≥ before", i)
+			assert.LessOrEqual(t, ns, after, "heap[%d].keys.DeletedAtNS should be ≤ after", i)
+		}
+	})
+}
+
+func TestDelete_DeletedAtNS(t *testing.T) {
+	t.Parallel()
+	before := time.Now().UnixNano()
+	buckets := []time.Duration{1 * time.Second}  // long bucket so item stays in heap
+	d := newDeleted(t.Context(), buckets, false) // false = don't start background goroutine
+	defer d.Close()
+
+	d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
+	after := time.Now().UnixNano()
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	require.Equal(t, 1, d.heap.Len())
+	ns := int64(d.heap.data[0].keys.DeletedAtNS)
+	assert.Greater(t, ns, before, "DeletedAtNS should be ≥ before Delete call")
+	assert.LessOrEqual(t, ns, after, "DeletedAtNS should be ≤ after Delete call")
 }
 
 // TestFastPathOptimization tests the atomic fast-path check
