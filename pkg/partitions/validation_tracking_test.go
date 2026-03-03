@@ -33,19 +33,21 @@ func TestValidationTracking_SuccessAndFailure(t *testing.T) {
 	before := uint64(time.Now().UTC().UnixNano())
 	parts.ValidationSuccess(&v0)
 
-	fs, ls, lf, recent := parts.ValidationStats(v0.ID)
+	fs, ls, lf, recent, sc := parts.ValidationStats(v0.ID)
 	require.NotZero(t, fs)
 	require.GreaterOrEqual(t, ls, fs)
 	require.Zero(t, lf)
+	require.EqualValues(t, 1, sc)
 
 	// Ring buffer should have at least one non-zero entry
 	require.GreaterOrEqual(t, len(recent), 1)
 
 	// Second success keeps firstSuccessNS and updates lastSuccessNS
 	parts.ValidationSuccess(&v0)
-	fs2, ls2, _, _ := parts.ValidationStats(v0.ID)
+	fs2, ls2, _, _, sc2 := parts.ValidationStats(v0.ID)
 	require.Equal(t, fs, fs2)
 	require.GreaterOrEqual(t, ls2, ls)
+	require.EqualValues(t, 2, sc2)
 
 	// Multi-partition failure updates failure timestamp for both
 	v1 := parts.Get(1)
@@ -53,8 +55,8 @@ func TestValidationTracking_SuccessAndFailure(t *testing.T) {
 	parts.ValidationFailure(&v0)
 	parts.ValidationFailure(&v1)
 
-	_, _, lf0, _ := parts.ValidationStats(v0.ID)
-	_, _, lf1, _ := parts.ValidationStats(v1.ID)
+	_, _, lf0, _, _ := parts.ValidationStats(v0.ID)
+	_, _, lf1, _, _ := parts.ValidationStats(v1.ID)
 	require.GreaterOrEqual(t, lf0, before)
 	require.GreaterOrEqual(t, lf1, before)
 }
@@ -70,11 +72,12 @@ func TestValidationTracking_RecentRingWrap(t *testing.T) {
 		parts.ValidationSuccess(&key)
 	}
 
-	first, last, failure, recent := parts.ValidationStats(key.ID)
+	first, last, failure, recent, sc := parts.ValidationStats(key.ID)
 	require.NotZero(t, first)
 	require.GreaterOrEqual(t, last, first)
 	require.Zero(t, failure)
 	require.Len(t, recent, 5)
+	require.EqualValues(t, 7, sc)
 }
 
 func TestValidationTracking_MissingAndRelease(t *testing.T) {
@@ -95,9 +98,10 @@ func TestValidationTracking_MissingAndRelease(t *testing.T) {
 	key.Release()
 
 	parts.ValidationFailure(&key)
-	first, last, failure, recent := parts.ValidationStats(key.ID)
+	first, last, failure, recent, sc := parts.ValidationStats(key.ID)
 	require.Zero(t, first)
 	require.Zero(t, last)
 	require.Zero(t, failure)
 	require.Empty(t, recent)
+	require.Zero(t, sc)
 }

@@ -68,16 +68,8 @@ type (
 
 	// PartitionInfo represents a single partition with its keys and validation data
 	PartitionInfo struct {
-		PartitionKeys   map[string]any                `json:"partitionKeys"`
-		LastValidations map[string]LastValidationData `json:"lastValidations,omitempty"`
-	}
-
-	// LastValidationData stores validation timing information for a partition
-	LastValidationData struct {
-		Recent         []uint64 `json:"recent,omitempty"`
-		FirstSuccessNS uint64   `json:"firstSuccessNS,omitempty"`
-		LastSuccessNS  uint64   `json:"lastSuccessNS,omitempty"`
-		LastFailureNS  uint64   `json:"lastFailureNS,omitempty"`
+		PartitionKeys   map[string]any                          `json:"partitionKeys"`
+		LastValidations map[string]joberror.PartitionValidation `json:"lastValidations,omitempty"`
 	}
 
 	Line struct {

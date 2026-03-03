@@ -36,12 +36,19 @@ func (u *Uint64) MarshalJSON() ([]byte, error) {
 }
 
 type GlobalStatus struct {
-	Errors        *joberror.ErrorList `json:"errors,omitempty"`
-	WriteOps      Uint64              `json:"write_ops"`
-	WriteErrors   Uint64              `json:"write_errors"`
-	ReadOps       Uint64              `json:"read_ops"`
-	ValidatedRows Uint64              `json:"validated_rows,omitempty"`
-	ReadErrors    Uint64              `json:"read_errors"`
+	Errors         *joberror.ErrorList `json:"errors,omitempty"`
+	testStmtFile   string
+	oracleStmtFile string
+	WriteOps       Uint64 `json:"write_ops"`
+	WriteErrors    Uint64 `json:"write_errors"`
+	ReadOps        Uint64 `json:"read_ops"`
+	ValidatedRows  Uint64 `json:"validated_rows,omitempty"`
+	ReadErrors     Uint64 `json:"read_errors"`
+}
+
+func (gs *GlobalStatus) SetStatementFiles(testFile, oracleFile string) {
+	gs.testStmtFile = testFile
+	gs.oracleStmtFile = oracleFile
 }
 
 func (gs *GlobalStatus) AddWriteError(err joberror.JobError) {
@@ -57,12 +64,19 @@ func (gs *GlobalStatus) AddReadError(err joberror.JobError) {
 }
 
 func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, version string, info map[string]any) error {
+	return gs.PrintResultAsJSONWithSummary(w, schema, version, info, nil)
+}
+
+func (gs *GlobalStatus) PrintResultAsJSONWithSummary(w io.Writer, schema *typedef.Schema, version string, info map[string]any, summary []joberror.CorruptionEntry) error {
 	result := map[string]any{
 		"result":           gs,
 		"gemini_version":   version,
 		"schemaHash":       schema.GetHash(),
 		"schema":           schema,
 		"statement_ratios": info,
+	}
+	if len(summary) > 0 {
+		result["corruption_summary"] = summary
 	}
 	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
@@ -94,8 +108,13 @@ func (gs *GlobalStatus) PrintResult(
 	version string,
 	statementInfo map[string]any,
 ) {
-	if err := gs.PrintResultAsJSON(w, schema, version, statementInfo); err != nil {
-		// In case there has been, it has been a long run we want to display it anyway...
+	// Build the summary once — both JSON and text will use the same data.
+	var summary []joberror.CorruptionEntry
+	if gs.Errors.Len() > 0 {
+		summary = joberror.ComputeSummary(gs.Errors.Errors(), gs.testStmtFile, gs.oracleStmtFile)
+	}
+
+	if err := gs.PrintResultAsJSONWithSummary(w, schema, version, statementInfo, summary); err != nil {
 		fmt.Printf("Unable to print result as json, using plain text to stdout, error=%s\n", err)
 		fmt.Printf("Gemini version: %s\n", version)
 		fmt.Printf("Results:\n")
@@ -110,6 +129,8 @@ func (gs *GlobalStatus) PrintResult(
 		jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
 		fmt.Printf("Schema: %v\n", string(jsonSchema))
 	}
+
+	joberror.PrintCorruptionSummary(w, summary)
 }
 
 func (gs *GlobalStatus) WriteOp() {

@@ -156,7 +156,7 @@ func TestValidateDeletedPartition_Success(t *testing.T) {
 	})
 
 	ctx := t.Context()
-	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues})
+	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues}, 0)
 
 	require.NoError(t, err)
 }
@@ -192,7 +192,7 @@ func TestValidateDeletedPartition_StoreError(t *testing.T) {
 
 	ctx := t.Context()
 
-	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues})
+	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues}, 0)
 
 	require.Error(t, err)
 
@@ -231,7 +231,7 @@ func TestValidateDeletedPartition_ContextCanceled(t *testing.T) {
 
 	ctx := t.Context()
 
-	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues})
+	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues}, 0)
 
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.Canceled))
@@ -265,7 +265,7 @@ func TestValidateDeletedPartition_ContextDeadlineExceeded(t *testing.T) {
 	})
 
 	ctx := t.Context()
-	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues})
+	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues}, 0)
 
 	require.Error(t, err)
 	require.True(t, errors.Is(err, context.DeadlineExceeded))
@@ -307,7 +307,7 @@ func TestValidateDeletedPartition_MultiplePartitionKeys(t *testing.T) {
 	})
 
 	ctx := t.Context()
-	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues})
+	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues}, 0)
 
 	// Should succeed - partition is deleted (0 rows)
 	require.NoError(t, err)

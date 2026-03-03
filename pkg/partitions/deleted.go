@@ -419,6 +419,7 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	}
 
 	now := time.Now()
+	keys.DeletedAtNS = uint64(now.UnixNano())
 	// Apply jitter to avoid aligning many items on the exact same boundary
 	readyAt := now.Add(d.buckets[0]).Add(jitterDuration(d.buckets[0]))
 	readyAtNs := readyAt.UnixNano()
@@ -475,12 +476,14 @@ func (d *deletedPartitions) DeleteBulk(keys []typedef.PartitionKeys) {
 	wasEmpty := d.heap.Len() == 0
 	minReadyNs := readyAtNs
 
-	for _, k := range keys {
+	deletedAtNS := uint64(now.UnixNano())
+	for i := range keys {
+		keys[i].DeletedAtNS = deletedAtNS
 		// wrap each to defer release until final
-		onDone := k.Release
-		k.Release = nil
+		onDone := keys[i].Release
+		keys[i].Release = nil
 		d.heap.pushInline(deletedPartition{
-			keys:    k,
+			keys:    keys[i],
 			onDone:  onDone,
 			counter: 1,
 			readyAt: readyAt,

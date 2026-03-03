@@ -92,9 +92,10 @@ func (q SimpleQuery) ToCql() (stmt string, names []string) {
 
 type (
 	PartitionKeys struct {
-		Values  *Values
-		Release func() `json:"-"`
-		ID      uuid.UUID
+		Values      *Values
+		Release     func() `json:"-"`
+		ID          uuid.UUID
+		DeletedAtNS uint64
 	}
 
 	Stmt struct {
@@ -295,6 +296,7 @@ type ValidationData struct {
 	LastFailureNS  atomic.Uint64
 	Recent         [5]atomic.Uint64
 	RecentIdx      atomic.Uint64
+	SuccessCount   atomic.Uint64
 }
 
 func NewValues(initial int) *Values {
@@ -418,8 +420,9 @@ func (v *Values) UnmarshalJSON(data []byte) error {
 
 func (v *PartitionKeys) Copy() PartitionKeys {
 	return PartitionKeys{
-		Values: v.Values.Copy(),
-		ID:     v.ID,
+		Values:      v.Values.Copy(),
+		ID:          v.ID,
+		DeletedAtNS: v.DeletedAtNS,
 	}
 }
 

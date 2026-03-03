@@ -14,12 +14,31 @@
 
 package jobs
 
-import "errors"
+import (
+	"errors"
 
-// Sentinel errors used to signal that a worker stopped due to reaching
-// the configured error cap. These are considered expected/shutdown paths
-// and should not be logged as errors by the job runner.
+	"github.com/google/uuid"
+
+	"github.com/scylladb/gemini/pkg/typedef"
+)
+
 var (
 	ErrMutationJobStopped   = errors.New("mutation job stopped due to errors")
 	ErrValidationJobStopped = errors.New("validation job stopped due to errors")
 )
+
+func collectPartitionIDs(pks []typedef.PartitionKeys) []uuid.UUID {
+	if len(pks) == 0 {
+		return nil
+	}
+
+	ids := make([]uuid.UUID, 0, len(pks))
+
+	for i := range pks {
+		if pks[i].ID != uuid.Nil {
+			ids = append(ids, pks[i].ID)
+		}
+	}
+
+	return ids
+}

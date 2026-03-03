@@ -1,0 +1,104 @@
+
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║                         CORRUPTION SUMMARY                                      ║
+╚══════════════════════════════════════════════════════════════════════════════════╝
+  3 corrupted partition(s) detected
+
+─── Error #1 ─────────────────────────────────────────────────────────────────────
+  Partition keys  : pk0=101, pk1=session-alpha
+  Error kind      : missing in test
+  Detected at     : 2026-02-23 09:10:00.000 UTC
+
+  EVENT                  TIME                         DETAIL
+  ─────                  ────                         ──────
+  First write  (test)    2026-02-23 09:00:00.000 UTC  3 writes, 0 write errors
+  Last write   (test)    2026-02-23 09:01:30.000 UTC  
+  First delete (test)    -                            0 deletes, 0 delete errors
+  Last delete  (test)    -                            
+  First write  (oracle)  2026-02-23 09:00:01.000 UTC  2 writes, 0 write errors
+  Last write   (oracle)  2026-02-23 09:00:31.000 UTC  
+  First delete (oracle)  -                            0 deletes, 0 delete errors
+  Last delete  (oracle)  -                            
+  Partition created      2026-02-23 09:00:00.000 UTC  (UUIDv7 / first write)
+  Last validation ok     2026-02-23 09:08:00.000 UTC  24 successful validation(s)
+  Corruption detected    2026-02-23 09:10:00.000 UTC  missing in test
+  Partition deleted      -                            
+
+  Write → corruption gap : 10m0s
+  Hosts seen in writes   : 10.0.0.1, 10.0.0.2, oracle-1
+
+  Diff details:
+    rows in oracle but missing from test : 1
+
+  Failing query : SELECT pk0, pk1, col FROM ks.tbl WHERE pk0=? AND pk1=?
+  Message       : row present in oracle but missing from test cluster
+
+─── Error #2 ─────────────────────────────────────────────────────────────────────
+  Partition keys  : pk0=202, pk1=session-beta
+  Error kind      : field value mismatch
+  Detected at     : 2026-02-23 09:12:00.000 UTC
+
+  EVENT                  TIME                         DETAIL
+  ─────                  ────                         ──────
+  First write  (test)    2026-02-23 09:00:05.000 UTC  1 writes, 0 write errors
+  Last write   (test)    2026-02-23 09:00:05.000 UTC  
+  First delete (test)    -                            0 deletes, 0 delete errors
+  Last delete  (test)    -                            
+  First write  (oracle)  2026-02-23 09:00:06.000 UTC  1 writes, 0 write errors
+  Last write   (oracle)  2026-02-23 09:00:06.000 UTC  
+  First delete (oracle)  -                            0 deletes, 0 delete errors
+  Last delete  (oracle)  -                            
+  Partition created      2026-02-23 09:00:05.000 UTC  (UUIDv7 / first write)
+  Last validation ok     2026-02-23 09:11:00.000 UTC  33 successful validation(s)
+  Corruption detected    2026-02-23 09:12:00.000 UTC  field value mismatch
+  Partition deleted      -                            
+
+  Write → corruption gap : 11m55s
+  Hosts seen in writes   : 10.0.0.3, oracle-1
+
+  Diff details:
+    field diff #1:
+      - col: 42
+      + col: 99
+
+  Failing query : SELECT pk0, pk1, col FROM ks.tbl WHERE pk0=? AND pk1=?
+  Message       : field value differs between test and oracle
+
+─── Error #3 ─────────────────────────────────────────────────────────────────────
+  Partition keys  : pk0=303, pk1=session-gamma
+  Error kind      : missing in oracle
+  Detected at     : 2026-02-23 09:15:00.000 UTC
+
+  EVENT                  TIME                         DETAIL
+  ─────                  ────                         ──────
+  First write  (test)    2026-02-23 09:00:10.000 UTC  1 writes, 0 write errors
+  Last write   (test)    2026-02-23 09:00:10.000 UTC  
+  First delete (test)    2026-02-23 09:00:20.000 UTC  1 deletes, 0 delete errors
+  Last delete  (test)    2026-02-23 09:00:20.000 UTC  
+  First write  (oracle)  -                            0 writes, 0 write errors
+  Last write   (oracle)  -                            
+  First delete (oracle)  -                            0 deletes, 0 delete errors
+  Last delete  (oracle)  -                            
+  Partition created      2026-02-23 09:00:10.000 UTC  (UUIDv7 / first write)
+  Last validation ok     2026-02-23 09:14:00.000 UTC  41 successful validation(s)
+  Corruption detected    2026-02-23 09:15:00.000 UTC  missing in oracle
+  Partition deleted      2026-02-23 09:16:00.000 UTC  
+
+  Write → corruption gap : 14m50s
+  Hosts seen in writes   : 10.0.0.1, 10.0.0.2
+
+  Diff details:
+    rows in test but missing from oracle : 1
+
+  Failing query : SELECT pk0, pk1, col FROM ks.tbl WHERE pk0=? AND pk1=?
+  Message       : row present in test but missing from oracle
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Quick triage
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  #   Partition                    Inserted                      Last OK Validation            Corruption                    Deleted                       Kind
+  ─   ─────────                    ────────                      ──────────────────            ───────────                   ───────                       ────
+  1   pk0=101, pk1=session-alpha   2026-02-23 09:00:00.000 UTC   2026-02-23 09:08:00.000 UTC   2026-02-23 09:10:00.000 UTC   -                             missing in test
+  2   pk0=202, pk1=session-beta    2026-02-23 09:00:05.000 UTC   2026-02-23 09:11:00.000 UTC   2026-02-23 09:12:00.000 UTC   -                             field value mismatch
+  3   pk0=303, pk1=session-gamma   2026-02-23 09:00:10.000 UTC   2026-02-23 09:14:00.000 UTC   2026-02-23 09:15:00.000 UTC   2026-02-23 09:16:00.000 UTC   missing in oracle
+

@@ -107,7 +107,7 @@ func (m *Mutation) run(ctx context.Context) error {
 	// Note: MutationError implements Is and may match DeadlineExceeded; detect it explicitly.
 	var mutErr *store.MutationError
 	if errors.As(err, &mutErr) {
-		return &joberror.JobError{
+		je := &joberror.JobError{
 			Err:       err,
 			Timestamp: time.Now(),
 			StmtType:  mutateStmt.QueryType,
@@ -119,8 +119,10 @@ func (m *Mutation) run(ctx context.Context) error {
 				}
 				return nil
 			}(),
-			Values: mutateStmt.Values,
+			PartitionIDs: collectPartitionIDs(mutateStmt.PartitionKeys),
+			Values:       mutateStmt.Values,
 		}
+		return je
 	}
 
 	// For pure context deadline expirations (e.g. job/context shutdown), don't count as errors
@@ -128,7 +130,7 @@ func (m *Mutation) run(ctx context.Context) error {
 		return nil
 	}
 
-	return &joberror.JobError{
+	je2 := &joberror.JobError{
 		Err:       err,
 		Timestamp: time.Now(),
 		StmtType:  mutateStmt.QueryType,
@@ -140,8 +142,10 @@ func (m *Mutation) run(ctx context.Context) error {
 			}
 			return nil
 		}(),
-		Values: mutateStmt.Values,
+		PartitionIDs: collectPartitionIDs(mutateStmt.PartitionKeys),
+		Values:       mutateStmt.Values,
 	}
+	return je2
 }
 
 func (m *Mutation) Do(ctx context.Context) error {
