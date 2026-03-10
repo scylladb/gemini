@@ -2,7 +2,7 @@ module github.com/scylladb/gemini
 
 go 1.25.0
 
-replace github.com/gocql/gocql => github.com/scylladb/gocql v1.17.1
+replace github.com/gocql/gocql => github.com/scylladb/gocql v1.17.3
 
 exclude (
 	google.golang.org/genproto v0.0.0-20220519153652-3a47de7e79bd
@@ -31,7 +31,7 @@ require (
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/exp v0.0.0-20251009144603-d2f985daa21b
-	golang.org/x/sync v0.17.0
+	golang.org/x/sync v0.19.0
 	gonum.org/v1/gonum v0.16.0
 	gopkg.in/inf.v0 v0.9.1
 )
@@ -61,7 +61,7 @@ require (
 	github.com/gotesttools/gotestfmt/v2 v2.5.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/klauspost/compress v1.18.3 // indirect
+	github.com/klauspost/compress v1.18.4 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20250827001030-24949be3fa54 // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
