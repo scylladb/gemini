@@ -240,7 +240,8 @@ func transformAndDiff(t *testing.T, testSchema *typedef.Schema) {
 }
 
 func createColumns(cnt int, prefix string) typedef.Columns {
-	var cols typedef.Columns
+	cols := make(typedef.Columns, 0, cnt)
+
 	for i := range cnt {
 		cols = append(cols, typedef.ColumnDef{
 			Name: statements.GenColumnName(prefix, i),
