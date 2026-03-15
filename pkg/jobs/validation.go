@@ -95,6 +95,15 @@ func NewValidation(
 	}
 }
 
+// releaseKeys releases all partition key references held by stmt.
+func releaseKeys(stmt *typedef.Stmt) {
+	for i := range stmt.PartitionKeys {
+		if stmt.PartitionKeys[i].Release != nil {
+			stmt.PartitionKeys[i].Release()
+		}
+	}
+}
+
 func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 	stmt, stmtErr := v.statement.Select(ctx)
 	if errors.Is(stmtErr, utils.ErrNoPartitionKeyValues) {
@@ -108,63 +117,66 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 		return ErrNoStatement
 	}
 
-	// Delegate retries to the store implementation
+	// Delegate retries to the store implementation.
 	validatedRows, err := v.store.Check(ctx, v.table, stmt, 0)
 	if err == nil {
 		metric.Add(float64(validatedRows))
 		v.status.AddValidatedRows(validatedRows)
 		v.status.ReadOp()
-		// track successful validation for involved partitions
 		if v.generator != nil {
 			for i := range stmt.PartitionKeys {
-				pk := &stmt.PartitionKeys[i]
-				v.generator.ValidationSuccess(pk)
+				v.generator.ValidationSuccess(&stmt.PartitionKeys[i])
 			}
 		}
-		// release all keys after use
-		for i := range stmt.PartitionKeys {
-			if stmt.PartitionKeys[i].Release != nil {
-				stmt.PartitionKeys[i].Release()
-			}
-		}
+		releaseKeys(stmt)
 		return nil
 	}
 
-	if errors.Is(err, context.DeadlineExceeded) {
-		// release all keys before returning
-		for i := range stmt.PartitionKeys {
-			if stmt.PartitionKeys[i].Release != nil {
-				stmt.PartitionKeys[i].Release()
-			}
-		}
+	// Context cancellation/deadline — not a data discrepancy.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		releaseKeys(stmt)
 		return nil
 	}
 
-	if errors.Is(err, context.Canceled) {
-		// release all keys before returning
-		for i := range stmt.PartitionKeys {
-			if stmt.PartitionKeys[i].Release != nil {
-				stmt.PartitionKeys[i].Release()
-			}
-		}
-		return nil
+	return v.handleCheckFailure(err, stmt)
+}
+
+// handleCheckFailure processes a non-context store.Check error: it records the
+// failure, releases all keys, and returns a JobError only for the first goroutine
+// to mark each partition invalid (deduplication via MarkInvalid).
+func (v *Validation) handleCheckFailure(err error, stmt *typedef.Stmt) error {
+	if v.generator == nil {
+		releaseKeys(stmt)
+		return v.buildJobError(err, stmt, "Validation failed: "+err.Error())
 	}
 
-	// final failure after retries — track failure for involved partitions
-	if v.generator != nil {
-		for i := range stmt.PartitionKeys {
-			pk := &stmt.PartitionKeys[i]
-			v.generator.ValidationFailure(pk)
-		}
-	}
-	// release all keys after use
+	// Step 1: Record validation failure timestamps (UUID still live in uuidToIdx).
 	for i := range stmt.PartitionKeys {
-		if stmt.PartitionKeys[i].Release != nil {
-			stmt.PartitionKeys[i].Release()
+		v.generator.ValidationFailure(&stmt.PartitionKeys[i])
+	}
+
+	// Step 2: Attempt to mark invalid BEFORE releasing keys.
+	// releaseKeys may trigger deleteValidation which removes the UUID from
+	// uuidToIdx, so MarkInvalid must be called while the UUID is still registered.
+	// MarkInvalid is non-blocking and idempotent — only the first goroutine for
+	// a given partition returns true. Emit a JobError only for newly-marked
+	// partitions; silently drop the rest to ensure unique reporting.
+	marked := false
+	for i := range stmt.PartitionKeys {
+		if v.generator.MarkInvalid(&stmt.PartitionKeys[i]) {
+			marked = true
+			// Do not break: every key in the statement must be marked so that
+			// future Next()/ReplaceNext() calls skip all of them, not just the first.
 		}
 	}
 
-	return v.buildJobError(err, stmt, "Validation failed: "+err.Error())
+	// Step 3: Release keys (may trigger deleteValidation — safe now).
+	releaseKeys(stmt)
+
+	if marked {
+		return v.buildJobError(err, stmt, "Validation failed: "+err.Error())
+	}
+	return nil
 }
 
 // extractComparisonResults extracts comparison results from a store.ValidationError
@@ -307,6 +319,13 @@ func (v *Validation) validateDeletedPartition(ctx context.Context, keys typedef.
 		if v.generator != nil {
 			v.generator.ValidationFailure(&stmt.PartitionKeys[0])
 		}
+
+		// Mark the partition invalid and only report if this is the first time.
+		if v.generator != nil && !v.generator.MarkInvalid(&stmt.PartitionKeys[0]) {
+			// Already reported by another goroutine.
+			return nil
+		}
+
 		jobErr := v.buildJobError(err, stmt, "Deleted partition validation failed (difference found): "+err.Error())
 		jobErr.DeletionTimeNS = deletionTimeNS
 		return jobErr

@@ -55,7 +55,7 @@ func createTestPartitions(t *testing.T, count uint64) *Partitions {
 		MinStringLength: 5,
 		DeleteBuckets:   nil, // No delete buckets - tests that need them should use createTestPartitionsWithDeletes
 	}
-	parts := New(t.Context(), rand.New(src), fn, table, config, count)
+	parts := New(t.Context(), rand.New(src), fn, table, config, count, 0)
 	t.Cleanup(parts.Close)
 	return parts
 }
@@ -548,7 +548,7 @@ func BenchmarkPartitionsConcurrentMixed(b *testing.B) {
 	config := typedef.PartitionRangeConfig{
 		DeleteBuckets: []time.Duration{100 * time.Millisecond},
 	}
-	parts := New(b.Context(), rand.New(src), fn, table, config, 10_000)
+	parts := New(b.Context(), rand.New(src), fn, table, config, 10_000, 0)
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
@@ -587,7 +587,7 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = New(b.Context(), rand.New(src), fn, table, config, size)
+				_ = New(b.Context(), rand.New(src), fn, table, config, size, 0)
 			}
 		})
 	}

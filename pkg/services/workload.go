@@ -206,7 +206,16 @@ func (w *Workload) Run(base context.Context) error {
 		w.logger.Debug("starting warmup phase", zap.Duration("duration", w.config.WarmupDuration))
 		stopFlag := w.stopFlag.CreateChild("warmup")
 
-		if err := w.jobs.Run(base, w.config.WarmupDuration, w.distFunc, w.config.PartitionCount, w.schema.Config.GetPartitionRangeConfig(), stopFlag, jobs.WarmupMode); err != nil {
+		if err := w.jobs.Run(
+			base,
+			w.config.WarmupDuration,
+			w.distFunc,
+			w.config.PartitionCount,
+			w.schema.Config.GetPartitionRangeConfig(),
+			stopFlag,
+			jobs.WarmupMode,
+			uint64(w.config.MaxErrorsToStore),
+		); err != nil {
 			return errors.Wrap(err, "failed to run warmup jobs")
 		}
 		w.logger.Debug("warmup phase completed")
@@ -224,6 +233,7 @@ func (w *Workload) Run(base context.Context) error {
 			w.schema.Config.GetPartitionRangeConfig(),
 			stopFlag,
 			w.config.RunningMode,
+			uint64(w.config.MaxErrorsToStore),
 		); err != nil {
 			return err
 		}
