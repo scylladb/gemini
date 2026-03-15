@@ -17,6 +17,8 @@ package tableopts_test
 import (
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/scylladb/gemini/pkg/tableopts"
 )
 
@@ -71,6 +73,53 @@ func TestToCQL(t *testing.T) {
 				if got != test.want {
 					t.Fatalf("expected\t'%s', \ngot\t'%s'", test.want, got)
 				}
+			}
+		})
+	}
+}
+
+// TestCreateTableOptions verifies that valid options are parsed and invalid ones are skipped.
+func TestCreateTableOptions(t *testing.T) {
+	t.Parallel()
+
+	logger := zap.NewNop()
+
+	tests := map[string]struct {
+		inputs  []string
+		wantLen int
+	}{
+		"all valid": {
+			inputs:  []string{"read_repair_chance = 0.1", "comment = 'test'"},
+			wantLen: 2,
+		},
+		"one invalid one valid": {
+			inputs:  []string{"no_equals_sign_here", "read_repair_chance = 0.5"},
+			wantLen: 1,
+		},
+		"all invalid": {
+			inputs:  []string{"nope", "alsonope"},
+			wantLen: 0,
+		},
+		"empty slice": {
+			inputs:  []string{},
+			wantLen: 0,
+		},
+		"nil slice": {
+			inputs:  nil,
+			wantLen: 0,
+		},
+		"map option": {
+			inputs:  []string{"compression = {'sstable_compression':'LZ4Compressor'}"},
+			wantLen: 1,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			opts := tableopts.CreateTableOptions(tc.inputs, logger)
+			if len(opts) != tc.wantLen {
+				t.Errorf("want %d options, got %d", tc.wantLen, len(opts))
 			}
 		})
 	}
