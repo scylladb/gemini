@@ -109,6 +109,7 @@ func (j *Jobs) Run(
 	partsConfig typedef.PartitionRangeConfig,
 	stopFlag *stop.Flag,
 	mode string,
+	maxErrors uint64,
 ) error {
 	log := j.logger.Named(j.name)
 	log.Info("start jobs", zap.String("mode", mode))
@@ -120,7 +121,7 @@ func (j *Jobs) Run(
 	g, gCtx := errgroup.WithContext(timeoutCtx)
 
 	for _, table := range j.schema.Tables {
-		generator := partitions.New(gCtx, j.random, idxFunc, table, partsConfig, partsCount)
+		generator := partitions.New(gCtx, j.random, idxFunc, table, partsConfig, partsCount, maxErrors)
 		log.Debug("processing table", zap.String("table", table.Name))
 
 		// Additionally, request a graceful stop of workers after the duration

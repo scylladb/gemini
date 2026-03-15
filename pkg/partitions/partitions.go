@@ -49,6 +49,18 @@ type (
 		ValidationFailure(values *typedef.PartitionKeys)
 		ValidationStats(id uuid.UUID) (first, last, failure uint64, recent []uint64, successCount uint64)
 
+		// Invalid partition tracking.
+		// MarkInvalid marks the partition identified by keys as permanently invalid.
+		// It is a non-blocking, idempotent operation — only the first caller for a
+		// given partition index succeeds (returns true); subsequent calls return false.
+		// Returns false when the partition was already invalid or when the maximum
+		// number of invalid partitions has been reached.
+		MarkInvalid(keys *typedef.PartitionKeys) bool
+		// IsInvalid reports whether the partition at idx is invalid.
+		IsInvalid(idx uint64) bool
+		// InvalidCount returns the current number of permanently invalid partitions.
+		InvalidCount() uint64
+
 		Len() uint64
 		Close()
 	}
@@ -73,9 +85,13 @@ type (
 		idxFunc       distributions.DistributionFunc
 		deleted       *deletedPartitions
 		validationMap map[uuid.UUID]*typedef.ValidationData
+		uuidToIdx     map[uuid.UUID]uint64
+		invalidByIdx  sync.Map
 		r             random.GoRoutineSafeRandom
 		config        typedef.PartitionRangeConfig
 		parts         partitions
+		invalidCount  atomic.Uint64
+		maxInvalid    uint64
 		validationMu  sync.RWMutex
 	}
 
@@ -84,11 +100,19 @@ type (
 		PartitionsCreated      uint64
 		PartitionsDeleted      uint64
 		DeletedPartitionsCount uint64
+		InvalidPartitionsCount uint64
 		MemoryUsage            uint64
 	}
 )
 
-func New(ctx context.Context, r rand.Source, idxFunc distributions.DistributionFunc, table *typedef.Table, config typedef.PartitionRangeConfig, count uint64) *Partitions {
+func New(
+	ctx context.Context,
+	r rand.Source,
+	idxFunc distributions.DistributionFunc,
+	table *typedef.Table,
+	config typedef.PartitionRangeConfig,
+	count, maxInvalid uint64,
+) *Partitions {
 	partitionValuesLen := table.PartitionKeys.LenValues()
 
 	// Pre-allocate slice of partition pointers
@@ -108,6 +132,8 @@ func New(ctx context.Context, r rand.Source, idxFunc distributions.DistributionF
 		config:        config,
 		idxFunc:       idxFunc,
 		validationMap: make(map[uuid.UUID]*typedef.ValidationData),
+		uuidToIdx:     make(map[uuid.UUID]uint64),
+		maxInvalid:    maxInvalid,
 	}
 
 	// Only start deleted-partitions processing when time buckets are configured.
@@ -160,6 +186,11 @@ func (p *Partitions) valuesNoLock(part *Partition) typedef.PartitionKeys {
 func (p *Partitions) deleteValidation(id uuid.UUID) {
 	p.validationMu.Lock()
 	delete(p.validationMap, id)
+	// Do NOT remove from uuidToIdx here. The UUID→idx mapping must remain alive
+	// for the entire lifetime of the partition at that slot so that MarkInvalid
+	// can still find it after all outstanding references have been released.
+	// uuidToIdx is cleaned up in fill() / Replace() when a new partition occupies
+	// the slot and the old UUID is genuinely retired.
 	p.validationMu.Unlock()
 }
 
@@ -232,9 +263,23 @@ func (p *Partitions) fill(idx uint64) {
 	}
 
 	id, _ := uuid.NewV7()
+
+	// Capture the old partition's UUID before replacing the slot so we can
+	// retire it from uuidToIdx.  During initial population the old *Partition
+	// is the zero-value struct whose id is uuid.Nil, which is never inserted
+	// into uuidToIdx, so we guard with a nil check.
+	p.parts.mu.RLock()
+	oldPart := p.parts.parts[idx]
+	p.parts.mu.RUnlock()
+
 	p.validationMu.Lock()
 	if _, ok := p.validationMap[id]; !ok {
 		p.validationMap[id] = &typedef.ValidationData{}
+	}
+	p.uuidToIdx[id] = idx
+	// Retire the old UUID from the slot mapping now that a new partition owns it.
+	if oldPart != nil && oldPart.id != (uuid.UUID{}) {
+		delete(p.uuidToIdx, oldPart.id)
 	}
 	p.validationMu.Unlock()
 
@@ -253,20 +298,24 @@ func (p *Partitions) Stats() Stats {
 		mem += p.partition(i).size()
 	}
 
+	invalidCount := p.invalidCount.Load()
+
 	if p.deleted != nil {
 		return Stats{
 			CurrentPartitionCount:  count,
 			PartitionsCreated:      p.parts.created.Load(),
 			PartitionsDeleted:      p.deleted.deleted.Load(),
 			DeletedPartitionsCount: uint64(p.deleted.Len()),
+			InvalidPartitionsCount: invalidCount,
 			MemoryUsage:            mem,
 		}
 	}
 
 	return Stats{
-		CurrentPartitionCount: count,
-		PartitionsCreated:     p.parts.created.Load(),
-		MemoryUsage:           mem,
+		CurrentPartitionCount:  count,
+		PartitionsCreated:      p.parts.created.Load(),
+		InvalidPartitionsCount: invalidCount,
+		MemoryUsage:            mem,
 	}
 }
 
@@ -274,7 +323,41 @@ func (p *Partitions) Get(idx uint64) typedef.PartitionKeys {
 	return p.values(idx)
 }
 
+// Next returns the next partition according to the distribution function.
+// If the selected partition has been marked invalid it is skipped and a new
+// one is picked. The retry budget is the total number of partitions minus the
+// number already marked invalid, so the loop always terminates.
 func (p *Partitions) Next() typedef.PartitionKeys {
+	total := p.parts.count.Load()
+	invalid := p.invalidCount.Load()
+
+	// Fast-path: no invalid partitions yet.
+	if invalid == 0 {
+		return p.Get(p.idxFunc())
+	}
+
+	// When more than half the slots are invalid the random retry budget becomes
+	// too small to reliably land on a valid slot.  Fall back to a linear scan
+	// so we always find a valid slot deterministically.
+	if invalid*2 >= total {
+		for i := range total {
+			if _, bad := p.invalidByIdx.Load(i); !bad {
+				return p.Get(i)
+			}
+		}
+		// All slots invalid — return best-effort.
+		return p.Get(p.idxFunc())
+	}
+
+	// Retry up to (total - invalid) times to find a valid slot.
+	maxRetries := total - invalid
+	for range maxRetries {
+		idx := p.idxFunc()
+		if _, bad := p.invalidByIdx.Load(idx); !bad {
+			return p.Get(idx)
+		}
+	}
+	// Fallback: pick any slot (best-effort).
 	return p.Get(p.idxFunc())
 }
 
@@ -290,11 +373,6 @@ func (p *Partitions) Extend() typedef.PartitionKeys {
 	}
 
 	id, _ := uuid.NewV7()
-	p.validationMu.Lock()
-	if _, ok := p.validationMap[id]; !ok {
-		p.validationMap[id] = &typedef.ValidationData{}
-	}
-	p.validationMu.Unlock()
 
 	// Hold lock while extending slice AND initializing the new partition
 	// to prevent other goroutines from accessing it during reallocation
@@ -303,6 +381,13 @@ func (p *Partitions) Extend() typedef.PartitionKeys {
 	part := &Partition{values: values, id: id}
 	p.parts.parts = append(p.parts.parts, part)
 	p.parts.mu.Unlock()
+
+	p.validationMu.Lock()
+	if _, ok := p.validationMap[id]; !ok {
+		p.validationMap[id] = &typedef.ValidationData{}
+	}
+	p.uuidToIdx[id] = newIdx
+	p.validationMu.Unlock()
 
 	p.parts.count.Add(1)
 	p.parts.created.Add(1)
@@ -325,12 +410,26 @@ func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
 	if _, ok := p.validationMap[id]; !ok {
 		p.validationMap[id] = &typedef.ValidationData{}
 	}
+	p.uuidToIdx[id] = idx
 	p.validationMu.Unlock()
 
 	p.parts.mu.Lock()
 	oldPart := p.parts.parts[idx]
 	p.parts.parts[idx] = &Partition{values: values, id: id}
 	p.parts.mu.Unlock()
+
+	// Do NOT explicitly delete oldPart.id from uuidToIdx here.
+	// Outstanding references to the old partition (e.g. a validation goroutine
+	// mid-retry) still hold the old UUID. Removing it prematurely means
+	// MarkInvalid() can no longer locate the partition by UUID and silently
+	// drops the error. The old UUID will be cleaned up naturally when the last
+	// caller invokes Release() and refCount drops to zero (via deleteValidation).
+
+	// If the slot was previously marked invalid, clear it so the new partition
+	// is visible to Next()/ReplaceNext() again.
+	if _, wasInvalid := p.invalidByIdx.LoadAndDelete(idx); wasInvalid {
+		p.invalidCount.Add(^uint64(0)) // atomic decrement
+	}
 
 	oldKeys := p.valuesNoLock(oldPart)
 
@@ -348,7 +447,33 @@ func (p *Partitions) Deleted() <-chan typedef.PartitionKeys {
 	return p.deleted.ch
 }
 
+// ReplaceNext picks a partition by distribution and replaces it, sending
+// the old keys to the deleted queue. Invalid partitions are skipped.
 func (p *Partitions) ReplaceNext() typedef.PartitionKeys {
+	total := p.parts.count.Load()
+	invalid := p.invalidCount.Load()
+
+	if invalid == 0 {
+		return p.Replace(p.idxFunc())
+	}
+
+	// Linear scan when more than half the slots are invalid.
+	if invalid*2 >= total {
+		for i := range total {
+			if _, bad := p.invalidByIdx.Load(i); !bad {
+				return p.Replace(i)
+			}
+		}
+		return p.Replace(p.idxFunc())
+	}
+
+	maxRetries := total - invalid
+	for range maxRetries {
+		idx := p.idxFunc()
+		if _, bad := p.invalidByIdx.Load(idx); !bad {
+			return p.Replace(idx)
+		}
+	}
 	return p.Replace(p.idxFunc())
 }
 
@@ -360,6 +485,48 @@ func (p *Partitions) ReplaceWithoutOld(idx uint64) {
 }
 
 func (p *Partitions) ReplaceNextWithoutOld() {
+	total := p.parts.count.Load()
+	invalid := p.invalidCount.Load()
+
+	if invalid == 0 {
+		p.fill(p.idxFunc())
+		if p.deleted != nil {
+			p.deleted.deleted.Add(1)
+		}
+		return
+	}
+
+	// Linear scan when more than half the slots are invalid.
+	if invalid*2 >= total {
+		for i := range total {
+			if _, bad := p.invalidByIdx.Load(i); !bad {
+				p.fill(i)
+				if p.deleted != nil {
+					p.deleted.deleted.Add(1)
+				}
+				return
+			}
+		}
+		// All slots invalid — fall through to best-effort.
+		p.fill(p.idxFunc())
+		if p.deleted != nil {
+			p.deleted.deleted.Add(1)
+		}
+		return
+	}
+
+	maxRetries := total - invalid
+	for range maxRetries {
+		idx := p.idxFunc()
+		if _, bad := p.invalidByIdx.Load(idx); !bad {
+			p.fill(idx)
+			if p.deleted != nil {
+				p.deleted.deleted.Add(1)
+			}
+			return
+		}
+	}
+	// Fallback.
 	p.fill(p.idxFunc())
 	if p.deleted != nil {
 		p.deleted.deleted.Add(1)
@@ -427,6 +594,61 @@ func (p *Partitions) ValidationStats(id uuid.UUID) (first, last, failure uint64,
 		}
 	}
 	return first, last, failure, recent, successCount
+}
+
+// MarkInvalid permanently marks the partition identified by keys as invalid.
+//
+// The operation is non-blocking and idempotent: the first goroutine to call it
+// for a given partition index atomically claims the slot and returns true.
+// Every subsequent call for the same slot returns false immediately.
+//
+// If maxInvalid is configured and the limit has already been reached the call
+// also returns false and the partition is NOT marked (the caller should treat
+// this situation as a hard stop trigger — too many bad partitions).
+func (p *Partitions) MarkInvalid(keys *typedef.PartitionKeys) bool {
+	if keys == nil {
+		return false
+	}
+
+	// Look up the slot index for this UUID.
+	p.validationMu.RLock()
+	idx, ok := p.uuidToIdx[keys.ID]
+	p.validationMu.RUnlock()
+	if !ok {
+		// UUID not tracked (partition slot was replaced) — nothing to mark.
+		return false
+	}
+
+	// Atomically claim the slot first. LoadOrStore returns (existing, true) if
+	// already present, or (stored, false) on first store.
+	_, alreadyInvalid := p.invalidByIdx.LoadOrStore(idx, struct{}{})
+	if alreadyInvalid {
+		return false
+	}
+
+	// Slot was not previously invalid. Now increment the counter.
+	// If maxInvalid is set and we have exceeded it, undo the store and return false.
+	newCount := p.invalidCount.Add(1)
+	if p.maxInvalid > 0 && newCount > p.maxInvalid {
+		// Roll back: remove the entry we just stored and decrement the counter.
+		p.invalidByIdx.Delete(idx)
+		p.invalidCount.Add(^uint64(0)) // atomic decrement
+		return false
+	}
+
+	return true
+}
+
+// IsInvalid reports whether the partition at the given index has been permanently
+// marked invalid.
+func (p *Partitions) IsInvalid(idx uint64) bool {
+	_, bad := p.invalidByIdx.Load(idx)
+	return bad
+}
+
+// InvalidCount returns the current number of permanently invalid partitions.
+func (p *Partitions) InvalidCount() uint64 {
+	return p.invalidCount.Load()
 }
 
 func generateValue(r utils.Random, table *typedef.Table, config typedef.RangeConfig) []any {

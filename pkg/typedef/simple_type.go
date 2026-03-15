@@ -170,7 +170,7 @@ func (st SimpleType) genValue(r utils.Random, p RangeConfig) any {
 	case TypeDate:
 		return utils.RandDate(r)
 	case TypeTime:
-		return utils.RandTime(r)
+		return time.Duration(utils.RandTime(r))
 	case TypeTimestamp:
 		return utils.RandTimestamp(r)
 	case TypeDecimal:

@@ -420,7 +420,7 @@ func canonicalValueString(v any) string {
 		}
 		return "false"
 	case time.Time:
-		return val.Format(time.DateTime)
+		return val.Format("2006-01-02 15:04:05.999999999")
 	case gocql.UUID:
 		return val.String()
 	default:

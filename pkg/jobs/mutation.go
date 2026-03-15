@@ -103,8 +103,15 @@ func (m *Mutation) run(ctx context.Context) error {
 		return context.Canceled
 	}
 
-	// If this is a comprehensive mutation error (all retries failed), surface it.
-	// Note: MutationError implements Is and may match DeadlineExceeded; detect it explicitly.
+	// For context deadline expirations (CQL RequestTimeout or job shutdown), don't
+	// count as data errors. This covers both the raw error and MutationError whose
+	// FinalError is DeadlineExceeded (all retries timed out on a slow CI runner).
+	if errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+
+	// If this is a comprehensive mutation error (all retries failed for a non-timeout
+	// reason), surface it as a write error.
 	var mutErr *store.MutationError
 	if errors.As(err, &mutErr) {
 		je := &joberror.JobError{
@@ -123,11 +130,6 @@ func (m *Mutation) run(ctx context.Context) error {
 			Values:       mutateStmt.Values,
 		}
 		return je
-	}
-
-	// For pure context deadline expirations (e.g. job/context shutdown), don't count as errors
-	if errors.Is(err, context.DeadlineExceeded) {
-		return nil
 	}
 
 	je2 := &joberror.JobError{

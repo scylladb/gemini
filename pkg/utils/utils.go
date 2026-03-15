@@ -64,7 +64,8 @@ func RandTimestamp(rnd Random) int64 {
 }
 
 func RandDate(rnd Random) time.Time {
-	return time.UnixMilli(rnd.Int64N(maxDateMs)).UTC()
+	t := time.UnixMilli(rnd.Int64N(maxDateMs)).UTC()
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func RandDuration(rnd Random) time.Duration {

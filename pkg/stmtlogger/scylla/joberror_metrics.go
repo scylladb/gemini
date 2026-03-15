@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
@@ -37,7 +38,7 @@ func RecordErrorMetrics(j *joberror.JobError, lineBytes []byte, storage string) 
 
 	var errStr string
 	if j.Err != nil {
-		errStr = j.Err.Error()
+		errStr = sanitizeUTF8(j.Err.Error())
 	}
 
 	labels := map[string]string{
@@ -51,6 +52,15 @@ func RecordErrorMetrics(j *joberror.JobError, lineBytes []byte, storage string) 
 	}
 
 	metrics.StatementErrorLastTS.With(labels).Set(float64(time.Now().Unix()))
+}
+
+// sanitizeUTF8 replaces any invalid UTF-8 sequences with the Unicode replacement
+// character so that the string is safe to use as a Prometheus label value.
+func sanitizeUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, "\uFFFD")
 }
 
 func partitionHashFromValues(v *typedef.Values) string {

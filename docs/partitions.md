@@ -846,6 +846,7 @@ func main() {
         table,
         config,
         10000,  // Initial partition count
+        0,      // maxInvalid: 0 means no limit
     )
     defer parts.Close()
     
@@ -878,7 +879,7 @@ func main() {
 
 ```go
 src, idxFunc := distributions.New(distributions.Uniform, 100000, 1, 0, 0)
-parts := partitions.New(ctx, rand.New(src), idxFunc, table, config, 100000)
+parts := partitions.New(ctx, rand.New(src), idxFunc, table, config, 100000, 0)
 
 // All partitions equally likely
 for range 1000 {
@@ -891,7 +892,7 @@ for range 1000 {
 
 ```go
 src, idxFunc := distributions.New(distributions.Zipfian, 100000, 1, 0, 0)
-parts := partitions.New(ctx, rand.New(src), idxFunc, table, config, 100000)
+parts := partitions.New(ctx, rand.New(src), idxFunc, table, config, 100000, 0)
 
 // Some partitions accessed much more frequently
 for range 1000 {
@@ -904,7 +905,7 @@ for range 1000 {
 
 ```go
 src, idxFunc := distributions.New(distributions.Sequential, 100000, 1, 0, 0)
-parts := partitions.New(ctx, rand.New(src), idxFunc, table, config, 100000)
+parts := partitions.New(ctx, rand.New(src), idxFunc, table, config, 100000, 0)
 
 // Partitions accessed in order
 for range 1000 {
@@ -925,7 +926,7 @@ config := typedef.PartitionRangeConfig{
     },
 }
 
-parts := partitions.New(ctx, r, idxFunc, table, config, 1000)
+parts := partitions.New(ctx, r, idxFunc, table, config, 1000, 0)
 
 // Replace operation triggers deletion tracking
 oldValues := parts.Replace(42)

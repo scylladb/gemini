@@ -129,7 +129,7 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 		}
 	case *time.Time:
 		if v != nil {
-			sb.WriteString(v.Format(time.DateTime))
+			sb.WriteString(v.Format("2006-01-02 15:04:05.999999999"))
 		} else {
 			sb.WriteString("null")
 		}
@@ -191,7 +191,7 @@ func formatRows(sb *strings.Builder, key string, value any) string {
 	case gocql.UUID:
 		sb.WriteString(v.String())
 	case time.Time:
-		sb.WriteString(v.Format(time.DateTime))
+		sb.WriteString(v.Format("2006-01-02 15:04:05.999999999"))
 	case time.Duration:
 		_, _ = fmt.Fprintf(sb, "%v", v)
 	case []byte:

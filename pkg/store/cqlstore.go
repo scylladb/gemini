@@ -480,5 +480,28 @@ func CreateCluster(
 		}
 	}
 
+	// When connecting through a port-mapped proxy (e.g. Docker on macOS), the
+	// addresses advertised by peers in system.peers are the container-internal IPs
+	// which are unreachable from the host.  Install an AddressTranslator that
+	// redirects every discovered peer back to the first contact-point host on the
+	// configured port, and disable the shard-aware dialer to prevent extra
+	// connections to shard-specific ports on unreachable internal IPs.
+	// Only activated for non-default ports (port != 9042) to avoid silently
+	// breaking standard production deployments.  Matching logic lives in
+	// pkg/stmtlogger/scylla/helpers.go (newSession) and pkg/testutils/scylladb.go (createClusterConfig).
+	if config.Port > 0 && config.Port != 9042 && len(config.Hosts) > 0 {
+		contactIP := net.ParseIP(config.Hosts[0])
+		mappedPort := config.Port
+		logger.Warn("address translation active: all peer IPs will be rewritten to the first contact-point host",
+			zap.String("contact_ip", config.Hosts[0]),
+			zap.Int("port", mappedPort),
+			zap.String("cluster", string(config.Name)),
+		)
+		cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, _ int) (net.IP, int) {
+			return contactIP, mappedPort
+		})
+		cluster.DisableShardAwarePort = true
+	}
+
 	return cluster, nil
 }
