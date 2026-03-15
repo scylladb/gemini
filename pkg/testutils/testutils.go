@@ -33,6 +33,9 @@ type (
 		Test            *gocql.Session
 		OracleHosts     []string
 		TestHosts       []string
+		// DockerMode is true when the clusters were started via testcontainers
+		// and require address translation (all peer IPs rewritten to 127.0.0.1).
+		DockerMode bool
 	}
 
 	ManagedScylla struct {

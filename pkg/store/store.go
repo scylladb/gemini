@@ -60,17 +60,18 @@ type Store interface {
 
 type (
 	ScyllaClusterConfig struct {
-		Name                    stmtlogger.Type
-		HostSelectionPolicy     HostSelectionPolicy
 		Replication             replication.Replication
+		TracingDir              string
+		HostSelectionPolicy     HostSelectionPolicy
 		Consistency             string
 		Username                string
 		Password                string
-		TracingDir              string
+		Name                    stmtlogger.Type
 		Hosts                   []string
-		Port                    int // Optional explicit port for all hosts without a port specified
+		Port                    int
 		RequestTimeout          time.Duration
 		ConnectTimeout          time.Duration
+		DockerMode              bool
 		UseServerSideTimestamps bool
 	}
 	Config struct {
@@ -167,6 +168,8 @@ func New(
 					oracleStoreImpl.getSession,
 					testStore.getSession,
 					cfg.OracleClusterConfig.Hosts,
+					cfg.OracleClusterConfig.Port,
+					cfg.OracleClusterConfig.DockerMode,
 					cfg.OracleClusterConfig.Username,
 					cfg.OracleClusterConfig.Password,
 					partitionKeyColumns,
