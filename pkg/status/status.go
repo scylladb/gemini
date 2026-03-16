@@ -104,6 +104,7 @@ func (gs *GlobalStatus) HasErrors() bool {
 //nolint:forbidigo
 func (gs *GlobalStatus) PrintResult(
 	w io.Writer,
+	summaryWriter io.Writer,
 	schema *typedef.Schema,
 	version string,
 	statementInfo map[string]any,
@@ -130,7 +131,7 @@ func (gs *GlobalStatus) PrintResult(
 		fmt.Printf("Schema: %v\n", string(jsonSchema))
 	}
 
-	joberror.PrintCorruptionSummary(w, summary)
+	joberror.PrintCorruptionSummary(summaryWriter, summary)
 }
 
 func (gs *GlobalStatus) WriteOp() {
