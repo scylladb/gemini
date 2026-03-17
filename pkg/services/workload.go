@@ -307,7 +307,7 @@ func (w *Workload) PrintResults(geminiVersion string) error {
 		}
 	}()
 
-	w.status.PrintResult(writer, summaryWriter, w.schema, geminiVersion, w.config.StatementRatios.GetStatementInfo())
+	w.status.PrintResult(writer, summaryWriter, w.schema, geminiVersion, w.config.StatementRatios.GetStatementInfo(), w.config.SummaryFile)
 	if w.status.HasErrors() {
 		return errors.New("gemini encountered errors, exiting with non zero status")
 	}
