@@ -98,6 +98,8 @@ var (
 	statementRatios string
 
 	deletedPartitionsTimeBucket []string
+
+	summaryFile string
 )
 
 //nolint:lll
@@ -243,4 +245,6 @@ func setupFlags(cmd *cobra.Command) {
 		StringVarP(&statementRatios, "statement-ratios", "", "", "Statement ratios configuration in JSON format (e.g., '{\"mutation_ratios\":{\"insert_ratio\":0.7,\"update_ratio\":0.2,\"delete_ratio\":0.1}}')")
 	cmd.Flags().
 		DurationVarP(&minimumDelay, "minimum-delay", "", 25*time.Microsecond, "Minimum delay between mutations")
+	cmd.Flags().
+		StringVarP(&summaryFile, "summary-file", "", "./gemini-summary.txt", "Path to the file where the human-readable corruption summary is written")
 }

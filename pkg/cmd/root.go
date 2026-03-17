@@ -220,6 +220,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		RandomStringBuffer:    randomStringBuffer,
 		MaxErrorsToStore:      maxErrorsToStore,
 		OutputFile:            outFileArg,
+		SummaryFile:           summaryFile,
 		PartitionDistribution: distributions.Distribution(partitionKeyDistribution),
 		PartitionCount:        partitionCount,
 		IOWorkerPoolSize:      iOWorkerPool,

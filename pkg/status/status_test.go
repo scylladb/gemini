@@ -173,7 +173,7 @@ func TestPrintResultAsJSON(t *testing.T) {
 
 	schema := newMinimalSchema()
 	var buf bytes.Buffer
-	err := gs.PrintResultAsJSON(&buf, schema, "v1.0.0", map[string]any{"insert": 0.5})
+	err := gs.PrintResultAsJSON(&buf, schema, "v1.0.0", map[string]any{"insert": 0.5}, "./gemini-summary.txt")
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -191,7 +191,7 @@ func TestPrintResultAsJSONWithSummary(t *testing.T) {
 	schema := newMinimalSchema()
 	summary := []joberror.CorruptionEntry{{ErrorKind: "mismatch"}}
 	var buf bytes.Buffer
-	err := gs.PrintResultAsJSONWithSummary(&buf, schema, "v2.0.0", nil, summary)
+	err := gs.PrintResultAsJSONWithSummary(&buf, schema, "v2.0.0", nil, summary, "./gemini-summary.txt")
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -206,7 +206,7 @@ func TestPrintResultAsJSONWithSummary_NoSummary(t *testing.T) {
 
 	schema := newMinimalSchema()
 	var buf bytes.Buffer
-	err := gs.PrintResultAsJSONWithSummary(&buf, schema, "v2.0.0", nil, nil)
+	err := gs.PrintResultAsJSONWithSummary(&buf, schema, "v2.0.0", nil, nil, "./gemini-summary.txt")
 	require.NoError(t, err)
 
 	out := buf.String()
@@ -222,7 +222,8 @@ func TestPrintResult(t *testing.T) {
 
 	schema := newMinimalSchema()
 	var buf bytes.Buffer
-	gs.PrintResult(&buf, schema, "v1.2.3", map[string]any{})
+	var summaryBuf bytes.Buffer
+	gs.PrintResult(&buf, &summaryBuf, schema, "v1.2.3", map[string]any{}, "./gemini-summary.txt")
 
 	out := buf.String()
 	// It must produce some output

@@ -39,6 +39,7 @@ type (
 		PartitionDistribution distributions.Distribution
 		RunningMode           string
 		OutputFile            string
+		SummaryFile           string
 		MU                    float64
 		Seed                  uint64
 		IOWorkerPoolSize      int
@@ -277,7 +278,36 @@ func (w *Workload) PrintResults(geminiVersion string) error {
 		}
 	}()
 
-	w.status.PrintResult(writer, w.schema, geminiVersion, w.config.StatementRatios.GetStatementInfo())
+	summaryWriter, err := utils.CreateFile(w.config.SummaryFile, false, os.Stdout)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		file, ok := summaryWriter.(*os.File)
+
+		if !ok {
+			return
+		}
+
+		if file == os.Stderr || file == os.Stdout {
+			return
+		}
+
+		if syncErr := file.Sync(); syncErr != nil {
+			w.logger.Error("failed to sync summary file",
+				zap.Error(syncErr),
+				zap.String("file", w.config.SummaryFile))
+		}
+
+		if closeErr := file.Close(); closeErr != nil {
+			w.logger.Error("failed to close summary file",
+				zap.Error(closeErr),
+				zap.String("file", w.config.SummaryFile))
+		}
+	}()
+
+	w.status.PrintResult(writer, summaryWriter, w.schema, geminiVersion, w.config.StatementRatios.GetStatementInfo(), w.config.SummaryFile)
 	if w.status.HasErrors() {
 		return errors.New("gemini encountered errors, exiting with non zero status")
 	}

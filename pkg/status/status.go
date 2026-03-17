@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -63,17 +64,33 @@ func (gs *GlobalStatus) AddReadError(err joberror.JobError) {
 	gs.Errors.AddError(err)
 }
 
-func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, version string, info map[string]any) error {
-	return gs.PrintResultAsJSONWithSummary(w, schema, version, info, nil)
+func (gs *GlobalStatus) PrintResultAsJSON(w io.Writer, schema *typedef.Schema, version string, info map[string]any, summaryFile string) error {
+	return gs.PrintResultAsJSONWithSummary(w, schema, version, info, nil, summaryFile)
 }
 
-func (gs *GlobalStatus) PrintResultAsJSONWithSummary(w io.Writer, schema *typedef.Schema, version string, info map[string]any, summary []joberror.CorruptionEntry) error {
+func (gs *GlobalStatus) PrintResultAsJSONWithSummary(
+	w io.Writer,
+	schema *typedef.Schema,
+	version string,
+	info map[string]any,
+	summary []joberror.CorruptionEntry,
+	summaryFile string,
+) error {
+	summaryAbsPath, err := filepath.Abs(summaryFile)
+	if err != nil {
+		summaryAbsPath = summaryFile
+	}
+
 	result := map[string]any{
 		"result":           gs,
 		"gemini_version":   version,
 		"schemaHash":       schema.GetHash(),
 		"schema":           schema,
 		"statement_ratios": info,
+		"summary": map[string]string{
+			"file": filepath.Base(summaryFile),
+			"path": summaryAbsPath,
+		},
 	}
 	if len(summary) > 0 {
 		result["corruption_summary"] = summary
@@ -81,7 +98,7 @@ func (gs *GlobalStatus) PrintResultAsJSONWithSummary(w io.Writer, schema *typede
 	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent(" ", "    ")
-	if err := encoder.Encode(result); err != nil {
+	if err = encoder.Encode(result); err != nil {
 		return errors.Wrap(err, "unable to create json from result")
 	}
 
@@ -104,9 +121,11 @@ func (gs *GlobalStatus) HasErrors() bool {
 //nolint:forbidigo
 func (gs *GlobalStatus) PrintResult(
 	w io.Writer,
+	summaryWriter io.Writer,
 	schema *typedef.Schema,
 	version string,
 	statementInfo map[string]any,
+	summaryFile string,
 ) {
 	// Build the summary once — both JSON and text will use the same data.
 	var summary []joberror.CorruptionEntry
@@ -114,7 +133,11 @@ func (gs *GlobalStatus) PrintResult(
 		summary = joberror.ComputeSummary(gs.Errors.Errors(), gs.testStmtFile, gs.oracleStmtFile)
 	}
 
-	if err := gs.PrintResultAsJSONWithSummary(w, schema, version, statementInfo, summary); err != nil {
+	if err := gs.PrintResultAsJSONWithSummary(w, schema, version, statementInfo, summary, summaryFile); err != nil {
+		summaryAbsPath, absErr := filepath.Abs(summaryFile)
+		if absErr != nil {
+			summaryAbsPath = summaryFile
+		}
 		fmt.Printf("Unable to print result as json, using plain text to stdout, error=%s\n", err)
 		fmt.Printf("Gemini version: %s\n", version)
 		fmt.Printf("Results:\n")
@@ -123,6 +146,8 @@ func (gs *GlobalStatus) PrintResult(
 		fmt.Printf("\tvalidated rows:     %v\n", gs.ValidatedRows.Load())
 		fmt.Printf("\twrite errors: %v\n", gs.WriteErrors.Load())
 		fmt.Printf("\tread errors:  %v\n", gs.ReadErrors.Load())
+		fmt.Printf("\tsummary_file: %s\n", filepath.Base(summaryFile))
+		fmt.Printf("\tsummary_path: %s\n", summaryAbsPath)
 		for i, err := range gs.Errors.Errors() {
 			fmt.Printf("Error %d: %v\n", i, err)
 		}
@@ -130,7 +155,7 @@ func (gs *GlobalStatus) PrintResult(
 		fmt.Printf("Schema: %v\n", string(jsonSchema))
 	}
 
-	joberror.PrintCorruptionSummary(w, summary)
+	joberror.PrintCorruptionSummary(summaryWriter, summary)
 }
 
 func (gs *GlobalStatus) WriteOp() {
