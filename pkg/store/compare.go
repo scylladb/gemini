@@ -40,6 +40,9 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 	testRows = deduplicateRows(table, testRows)
 	oracleRows = deduplicateRows(table, oracleRows)
 
+	deduplicateListValues(table, testRows)
+	deduplicateListValues(table, oracleRows)
+
 	// Sort both sides (stable) to aid deterministic behavior when rendering diffs.
 	// We sort by partition keys first, then clustering keys to ensure stable
 	// and consistent comparison regardless of the order returned by the database.
@@ -336,6 +339,55 @@ func canonicalizeRow(row Row) map[string]string {
 		out[name] = canonicalValueString(v)
 	}
 	return out
+}
+
+// deduplicateSlice removes duplicate elements from a []any slice, preserving order
+// (keeps first occurrence). Uses fmt.Sprint as the dedup key.
+func deduplicateSlice(s []any) []any {
+	if len(s) <= 1 {
+		return s
+	}
+	seen := make(map[string]struct{}, len(s))
+	result := make([]any, 0, len(s))
+	for _, v := range s {
+		key := fmt.Sprint(v)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, v)
+	}
+	if len(result) == len(s) {
+		return s
+	}
+	return result
+}
+
+// deduplicateListValues deduplicates values in CQL list columns in-place.
+// This works around a Scylla issue where insert retries can cause list columns
+// to accumulate duplicate values.
+func deduplicateListValues(table *typedef.Table, rows Rows) {
+	if table == nil {
+		return
+	}
+	// Find list column names
+	var listCols []string
+	for _, col := range table.Columns {
+		if ct, ok := col.Type.(*typedef.Collection); ok && ct.ComplexType == typedef.TypeList {
+			listCols = append(listCols, col.Name)
+		}
+	}
+	if len(listCols) == 0 {
+		return
+	}
+	for _, row := range rows {
+		for _, name := range listCols {
+			val := row.Get(name)
+			if slice, ok := val.([]any); ok {
+				row.Set(name, deduplicateSlice(slice))
+			}
+		}
+	}
 }
 
 // canonicalValueString returns a stable, pointer-safe string for a value.
