@@ -51,7 +51,7 @@ func PreallocateRandomString(rnd Random, ln int) {
 			panic("PreallocateRandomString: requested length is too large, you'll be using more then half of the available memory")
 		}
 
-		data := make([]byte, ln)
+		data := make([]byte, length)
 
 		for i := 0; i < length; i += uint64Size {
 			number := rnd.Uint64()
@@ -59,6 +59,8 @@ func PreallocateRandomString(rnd Random, ln int) {
 				data[i+j] = byte(number >> j & 0xFF)
 			}
 		}
+
+		data = data[:ln]
 
 		randomBytes = data
 
