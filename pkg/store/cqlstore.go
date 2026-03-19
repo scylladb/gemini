@@ -491,16 +491,32 @@ func CreateCluster(
 	// pkg/stmtlogger/scylla/helpers.go (newSession) and pkg/testutils/scylladb.go (createClusterConfig).
 	if config.Port > 0 && config.Port != 9042 && len(config.Hosts) > 0 {
 		contactIP := net.ParseIP(config.Hosts[0])
+		if contactIP == nil {
+			// config.Hosts[0] is a hostname rather than a literal IP address;
+			// resolve it so the AddressTranslator has a concrete IP to return.
+			var addrs []string
+			addrs, err = net.LookupHost(config.Hosts[0])
+			if err != nil || len(addrs) == 0 {
+				logger.Warn("address translation skipped: could not resolve contact point hostname",
+					zap.String("host", config.Hosts[0]),
+					zap.Error(err),
+				)
+			} else {
+				contactIP = net.ParseIP(addrs[0])
+			}
+		}
 		mappedPort := config.Port
-		logger.Warn("address translation active: all peer IPs will be rewritten to the first contact-point host",
-			zap.String("contact_ip", config.Hosts[0]),
-			zap.Int("port", mappedPort),
-			zap.String("cluster", string(config.Name)),
-		)
-		cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, _ int) (net.IP, int) {
-			return contactIP, mappedPort
-		})
-		cluster.DisableShardAwarePort = true
+		if contactIP != nil {
+			logger.Warn("address translation active: all peer IPs will be rewritten to the first contact-point host",
+				zap.String("contact_ip", config.Hosts[0]),
+				zap.Int("port", mappedPort),
+				zap.String("cluster", string(config.Name)),
+			)
+			cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, _ int) (net.IP, int) {
+				return contactIP, mappedPort
+			})
+			cluster.DisableShardAwarePort = true
+		}
 	}
 
 	return cluster, nil

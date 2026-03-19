@@ -335,3 +335,94 @@ func TestMarkInvalid_ConcurrentDedup(t *testing.T) {
 	assert.Equal(t, int64(1), wins.Load(), "exactly one goroutine must win the race")
 	assert.Equal(t, uint64(1), parts.InvalidCount())
 }
+
+// TestFill_ClearsInvalidFlag verifies that fill() (used by ReplaceWithoutOld /
+// ReplaceNextWithoutOld) removes the invalid flag for a slot so that Next()
+// can return the freshly filled partition again.
+func TestFill_ClearsInvalidFlag(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 5)
+
+	// Mark slot 0 as invalid.
+	key := parts.Get(0)
+	require.NotNil(t, key)
+	require.True(t, parts.MarkInvalid(&key))
+	key.Release()
+
+	assert.True(t, parts.IsInvalid(0))
+	assert.Equal(t, uint64(1), parts.InvalidCount())
+
+	// ReplaceWithoutOld replaces via fill(). The invalid flag must be cleared.
+	parts.ReplaceWithoutOld(0)
+
+	assert.False(t, parts.IsInvalid(0), "fill() must clear the invalid flag for the replaced slot")
+	assert.Equal(t, uint64(0), parts.InvalidCount(), "invalid count must decrement after fill()")
+}
+
+// TestReplace_ClearsInvalidFlag verifies that Replace() clears the invalid flag
+// so the slot becomes accessible to Next() after replacement.
+func TestReplace_ClearsInvalidFlag(t *testing.T) {
+	t.Parallel()
+
+	const total uint64 = 10
+	parts := createTestPartitions(t, total)
+
+	// Mark all slots except the last one as invalid.
+	for i := range total - 1 {
+		key := parts.Get(i)
+		require.NotNil(t, key)
+		require.True(t, parts.MarkInvalid(&key))
+		key.Release()
+	}
+
+	assert.Equal(t, total-1, parts.InvalidCount())
+
+	// Replace slot 0. The invalid flag must be cleared.
+	old := parts.Replace(0)
+	old.Release()
+
+	assert.False(t, parts.IsInvalid(0), "Replace() must clear the invalid flag for the new partition")
+	assert.Equal(t, total-2, parts.InvalidCount(), "invalid count must decrement after Replace()")
+}
+
+// TestMarkInvalid_ConcurrentCapEnforcement verifies that the CAS-based cap
+// enforcement never allows more than maxInvalid entries to be stored, even
+// under high concurrent load on distinct partition indices.
+func TestMarkInvalid_ConcurrentCapEnforcement(t *testing.T) {
+	t.Parallel()
+
+	const total uint64 = 200
+	const limit uint64 = 50
+	const goroutines = 20
+
+	parts := createTestPartitionsWithMaxInvalid(t, total, limit)
+
+	keys := make([]typedef.PartitionKeys, total)
+	for i := range total {
+		keys[i] = parts.Get(i)
+	}
+	t.Cleanup(func() {
+		for i := range total {
+			keys[i].Release()
+		}
+	})
+
+	var wins atomic.Int64
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			for i := range total {
+				if parts.MarkInvalid(&keys[i]) {
+					wins.Add(1)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	assert.Equal(t, int64(limit), wins.Load(), "exactly maxInvalid partitions should be marked")
+	assert.Equal(t, limit, parts.InvalidCount(), "InvalidCount must equal the cap")
+}

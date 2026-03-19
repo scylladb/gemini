@@ -289,6 +289,12 @@ func (p *Partitions) fill(idx uint64) {
 		id:     id,
 	}
 	p.parts.mu.Unlock()
+
+	// If this slot was previously marked invalid, clear it so the new partition
+	// is visible to Next()/ReplaceNext() again.
+	if _, wasInvalid := p.invalidByIdx.LoadAndDelete(idx); wasInvalid {
+		p.invalidCount.Add(^uint64(0)) // atomic decrement
+	}
 }
 
 func (p *Partitions) Stats() Stats {
@@ -323,42 +329,46 @@ func (p *Partitions) Get(idx uint64) typedef.PartitionKeys {
 	return p.values(idx)
 }
 
+// pickValidIdx returns the index of a valid (non-invalid) partition.
+// Strategy (in order):
+//  1. Fast-path: if no invalid partitions, call the distribution function directly.
+//  2. Linear scan: when more than half the slots are invalid, scan sequentially
+//     so we always find a valid slot deterministically.
+//  3. Random retry: up to (total − invalid) attempts before a best-effort fallback.
+func (p *Partitions) pickValidIdx() uint64 {
+	total := p.parts.count.Load()
+	invalid := p.invalidCount.Load()
+
+	if invalid == 0 {
+		return p.idxFunc()
+	}
+
+	if invalid*2 >= total {
+		for i := range total {
+			if _, bad := p.invalidByIdx.Load(i); !bad {
+				return i
+			}
+		}
+		// All slots invalid — best-effort fallback.
+		return p.idxFunc()
+	}
+
+	maxRetries := total - invalid
+	for range maxRetries {
+		idx := p.idxFunc()
+		if _, bad := p.invalidByIdx.Load(idx); !bad {
+			return idx
+		}
+	}
+	return p.idxFunc()
+}
+
 // Next returns the next partition according to the distribution function.
 // If the selected partition has been marked invalid it is skipped and a new
 // one is picked. The retry budget is the total number of partitions minus the
 // number already marked invalid, so the loop always terminates.
 func (p *Partitions) Next() typedef.PartitionKeys {
-	total := p.parts.count.Load()
-	invalid := p.invalidCount.Load()
-
-	// Fast-path: no invalid partitions yet.
-	if invalid == 0 {
-		return p.Get(p.idxFunc())
-	}
-
-	// When more than half the slots are invalid the random retry budget becomes
-	// too small to reliably land on a valid slot.  Fall back to a linear scan
-	// so we always find a valid slot deterministically.
-	if invalid*2 >= total {
-		for i := range total {
-			if _, bad := p.invalidByIdx.Load(i); !bad {
-				return p.Get(i)
-			}
-		}
-		// All slots invalid — return best-effort.
-		return p.Get(p.idxFunc())
-	}
-
-	// Retry up to (total - invalid) times to find a valid slot.
-	maxRetries := total - invalid
-	for range maxRetries {
-		idx := p.idxFunc()
-		if _, bad := p.invalidByIdx.Load(idx); !bad {
-			return p.Get(idx)
-		}
-	}
-	// Fallback: pick any slot (best-effort).
-	return p.Get(p.idxFunc())
+	return p.Get(p.pickValidIdx())
 }
 
 func (p *Partitions) Extend() typedef.PartitionKeys {
@@ -450,31 +460,7 @@ func (p *Partitions) Deleted() <-chan typedef.PartitionKeys {
 // ReplaceNext picks a partition by distribution and replaces it, sending
 // the old keys to the deleted queue. Invalid partitions are skipped.
 func (p *Partitions) ReplaceNext() typedef.PartitionKeys {
-	total := p.parts.count.Load()
-	invalid := p.invalidCount.Load()
-
-	if invalid == 0 {
-		return p.Replace(p.idxFunc())
-	}
-
-	// Linear scan when more than half the slots are invalid.
-	if invalid*2 >= total {
-		for i := range total {
-			if _, bad := p.invalidByIdx.Load(i); !bad {
-				return p.Replace(i)
-			}
-		}
-		return p.Replace(p.idxFunc())
-	}
-
-	maxRetries := total - invalid
-	for range maxRetries {
-		idx := p.idxFunc()
-		if _, bad := p.invalidByIdx.Load(idx); !bad {
-			return p.Replace(idx)
-		}
-	}
-	return p.Replace(p.idxFunc())
+	return p.Replace(p.pickValidIdx())
 }
 
 func (p *Partitions) ReplaceWithoutOld(idx uint64) {
@@ -485,49 +471,7 @@ func (p *Partitions) ReplaceWithoutOld(idx uint64) {
 }
 
 func (p *Partitions) ReplaceNextWithoutOld() {
-	total := p.parts.count.Load()
-	invalid := p.invalidCount.Load()
-
-	if invalid == 0 {
-		p.fill(p.idxFunc())
-		if p.deleted != nil {
-			p.deleted.deleted.Add(1)
-		}
-		return
-	}
-
-	// Linear scan when more than half the slots are invalid.
-	if invalid*2 >= total {
-		for i := range total {
-			if _, bad := p.invalidByIdx.Load(i); !bad {
-				p.fill(i)
-				if p.deleted != nil {
-					p.deleted.deleted.Add(1)
-				}
-				return
-			}
-		}
-		// All slots invalid — fall through to best-effort.
-		p.fill(p.idxFunc())
-		if p.deleted != nil {
-			p.deleted.deleted.Add(1)
-		}
-		return
-	}
-
-	maxRetries := total - invalid
-	for range maxRetries {
-		idx := p.idxFunc()
-		if _, bad := p.invalidByIdx.Load(idx); !bad {
-			p.fill(idx)
-			if p.deleted != nil {
-				p.deleted.deleted.Add(1)
-			}
-			return
-		}
-	}
-	// Fallback.
-	p.fill(p.idxFunc())
+	p.fill(p.pickValidIdx())
 	if p.deleted != nil {
 		p.deleted.deleted.Add(1)
 	}
@@ -619,19 +563,24 @@ func (p *Partitions) MarkInvalid(keys *typedef.PartitionKeys) bool {
 		return false
 	}
 
-	// Atomically claim the slot first. LoadOrStore returns (existing, true) if
-	// already present, or (stored, false) on first store.
-	_, alreadyInvalid := p.invalidByIdx.LoadOrStore(idx, struct{}{})
-	if alreadyInvalid {
-		return false
+	// Reserve a slot in the counter first using a CAS loop. This avoids the
+	// TOCTOU window where multiple goroutines each increment past maxInvalid
+	// and then all roll back, leaving zero slots marked.
+	for {
+		cur := p.invalidCount.Load()
+		if p.maxInvalid > 0 && cur >= p.maxInvalid {
+			return false
+		}
+		if p.invalidCount.CompareAndSwap(cur, cur+1) {
+			break
+		}
 	}
 
-	// Slot was not previously invalid. Now increment the counter.
-	// If maxInvalid is set and we have exceeded it, undo the store and return false.
-	newCount := p.invalidCount.Add(1)
-	if p.maxInvalid > 0 && newCount > p.maxInvalid {
-		// Roll back: remove the entry we just stored and decrement the counter.
-		p.invalidByIdx.Delete(idx)
+	// Counter slot reserved. Now atomically claim the map entry.
+	// LoadOrStore returns (existing, true) if already present.
+	_, alreadyInvalid := p.invalidByIdx.LoadOrStore(idx, struct{}{})
+	if alreadyInvalid {
+		// Another goroutine beat us to this slot — release our counter reservation.
 		p.invalidCount.Add(^uint64(0)) // atomic decrement
 		return false
 	}

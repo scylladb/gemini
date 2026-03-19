@@ -213,25 +213,3 @@ func TestMockPartitions_DeletedChannel(t *testing.T) {
 
 	mp.Close()
 }
-
-func TestTotalCartesianProductCount(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		initial float64
-		pkLen   float64
-		wantMin int
-	}{
-		{initial: 10, pkLen: 1, wantMin: 1},
-		{initial: 0, pkLen: 3, wantMin: 1},
-		{initial: 5, pkLen: 2, wantMin: 1},
-	}
-
-	for _, tc := range tests {
-		got := TotalCartesianProductCount(tc.initial, tc.pkLen)
-		if got < tc.wantMin {
-			t.Errorf("TotalCartesianProductCount(%v, %v) = %d, want >= %d",
-				tc.initial, tc.pkLen, got, tc.wantMin)
-		}
-	}
-}

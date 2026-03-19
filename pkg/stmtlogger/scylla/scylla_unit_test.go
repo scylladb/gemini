@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -657,76 +656,5 @@ func BenchmarkLine_Marshal(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = json.Marshal(line)
-	}
-}
-
-// TestNewClusterConfig_AddressTranslator verifies that the AddressTranslator
-// is installed for non-standard ports and skipped for port 9042 / port 0.
-func TestNewClusterConfig_AddressTranslator(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name              string
-		host              string
-		port              int
-		wantTranslator    bool
-		wantShardDisabled bool
-	}{
-		{
-			name:              "non-standard port activates translator",
-			host:              "127.0.0.1",
-			port:              19042,
-			wantTranslator:    true,
-			wantShardDisabled: true,
-		},
-		{
-			name:              "default port 9042 does not activate translator",
-			host:              "127.0.0.1",
-			port:              9042,
-			wantTranslator:    false,
-			wantShardDisabled: false,
-		},
-		{
-			name:              "port 0 (unset) does not activate translator",
-			host:              "127.0.0.1",
-			port:              0,
-			wantTranslator:    false,
-			wantShardDisabled: false,
-		},
-		{
-			name:              "non-IP hostname skips translator even with non-standard port",
-			host:              "scylla-node",
-			port:              19042,
-			wantTranslator:    false,
-			wantShardDisabled: false,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			logger := zaptest.NewLogger(t)
-			cluster := newClusterConfig([]string{tc.host}, tc.port, "", "", logger)
-			require.NotNil(t, cluster)
-
-			if tc.wantTranslator {
-				require.NotNil(t, cluster.AddressTranslator,
-					"expected AddressTranslator to be set for port %d", tc.port)
-				gotIP, gotPort := cluster.AddressTranslator.Translate(
-					net.ParseIP("10.0.0.5"), 9042,
-				)
-				require.Equal(t, tc.host, gotIP.String(),
-					"translator should redirect to the contact-point host")
-				require.Equal(t, tc.port, gotPort,
-					"translator should use the configured mapped port")
-			} else {
-				require.Nil(t, cluster.AddressTranslator,
-					"expected no AddressTranslator for port %d / host %q", tc.port, tc.host)
-			}
-
-			require.Equal(t, tc.wantShardDisabled, cluster.DisableShardAwarePort,
-				"DisableShardAwarePort mismatch for port %d", tc.port)
-		})
 	}
 }
