@@ -17,14 +17,15 @@
   ],
   "packageRules": [
     {
-      "groupName": "All dependencies",
-      "groupSlug": "all-dependencies",
+      "groupName": "All other Go dependencies",
+      "groupSlug": "all-other-go-dependencies",
       "matchManagers": [
         "gomod"
       ],
       "matchPackageNames": [
         "!github.com/scylladb/gocql"
       ],
+      "matchIsVulnerabilityAlert": false,
       "addLabels": [
         "test/integration"
       ],
