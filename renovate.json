@@ -22,7 +22,7 @@
       "matchManagers": [
         "gomod"
       ],
-      "packageNames": [
+      "matchPackageNames": [
         "!github.com/scylladb/gocql"
       ],
       "addLabels": [
@@ -46,7 +46,7 @@
       "enabled": false
     },
     {
-      "packageNames": [
+      "matchPackageNames": [
         "github.com/scylladb/gocql"
       ],
       "addLabels": [
