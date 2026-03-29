@@ -25,7 +25,6 @@
       "matchPackageNames": [
         "!github.com/scylladb/gocql"
       ],
-      "matchIsVulnerabilityAlert": false,
       "addLabels": [
         "test/integration"
       ],
