@@ -66,34 +66,41 @@ type (
 		Close()
 	}
 
+	// partitionData is an immutable snapshot of a partition's values and ID.
+	// Stored via atomic.Pointer so readers never block on a mutex.
+	partitionData struct {
+		values []any
+		id     uuid.UUID
+	}
+
 	Partition struct {
-		values   []any
-		id       uuid.UUID
+		data     atomic.Pointer[partitionData]
 		refCount atomic.Int32
-		mu       sync.RWMutex
 	}
 
 	partitions struct {
-		parts              []*Partition
+		// slots stores partition pointers. The slice itself is replaced
+		// atomically on Extend; individual slots are updated in-place
+		// since *Partition is stable (only its atomic data pointer changes).
+		slots              atomic.Pointer[[]*Partition]
 		partitionValuesLen uint64
 		count              atomic.Uint64
 		created            atomic.Uint64
-		mu                 sync.RWMutex
+		extendMu           sync.Mutex // only held during Extend (rare)
 	}
 
 	Partitions struct {
 		table         *typedef.Table
 		idxFunc       distributions.DistributionFunc
 		deleted       *deletedPartitions
-		validationMap map[uuid.UUID]*typedef.ValidationData
-		uuidToIdx     map[uuid.UUID]uint64
-		invalidByIdx  sync.Map
+		validationMap sync.Map // uuid.UUID → *typedef.ValidationData
+		uuidToIdx     sync.Map // uuid.UUID → uint64
+		invalidByIdx  sync.Map // uint64 → struct{}
 		r             random.GoRoutineSafeRandom
 		config        typedef.PartitionRangeConfig
 		parts         partitions
 		invalidCount  atomic.Uint64
 		maxInvalid    uint64
-		validationMu  sync.RWMutex
 	}
 
 	Stats struct {
@@ -117,25 +124,23 @@ func New(
 	partitionValuesLen := table.PartitionKeys.LenValues()
 
 	// Pre-allocate slice of partition pointers
-	parts := make([]*Partition, count)
+	slots := make([]*Partition, count)
 	for i := range count {
-		parts[i] = &Partition{}
+		slots[i] = &Partition{}
 	}
 
 	p := &Partitions{
 		parts: partitions{
 			partitionValuesLen: uint64(partitionValuesLen),
-			parts:              parts,
 		},
-		deleted:       newDeleted(ctx, config.DeleteBuckets, false),
-		r:             *random.NewGoRoutineSafeRandom(r),
-		table:         table,
-		config:        config,
-		idxFunc:       idxFunc,
-		validationMap: make(map[uuid.UUID]*typedef.ValidationData),
-		uuidToIdx:     make(map[uuid.UUID]uint64),
-		maxInvalid:    maxInvalid,
+		deleted:    newDeleted(ctx, config.DeleteBuckets, false),
+		r:          *random.NewGoRoutineSafeRandom(r),
+		table:      table,
+		config:     config,
+		idxFunc:    idxFunc,
+		maxInvalid: maxInvalid,
 	}
+	p.parts.slots.Store(&slots)
 
 	// Only start deleted-partitions processing when time buckets are configured.
 	// When no buckets are provided, the feature is fully disabled (no goroutines,
@@ -157,59 +162,58 @@ func (p *Partition) size() uint64 {
 	return 0
 }
 
+// loadData atomically loads the partition's immutable data snapshot.
+func (p *Partition) loadData() *partitionData {
+	return p.data.Load()
+}
+
 func (p *Partitions) partition(idx uint64) *Partition {
-	p.parts.mu.RLock()
-	part := p.parts.parts[idx]
-	p.parts.mu.RUnlock()
-	return part
+	slots := *p.parts.slots.Load()
+	return slots[idx]
 }
 
 func (p *Partitions) valuesNoLock(part *Partition) typedef.PartitionKeys {
+	return p.buildKeysFromData(part, part.loadData())
+}
+
+// buildKeysFromData creates PartitionKeys from a specific data snapshot.
+// Used by Replace() to capture old values before the atomic swap.
+func (p *Partitions) buildKeysFromData(part *Partition, d *partitionData) typedef.PartitionKeys {
 	out := make(map[string][]any, p.parts.partitionValuesLen)
 
 	for i, col := range p.table.PartitionKeys {
-		// Copy the slice to avoid data races when the underlying array is modified
-		out[col.Name] = append(out[col.Name], part.values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
+		out[col.Name] = append(out[col.Name], d.values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
 	}
 
 	part.refCount.Add(1)
+	id := d.id
 	return typedef.PartitionKeys{
 		Values: typedef.NewValuesFromMap(out),
-		ID:     part.id,
+		ID:     id,
 		Release: func() {
 			if part.refCount.Add(-1) == 0 {
-				p.deleteValidation(part.id)
+				p.deleteValidation(id)
 			}
 		},
 	}
 }
 
 func (p *Partitions) deleteValidation(id uuid.UUID) {
-	p.validationMu.Lock()
-	delete(p.validationMap, id)
-	// Do NOT remove from uuidToIdx here. The UUID→idx mapping must remain alive
-	// for the entire lifetime of the partition at that slot so that MarkInvalid
-	// can still find it after all outstanding references have been released.
-	// uuidToIdx is cleaned up in fill() / Replace() when a new partition occupies
-	// the slot and the old UUID is genuinely retired.
-	p.validationMu.Unlock()
+	p.validationMap.Delete(id)
 }
 
-func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
-	part := p.partition(idx)
-	part.mu.RLock()
-	// Copy the slice reference while holding the lock
-	values := part.values
-	id := part.id
-	part.mu.RUnlock()
+// buildPartitionKeys creates a PartitionKeys from a partition's atomic data.
+// No locks are required — the data pointer is loaded atomically.
+func (p *Partitions) buildPartitionKeys(part *Partition) typedef.PartitionKeys {
+	d := part.loadData()
 
-	// Build the result outside the lock to minimize contention
 	out := make(map[string][]any, p.parts.partitionValuesLen)
 	for i, col := range p.table.PartitionKeys {
-		out[col.Name] = append(out[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
+		out[col.Name] = append(out[col.Name], d.values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
 	}
 
 	part.refCount.Add(1)
+	id := d.id
 	var once sync.Once
 	return typedef.PartitionKeys{
 		Values: typedef.NewValuesFromMap(out),
@@ -224,32 +228,12 @@ func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
 	}
 }
 
+func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
+	return p.buildPartitionKeys(p.partition(idx))
+}
+
 func (p *Partitions) valuesCopy(idx uint64) typedef.PartitionKeys {
-	part := p.partition(idx)
-	part.mu.RLock()
-	values := part.values
-	id := part.id
-	part.mu.RUnlock()
-
-	// Build result outside lock
-	m := make(map[string][]any, p.parts.partitionValuesLen)
-	for i, col := range p.table.PartitionKeys {
-		m[col.Name] = append(m[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
-	}
-
-	part.refCount.Add(1)
-	var once sync.Once
-	return typedef.PartitionKeys{
-		Values: typedef.NewValuesFromMap(m),
-		ID:     id,
-		Release: func() {
-			once.Do(func() {
-				if part.refCount.Add(-1) == 0 {
-					p.deleteValidation(id)
-				}
-			})
-		},
-	}
+	return p.buildPartitionKeys(p.partition(idx))
 }
 
 func (p *Partitions) fill(idx uint64) {
@@ -265,31 +249,23 @@ func (p *Partitions) fill(idx uint64) {
 
 	id, _ := uuid.NewV7()
 
-	// Capture the old partition's UUID before replacing the slot so we can
-	// retire it from uuidToIdx.  During initial population the old *Partition
-	// is the zero-value struct whose id is uuid.Nil, which is never inserted
-	// into uuidToIdx, so we guard with a nil check.
-	p.parts.mu.RLock()
-	oldPart := p.parts.parts[idx]
-	p.parts.mu.RUnlock()
+	// Capture the old partition's UUID before replacing so we can retire it.
+	oldPart := p.partition(idx)
 
-	p.validationMu.Lock()
-	if _, ok := p.validationMap[id]; !ok {
-		p.validationMap[id] = &typedef.ValidationData{}
-	}
-	p.uuidToIdx[id] = idx
-	// Retire the old UUID from the slot mapping now that a new partition owns it.
-	if oldPart != nil && oldPart.id != (uuid.UUID{}) {
-		delete(p.uuidToIdx, oldPart.id)
-	}
-	p.validationMu.Unlock()
+	// Register the new partition in validation tracking.
+	p.validationMap.LoadOrStore(id, &typedef.ValidationData{})
+	p.uuidToIdx.Store(id, idx)
 
-	p.parts.mu.Lock()
-	p.parts.parts[idx] = &Partition{
-		values: values,
-		id:     id,
+	// Retire the old UUID from the slot mapping.
+	if oldPart != nil {
+		if oldData := oldPart.loadData(); oldData != nil && oldData.id != (uuid.UUID{}) {
+			p.uuidToIdx.Delete(oldData.id)
+		}
 	}
-	p.parts.mu.Unlock()
+
+	// Atomically update the partition data — no mutex needed.
+	part := p.partition(idx)
+	part.data.Store(&partitionData{values: values, id: id})
 
 	// If this slot was previously marked invalid, clear it so the new partition
 	// is visible to Next()/ReplaceNext() again.
@@ -373,7 +349,6 @@ func (p *Partitions) Next() typedef.PartitionKeys {
 }
 
 func (p *Partitions) Extend() typedef.PartitionKeys {
-	// Generate values outside the lock to minimize lock hold time
 	values := generateValue(&p.r, p.table, &p.config)
 	if uint64(len(values)) != p.parts.partitionValuesLen {
 		panic(fmt.Sprintf(
@@ -385,20 +360,21 @@ func (p *Partitions) Extend() typedef.PartitionKeys {
 
 	id, _ := uuid.NewV7()
 
-	// Hold lock while extending slice AND initializing the new partition
-	// to prevent other goroutines from accessing it during reallocation
-	p.parts.mu.Lock()
-	newIdx := uint64(len(p.parts.parts))
-	part := &Partition{values: values, id: id}
-	p.parts.parts = append(p.parts.parts, part)
-	p.parts.mu.Unlock()
+	newPart := &Partition{}
+	newPart.data.Store(&partitionData{values: values, id: id})
 
-	p.validationMu.Lock()
-	if _, ok := p.validationMap[id]; !ok {
-		p.validationMap[id] = &typedef.ValidationData{}
-	}
-	p.uuidToIdx[id] = newIdx
-	p.validationMu.Unlock()
+	// Extend requires copying the slice — use a mutex (rare operation).
+	p.parts.extendMu.Lock()
+	oldSlice := *p.parts.slots.Load()
+	newIdx := uint64(len(oldSlice))
+	newSlice := make([]*Partition, len(oldSlice)+1)
+	copy(newSlice, oldSlice)
+	newSlice[newIdx] = newPart
+	p.parts.slots.Store(&newSlice)
+	p.parts.extendMu.Unlock()
+
+	p.validationMap.LoadOrStore(id, &typedef.ValidationData{})
+	p.uuidToIdx.Store(id, newIdx)
 
 	p.parts.count.Add(1)
 	p.parts.created.Add(1)
@@ -418,24 +394,16 @@ func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
 	}
 
 	id, _ := uuid.NewV7()
-	p.validationMu.Lock()
-	if _, ok := p.validationMap[id]; !ok {
-		p.validationMap[id] = &typedef.ValidationData{}
-	}
-	p.uuidToIdx[id] = idx
-	p.validationMu.Unlock()
 
-	p.parts.mu.Lock()
-	oldPart := p.parts.parts[idx]
-	p.parts.parts[idx] = &Partition{values: values, id: id}
-	p.parts.mu.Unlock()
+	p.validationMap.LoadOrStore(id, &typedef.ValidationData{})
+	p.uuidToIdx.Store(id, idx)
 
-	// Do NOT explicitly delete oldPart.id from uuidToIdx here.
-	// Outstanding references to the old partition (e.g. a validation goroutine
-	// mid-retry) still hold the old UUID. Removing it prematurely means
-	// MarkInvalid() can no longer locate the partition by UUID and silently
-	// drops the error. The old UUID will be cleaned up naturally when the last
-	// caller invokes Release() and refCount drops to zero (via deleteValidation).
+	// Capture old data BEFORE swapping — the partition object is reused.
+	part := p.partition(idx)
+	oldData := part.loadData()
+
+	// Atomically swap the partition data — no slice mutation, no mutex.
+	part.data.Store(&partitionData{values: values, id: id})
 
 	// If the slot was previously marked invalid, clear it so the new partition
 	// is visible to Next()/ReplaceNext() again.
@@ -443,7 +411,7 @@ func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
 		p.invalidCount.Add(^uint64(0)) // atomic decrement
 	}
 
-	oldKeys := p.valuesNoLock(oldPart)
+	oldKeys := p.buildKeysFromData(part, oldData)
 
 	if p.deleted != nil {
 		p.deleted.Delete(oldKeys)
@@ -495,12 +463,11 @@ func (p *Partitions) ValidationSuccess(keys *typedef.PartitionKeys) {
 		return
 	}
 	now := uint64(time.Now().UTC().UnixNano())
-	p.validationMu.RLock()
-	data, ok := p.validationMap[keys.ID]
-	p.validationMu.RUnlock()
+	v, ok := p.validationMap.Load(keys.ID)
 	if !ok {
 		return
 	}
+	data := v.(*typedef.ValidationData)
 	data.FirstSuccessNS.CompareAndSwap(0, now)
 	data.LastSuccessNS.Store(now)
 	data.SuccessCount.Add(1)
@@ -513,22 +480,20 @@ func (p *Partitions) ValidationFailure(keys *typedef.PartitionKeys) {
 		return
 	}
 	now := uint64(time.Now().UTC().UnixNano())
-	p.validationMu.RLock()
-	data, ok := p.validationMap[keys.ID]
-	p.validationMu.RUnlock()
+	v, ok := p.validationMap.Load(keys.ID)
 	if !ok {
 		return
 	}
+	data := v.(*typedef.ValidationData)
 	data.LastFailureNS.Store(now)
 }
 
 func (p *Partitions) ValidationStats(id uuid.UUID) (first, last, failure uint64, recent []uint64, successCount uint64) {
-	p.validationMu.RLock()
-	data, ok := p.validationMap[id]
-	p.validationMu.RUnlock()
+	v, ok := p.validationMap.Load(id)
 	if !ok {
 		return 0, 0, 0, nil, 0
 	}
+	data := v.(*typedef.ValidationData)
 	first = data.FirstSuccessNS.Load()
 	last = data.LastSuccessNS.Load()
 	failure = data.LastFailureNS.Load()
@@ -558,13 +523,12 @@ func (p *Partitions) MarkInvalid(keys *typedef.PartitionKeys) bool {
 	}
 
 	// Look up the slot index for this UUID.
-	p.validationMu.RLock()
-	idx, ok := p.uuidToIdx[keys.ID]
-	p.validationMu.RUnlock()
+	idxVal, ok := p.uuidToIdx.Load(keys.ID)
 	if !ok {
 		// UUID not tracked (partition slot was replaced) — nothing to mark.
 		return false
 	}
+	idx := idxVal.(uint64)
 
 	// Reserve a slot in the counter first using a CAS loop. This avoids the
 	// TOCTOU window where multiple goroutines each increment past maxInvalid
