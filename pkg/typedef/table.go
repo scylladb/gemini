@@ -21,8 +21,16 @@ import (
 
 type KnownIssues map[string]bool
 
+// ListColInfo describes a list-type column for efficient deduplication.
+type ListColInfo struct {
+	Name      string
+	ValueType SimpleType
+}
+
 type Table struct {
 	schema            *Schema
+	listCols          []ListColInfo // cached list column info, built by Init
+	listColsBuilt     bool
 	Name              string             `json:"name"`
 	PartitionKeys     Columns            `json:"partition_keys"`
 	ClusteringKeys    Columns            `json:"clustering_keys"`
@@ -101,6 +109,31 @@ func (t *Table) SupportsChanges() bool {
 
 func (t *Table) Init(s *Schema) {
 	t.schema = s
+	t.buildListColCache()
+}
+
+// buildListColCache scans columns once and caches list column metadata.
+func (t *Table) buildListColCache() {
+	t.listCols = nil
+	for _, col := range t.Columns {
+		if ct, ok := col.Type.(*Collection); ok && ct.ComplexType == TypeList {
+			t.listCols = append(t.listCols, ListColInfo{
+				Name:      col.Name,
+				ValueType: ct.ValueType,
+			})
+		}
+	}
+	t.listColsBuilt = true
+}
+
+// ListColumns returns cached list column info. Returns nil if the table
+// has no list columns — callers can skip deduplication entirely.
+// Lazily builds the cache on first call if Init() wasn't called.
+func (t *Table) ListColumns() []ListColInfo {
+	if !t.listColsBuilt {
+		t.buildListColCache()
+	}
+	return t.listCols
 }
 
 func (t *Table) ValidColumnsForDelete() Columns {

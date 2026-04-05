@@ -38,15 +38,10 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 		return result
 	}
 
-	origTestLen, origOracleLen := len(testRows), len(oracleRows)
-	testRows = deduplicateRows(table, testRows)
-	oracleRows = deduplicateRows(table, oracleRows)
-	if deduped := (origTestLen - len(testRows)) + (origOracleLen - len(oracleRows)); deduped > 0 {
-		metrics.ValidationRowsDeduplicated.Add(float64(deduped))
-	}
-
+	// Only deduplicate list values on the test side — oracle never has
+	// duplicate list items. This is a workaround for non-idempotent list
+	// appends in Scylla when inserts are retried.
 	deduplicateListValues(table, testRows)
-	deduplicateListValues(table, oracleRows)
 
 	// Sort both sides (stable) to aid deterministic behavior when rendering diffs.
 	// We sort by partition keys first, then clustering keys to ensure stable
@@ -154,30 +149,6 @@ func buildRowMap(table *typedef.Table, rows Rows) map[string]Row {
 	}
 
 	return result
-}
-
-// deduplicateRows removes duplicate rows with the same primary key, keeping the last occurrence.
-// This handles eventual consistency scenarios where the same row might be returned multiple times.
-func deduplicateRows(table *typedef.Table, rows Rows) Rows {
-	if len(rows) <= 1 {
-		return rows
-	}
-
-	// Build a map of composite keys to rows (last occurrence wins)
-	rowMap := buildRowMap(table, rows)
-
-	// If no duplicates were found, return original rows
-	if len(rowMap) == len(rows) {
-		return rows
-	}
-
-	// Rebuild the rows slice from the map
-	deduplicated := make(Rows, 0, len(rowMap))
-	for _, row := range rowMap {
-		deduplicated = append(deduplicated, row)
-	}
-
-	return deduplicated
 }
 
 // ToError converts ComparisonResult to an error if there are differences
@@ -352,53 +323,120 @@ func canonicalizeRow(row Row) map[string]string {
 	return out
 }
 
-// deduplicateSlice removes duplicate elements from a []any slice, preserving order
-// (keeps first occurrence). Uses fmt.Sprint as the dedup key.
-func deduplicateSlice(s []any) []any {
-	if len(s) <= 1 {
-		return s
+// deduplicateListValues deduplicates values in CQL list columns in-place.
+// This works around a Scylla issue where insert retries can cause list columns
+// to accumulate duplicate values. Uses cached list column info from the table
+// and type-aware comparison based on the list's ValueType.
+func deduplicateListValues(table *typedef.Table, rows Rows) {
+	if table == nil || len(rows) == 0 {
+		return
 	}
-	seen := make(map[string]struct{}, len(s))
-	result := make([]any, 0, len(s))
+
+	listCols := table.ListColumns()
+	if len(listCols) == 0 {
+		return
+	}
+
+	for _, row := range rows {
+		for i := range listCols {
+			val := row.Get(listCols[i].Name)
+			slice, ok := val.([]any)
+			if !ok || len(slice) <= 1 {
+				continue
+			}
+			deduped := deduplicateByType(slice, listCols[i].ValueType)
+			if len(deduped) != len(slice) {
+				row.Set(listCols[i].Name, deduped)
+				metrics.ValidationRowsDeduplicated.Add(float64(len(slice) - len(deduped)))
+			}
+		}
+	}
+}
+
+// deduplicateByType removes duplicate elements from a list using type-aware
+// comparison. For types that are directly comparable (int, string, etc.), it
+// uses a typed set with zero string conversion. For complex types it falls
+// back to compareValues-based dedup.
+func deduplicateByType(s []any, vt typedef.SimpleType) []any {
+	switch vt {
+	case typedef.TypeInt:
+		return deduplicateTyped[int32](s)
+	case typedef.TypeBigint:
+		return deduplicateTyped[int64](s)
+	case typedef.TypeSmallint:
+		return deduplicateTyped[int16](s)
+	case typedef.TypeTinyint:
+		return deduplicateTyped[int8](s)
+	case typedef.TypeFloat:
+		return deduplicateTyped[float32](s)
+	case typedef.TypeDouble:
+		return deduplicateTyped[float64](s)
+	case typedef.TypeBoolean:
+		return deduplicateTyped[bool](s)
+	case typedef.TypeText, typedef.TypeAscii, typedef.TypeVarchar:
+		return deduplicateTyped[string](s)
+	case typedef.TypeUuid, typedef.TypeTimeuuid:
+		return deduplicateUUID(s)
+	default:
+		return deduplicateGeneric(s)
+	}
+}
+
+// deduplicateTyped uses a typed map for O(1) lookup without any string conversion.
+func deduplicateTyped[T comparable](s []any) []any {
+	seen := make(map[T]struct{}, len(s))
+	result := s[:0] // reuse backing array
 	for _, v := range s {
-		key := fmt.Sprint(v)
-		if _, ok := seen[key]; ok {
+		tv, ok := v.(T)
+		if !ok {
+			result = append(result, v)
 			continue
 		}
-		seen[key] = struct{}{}
+		if _, exists := seen[tv]; exists {
+			continue
+		}
+		seen[tv] = struct{}{}
 		result = append(result, v)
-	}
-	if len(result) == len(s) {
-		return s
 	}
 	return result
 }
 
-// deduplicateListValues deduplicates values in CQL list columns in-place.
-// This works around a Scylla issue where insert retries can cause list columns
-// to accumulate duplicate values.
-func deduplicateListValues(table *typedef.Table, rows Rows) {
-	if table == nil {
-		return
-	}
-	// Find list column names
-	var listCols []string
-	for _, col := range table.Columns {
-		if ct, ok := col.Type.(*typedef.Collection); ok && ct.ComplexType == typedef.TypeList {
-			listCols = append(listCols, col.Name)
+// deduplicateUUID handles gocql.UUID which is [16]byte and comparable.
+func deduplicateUUID(s []any) []any {
+	seen := make(map[gocql.UUID]struct{}, len(s))
+	result := s[:0]
+	for _, v := range s {
+		u, ok := v.(gocql.UUID)
+		if !ok {
+			result = append(result, v)
+			continue
 		}
+		if _, exists := seen[u]; exists {
+			continue
+		}
+		seen[u] = struct{}{}
+		result = append(result, v)
 	}
-	if len(listCols) == 0 {
-		return
-	}
-	for _, row := range rows {
-		for _, name := range listCols {
-			val := row.Get(name)
-			if slice, ok := val.([]any); ok {
-				row.Set(name, deduplicateSlice(slice))
+	return result
+}
+
+// deduplicateGeneric falls back to compareValues for types that aren't
+// directly map-keyable ([]byte, *big.Int, *inf.Dec, time.Duration, etc.).
+func deduplicateGeneric(s []any) []any {
+	result := s[:0]
+	for _, v := range s {
+		found := false
+		for _, existing := range result {
+			if compareValues(existing, v) == 0 {
+				found = true
+				break
 			}
 		}
+		if !found {
+			result = append(result, v)
+		}
 	}
+	return result
 }
 
 // canonicalValueString returns a stable, pointer-safe string for a value.
