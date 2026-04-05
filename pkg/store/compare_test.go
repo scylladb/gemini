@@ -125,37 +125,6 @@ func TestRowsToKeyStrings_PreservesOrder(t *testing.T) {
 	assert.Equal(t, []string{"pk=1,ck=2", "pk=3,ck=4"}, got)
 }
 
-func TestDeduplicateSlice(t *testing.T) {
-	t.Parallel()
-
-	t.Run("empty", func(t *testing.T) {
-		t.Parallel()
-		assert.Empty(t, deduplicateSlice(nil))
-		assert.Empty(t, deduplicateSlice([]any{}))
-	})
-
-	t.Run("single", func(t *testing.T) {
-		t.Parallel()
-		in := []any{42}
-		assert.Equal(t, []any{42}, deduplicateSlice(in))
-	})
-
-	t.Run("no dupes returns original", func(t *testing.T) {
-		t.Parallel()
-		in := []any{1, 2, 3}
-		out := deduplicateSlice(in)
-		assert.Equal(t, []any{1, 2, 3}, out)
-		// Should return the original slice when there are no dupes
-		assert.True(t, &in[0] == &out[0], "expected same backing array")
-	})
-
-	t.Run("dupes preserving order", func(t *testing.T) {
-		t.Parallel()
-		in := []any{"a", "b", "a", "c", "b"}
-		assert.Equal(t, []any{"a", "b", "c"}, deduplicateSlice(in))
-	})
-}
-
 func TestDeduplicateListValues(t *testing.T) {
 	t.Parallel()
 
@@ -168,11 +137,12 @@ func TestDeduplicateListValues(t *testing.T) {
 			PartitionKeys: []typedef.ColumnDef{{Name: "pk", Type: typedef.TypeInt}},
 			Columns:       []typedef.ColumnDef{{Name: "vals", Type: listType}},
 		}
+		// Use int32 to match gocql's CQL int → Go int32 mapping
 		rows := Rows{
-			makeRow([]string{"pk", "vals"}, []any{1, []any{10, 20, 10, 30}}),
+			makeRow([]string{"pk", "vals"}, []any{int32(1), []any{int32(10), int32(20), int32(10), int32(30)}}),
 		}
 		deduplicateListValues(table, rows)
-		assert.Equal(t, []any{10, 20, 30}, rows[0].Get("vals"))
+		assert.Equal(t, []any{int32(10), int32(20), int32(30)}, rows[0].Get("vals"))
 	})
 
 	t.Run("non-list columns untouched", func(t *testing.T) {
@@ -182,10 +152,10 @@ func TestDeduplicateListValues(t *testing.T) {
 			Columns:       []typedef.ColumnDef{{Name: "v", Type: typedef.TypeInt}},
 		}
 		rows := Rows{
-			makeRow([]string{"pk", "v"}, []any{1, 42}),
+			makeRow([]string{"pk", "v"}, []any{int32(1), int32(42)}),
 		}
 		deduplicateListValues(table, rows)
-		assert.Equal(t, 42, rows[0].Get("v"))
+		assert.Equal(t, int32(42), rows[0].Get("v"))
 	})
 
 	t.Run("set columns skipped", func(t *testing.T) {
@@ -194,9 +164,9 @@ func TestDeduplicateListValues(t *testing.T) {
 			PartitionKeys: []typedef.ColumnDef{{Name: "pk", Type: typedef.TypeInt}},
 			Columns:       []typedef.ColumnDef{{Name: "s", Type: setType}},
 		}
-		original := []any{1, 2, 1}
+		original := []any{int32(1), int32(2), int32(1)}
 		rows := Rows{
-			makeRow([]string{"pk", "s"}, []any{1, original}),
+			makeRow([]string{"pk", "s"}, []any{int32(1), original}),
 		}
 		deduplicateListValues(table, rows)
 		assert.Equal(t, original, rows[0].Get("s"))
@@ -214,10 +184,10 @@ func TestCompareCollectedRows_ListDuplicatesMatch(t *testing.T) {
 
 	// Test side has duplicates in the list, oracle does not
 	testRows := Rows{
-		makeRow([]string{"pk", "vals"}, []any{1, []any{10, 20, 10}}),
+		makeRow([]string{"pk", "vals"}, []any{int32(1), []any{int32(10), int32(20), int32(10)}}),
 	}
 	oracleRows := Rows{
-		makeRow([]string{"pk", "vals"}, []any{1, []any{10, 20}}),
+		makeRow([]string{"pk", "vals"}, []any{int32(1), []any{int32(10), int32(20)}}),
 	}
 
 	res := CompareCollectedRows(table, testRows, oracleRows)

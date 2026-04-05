@@ -25,6 +25,7 @@ import (
 	"github.com/gocql/gocql"
 	"go.uber.org/multierr"
 
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -37,8 +38,10 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 		return result
 	}
 
+	// Only deduplicate list values on the test side — oracle never has
+	// duplicate list items. This is a workaround for non-idempotent list
+	// appends in Scylla when inserts are retried.
 	deduplicateListValues(table, testRows)
-	deduplicateListValues(table, oracleRows)
 
 	// Sort both sides (stable) to aid deterministic behavior when rendering diffs.
 	// We sort by partition keys first, then clustering keys to ensure stable
@@ -314,53 +317,135 @@ func canonicalizeRow(row Row) map[string]string {
 	return out
 }
 
-// deduplicateSlice removes duplicate elements from a []any slice, preserving order
-// (keeps first occurrence). Uses fmt.Sprint as the dedup key.
-func deduplicateSlice(s []any) []any {
-	if len(s) <= 1 {
-		return s
-	}
-	seen := make(map[string]struct{}, len(s))
-	result := make([]any, 0, len(s))
-	for _, v := range s {
-		key := fmt.Sprint(v)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		result = append(result, v)
-	}
-	if len(result) == len(s) {
-		return s
-	}
-	return result
+// listColInfo holds pre-computed list column info to avoid repeated type assertions.
+type listColInfo struct {
+	name      string
+	valueType typedef.SimpleType
 }
 
 // deduplicateListValues deduplicates values in CQL list columns in-place.
 // This works around a Scylla issue where insert retries can cause list columns
-// to accumulate duplicate values.
+// to accumulate duplicate values. Uses type-aware comparison based on the
+// list's ValueType to avoid string conversion overhead.
 func deduplicateListValues(table *typedef.Table, rows Rows) {
-	if table == nil {
+	if table == nil || len(rows) == 0 {
 		return
 	}
-	// Find list column names
-	var listCols []string
+
+	// Pre-compute list column info once.
+	var listCols []listColInfo
 	for _, col := range table.Columns {
 		if ct, ok := col.Type.(*typedef.Collection); ok && ct.ComplexType == typedef.TypeList {
-			listCols = append(listCols, col.Name)
+			listCols = append(listCols, listColInfo{
+				name:      col.Name,
+				valueType: ct.ValueType,
+			})
 		}
 	}
 	if len(listCols) == 0 {
 		return
 	}
+
 	for _, row := range rows {
-		for _, name := range listCols {
-			val := row.Get(name)
-			if slice, ok := val.([]any); ok {
-				row.Set(name, deduplicateSlice(slice))
+		for _, lc := range listCols {
+			val := row.Get(lc.name)
+			slice, ok := val.([]any)
+			if !ok || len(slice) <= 1 {
+				continue
+			}
+			deduped := deduplicateByType(slice, lc.valueType)
+			if len(deduped) != len(slice) {
+				row.Set(lc.name, deduped)
+				metrics.ValidationRowsDeduplicated.Add(float64(len(slice) - len(deduped)))
 			}
 		}
 	}
+}
+
+// deduplicateByType removes duplicate elements from a list using type-aware
+// comparison. For types that are directly comparable (int, string, etc.), it
+// uses a typed set with zero string conversion. For complex types it falls
+// back to compareValues-based dedup.
+func deduplicateByType(s []any, vt typedef.SimpleType) []any {
+	switch vt {
+	case typedef.TypeInt:
+		return deduplicateTyped[int32](s)
+	case typedef.TypeBigint:
+		return deduplicateTyped[int64](s)
+	case typedef.TypeSmallint:
+		return deduplicateTyped[int16](s)
+	case typedef.TypeTinyint:
+		return deduplicateTyped[int8](s)
+	case typedef.TypeFloat:
+		return deduplicateTyped[float32](s)
+	case typedef.TypeDouble:
+		return deduplicateTyped[float64](s)
+	case typedef.TypeBoolean:
+		return deduplicateTyped[bool](s)
+	case typedef.TypeText, typedef.TypeAscii, typedef.TypeVarchar:
+		return deduplicateTyped[string](s)
+	case typedef.TypeUuid, typedef.TypeTimeuuid:
+		return deduplicateUUID(s)
+	default:
+		return deduplicateGeneric(s)
+	}
+}
+
+// deduplicateTyped uses a typed map for O(1) lookup without any string conversion.
+func deduplicateTyped[T comparable](s []any) []any {
+	seen := make(map[T]struct{}, len(s))
+	result := s[:0] // reuse backing array
+	for _, v := range s {
+		tv, ok := v.(T)
+		if !ok {
+			result = append(result, v)
+			continue
+		}
+		if _, exists := seen[tv]; exists {
+			continue
+		}
+		seen[tv] = struct{}{}
+		result = append(result, v)
+	}
+	return result
+}
+
+// deduplicateUUID handles gocql.UUID which is [16]byte and comparable.
+func deduplicateUUID(s []any) []any {
+	seen := make(map[gocql.UUID]struct{}, len(s))
+	result := s[:0]
+	for _, v := range s {
+		u, ok := v.(gocql.UUID)
+		if !ok {
+			result = append(result, v)
+			continue
+		}
+		if _, exists := seen[u]; exists {
+			continue
+		}
+		seen[u] = struct{}{}
+		result = append(result, v)
+	}
+	return result
+}
+
+// deduplicateGeneric falls back to compareValues for types that aren't
+// directly map-keyable ([]byte, *big.Int, *inf.Dec, time.Duration, etc.).
+func deduplicateGeneric(s []any) []any {
+	result := s[:0]
+	for _, v := range s {
+		found := false
+		for _, existing := range result {
+			if compareValues(existing, v) == 0 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, v)
+		}
+	}
+	return result
 }
 
 // canonicalValueString returns a stable, pointer-safe string for a value.
