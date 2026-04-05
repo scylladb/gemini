@@ -76,20 +76,10 @@ func (g *Generator) deleteMultiplePartitions(_ context.Context) (*typedef.Stmt, 
 func (g *Generator) deleteSinglePartition(_ context.Context) (*typedef.Stmt, error) {
 	pks := g.generator.ReplaceNext()
 
-	builder := qb.Delete(g.keyspaceAndTable)
-	values := make([]any, 0, g.table.PartitionKeys.LenValues())
-
-	for _, pk := range g.table.PartitionKeys {
-		builder = builder.Where(qb.Eq(pk.Name))
-		values = append(values, pks.Values.Get(pk.Name)...)
-	}
-
-	query, _ := builder.ToCql()
-
 	return &typedef.Stmt{
 		PartitionKeys: []typedef.PartitionKeys{pks},
-		Values:        values,
+		Values:        pks.Values.ToCQLValues(g.table.PartitionKeys),
 		QueryType:     typedef.DeleteWholePartitionType,
-		Query:         query,
+		Query:         g.cachedDeleteQuery,
 	}, nil
 }

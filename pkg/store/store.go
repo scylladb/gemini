@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"time"
 
 	pkgerrors "github.com/pkg/errors"
@@ -33,6 +34,18 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
+
+type rowsTagged struct {
+	err    error
+	rows   Rows
+	oracle bool
+}
+
+var rowsTaggedChPool = sync.Pool{
+	New: func() any {
+		return make(chan rowsTagged, 2)
+	},
+}
 
 type loader interface {
 	load(context.Context, *typedef.Stmt) (Rows, error)
@@ -250,10 +263,9 @@ func (ds delegatingStore) getLogger() *zap.Logger {
 }
 
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef.Stmt) error {
-	ctx = WithContextData(ctx, &ContextData{
-		GeminiAttempt: 0,
-		Statement:     stmt,
-	})
+	cd := AcquireContextData(stmt, 0)
+	ctx = WithContextData(ctx, cd)
+	defer ReleaseContextData(cd)
 
 	ts := mo.None[time.Time]()
 
@@ -299,6 +311,12 @@ type mutationChanRes struct {
 	oracle bool
 }
 
+var mutationChPool = sync.Pool{
+	New: func() any {
+		return make(chan mutationChanRes, 2)
+	},
+}
+
 // executeParallelMutations executes mutations on stores that need to be retried
 func (ds delegatingStore) executeParallelMutations(
 	ctx context.Context,
@@ -310,15 +328,12 @@ func (ds delegatingStore) executeParallelMutations(
 	result := mutationResult{}
 
 	// Update context with attempt number
-	ctxData := &ContextData{
-		GeminiAttempt: attempt,
-		Statement:     stmt,
-		Timestamp:     time.Now().UTC(),
-	}
+	ctxData := AcquireContextData(stmt, attempt)
 	doCtx := WithContextData(ctx, ctxData)
+	defer ReleaseContextData(ctxData)
 
-	// Use a single channel for both mutations
-	ch := make(chan mutationChanRes, 2)
+	// Use a pooled channel for both mutations
+	ch := mutationChPool.Get().(chan mutationChanRes)
 
 	expected := 0
 	if retryTest {
@@ -344,6 +359,7 @@ func (ds delegatingStore) executeParallelMutations(
 
 	// Wait for results
 	ds.waitForMutationResults(doCtx, ch, &result, retryTest, retryOracle, expected)
+	mutationChPool.Put(ch)
 
 	return result
 }
@@ -552,11 +568,9 @@ func (ds delegatingStore) checkOnceInternal(
 	stmt *typedef.Stmt,
 	attempt int,
 ) (int, error) {
-	doCtx := WithContextData(ctx, &ContextData{
-		GeminiAttempt: attempt,
-		Statement:     stmt,
-		Timestamp:     time.Now().UTC(),
-	})
+	cd := AcquireContextData(stmt, attempt)
+	doCtx := WithContextData(ctx, cd)
+	defer ReleaseContextData(cd)
 
 	// If there is no oracle, just count test rows
 	if ds.oracleStore == nil {
@@ -570,14 +584,8 @@ func (ds delegatingStore) checkOnceInternal(
 		return len(testRows), nil
 	}
 
-	// Run iterators in parallel using a single channel (size 2)
-	type rowsTagged struct {
-		err    error
-		rows   Rows
-		oracle bool
-	}
-
-	ch := make(chan rowsTagged, 2)
+	// Run iterators in parallel using a pooled channel (size 2)
+	ch := rowsTaggedChPool.Get().(chan rowsTagged)
 
 	go func() {
 		rows, err := ds.testStore.load(doCtx, stmt)
@@ -608,10 +616,12 @@ func (ds delegatingStore) checkOnceInternal(
 			}
 			received++
 		case <-doCtx.Done():
+			rowsTaggedChPool.Put(ch)
 			metrics.ContextCancellations.WithLabelValues("load", "deadline").Inc()
 			return 0, doCtx.Err()
 		}
 	}
+	rowsTaggedChPool.Put(ch)
 
 	// Extract results
 	testRows, oracleRows := tRes.rows, oRes.rows

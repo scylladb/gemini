@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -38,15 +39,36 @@ type (
 	Rows []Row
 )
 
-// NewRow creates a new Row with the given column names and values
-func NewRow(columnNames []string, values []any) Row {
+// columnIndexCache caches the column-name→index mapping for a given set
+// of columns. Since gocql always returns the same column order for a
+// given query, we build the map once and share it across all rows from
+// the same iterator.
+var columnIndexCache sync.Map // key: joined column names, value: map[string]int
+
+func getColumnIndex(columnNames []string) map[string]int {
+	// Build a cache key from column names. Using a simple join since
+	// column names don't contain null bytes.
+	key := strings.Join(columnNames, "\x00")
+
+	if cached, ok := columnIndexCache.Load(key); ok {
+		return cached.(map[string]int)
+	}
+
 	columns := make(map[string]int, len(columnNames))
 	for i, name := range columnNames {
 		columns[name] = i
 	}
+	columnIndexCache.Store(key, columns)
+	return columns
+}
+
+// NewRow creates a new Row with the given column names and values.
+// The column-name→index map is cached and shared across rows with the
+// same column layout, eliminating per-row map allocation.
+func NewRow(columnNames []string, values []any) Row {
 	return Row{
 		values:  values,
-		columns: columns,
+		columns: getColumnIndex(columnNames),
 	}
 }
 
