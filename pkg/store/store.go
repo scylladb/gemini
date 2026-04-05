@@ -176,7 +176,7 @@ func New(
 		if cfg.OracleStatementFile != "" && cfg.TestStatementFile != "" {
 			logger.Debug("creating statement logger with oracle cluster")
 
-			ch := make(chan stmtlogger.Item, 50_000)
+			ch := make(chan stmtlogger.Item, 131_072)
 
 			statementLogger, err = stmtlogger.NewLogger(
 				stmtlogger.WithChannel(ch),

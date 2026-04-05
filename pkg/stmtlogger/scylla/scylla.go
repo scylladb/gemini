@@ -39,9 +39,9 @@ import (
 )
 
 const (
-	committerBatchSize      = 64
+	committerBatchSize      = 256
 	statementChBuffer       = 1000
-	statementFileBufferSize = 32 * 1024
+	statementFileBufferSize = 64 * 1024
 	statementDirPerm        = 0o755
 	statementFilePerm       = 0o644
 	// Delay before fetching statements for a job error to ensure all statements are persisted and ready

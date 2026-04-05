@@ -173,6 +173,13 @@ var (
 		},
 	)
 
+	StatementLoggerDropped = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "statement_logger_dropped_total",
+			Help: "Total number of statement log items dropped due to full channel.",
+		},
+	)
+
 	StatementLoggerItems = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "statement_logger_items",
@@ -456,6 +463,7 @@ func init() {
 		ValidatedRows,
 		StatementLoggerEnqueuedTotal,
 		StatementLoggerDequeuedTotal,
+		StatementLoggerDropped,
 		StatementLoggerItems,
 		StatementLoggerFlushes,
 		StatementErrorLastTS,

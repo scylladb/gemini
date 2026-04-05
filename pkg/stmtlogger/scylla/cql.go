@@ -425,8 +425,45 @@ func prepareValuesOptimized(values mo.Either[[]any, []byte]) []string {
 	result := make([]string, len(valSlice))
 
 	for i, val := range valSlice {
-		result[i] = fmt.Sprintf("%#v", val)
+		result[i] = formatValueFast(val)
 	}
 
 	return result
+}
+
+// formatValueFast converts a value to string without reflection.
+// Handles the common CQL types directly instead of using fmt.Sprintf("%#v").
+func formatValueFast(val any) string {
+	if val == nil {
+		return "<nil>"
+	}
+	switch v := val.(type) {
+	case string:
+		return `"` + v + `"`
+	case []byte:
+		return "0x" + hex.EncodeToString(v)
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case int:
+		return fmt.Sprint(v)
+	case int8:
+		return fmt.Sprint(v)
+	case int16:
+		return fmt.Sprint(v)
+	case int32:
+		return fmt.Sprint(v)
+	case int64:
+		return fmt.Sprint(v)
+	case float32:
+		return fmt.Sprint(v)
+	case float64:
+		return fmt.Sprint(v)
+	case gocql.UUID:
+		return v.String()
+	default:
+		return fmt.Sprintf("%#v", v)
+	}
 }

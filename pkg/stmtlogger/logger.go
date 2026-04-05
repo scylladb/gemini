@@ -20,6 +20,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/mo"
 
 	"github.com/scylladb/gemini/pkg/metrics"
@@ -28,7 +29,7 @@ import (
 )
 
 const (
-	defaultChanSize = 8192
+	defaultChanSize = 131072 // 128K items — large buffer to avoid blocking query goroutines
 )
 
 const (
@@ -73,10 +74,13 @@ type (
 	}
 
 	Logger struct {
-		closer    io.Closer
-		ch        chan Item
-		done      chan struct{}
-		closeOnce sync.Once
+		closer       io.Closer
+		ch           chan Item
+		done         chan struct{}
+		closeOnce    sync.Once
+		itemsMetric  prometheus.Gauge
+		enqueueTotal prometheus.Counter
+		dropTotal    prometheus.Counter
 	}
 
 	options struct {
@@ -120,9 +124,12 @@ func NewLogger(opts ...Option) (*Logger, error) {
 	}
 
 	l := &Logger{
-		closer: o.innerLogger,
-		ch:     o.channel,
-		done:   make(chan struct{}),
+		closer:       o.innerLogger,
+		ch:           o.channel,
+		done:         make(chan struct{}),
+		itemsMetric:  metrics.StatementLoggerItems,
+		enqueueTotal: metrics.StatementLoggerEnqueuedTotal,
+		dropTotal:    metrics.StatementLoggerDropped,
 	}
 
 	return l, nil
@@ -142,17 +149,15 @@ func (l *Logger) LogStmt(item Item) error {
 
 	select {
 	case <-l.done:
-		// Logger already closed — discard quietly.
 		return nil
 	default:
 	}
 
 	// Block until the item is accepted or the logger is closed.
-	// No mutex is held here, so Close() is never starved.
 	select {
 	case l.ch <- item:
-		metrics.StatementLoggerItems.Inc()
-		metrics.StatementLoggerEnqueuedTotal.Inc()
+		l.itemsMetric.Inc()
+		l.enqueueTotal.Inc()
 	case <-l.done:
 		// Logger closed while we were waiting — discard.
 	}
