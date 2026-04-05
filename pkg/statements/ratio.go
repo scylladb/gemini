@@ -19,6 +19,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
@@ -151,7 +152,30 @@ func NewRatioController(ratios Ratios, random utils.Random) (*RatioController, e
 	}
 
 	controller.buildCDFs(ratios)
+	controller.publishConfiguredRatios(ratios)
 	return controller, nil
+}
+
+// publishConfiguredRatios exports the configured ratios as Prometheus gauges so they
+// are visible in dashboards alongside the actual observed ratios.
+func (c *RatioController) publishConfiguredRatios(ratios Ratios) {
+	m := ratios.MutationRatios
+	metrics.StatementRatioConfigured.WithLabelValues("mutation", "insert").Set(m.InsertRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("mutation", "update").Set(m.UpdateRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("mutation", "delete").Set(m.DeleteRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("mutation_insert", "regular").Set(m.InsertSubtypeRatios.RegularInsertRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("mutation_insert", "json").Set(m.InsertSubtypeRatios.JSONInsertRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("mutation_delete", "whole_partition").Set(m.DeleteSubtypeRatios.WholePartitionRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("mutation_delete", "single_row").Set(m.DeleteSubtypeRatios.SingleRowRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("mutation_delete", "single_column").Set(m.DeleteSubtypeRatios.SingleColumnRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("mutation_delete", "multiple_partitions").Set(m.DeleteSubtypeRatios.MultiplePartitionsRatio)
+
+	s := ratios.ValidationRatios.SelectSubtypeRatios
+	metrics.StatementRatioConfigured.WithLabelValues("select", "single_partition").Set(s.SinglePartitionRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("select", "multiple_partition").Set(s.MultiplePartitionRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("select", "clustering_range").Set(s.ClusteringRangeRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("select", "multi_partition_clustering_range").Set(s.MultiplePartitionClusteringRangeRatio)
+	metrics.StatementRatioConfigured.WithLabelValues("select", "single_index").Set(s.SingleIndexRatio)
 }
 
 // validate checks if the ratios are valid (sum to 1.0 with some tolerance)

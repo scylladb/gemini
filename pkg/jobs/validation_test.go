@@ -45,6 +45,10 @@ func (m *mockStore) Check(ctx context.Context, table *typedef.Table, stmt *typed
 	return 0, nil
 }
 
+func (m *mockStore) CheckOnce(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, attempt int) (int, error) {
+	return m.Check(ctx, table, stmt, attempt)
+}
+
 func (m *mockStore) Close() error {
 	return nil
 }

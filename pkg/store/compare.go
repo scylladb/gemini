@@ -25,6 +25,7 @@ import (
 	"github.com/gocql/gocql"
 	"go.uber.org/multierr"
 
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -37,8 +38,12 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 		return result
 	}
 
+	origTestLen, origOracleLen := len(testRows), len(oracleRows)
 	testRows = deduplicateRows(table, testRows)
 	oracleRows = deduplicateRows(table, oracleRows)
+	if deduped := (origTestLen - len(testRows)) + (origOracleLen - len(oracleRows)); deduped > 0 {
+		metrics.ValidationRowsDeduplicated.Add(float64(deduped))
+	}
 
 	deduplicateListValues(table, testRows)
 	deduplicateListValues(table, oracleRows)
@@ -68,6 +73,7 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 
 	// Fast-path: if rows are deeply equal after sort, all match.
 	if reflect.DeepEqual(testRows, oracleRows) {
+		metrics.ValidationRowsMatched.Add(float64(len(testRows)))
 		return ComparisonResult{Table: table, MatchCount: len(testRows)}
 	}
 
@@ -98,6 +104,8 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 			}
 		}
 
+		metrics.ValidationRowsMissingInTest.Add(float64(len(result.OracleOnlyRows)))
+		metrics.ValidationRowsMissingInOracle.Add(float64(len(result.TestOnlyRows)))
 		return result
 	}
 
@@ -115,6 +123,9 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 			result.MatchCount++
 		}
 	}
+
+	metrics.ValidationRowsMatched.Add(float64(result.MatchCount))
+	metrics.ValidationRowsDifferent.Add(float64(len(result.DifferentRows)))
 
 	return result
 }

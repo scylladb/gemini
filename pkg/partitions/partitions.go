@@ -25,6 +25,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/scylladb/gemini/pkg/distributions"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/random"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
@@ -401,6 +402,7 @@ func (p *Partitions) Extend() typedef.PartitionKeys {
 
 	p.parts.count.Add(1)
 	p.parts.created.Add(1)
+	metrics.PartitionsExtended.Inc()
 
 	return p.valuesCopy(newIdx)
 }
@@ -446,6 +448,7 @@ func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
 	if p.deleted != nil {
 		p.deleted.Delete(oldKeys)
 	}
+	metrics.PartitionsReplaced.Inc()
 	return oldKeys
 }
 
@@ -585,6 +588,7 @@ func (p *Partitions) MarkInvalid(keys *typedef.PartitionKeys) bool {
 		return false
 	}
 
+	metrics.PartitionsInvalid.Set(float64(p.invalidCount.Load()))
 	return true
 }
 
