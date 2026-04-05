@@ -37,9 +37,6 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 		return result
 	}
 
-	testRows = deduplicateRows(table, testRows)
-	oracleRows = deduplicateRows(table, oracleRows)
-
 	deduplicateListValues(table, testRows)
 	deduplicateListValues(table, oracleRows)
 
@@ -143,30 +140,6 @@ func buildRowMap(table *typedef.Table, rows Rows) map[string]Row {
 	}
 
 	return result
-}
-
-// deduplicateRows removes duplicate rows with the same primary key, keeping the last occurrence.
-// This handles eventual consistency scenarios where the same row might be returned multiple times.
-func deduplicateRows(table *typedef.Table, rows Rows) Rows {
-	if len(rows) <= 1 {
-		return rows
-	}
-
-	// Build a map of composite keys to rows (last occurrence wins)
-	rowMap := buildRowMap(table, rows)
-
-	// If no duplicates were found, return original rows
-	if len(rowMap) == len(rows) {
-		return rows
-	}
-
-	// Rebuild the rows slice from the map
-	deduplicated := make(Rows, 0, len(rowMap))
-	for _, row := range rowMap {
-		deduplicated = append(deduplicated, row)
-	}
-
-	return deduplicated
 }
 
 // ToError converts ComparisonResult to an error if there are differences

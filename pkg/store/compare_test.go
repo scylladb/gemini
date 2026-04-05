@@ -68,28 +68,6 @@ func TestCompareCollectedRows_MultiPKMultiCK_SortingAndDiff(t *testing.T) {
 	assert.Equal(t, 2, diff.TestRow.Get("ck2"))
 }
 
-func TestCompareCollectedRows_Deduplicate_LastWins(t *testing.T) {
-	t.Parallel()
-
-	table := &typedef.Table{
-		PartitionKeys:  []typedef.ColumnDef{{Name: "pk", Type: typedef.TypeText}},
-		ClusteringKeys: []typedef.ColumnDef{{Name: "ck", Type: typedef.TypeInt}},
-	}
-
-	// Duplicate key on test side: last occurrence should win and match oracle
-	t1 := makeRow([]string{"pk", "ck", "v"}, []any{"X", 1, "old"})
-	t2 := makeRow([]string{"v", "ck", "pk"}, []any{"new", 1, "X"}) // same key, updated value
-	t3 := makeRow([]string{"pk", "ck", "v"}, []any{"Y", 2, "same"})
-
-	o1 := makeRow([]string{"pk", "ck", "v"}, []any{"X", 1, "new"})
-	o2 := makeRow([]string{"pk", "ck", "v"}, []any{"Y", 2, "same"})
-
-	res := CompareCollectedRows(table, Rows{t1, t2, t3}, Rows{o1, o2})
-
-	assert.Empty(t, res.DifferentRows)
-	assert.Equal(t, 2, res.MatchCount)
-	assert.NoError(t, res.ToError())
-}
 
 func TestRowKeyString_CompositeFormatting(t *testing.T) {
 	t.Parallel()
