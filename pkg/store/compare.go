@@ -317,45 +317,30 @@ func canonicalizeRow(row Row) map[string]string {
 	return out
 }
 
-// listColInfo holds pre-computed list column info to avoid repeated type assertions.
-type listColInfo struct {
-	name      string
-	valueType typedef.SimpleType
-}
-
 // deduplicateListValues deduplicates values in CQL list columns in-place.
 // This works around a Scylla issue where insert retries can cause list columns
-// to accumulate duplicate values. Uses type-aware comparison based on the
-// list's ValueType to avoid string conversion overhead.
+// to accumulate duplicate values. Uses cached list column info from the table
+// and type-aware comparison based on the list's ValueType.
 func deduplicateListValues(table *typedef.Table, rows Rows) {
 	if table == nil || len(rows) == 0 {
 		return
 	}
 
-	// Pre-compute list column info once.
-	var listCols []listColInfo
-	for _, col := range table.Columns {
-		if ct, ok := col.Type.(*typedef.Collection); ok && ct.ComplexType == typedef.TypeList {
-			listCols = append(listCols, listColInfo{
-				name:      col.Name,
-				valueType: ct.ValueType,
-			})
-		}
-	}
+	listCols := table.ListColumns()
 	if len(listCols) == 0 {
 		return
 	}
 
 	for _, row := range rows {
-		for _, lc := range listCols {
-			val := row.Get(lc.name)
+		for i := range listCols {
+			val := row.Get(listCols[i].Name)
 			slice, ok := val.([]any)
 			if !ok || len(slice) <= 1 {
 				continue
 			}
-			deduped := deduplicateByType(slice, lc.valueType)
+			deduped := deduplicateByType(slice, listCols[i].ValueType)
 			if len(deduped) != len(slice) {
-				row.Set(lc.name, deduped)
+				row.Set(listCols[i].Name, deduped)
 				metrics.ValidationRowsDeduplicated.Add(float64(len(slice) - len(deduped)))
 			}
 		}
