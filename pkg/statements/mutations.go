@@ -17,7 +17,6 @@ package statements
 import (
 	"context"
 
-	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -33,28 +32,28 @@ func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) (*
 
 	switch g.ratioController.GetMutationStatementType(filterDeletes...) {
 	case StatementTypeInsert:
-		metrics.StatementsGenerated.WithLabelValues("intended", "insert").Inc()
+		g.metricIntendedInsert.Inc()
 		if g.table.IsCounterTable() {
-			metrics.StatementsGenerated.WithLabelValues("mutation", "counter_update").Inc()
+			g.metricMutCounterUpd.Inc()
 			return g.Update(ctx)
 		}
 
 		if g.ratioController.GetInsertSubtype() == InsertJSONStatement {
 			if g.table.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
-				metrics.StatementsGenerated.WithLabelValues("mutation", "insert").Inc()
+				g.metricMutInsert.Inc()
 				return g.Insert(ctx)
 			}
 
-			metrics.StatementsGenerated.WithLabelValues("mutation", "insert_json").Inc()
+			g.metricMutInsertJSON.Inc()
 			return g.InsertJSON(ctx)
 		}
 
-		metrics.StatementsGenerated.WithLabelValues("mutation", "insert").Inc()
+		g.metricMutInsert.Inc()
 		return g.Insert(ctx)
 	case StatementTypeUpdate:
-		metrics.StatementsGenerated.WithLabelValues("intended", "update").Inc()
+		g.metricIntendedUpdate.Inc()
 		if g.table.IsCounterTable() {
-			metrics.StatementsGenerated.WithLabelValues("mutation", "counter_update").Inc()
+			g.metricMutCounterUpd.Inc()
 			return g.Update(ctx)
 		}
 
@@ -62,15 +61,15 @@ func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) (*
 		//       Falling back to Insert for now, until everything else is stable
 
 		if g.ratioController.GetInsertSubtype() == InsertJSONStatement {
-			metrics.StatementsGenerated.WithLabelValues("mutation", "insert_json").Inc()
+			g.metricMutInsertJSON.Inc()
 			return g.InsertJSON(ctx)
 		}
 
-		metrics.StatementsGenerated.WithLabelValues("mutation", "insert").Inc()
+		g.metricMutInsert.Inc()
 		return g.Insert(ctx)
 	case StatementTypeDelete:
-		metrics.StatementsGenerated.WithLabelValues("intended", "delete").Inc()
-		metrics.StatementsGenerated.WithLabelValues("mutation", "delete").Inc()
+		g.metricIntendedDelete.Inc()
+		g.metricMutDelete.Inc()
 		return g.Delete(ctx)
 	default:
 		panic("Invalid mutation statement type")

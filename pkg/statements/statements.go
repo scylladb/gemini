@@ -17,8 +17,10 @@ package statements
 import (
 	"math"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/scylladb/gocqlx/v3/qb"
 
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/partitions"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
@@ -64,13 +66,24 @@ type Generator struct {
 	keyspaceAndTable string
 	selectColumns    []string
 	// Cached query strings — same table schema always produces the same CQL.
-	cachedInsertQuery              string
-	cachedInsertJSONQuery          string
-	cachedSelectQuery              string
-	cachedDeleteQuery              string
-	cachedMultiPartitionSelect     map[int]string // numQueryPKs → query
-	cachedMultiPartitionDelete     map[int]string // numQueryPKs → query
-	useLWT                         bool
+	cachedInsertQuery          string
+	cachedInsertJSONQuery      string
+	cachedSelectQuery          string
+	cachedDeleteQuery          string
+	cachedMultiPartitionSelect map[int]string // numQueryPKs → query
+	cachedMultiPartitionDelete map[int]string // numQueryPKs → query
+	// Pre-resolved Prometheus counters to avoid WithLabelValues() map lookups.
+	metricMutInsert       prometheus.Counter
+	metricMutInsertJSON   prometheus.Counter
+	metricMutDelete       prometheus.Counter
+	metricMutCounterUpd   prometheus.Counter
+	metricIntendedInsert  prometheus.Counter
+	metricIntendedUpdate  prometheus.Counter
+	metricIntendedDelete  prometheus.Counter
+	metricSelSingle       prometheus.Counter
+	metricSelMulti        prometheus.Counter
+	metricSelIndex        prometheus.Counter
+	useLWT               bool
 }
 
 func New(
@@ -94,6 +107,19 @@ func New(
 		selectColumns:    table.SelectColumnNames(),
 	}
 	g.buildCachedQueries()
+
+	// Pre-resolve Prometheus counters to avoid per-call WithLabelValues() lookups.
+	g.metricMutInsert = metrics.StatementsGenerated.WithLabelValues("mutation", "insert")
+	g.metricMutInsertJSON = metrics.StatementsGenerated.WithLabelValues("mutation", "insert_json")
+	g.metricMutDelete = metrics.StatementsGenerated.WithLabelValues("mutation", "delete")
+	g.metricMutCounterUpd = metrics.StatementsGenerated.WithLabelValues("mutation", "counter_update")
+	g.metricIntendedInsert = metrics.StatementsGenerated.WithLabelValues("intended", "insert")
+	g.metricIntendedUpdate = metrics.StatementsGenerated.WithLabelValues("intended", "update")
+	g.metricIntendedDelete = metrics.StatementsGenerated.WithLabelValues("intended", "delete")
+	g.metricSelSingle = metrics.StatementsGenerated.WithLabelValues("select", "single_partition")
+	g.metricSelMulti = metrics.StatementsGenerated.WithLabelValues("select", "multi_partition")
+	g.metricSelIndex = metrics.StatementsGenerated.WithLabelValues("select", "index")
+
 	return g
 }
 

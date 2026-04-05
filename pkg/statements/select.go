@@ -21,31 +21,30 @@ import (
 
 	"github.com/scylladb/gocqlx/v3/qb"
 
-	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 func (g *Generator) Select(ctx context.Context) (*typedef.Stmt, error) {
 	switch n := g.ratioController.GetSelectSubtype(); n {
 	case SelectSinglePartitionQuery:
-		metrics.StatementsGenerated.WithLabelValues("select", "single_partition").Inc()
+		g.metricSelSingle.Inc()
 		return g.genSelectSinglePartitionQuery(ctx)
 	case SelectMultiplePartitionQuery:
-		metrics.StatementsGenerated.WithLabelValues("select", "multi_partition").Inc()
+		g.metricSelMulti.Inc()
 		return g.genSelectMultiplePartitionQuery(ctx)
 	case SelectClusteringRangeQuery:
-		metrics.StatementsGenerated.WithLabelValues("select", "single_partition").Inc()
+		g.metricSelSingle.Inc()
 		return g.genSelectSinglePartitionQuery(ctx)
 	case SelectMultiplePartitionClusteringRangeQuery:
-		metrics.StatementsGenerated.WithLabelValues("select", "multi_partition").Inc()
+		g.metricSelMulti.Inc()
 		return g.genSelectMultiplePartitionQuery(ctx)
 	case SelectSingleIndexQuery:
 		if len(g.table.Indexes) == 0 {
-			metrics.StatementsGenerated.WithLabelValues("select", "single_partition").Inc()
+			g.metricSelSingle.Inc()
 			return g.genSelectSinglePartitionQuery(ctx)
 		}
 
-		metrics.StatementsGenerated.WithLabelValues("select", "index").Inc()
+		g.metricSelIndex.Inc()
 		return g.genSingleIndexQuery(), nil
 	default:
 		panic(fmt.Sprintf("unexpected case in GenCheckStmt, random value: %d", n))

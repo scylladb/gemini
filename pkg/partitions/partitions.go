@@ -214,16 +214,17 @@ func (p *Partitions) buildPartitionKeys(part *Partition) typedef.PartitionKeys {
 
 	part.refCount.Add(1)
 	id := d.id
-	var once sync.Once
+	// Use an atomic flag instead of sync.Once to avoid per-call allocation.
+	var released atomic.Int32
 	return typedef.PartitionKeys{
 		Values: typedef.NewValuesFromMap(out),
 		ID:     id,
 		Release: func() {
-			once.Do(func() {
+			if released.CompareAndSwap(0, 1) {
 				if part.refCount.Add(-1) == 0 {
 					p.deleteValidation(id)
 				}
-			})
+			}
 		},
 	}
 }
