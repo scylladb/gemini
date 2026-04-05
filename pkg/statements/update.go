@@ -22,20 +22,18 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
+// Update generates a counter-table UPDATE statement. Only used when
+// IsCounterTable() is true — regular updates fall through to Insert().
 func (g *Generator) Update(_ context.Context) (*typedef.Stmt, error) {
 	builder := qb.Update(g.keyspaceAndTable)
-	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
+	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues())
 
 	for _, col := range g.table.Columns {
-		switch ty := col.Type.(type) {
-		case *typedef.TupleType:
-			builder.SetTuple(col.Name, len(ty.ValueTypes))
-			values = append(values, col.Type.GenValue(g.random, g.valueRangeConfig)...)
+		switch col.Type.(type) {
 		case *typedef.CounterType:
 			builder.SetLit(col.Name, col.Name+"+1")
 		default:
-			builder.Set(col.Name)
-			values = append(values, col.Type.GenValue(g.random, g.valueRangeConfig)...)
+			// non-counter columns in counter tables are part of the key
 		}
 	}
 
@@ -47,7 +45,7 @@ func (g *Generator) Update(_ context.Context) (*typedef.Stmt, error) {
 
 	for _, ck := range g.table.ClusteringKeys {
 		builder.Where(qb.Eq(ck.Name))
-		values = append(values, ck.Type.GenValue(g.random, g.valueRangeConfig)...)
+		values = ck.Type.GenValueOut(values, g.random, g.valueRangeConfig)
 	}
 
 	query, _ := builder.ToCql()

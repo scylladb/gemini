@@ -40,6 +40,16 @@ type Table struct {
 	KnownIssues       KnownIssues        `json:"known_issues"`
 	TableOptions      []string           `json:"table_options,omitempty"`
 
+	// Cached computed values — set once by Init(), never change.
+	PartitionKeysLenValues  int `json:"-"`
+	ClusteringKeysLenValues int `json:"-"`
+	ColumnsLenValues        int `json:"-"`
+	TotalLenValues          int `json:"-"` // sum of all three
+
+	// SortKeyNames is the ordered list of column names used for row sorting:
+	// partition keys first, then clustering keys. Cached by Init().
+	SortKeyNames []string `json:"-"`
+
 	// mu protects the table during schema changes
 	mu sync.RWMutex
 }
@@ -110,6 +120,18 @@ func (t *Table) SupportsChanges() bool {
 func (t *Table) Init(s *Schema) {
 	t.schema = s
 	t.buildListColCache()
+	t.PartitionKeysLenValues = t.PartitionKeys.LenValues()
+	t.ClusteringKeysLenValues = t.ClusteringKeys.LenValues()
+	t.ColumnsLenValues = t.Columns.LenValues()
+	t.TotalLenValues = t.PartitionKeysLenValues + t.ClusteringKeysLenValues + t.ColumnsLenValues
+
+	t.SortKeyNames = make([]string, 0, len(t.PartitionKeys)+len(t.ClusteringKeys))
+	for _, pk := range t.PartitionKeys {
+		t.SortKeyNames = append(t.SortKeyNames, pk.Name)
+	}
+	for _, ck := range t.ClusteringKeys {
+		t.SortKeyNames = append(t.SortKeyNames, ck.Name)
+	}
 }
 
 // buildListColCache scans columns once and caches list column metadata.

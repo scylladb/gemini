@@ -32,7 +32,7 @@ import (
 )
 
 func (g *Generator) Insert(_ context.Context) (*typedef.Stmt, error) {
-	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
+	values := make([]any, 0, g.table.TotalLenValues)
 
 	pks := g.generator.Next()
 
@@ -83,7 +83,7 @@ func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 	}
 
 	pks := g.generator.Next()
-	values := make(map[string]any, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
+	values := make(map[string]any, g.table.TotalLenValues)
 
 	for _, pk := range g.table.PartitionKeys {
 		switch t := pk.Type.(type) {
@@ -108,10 +108,9 @@ func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 		return nil, err
 	}
 
-	query, _ := qb.Insert(g.keyspaceAndTable).Json().ToCql()
 	return &typedef.Stmt{
 		PartitionKeys: []typedef.PartitionKeys{pks},
-		Query:         query,
+		Query:         g.cachedInsertJSONQuery,
 		QueryType:     typedef.InsertJSONStatementType,
 		Values:        []any{utils.UnsafeString(jsonString)},
 	}, nil

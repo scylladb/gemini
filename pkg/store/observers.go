@@ -83,6 +83,7 @@ type ClusterObserver struct {
 	goCQLQueries      *observer[prometheus.Counter]
 	goCQLQueryTime    *observer[prometheus.Observer]
 	goCQLConnections  *observer[prometheus.Gauge]
+	hostStrings       sync.Map // *gocql.HostInfo → "host:port" string cache
 	clusterName       stmtlogger.Type
 }
 
@@ -124,6 +125,17 @@ func NewClusterObserver(
 	}
 
 	return c
+}
+
+// hostPort returns a cached "host:port" string for the given host info,
+// avoiding per-call net.JoinHostPort + strconv.Itoa allocations.
+func (c *ClusterObserver) hostPort(host *gocql.HostInfo) string {
+	if v, ok := c.hostStrings.Load(host); ok {
+		return v.(string)
+	}
+	s := net.JoinHostPort(host.ConnectAddress().String(), strconv.Itoa(host.Port()))
+	c.hostStrings.Store(host, s)
+	return s
 }
 
 func (c *ClusterObserver) incGoCQLQueryError(instance string, err error) {
@@ -195,7 +207,7 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 	if data == nil {
 		return
 	}
-	instance := net.JoinHostPort(batch.Host.ConnectAddress().String(), strconv.Itoa(batch.Host.Port()))
+	instance := c.hostPort(batch.Host)
 
 	var errStr string
 
@@ -251,7 +263,7 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 		return
 	}
 
-	instance := net.JoinHostPort(query.Host.ConnectAddress().String(), strconv.Itoa(query.Host.Port()))
+	instance := c.hostPort(query.Host)
 	cluster := string(c.clusterName)
 
 	var errStr string
