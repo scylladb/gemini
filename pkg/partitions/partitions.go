@@ -172,10 +172,6 @@ func (p *Partitions) partition(idx uint64) *Partition {
 	return slots[idx]
 }
 
-func (p *Partitions) valuesNoLock(part *Partition) typedef.PartitionKeys {
-	return p.buildKeysFromData(part, part.loadData())
-}
-
 // buildKeysFromData creates PartitionKeys from a specific data snapshot.
 // Used by Replace() to capture old values before the atomic swap.
 func (p *Partitions) buildKeysFromData(part *Partition, d *partitionData) typedef.PartitionKeys {

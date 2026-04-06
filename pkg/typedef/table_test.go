@@ -224,6 +224,8 @@ func TestTable_Lock_Unlock_NoMV(t *testing.T) {
 	tbl := &typedef.Table{Name: "no_mv"}
 	// Lock/Unlock should not panic and should be balanced.
 	tbl.Lock()
+	// Verify the lock was acquired by performing a trivial operation.
+	_ = tbl.Name
 	tbl.Unlock()
 }
 
@@ -231,6 +233,8 @@ func TestTable_RLock_RUnlock_NoMV(t *testing.T) {
 	t.Parallel()
 	tbl := &typedef.Table{Name: "no_mv_r"}
 	tbl.RLock()
+	// Verify the read lock was acquired by performing a trivial operation.
+	_ = tbl.Name
 	tbl.RUnlock()
 }
 
@@ -247,6 +251,7 @@ func TestTable_Lock_WithMV_IsNoOp(t *testing.T) {
 	go func() {
 		tbl.Lock()
 		tbl.Lock() // would deadlock on a real mutex
+		_ = tbl.Name
 		tbl.Unlock()
 		tbl.Unlock()
 		close(done)

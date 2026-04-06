@@ -351,8 +351,8 @@ func TestErrorList_MarshalJSON(t *testing.T) {
 
 	// Must be a valid JSON array
 	var parsed []map[string]any
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		t.Fatalf("MarshalJSON() produced invalid JSON: %v\ndata: %s", err, data)
+	if unmarshalErr := json.Unmarshal(data, &parsed); unmarshalErr != nil {
+		t.Fatalf("MarshalJSON() produced invalid JSON: %v\ndata: %s", unmarshalErr, data)
 	}
 	if len(parsed) != 1 {
 		t.Errorf("MarshalJSON() encoded %d errors; want 1", len(parsed))
@@ -369,7 +369,7 @@ func TestErrorList_MarshalJSON_Empty(t *testing.T) {
 	}
 	// An empty list marshals to "[]" or "null"
 	var parsed []any
-	if err := json.Unmarshal(data, &parsed); err != nil {
+	if unmarshalErr := json.Unmarshal(data, &parsed); unmarshalErr != nil {
 		t.Fatalf("MarshalJSON() on empty list produced invalid JSON: %s", data)
 	}
 }
@@ -395,7 +395,7 @@ func TestErrorList_GetChannel(t *testing.T) {
 	select {
 	case jerr := <-ch:
 		if jerr == nil {
-			t.Error("received nil from channel; want a *JobError")
+			t.Fatal("received nil from channel; want a *JobError")
 		}
 		if jerr.Message != "channel test" {
 			t.Errorf("received message %q; want %q", jerr.Message, "channel test")

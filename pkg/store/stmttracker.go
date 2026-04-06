@@ -30,10 +30,10 @@ const stmtTrackerShards = 64
 // for minimal contention under high concurrency. It only stores hashes,
 // not full query strings, to keep memory usage constant.
 type stmtTracker struct {
-	shards       [stmtTrackerShards]stmtShard
 	uniqueGauge  prometheus.Gauge
 	ratioGauge   prometheus.Gauge
 	newStmtCount prometheus.Counter
+	shards       [stmtTrackerShards]stmtShard
 	seed         maphash.Seed
 	uniqueCount  atomic.Int64
 	maxPrepared  int
