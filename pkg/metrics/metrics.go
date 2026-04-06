@@ -195,6 +195,13 @@ var (
 		[]string{"job"},
 	)
 
+	ValidationRowsDeduplicated = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "validation_rows_deduplicated_total",
+			Help: "Total number of list column values removed during deduplication.",
+		},
+	)
+
 	mutexWaitSeconds = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "go_sync_mutex_wait_total_seconds",
@@ -229,6 +236,7 @@ func init() {
 		StatementLoggerFlushes,
 		StatementErrorLastTS,
 		WorkersCurrent,
+		ValidationRowsDeduplicated,
 	)
 
 	r.MustRegister(
