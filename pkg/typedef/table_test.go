@@ -108,8 +108,8 @@ func TestTable_SupportsChanges(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name string
 		tbl  *typedef.Table
+		name string
 		want bool
 	}{
 		{

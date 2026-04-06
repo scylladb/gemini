@@ -93,12 +93,12 @@ type (
 		table         *typedef.Table
 		idxFunc       distributions.DistributionFunc
 		deleted       *deletedPartitions
-		validationMap sync.Map // uuid.UUID → *typedef.ValidationData
-		uuidToIdx     sync.Map // uuid.UUID → uint64
-		invalidByIdx  sync.Map // uint64 → struct{}
+		validationMap sync.Map
+		uuidToIdx     sync.Map
+		invalidByIdx  sync.Map
 		r             random.GoRoutineSafeRandom
-		config        typedef.PartitionRangeConfig
 		parts         partitions
+		config        typedef.PartitionRangeConfig
 		invalidCount  atomic.Uint64
 		maxInvalid    uint64
 	}

@@ -28,30 +28,23 @@ type ListColInfo struct {
 }
 
 type Table struct {
-	schema            *Schema
-	listCols          []ListColInfo      // cached list column info, built by Init
-	listColsOnce      sync.Once          // ensures buildListColCache is called exactly once
-	Name              string             `json:"name"`
-	PartitionKeys     Columns            `json:"partition_keys"`
-	ClusteringKeys    Columns            `json:"clustering_keys"`
-	Columns           Columns            `json:"columns"`
-	Indexes           []IndexDef         `json:"indexes,omitempty"`
-	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
-	KnownIssues       KnownIssues        `json:"known_issues"`
-	TableOptions      []string           `json:"table_options,omitempty"`
-
-	// Cached computed values — set once by Init(), never change.
+	schema                  *Schema
+	Name                    string             `json:"name"`
+	PartitionKeys           Columns            `json:"partition_keys"`
+	ClusteringKeys          Columns            `json:"clustering_keys"`
+	Columns                 Columns            `json:"columns"`
+	Indexes                 []IndexDef         `json:"indexes,omitempty"`
+	MaterializedViews       []MaterializedView `json:"materialized_views,omitempty"`
+	KnownIssues             KnownIssues        `json:"known_issues"`
+	TableOptions            []string           `json:"table_options,omitempty"`
+	SortKeyNames            []string           `json:"-"`
+	listCols                []ListColInfo
 	PartitionKeysLenValues  int `json:"-"`
 	ClusteringKeysLenValues int `json:"-"`
 	ColumnsLenValues        int `json:"-"`
-	TotalLenValues          int `json:"-"` // sum of all three
-
-	// SortKeyNames is the ordered list of column names used for row sorting:
-	// partition keys first, then clustering keys. Cached by Init().
-	SortKeyNames []string `json:"-"`
-
-	// mu protects the table during schema changes
-	mu sync.RWMutex
+	TotalLenValues          int `json:"-"`
+	mu                      sync.RWMutex
+	listColsOnce            sync.Once
 }
 
 func (t *Table) SelectColumnNames() []string {

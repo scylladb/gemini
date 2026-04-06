@@ -29,34 +29,34 @@ func TestStatementType_String(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		st   typedef.StatementType
 		want string
+		st   typedef.StatementType
 	}{
-		{typedef.SelectStatementType, "SelectStatement"},
-		{typedef.SelectRangeStatementType, "SelectRangeStatement"},
-		{typedef.SelectMultiPartitionType, "SelectMultiPartitionType"},
-		{typedef.SelectMultiPartitionRangeStatementType, "SelectMultiPartitionRangeStatementType"},
-		{typedef.SelectByIndexStatementType, "SelectByIndexStatement"},
-		{typedef.SelectFromMaterializedViewStatementType, "SelectFromMaterializedViewStatement"},
-		{typedef.DeleteSingleRowType, "DeleteSingleRow"},
-		{typedef.DeleteSingleColumnType, "DeleteSingleColumn"},
-		{typedef.DeleteMultiplePartitionsType, "DeleteMultiplePartitions"},
-		{typedef.DeleteWholePartitionType, "DeleteWholePartition"},
-		{typedef.InsertStatementType, "InsertStatement"},
-		{typedef.InsertJSONStatementType, "InsertJSONStatement"},
-		{typedef.UpdateStatementType, "UpdateStatement"},
-		{typedef.AlterColumnStatementType, "AlterColumnStatement"},
-		{typedef.DropColumnStatementType, "DropColumnStatement"},
-		{typedef.AddColumnStatementType, "AddColumnStatement"},
-		{typedef.DropKeyspaceStatementType, "DropKeyspaceStatement"},
-		{typedef.CreateKeyspaceStatementType, "CreateKeyspaceStatement"},
-		{typedef.CreateSchemaStatementType, "CreateSchemaStatement"},
-		{typedef.CreateIndexStatementType, "CreateIndexStatement"},
-		{typedef.DropIndexStatementType, "DropIndexStatement"},
-		{typedef.CreateTypeStatementType, "CreateTypeStatement"},
-		{typedef.DropTypeStatementType, "DropTypeStatement"},
-		{typedef.CreateTableStatementType, "CreateTableStatement"},
-		{typedef.DropTableStatementType, "DropTableStatement"},
+		{"SelectStatement", typedef.SelectStatementType},
+		{"SelectRangeStatement", typedef.SelectRangeStatementType},
+		{"SelectMultiPartitionType", typedef.SelectMultiPartitionType},
+		{"SelectMultiPartitionRangeStatementType", typedef.SelectMultiPartitionRangeStatementType},
+		{"SelectByIndexStatement", typedef.SelectByIndexStatementType},
+		{"SelectFromMaterializedViewStatement", typedef.SelectFromMaterializedViewStatementType},
+		{"DeleteSingleRow", typedef.DeleteSingleRowType},
+		{"DeleteSingleColumn", typedef.DeleteSingleColumnType},
+		{"DeleteMultiplePartitions", typedef.DeleteMultiplePartitionsType},
+		{"DeleteWholePartition", typedef.DeleteWholePartitionType},
+		{"InsertStatement", typedef.InsertStatementType},
+		{"InsertJSONStatement", typedef.InsertJSONStatementType},
+		{"UpdateStatement", typedef.UpdateStatementType},
+		{"AlterColumnStatement", typedef.AlterColumnStatementType},
+		{"DropColumnStatement", typedef.DropColumnStatementType},
+		{"AddColumnStatement", typedef.AddColumnStatementType},
+		{"DropKeyspaceStatement", typedef.DropKeyspaceStatementType},
+		{"CreateKeyspaceStatement", typedef.CreateKeyspaceStatementType},
+		{"CreateSchemaStatement", typedef.CreateSchemaStatementType},
+		{"CreateIndexStatement", typedef.CreateIndexStatementType},
+		{"DropIndexStatement", typedef.DropIndexStatementType},
+		{"CreateTypeStatement", typedef.CreateTypeStatementType},
+		{"DropTypeStatement", typedef.DropTypeStatementType},
+		{"CreateTableStatement", typedef.CreateTableStatementType},
+		{"DropTableStatement", typedef.DropTableStatementType},
 	}
 
 	for _, tc := range cases {
@@ -249,16 +249,16 @@ func TestOpType_String(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		op   typedef.OpType
 		want string
+		op   typedef.OpType
 	}{
-		{typedef.OpSelect, "Select"},
-		{typedef.OpInsert, "Insert"},
-		{typedef.OpUpdate, "Update"},
-		{typedef.OpDelete, "Delete"},
-		{typedef.OpSchemaAlter, "SchemaAlter"},
-		{typedef.OpSchemaDrop, "SchemaDrop"},
-		{typedef.OpSchemaCreate, "SchemaCreate"},
+		{"Select", typedef.OpSelect},
+		{"Insert", typedef.OpInsert},
+		{"Update", typedef.OpUpdate},
+		{"Delete", typedef.OpDelete},
+		{"SchemaAlter", typedef.OpSchemaAlter},
+		{"SchemaDrop", typedef.OpSchemaDrop},
+		{"SchemaCreate", typedef.OpSchemaCreate},
 	}
 	for _, tc := range cases {
 		t.Run(tc.want, func(t *testing.T) {

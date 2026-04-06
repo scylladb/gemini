@@ -56,11 +56,11 @@ type cqlTimestamp struct {
 var cqlTSFormats = []string{
 	time.RFC3339Nano,
 	time.RFC3339,
-	"2006-01-02 15:04:05.999999999Z0700",   // space separator, compact offset
-	"2006-01-02 15:04:05.999999999Z07:00",   // space separator, colon offset
-	"2006-01-02T15:04:05.999999999Z0700",    // T separator, compact offset (+0000)
-	"2006-01-02T15:04:05.999999999-0700",    // T separator, compact offset
-	"2006-01-02 15:04:05.999999999+0000",    // explicit UTC with compact offset
+	"2006-01-02 15:04:05.999999999Z0700",  // space separator, compact offset
+	"2006-01-02 15:04:05.999999999Z07:00", // space separator, colon offset
+	"2006-01-02T15:04:05.999999999Z0700",  // T separator, compact offset (+0000)
+	"2006-01-02T15:04:05.999999999-0700",  // T separator, compact offset
+	"2006-01-02 15:04:05.999999999+0000",  // explicit UTC with compact offset
 }
 
 func (ct *cqlTimestamp) UnmarshalJSON(data []byte) error {
@@ -82,6 +82,7 @@ func (ct *cqlTimestamp) UnmarshalJSON(data []byte) error {
 	}
 	return fmt.Errorf("cqlTimestamp: unable to parse %q", s)
 }
+
 type stmtLogLine struct {
 	Query      string            `json:"query,omitempty"`
 	Message    string            `json:"message,omitempty"`

@@ -75,12 +75,12 @@ type (
 
 	Logger struct {
 		closer       io.Closer
-		ch           chan Item
-		done         chan struct{}
-		closeOnce    sync.Once
 		itemsMetric  prometheus.Gauge
 		enqueueTotal prometheus.Counter
 		dropTotal    prometheus.Counter
+		ch           chan Item
+		done         chan struct{}
+		closeOnce    sync.Once
 	}
 
 	options struct {

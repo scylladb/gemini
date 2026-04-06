@@ -38,30 +38,30 @@ func TestGenValueOut_BindCount_MatchesGenValue(t *testing.T) {
 	t.Parallel()
 
 	types := []struct {
-		name string
 		typ  Type
+		name string
 	}{
-		{"SimpleType_Int", TypeInt},
-		{"SimpleType_Bigint", TypeBigint},
-		{"SimpleType_Text", TypeText},
-		{"SimpleType_Boolean", TypeBoolean},
-		{"SimpleType_Float", TypeFloat},
-		{"SimpleType_Double", TypeDouble},
-		{"SimpleType_Blob", TypeBlob},
-		{"SimpleType_Uuid", TypeUuid},
-		{"SimpleType_Timestamp", TypeTimestamp},
-		{"SimpleType_Tinyint", TypeTinyint},
-		{"SimpleType_Smallint", TypeSmallint},
-		{"List_Int", &Collection{ComplexType: TypeList, ValueType: TypeInt}},
-		{"List_Text", &Collection{ComplexType: TypeList, ValueType: TypeText}},
-		{"List_Uuid", &Collection{ComplexType: TypeList, ValueType: TypeUuid}},
-		{"Set_Int", &Collection{ComplexType: TypeSet, ValueType: TypeInt}},
-		{"Set_Text", &Collection{ComplexType: TypeSet, ValueType: TypeText}},
-		{"Tuple_Int_Text", &TupleType{ValueTypes: []SimpleType{TypeInt, TypeText}}},
-		{"Tuple_Single", &TupleType{ValueTypes: []SimpleType{TypeInt}}},
-		{"Tuple_Triple", &TupleType{ValueTypes: []SimpleType{TypeInt, TypeText, TypeBoolean}}},
-		{"UDT", &UDTType{ValueTypes: map[string]SimpleType{"a": TypeInt, "b": TypeText}, TypeName: "test_udt", Frozen: true}},
-		{"Map_Int_Text", &MapType{KeyType: TypeInt, ValueType: TypeText, Frozen: true}},
+		{TypeInt, "SimpleType_Int"},
+		{TypeBigint, "SimpleType_Bigint"},
+		{TypeText, "SimpleType_Text"},
+		{TypeBoolean, "SimpleType_Boolean"},
+		{TypeFloat, "SimpleType_Float"},
+		{TypeDouble, "SimpleType_Double"},
+		{TypeBlob, "SimpleType_Blob"},
+		{TypeUuid, "SimpleType_Uuid"},
+		{TypeTimestamp, "SimpleType_Timestamp"},
+		{TypeTinyint, "SimpleType_Tinyint"},
+		{TypeSmallint, "SimpleType_Smallint"},
+		{&Collection{ComplexType: TypeList, ValueType: TypeInt}, "List_Int"},
+		{&Collection{ComplexType: TypeList, ValueType: TypeText}, "List_Text"},
+		{&Collection{ComplexType: TypeList, ValueType: TypeUuid}, "List_Uuid"},
+		{&Collection{ComplexType: TypeSet, ValueType: TypeInt}, "Set_Int"},
+		{&Collection{ComplexType: TypeSet, ValueType: TypeText}, "Set_Text"},
+		{&TupleType{ValueTypes: []SimpleType{TypeInt, TypeText}}, "Tuple_Int_Text"},
+		{&TupleType{ValueTypes: []SimpleType{TypeInt}}, "Tuple_Single"},
+		{&TupleType{ValueTypes: []SimpleType{TypeInt, TypeText, TypeBoolean}}, "Tuple_Triple"},
+		{&UDTType{ValueTypes: map[string]SimpleType{"a": TypeInt, "b": TypeText}, TypeName: "test_udt", Frozen: true}, "UDT"},
+		{&MapType{KeyType: TypeInt, ValueType: TypeText, Frozen: true}, "Map_Int_Text"},
 	}
 
 	for _, tt := range types {
@@ -101,13 +101,13 @@ func TestGenValueOut_Collection_SingleBindValue(t *testing.T) {
 	t.Parallel()
 
 	types := []struct {
-		name string
 		coll *Collection
+		name string
 	}{
-		{"List_Int", &Collection{ComplexType: TypeList, ValueType: TypeInt}},
-		{"List_Text", &Collection{ComplexType: TypeList, ValueType: TypeText}},
-		{"Set_Int", &Collection{ComplexType: TypeSet, ValueType: TypeInt}},
-		{"Set_Bigint", &Collection{ComplexType: TypeSet, ValueType: TypeBigint}},
+		{&Collection{ComplexType: TypeList, ValueType: TypeInt}, "List_Int"},
+		{&Collection{ComplexType: TypeList, ValueType: TypeText}, "List_Text"},
+		{&Collection{ComplexType: TypeSet, ValueType: TypeInt}, "Set_Int"},
+		{&Collection{ComplexType: TypeSet, ValueType: TypeBigint}, "Set_Bigint"},
 	}
 
 	for _, tt := range types {
@@ -222,17 +222,17 @@ func TestGenValueOut_LenValue_Consistency(t *testing.T) {
 	t.Parallel()
 
 	types := []struct {
-		name string
 		typ  Type
+		name string
 	}{
-		{"SimpleType_Int", TypeInt},
-		{"SimpleType_Text", TypeText},
-		{"List_Int", &Collection{ComplexType: TypeList, ValueType: TypeInt}},
-		{"Set_Text", &Collection{ComplexType: TypeSet, ValueType: TypeText}},
-		{"Tuple_2", &TupleType{ValueTypes: []SimpleType{TypeInt, TypeText}}},
-		{"Tuple_4", &TupleType{ValueTypes: []SimpleType{TypeInt, TypeText, TypeBoolean, TypeFloat}}},
-		{"UDT", &UDTType{ValueTypes: map[string]SimpleType{"a": TypeInt}, TypeName: "t", Frozen: true}},
-		{"Map", &MapType{KeyType: TypeInt, ValueType: TypeText, Frozen: true}},
+		{TypeInt, "SimpleType_Int"},
+		{TypeText, "SimpleType_Text"},
+		{&Collection{ComplexType: TypeList, ValueType: TypeInt}, "List_Int"},
+		{&Collection{ComplexType: TypeSet, ValueType: TypeText}, "Set_Text"},
+		{&TupleType{ValueTypes: []SimpleType{TypeInt, TypeText}}, "Tuple_2"},
+		{&TupleType{ValueTypes: []SimpleType{TypeInt, TypeText, TypeBoolean, TypeFloat}}, "Tuple_4"},
+		{&UDTType{ValueTypes: map[string]SimpleType{"a": TypeInt}, TypeName: "t", Frozen: true}, "UDT"},
+		{&MapType{KeyType: TypeInt, ValueType: TypeText, Frozen: true}, "Map"},
 	}
 
 	for _, tt := range types {

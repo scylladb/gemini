@@ -386,8 +386,8 @@ func TestGetStateName(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		state uint32
 		want  string
+		state uint32
 	}{
 		{state: stop.SignalNoop, want: "no-signal"},
 		{state: stop.SignalSoftStop, want: "soft"},
@@ -445,11 +445,11 @@ func TestAddHandler2_NoopExpected_FiresOnAnySignal(t *testing.T) {
 	t.Parallel()
 
 	for _, sig := range []struct {
-		name    string
 		trigger func(*stop.Flag)
+		name    string
 	}{
-		{"soft", func(f *stop.Flag) { f.SetSoft(false) }},
-		{"hard", func(f *stop.Flag) { f.SetHard(false) }},
+		{func(f *stop.Flag) { f.SetSoft(false) }, "soft"},
+		{func(f *stop.Flag) { f.SetHard(false) }, "hard"},
 	} {
 		t.Run(sig.name, func(t *testing.T) {
 			t.Parallel()

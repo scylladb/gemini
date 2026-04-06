@@ -25,8 +25,8 @@ import (
 // pendingRetry holds a validation statement waiting for its backoff timer to fire.
 type pendingRetry struct {
 	stmt    *typedef.Stmt
-	attempt int
 	timer   *time.Timer
+	attempt int
 }
 
 // retryQueue manages pending validation retries with backoff timers.

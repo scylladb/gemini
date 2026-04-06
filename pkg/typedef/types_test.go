@@ -242,15 +242,15 @@ func TestSimpleTypes_Contains(t *testing.T) {
 	list := SimpleTypes{TypeInt, TypeText, TypeBoolean}
 
 	cases := []struct {
-		name  string
 		typ   Type
+		name  string
 		found bool
 	}{
-		{"int present", TypeInt, true},
-		{"text present", TypeText, true},
-		{"boolean present", TypeBoolean, true},
-		{"blob absent", TypeBlob, false},
-		{"collection not SimpleType", &Collection{ComplexType: TypeList, ValueType: TypeInt}, false},
+		{TypeInt, "int present", true},
+		{TypeText, "text present", true},
+		{TypeBoolean, "boolean present", true},
+		{TypeBlob, "blob absent", false},
+		{&Collection{ComplexType: TypeList, ValueType: TypeInt}, "collection not SimpleType", false},
 	}
 
 	for _, tc := range cases {
@@ -337,13 +337,13 @@ func TestCollection_CQLType(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name     string
 		coll     *Collection
+		name     string
 		wantType gocql.Type
 	}{
-		{"set", &Collection{ComplexType: TypeSet, ValueType: TypeInt}, gocql.TypeSet},
-		{"list", &Collection{ComplexType: TypeList, ValueType: TypeInt}, gocql.TypeList},
-		{"unknown defaults to list", &Collection{ComplexType: "bag", ValueType: TypeInt}, gocql.TypeList},
+		{&Collection{ComplexType: TypeSet, ValueType: TypeInt}, "set", gocql.TypeSet},
+		{&Collection{ComplexType: TypeList, ValueType: TypeInt}, "list", gocql.TypeList},
+		{&Collection{ComplexType: "bag", ValueType: TypeInt}, "unknown defaults to list", gocql.TypeList},
 	}
 
 	for _, tc := range cases {
@@ -424,10 +424,10 @@ func TestTupleType_CQLDef(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name   string
 		tuple  *TupleType
-		frozen bool
+		name   string
 		want   string
+		frozen bool
 	}{
 		{
 			name:  "unfrozen",
@@ -499,8 +499,8 @@ func TestTupleType_Indexable(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name      string
 		tuple     *TupleType
+		name      string
 		indexable bool
 	}{
 		{
@@ -621,8 +621,8 @@ func TestUDTType_Indexable(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name      string
 		udt       *UDTType
+		name      string
 		indexable bool
 	}{
 		{
@@ -671,8 +671,8 @@ func TestUDTType_ValueVariationsNumber(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name string
 		udt  *UDTType
+		name string
 		want float64
 	}{
 		{

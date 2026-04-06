@@ -31,25 +31,25 @@ const stmtTrackerShards = 64
 // not full query strings, to keep memory usage constant.
 type stmtTracker struct {
 	shards       [stmtTrackerShards]stmtShard
-	seed         maphash.Seed
-	uniqueCount  atomic.Int64
-	maxPrepared  int
 	uniqueGauge  prometheus.Gauge
 	ratioGauge   prometheus.Gauge
 	newStmtCount prometheus.Counter
+	seed         maphash.Seed
+	uniqueCount  atomic.Int64
+	maxPrepared  int
 }
 
 type stmtShard struct {
-	mu   sync.Mutex
 	seen map[uint64]struct{}
+	mu   sync.Mutex
 }
 
 func newStmtTracker(system string, maxPrepared int) *stmtTracker {
 	t := &stmtTracker{
-		seed:        maphash.MakeSeed(),
-		maxPrepared: maxPrepared,
-		uniqueGauge: metrics.CQLPreparedStmtsUnique.WithLabelValues(system),
-		ratioGauge:  metrics.CQLPreparedStmtsRatio.WithLabelValues(system),
+		seed:         maphash.MakeSeed(),
+		maxPrepared:  maxPrepared,
+		uniqueGauge:  metrics.CQLPreparedStmtsUnique.WithLabelValues(system),
+		ratioGauge:   metrics.CQLPreparedStmtsRatio.WithLabelValues(system),
 		newStmtCount: metrics.CQLPreparedStmtsNew.WithLabelValues(system),
 	}
 

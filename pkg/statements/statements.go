@@ -57,33 +57,31 @@ const (
 const MutationStatementsCount = 3
 
 type Generator struct {
-	generator        partitions.Interface
-	random           utils.Random
-	table            *typedef.Table
-	valueRangeConfig *typedef.ValueRangeConfig
-	ratioController  *RatioController
-	keyspace         string
-	keyspaceAndTable string
-	selectColumns    []string
-	// Cached query strings — same table schema always produces the same CQL.
-	cachedInsertQuery          string
-	cachedInsertJSONQuery      string
-	cachedSelectQuery          string
+	generator                  partitions.Interface
+	random                     utils.Random
+	metricSelIndex             prometheus.Counter
+	metricSelMulti             prometheus.Counter
+	metricSelSingle            prometheus.Counter
+	metricIntendedDelete       prometheus.Counter
+	metricIntendedUpdate       prometheus.Counter
+	metricIntendedInsert       prometheus.Counter
+	metricMutCounterUpd        prometheus.Counter
+	metricMutDelete            prometheus.Counter
+	metricMutInsertJSON        prometheus.Counter
+	metricMutInsert            prometheus.Counter
+	cachedMultiPartitionSelect map[int]string
+	cachedMultiPartitionDelete map[int]string
+	ratioController            *RatioController
+	valueRangeConfig           *typedef.ValueRangeConfig
+	table                      *typedef.Table
 	cachedDeleteQuery          string
-	cachedMultiPartitionSelect map[int]string // numQueryPKs → query
-	cachedMultiPartitionDelete map[int]string // numQueryPKs → query
-	// Pre-resolved Prometheus counters to avoid WithLabelValues() map lookups.
-	metricMutInsert       prometheus.Counter
-	metricMutInsertJSON   prometheus.Counter
-	metricMutDelete       prometheus.Counter
-	metricMutCounterUpd   prometheus.Counter
-	metricIntendedInsert  prometheus.Counter
-	metricIntendedUpdate  prometheus.Counter
-	metricIntendedDelete  prometheus.Counter
-	metricSelSingle       prometheus.Counter
-	metricSelMulti        prometheus.Counter
-	metricSelIndex        prometheus.Counter
-	useLWT               bool
+	cachedSelectQuery          string
+	cachedInsertJSONQuery      string
+	cachedInsertQuery          string
+	keyspaceAndTable           string
+	keyspace                   string
+	selectColumns              []string
+	useLWT                     bool
 }
 
 func New(
