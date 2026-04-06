@@ -920,4 +920,3 @@ func TestCompareCollectedRows_DisjointPKSets(t *testing.T) {
 	assert.Contains(t, diff, "- pk0: 2")
 	assert.Contains(t, diff, "+ pk0: 1")
 }
-

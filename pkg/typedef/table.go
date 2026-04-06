@@ -29,19 +29,17 @@ type ListColInfo struct {
 
 type Table struct {
 	schema            *Schema
-	listCols          []ListColInfo // cached list column info, built by Init
-	listColsBuilt     bool
-	Name              string             `json:"name"`
+	KnownIssues       KnownIssues `json:"known_issues"`
+	Name              string      `json:"name"`
+	listCols          []ListColInfo
 	PartitionKeys     Columns            `json:"partition_keys"`
 	ClusteringKeys    Columns            `json:"clustering_keys"`
 	Columns           Columns            `json:"columns"`
 	Indexes           []IndexDef         `json:"indexes,omitempty"`
 	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
-	KnownIssues       KnownIssues        `json:"known_issues"`
 	TableOptions      []string           `json:"table_options,omitempty"`
-
-	// mu protects the table during schema changes
-	mu sync.RWMutex
+	mu                sync.RWMutex
+	listColsBuilt     bool
 }
 
 func (t *Table) SelectColumnNames() []string {
