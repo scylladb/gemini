@@ -37,11 +37,50 @@ const (
 )
 
 type stmtLogEntry struct {
-	Timestamp time.Time `json:"ts"`
-	Statement string    `json:"statement"`
-	Error     string    `json:"error,omitempty"`
-	Host      string    `json:"host,omitempty"`
-	Type      string    `json:"ty,omitempty"`
+	Timestamp cqlTimestamp `json:"ts"`
+	Statement string       `json:"statement"`
+	Error     string       `json:"error,omitempty"`
+	Host      string       `json:"host,omitempty"`
+	Type      string       `json:"ty,omitempty"`
+}
+
+// cqlTimestamp wraps time.Time with JSON unmarshaling that accepts both
+// Go's RFC3339 format and Scylla/Cassandra's SELECT JSON timestamp format
+// (e.g. "2024-11-25 12:34:56.789+0000" or "2024-11-25 12:34:56.789Z").
+type cqlTimestamp struct {
+	time.Time
+}
+
+// cqlTSFormats lists timestamp layouts emitted by Scylla / Cassandra
+// SELECT JSON, in order from most to least common.
+var cqlTSFormats = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02 15:04:05.999999999Z0700",   // space separator, compact offset
+	"2006-01-02 15:04:05.999999999Z07:00",   // space separator, colon offset
+	"2006-01-02T15:04:05.999999999Z0700",    // T separator, compact offset (+0000)
+	"2006-01-02T15:04:05.999999999-0700",    // T separator, compact offset
+	"2006-01-02 15:04:05.999999999+0000",    // explicit UTC with compact offset
+}
+
+func (ct *cqlTimestamp) UnmarshalJSON(data []byte) error {
+	// Strip surrounding quotes.
+	s := string(data)
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return fmt.Errorf("cqlTimestamp: expected quoted string, got %s", s)
+	}
+	s = s[1 : len(s)-1]
+	if s == "" || s == "null" {
+		ct.Time = time.Time{}
+		return nil
+	}
+	for _, layout := range cqlTSFormats {
+		if t, err := time.Parse(layout, s); err == nil {
+			ct.Time = t
+			return nil
+		}
+	}
+	return fmt.Errorf("cqlTimestamp: unable to parse %q", s)
 }
 type stmtLogLine struct {
 	Query      string            `json:"query,omitempty"`
