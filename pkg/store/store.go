@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"time"
 
 	pkgerrors "github.com/pkg/errors"
@@ -26,12 +27,25 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stmtlogger/scylla"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
+
+type rowsTagged struct {
+	err    error
+	rows   Rows
+	oracle bool
+}
+
+var rowsTaggedChPool = sync.Pool{
+	New: func() any {
+		return make(chan rowsTagged, 2)
+	},
+}
 
 type loader interface {
 	load(context.Context, *typedef.Stmt) (Rows, error)
@@ -56,6 +70,10 @@ type Store interface {
 	Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
 	Mutate(context.Context, *typedef.Stmt) error
 	Check(context.Context, *typedef.Table, *typedef.Stmt, int) (int, error)
+	// CheckOnce performs a single validation attempt without retries.
+	// Returns the number of matched rows and a ValidationError on mismatch,
+	// or nil on success. Callers manage retry scheduling externally.
+	CheckOnce(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, attempt int) (int, error)
 }
 
 type (
@@ -71,7 +89,6 @@ type (
 		Port                    int
 		RequestTimeout          time.Duration
 		ConnectTimeout          time.Duration
-		DockerMode              bool
 		UseServerSideTimestamps bool
 	}
 	Config struct {
@@ -158,7 +175,7 @@ func New(
 		if cfg.OracleStatementFile != "" && cfg.TestStatementFile != "" {
 			logger.Debug("creating statement logger with oracle cluster")
 
-			ch := make(chan stmtlogger.Item, 50_000)
+			ch := make(chan stmtlogger.Item, 131_072)
 
 			statementLogger, err = stmtlogger.NewLogger(
 				stmtlogger.WithChannel(ch),
@@ -169,7 +186,6 @@ func New(
 					testStore.getSession,
 					cfg.OracleClusterConfig.Hosts,
 					cfg.OracleClusterConfig.Port,
-					cfg.OracleClusterConfig.DockerMode,
 					cfg.OracleClusterConfig.Username,
 					cfg.OracleClusterConfig.Password,
 					partitionKeyColumns,
@@ -245,10 +261,9 @@ func (ds delegatingStore) getLogger() *zap.Logger {
 }
 
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef.Stmt) error {
-	ctx = WithContextData(ctx, &ContextData{
-		GeminiAttempt: 0,
-		Statement:     stmt,
-	})
+	cd := AcquireContextData(stmt, 0)
+	ctx = WithContextData(ctx, cd)
+	defer ReleaseContextData(cd)
 
 	ts := mo.None[time.Time]()
 
@@ -294,6 +309,12 @@ type mutationChanRes struct {
 	oracle bool
 }
 
+var mutationChPool = sync.Pool{
+	New: func() any {
+		return make(chan mutationChanRes, 2)
+	},
+}
+
 // executeParallelMutations executes mutations on stores that need to be retried
 func (ds delegatingStore) executeParallelMutations(
 	ctx context.Context,
@@ -305,20 +326,24 @@ func (ds delegatingStore) executeParallelMutations(
 	result := mutationResult{}
 
 	// Update context with attempt number
-	ctxData := &ContextData{
-		GeminiAttempt: attempt,
-		Statement:     stmt,
-		Timestamp:     time.Now().UTC(),
-	}
+	ctxData := AcquireContextData(stmt, attempt)
 	doCtx := WithContextData(ctx, ctxData)
 
-	// Use a single channel for both mutations
-	ch := make(chan mutationChanRes, 2)
+	// Use a pooled channel for both mutations
+	ch := mutationChPool.Get().(chan mutationChanRes)
+
+	// wg tracks goroutines so we can wait for them to fully finish before
+	// releasing ctxData. The observer (ClusterObserver.ObserveQuery) runs
+	// inside the goroutine and reads ctxData.Statement; releasing it early
+	// causes a data race.
+	var wg sync.WaitGroup
 
 	expected := 0
 	if retryTest {
 		expected++
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			err := ds.testStore.mutate(doCtx, stmt, timestamp)
 			select {
 			case ch <- mutationChanRes{oracle: false, err: err}:
@@ -328,7 +353,9 @@ func (ds delegatingStore) executeParallelMutations(
 	}
 	if retryOracle && ds.oracleStore != nil {
 		expected++
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			err := ds.oracleStore.mutate(doCtx, stmt, timestamp)
 			select {
 			case ch <- mutationChanRes{oracle: true, err: err}:
@@ -337,8 +364,13 @@ func (ds delegatingStore) executeParallelMutations(
 		}()
 	}
 
-	// Wait for results
+	// Wait for results; on context cancellation waitForMutationResults returns
+	// early, but the goroutines may still be running. We must wait for them to
+	// complete before releasing ctxData to avoid a data race in ObserveQuery.
 	ds.waitForMutationResults(doCtx, ch, &result, retryTest, retryOracle, expected)
+	wg.Wait()
+	mutationChPool.Put(ch)
+	ReleaseContextData(ctxData)
 
 	return result
 }
@@ -470,6 +502,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		// Check if we succeeded
 		if !ds.shouldRetryMutations(cumulativeResult) {
 			if attempt > 0 {
+				metrics.MutationRetriesTotal.WithLabelValues("success").Add(float64(attempt))
 				// Log which systems succeeded after retries
 				successfulStores := make([]string, 0, 2)
 				if cumulativeResult.testDone && cumulativeResult.testErr == nil {
@@ -524,6 +557,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	}
 
 	mutationErr.Finalize(finalErr)
+	metrics.MutationRetriesTotal.WithLabelValues("exhausted").Inc()
 
 	ds.getLogger().Error("mutation failed after all retry attempts",
 		zap.Int("total_attempts", maxAttempts),
@@ -535,149 +569,180 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	return mutationErr
 }
 
+// checkOnceInternal performs a single validation attempt. On success it returns
+// the matched row count and nil error. On failure it returns the validation
+// error with comparison results attached (when applicable).
+//
 //nolint:gocyclo
+func (ds delegatingStore) checkOnceInternal(
+	ctx context.Context,
+	table *typedef.Table,
+	stmt *typedef.Stmt,
+	attempt int,
+) (int, error) {
+	cd := AcquireContextData(stmt, attempt)
+	doCtx := WithContextData(ctx, cd)
+
+	// If there is no oracle, just count test rows
+	if ds.oracleStore == nil {
+		testRows, testErr := ds.testStore.load(doCtx, stmt)
+		ReleaseContextData(cd)
+		if testErr != nil {
+			validationErr := NewValidationError("validation", stmt)
+			validationErr.AddAttempt(testErr)
+			validationErr.Finalize(testErr)
+			return 0, validationErr
+		}
+		return len(testRows), nil
+	}
+
+	// Run iterators in parallel using a pooled channel (size 2)
+	ch := rowsTaggedChPool.Get().(chan rowsTagged)
+
+	// wg tracks goroutines so we can wait for them to fully finish before
+	// releasing cd. The observer (ClusterObserver.ObserveQuery) runs inside
+	// the goroutine and reads cd.Statement; releasing it early causes a race.
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		rows, err := ds.testStore.load(doCtx, stmt)
+		select {
+		case ch <- rowsTagged{oracle: false, rows: rows, err: err}:
+		case <-doCtx.Done():
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		rows, err := ds.oracleStore.load(doCtx, stmt)
+		select {
+		case ch <- rowsTagged{oracle: true, rows: rows, err: err}:
+		case <-doCtx.Done():
+		}
+	}()
+
+	var tRes, oRes rowsTagged
+	// Wait for both results or context cancellation
+	received := 0
+	for received < 2 {
+		select {
+		case r := <-ch:
+			if r.oracle {
+				oRes = r
+			} else {
+				tRes = r
+			}
+			received++
+		case <-doCtx.Done():
+			wg.Wait()
+			rowsTaggedChPool.Put(ch)
+			ReleaseContextData(cd)
+			metrics.ContextCancellations.WithLabelValues("load", "deadline").Inc()
+			return 0, doCtx.Err()
+		}
+	}
+	wg.Wait()
+	rowsTaggedChPool.Put(ch)
+	ReleaseContextData(cd)
+
+	// Extract results
+	testRows, oracleRows := tRes.rows, oRes.rows
+	testErr, oracleErr := tRes.err, oRes.err
+
+	validationErr := NewValidationError("validation", stmt)
+
+	// Record any errors that occurred
+	if testErr != nil {
+		validationErr.AddAttempt(testErr)
+	}
+	if oracleErr != nil {
+		validationErr.AddAttempt(oracleErr)
+	}
+
+	// If either side had a load error, finalize and return
+	if testErr != nil || oracleErr != nil {
+		lastErr := testErr
+		if oracleErr != nil {
+			lastErr = oracleErr
+		}
+		validationErr.Finalize(lastErr)
+		return 0, validationErr
+	}
+
+	// Compare results normally; if both sides are empty this will succeed with count 0.
+	result := CompareCollectedRows(table, testRows, oracleRows)
+	compErr := result.ToError()
+	if compErr == nil {
+		// No differences found
+		return result.MatchCount, nil
+	}
+
+	// Found differences, record them and store the comparison results
+	validationErr.AddAttempt(compErr)
+	validationErr.ComparisonResults = &ComparisonResults{
+		TestRows:       testRows,
+		OracleRows:     oracleRows,
+		TestOnlyRows:   result.TestOnlyRows,
+		OracleOnlyRows: result.OracleOnlyRows,
+		DifferentRows:  result.DifferentRows,
+	}
+	validationErr.Finalize(compErr)
+
+	return 0, validationErr
+}
+
+func (ds delegatingStore) CheckOnce(
+	ctx context.Context,
+	table *typedef.Table,
+	stmt *typedef.Stmt,
+	attempt int,
+) (int, error) {
+	return ds.checkOnceInternal(ctx, table, stmt, attempt)
+}
+
 func (ds delegatingStore) Check(
 	ctx context.Context,
 	table *typedef.Table,
 	stmt *typedef.Stmt,
 	_ int,
 ) (int, error) {
-	validationErr := NewValidationError("validation", stmt)
 	maxAttempts := ds.validationRetries
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}
-	var lastErr error
 
 	for attempt := range maxAttempts {
-		doCtx := WithContextData(ctx, &ContextData{
-			GeminiAttempt: attempt,
-			Statement:     stmt,
-			Timestamp:     time.Now().UTC(),
-		})
-
-		// If there is no oracle, just count test rows
-		if ds.oracleStore == nil {
-			testRows, testErr := ds.testStore.load(doCtx, stmt)
-
-			if testErr != nil {
-				validationErr.AddAttempt(testErr)
-				lastErr = testErr
-			} else {
-				return len(testRows), nil
-			}
-		} else {
-			// Run iterators in parallel using a single channel (size 2)
-			type rowsTagged struct {
-				err    error
-				rows   Rows
-				oracle bool
-			}
-
-			ch := make(chan rowsTagged, 2)
-
-			go func() {
-				rows, err := ds.testStore.load(doCtx, stmt)
-				select {
-				case ch <- rowsTagged{oracle: false, rows: rows, err: err}:
-				case <-doCtx.Done():
-				}
-			}()
-
-			go func() {
-				rows, err := ds.oracleStore.load(doCtx, stmt)
-				select {
-				case ch <- rowsTagged{oracle: true, rows: rows, err: err}:
-				case <-doCtx.Done():
-				}
-			}()
-
-			var tRes, oRes rowsTagged
-			// Wait for both results or context cancellation
-			received := 0
-			for received < 2 {
-				select {
-				case r := <-ch:
-					if r.oracle {
-						oRes = r
-					} else {
-						tRes = r
-					}
-					received++
-				case <-doCtx.Done():
-					return 0, doCtx.Err()
-				}
-			}
-
-			// Extract results
-			testRows, oracleRows := tRes.rows, oRes.rows
-			testErr, oracleErr := tRes.err, oRes.err
-
-			// Record any errors that occurred
-			if testErr != nil {
-				validationErr.AddAttempt(testErr)
-				lastErr = testErr
-			}
-			if oracleErr != nil {
-				validationErr.AddAttempt(oracleErr)
-				lastErr = oracleErr
-			}
-
-			// Check if comparison succeeded
-			if testErr == nil && oracleErr == nil {
-				// Compare results normally; if both sides are empty this will succeed with count 0.
-				result := CompareCollectedRows(table, testRows, oracleRows)
-				compErr := result.ToError()
-				if compErr == nil {
-					// No differences found
-					return result.MatchCount, nil
-				}
-
-				// Found differences, record them and store the comparison results
-				validationErr.AddAttempt(compErr)
-				lastErr = compErr
-
-				// Store all the comparison data for debugging
-				validationErr.ComparisonResults = &ComparisonResults{
-					TestRows:       testRows,
-					OracleRows:     oracleRows,
-					TestOnlyRows:   result.TestOnlyRows,
-					OracleOnlyRows: result.OracleOnlyRows,
-					DifferentRows:  result.DifferentRows,
-				}
-			}
+		count, err := ds.checkOnceInternal(ctx, table, stmt, attempt)
+		if err == nil {
+			return count, nil
 		}
 
-		if attempt < maxAttempts-1 {
-			delay := utils.Backoff(utils.LinearBackoffStrategy, attempt, ds.validationRetrySleep, ds.minimumDelay)
-			timer := utils.GetTimer(delay)
-			select {
-			case <-timer.C:
-				utils.PutTimer(timer)
-				// continue to next attempt
-			case <-ctx.Done():
-				utils.PutTimer(timer)
-				if errors.Is(ctx.Err(), context.Canceled) {
-					return 0, context.Canceled
-				}
-				return 0, pkgerrors.Wrap(ctx.Err(), "validation cancelled during retry delay")
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return 0, err
+		}
+
+		// Last attempt — return the error as-is (already finalized by checkOnceInternal)
+		if attempt >= maxAttempts-1 {
+			return 0, err
+		}
+
+		delay := utils.Backoff(utils.ExponentialBackoffStrategy, attempt, ds.validationRetrySleep, 100*time.Millisecond)
+		timer := utils.GetTimer(delay)
+		select {
+		case <-timer.C:
+			utils.PutTimer(timer)
+		case <-ctx.Done():
+			utils.PutTimer(timer)
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return 0, context.Canceled
 			}
+			return 0, pkgerrors.Wrap(ctx.Err(), "validation cancelled during retry delay")
 		}
 	}
 
-	// All attempts failed
-	if validationErr.TotalAttempts.Load() == 0 {
-		return 0, nil
-	}
-
-	if errors.Is(ctx.Err(), context.Canceled) {
-		return 0, context.Canceled
-	}
-
-	// Finalize the validation error with summary
-	validationErr.Finalize(lastErr)
-
-	return 0, validationErr
+	return 0, nil
 }
 
 func (ds delegatingStore) Close() error {

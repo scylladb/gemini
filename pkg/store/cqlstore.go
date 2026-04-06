@@ -41,25 +41,13 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
-// applyLocalhostTranslator installs an AddressTranslator on cluster that
-// rewrites every peer IP to 127.0.0.1, preserving the port.  This is the
-// Docker/testcontainer workaround: when a node advertises its internal
-// container IP as rpc_address, gocql would otherwise try to reconnect to an
-// IP that is unreachable from the host.  A warning is logged because silently
-// rerouting all traffic to a single address would cause very confusing
-// behaviour in production.
-func applyLocalhostTranslator(cluster *gocql.ClusterConfig, logger *zap.Logger) {
-	logger.Warn("DockerMode is enabled: all discovered peer addresses will be translated to 127.0.0.1; do NOT enable this in production")
-	localhostIP := net.ParseIP("127.0.0.1")
-	cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, p int) (net.IP, int) {
-		return localhostIP, p
-	})
-}
-
 type cqlStore struct {
 	cqlRequestsMetric         [typedef.StatementTypeCount]prometheus.Counter
 	cqlErrorRequestsMetric    [typedef.StatementTypeCount]prometheus.Counter
 	cqlTimeoutsRequestsMetric [typedef.StatementTypeCount]prometheus.Counter
+	rowsReturnedMetric        prometheus.Counter
+	rowsPerQueryMetric        prometheus.Observer
+	stmtTracker               *stmtTracker
 	cluster                   *gocql.ClusterConfig
 	session                   *gocql.Session
 	tracingDir                string
@@ -77,11 +65,12 @@ func newCQLStoreWithSession(
 	logger.Info("creating cql store with session", zap.String("system", system))
 
 	store := &cqlStore{
-		cluster:    cluster,
-		schema:     schema,
-		logger:     logger,
-		system:     system,
-		tracingDir: tracingDir,
+		cluster:     cluster,
+		schema:      schema,
+		logger:      logger,
+		system:      system,
+		tracingDir:  tracingDir,
+		stmtTracker: newStmtTracker(system, cluster.MaxPreparedStmts),
 	}
 
 	for i := range typedef.StatementTypeCount {
@@ -89,6 +78,9 @@ func newCQLStoreWithSession(
 		store.cqlErrorRequestsMetric[i] = metrics.CQLErrorRequests.WithLabelValues(system, i.String())
 		store.cqlTimeoutsRequestsMetric[i] = metrics.CQLQueryTimeouts.WithLabelValues(system, i.String())
 	}
+
+	store.rowsReturnedMetric = metrics.CQLRowsReturned.WithLabelValues(system)
+	store.rowsPerQueryMetric = metrics.CQLRowsPerQuery.WithLabelValues(system)
 
 	logger.Info("cql store created", zap.String("system", system))
 	return store
@@ -193,6 +185,8 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 		return err
 	}
 
+	c.stmtTracker.Track(stmt.Query)
+
 	query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 	defer query.Release()
 
@@ -213,6 +207,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 
 	if errors.Is(mutateErr, context.Canceled) {
 		c.logger.Debug("mutation cancelled", zap.String("system", c.system))
+		metrics.ContextCancellations.WithLabelValues("mutation", "cancelled").Inc()
 		return context.Canceled
 	}
 
@@ -222,6 +217,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 			zap.String("query_type", stmt.QueryType.String()),
 		)
 		c.cqlTimeoutsRequestsMetric[stmt.QueryType].Inc()
+		metrics.ContextCancellations.WithLabelValues("mutation", "deadline").Inc()
 		return mutateErr // Return timeout error so delegating store can retry
 	}
 
@@ -252,6 +248,8 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 		return nil, err
 	}
 
+	c.stmtTracker.Track(stmt.Query)
+
 	query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 	defer func() {
 		query.Release()
@@ -261,6 +259,7 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	iter := query.Iter()
 
 	if iter.NumRows() == 0 {
+		c.rowsPerQueryMetric.Observe(0)
 		return nil, iter.Close()
 	}
 
@@ -284,6 +283,10 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 		)
 	}
 
+	n := float64(len(rows))
+	c.rowsReturnedMetric.Add(n)
+	c.rowsPerQueryMetric.Observe(n)
+
 	return rows, err
 }
 
@@ -295,6 +298,8 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			yield(Row{}, errors.New("failed to get cql session"))
 			return
 		}
+
+		c.stmtTracker.Track(stmt.Query)
 
 		query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 		defer query.Release()
@@ -322,6 +327,7 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			return
 		}
 
+		var rowCount float64
 		for {
 			// Check for context cancellation
 			select {
@@ -338,13 +344,17 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			}
 
 			row := NewRow(rowData.Columns, rowData.Values)
+			rowCount++
 
 			// Yield the row
 			if !yield(row, nil) {
 				// Consumer stopped iteration
-				return
+				break
 			}
 		}
+
+		c.rowsReturnedMetric.Add(rowCount)
+		c.rowsPerQueryMetric.Observe(rowCount)
 	}
 }
 
@@ -441,18 +451,10 @@ func CreateCluster(
 		cluster.Port = config.Port
 	}
 
-	// DockerMode: translate every discovered peer address back to 127.0.0.1 so
-	// that gocql always dials through the host-mapped port instead of the
-	// internal Docker IP (which is unreachable from the host).
-	// This must only be enabled explicitly — never inferred from port/host values.
-	if config.DockerMode {
-		applyLocalhostTranslator(cluster, logger)
-	}
-
 	cluster.Timeout = config.RequestTimeout
 	cluster.ConnectTimeout = config.ConnectTimeout
 	cluster.MaxRoutingKeyInfo = 50_000
-	cluster.MaxPreparedStmts = 50_000
+	cluster.MaxPreparedStmts = 5_000
 	cluster.ReconnectInterval = config.ConnectTimeout
 	cluster.Events.DisableTopologyEvents = false
 	cluster.Events.DisableSchemaEvents = false
@@ -461,8 +463,8 @@ func CreateCluster(
 	cluster.DefaultIdempotence = false
 	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
 		Min:        10 * time.Millisecond,
-		Max:        10 * time.Second,
-		NumRetries: 10,
+		Max:        2 * time.Second,
+		NumRetries: 5,
 	}
 	cluster.ReconnectionPolicy = &gocql.ExponentialReconnectionPolicy{
 		MaxRetries:      10,

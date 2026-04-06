@@ -534,7 +534,8 @@ func TestNewPartitionKeys(t *testing.T) {
 func TestPartitionSize(t *testing.T) {
 	t.Parallel()
 
-	p := Partition{values: make([]any, 10)}
+	p := Partition{}
+	p.data.Store(&partitionData{values: make([]any, 10)})
 
 	// Current implementation returns 0
 	size := p.size()

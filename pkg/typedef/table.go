@@ -28,18 +28,23 @@ type ListColInfo struct {
 }
 
 type Table struct {
-	schema            *Schema
-	KnownIssues       KnownIssues `json:"known_issues"`
-	Name              string      `json:"name"`
-	listCols          []ListColInfo
-	PartitionKeys     Columns            `json:"partition_keys"`
-	ClusteringKeys    Columns            `json:"clustering_keys"`
-	Columns           Columns            `json:"columns"`
-	Indexes           []IndexDef         `json:"indexes,omitempty"`
-	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
-	TableOptions      []string           `json:"table_options,omitempty"`
-	mu                sync.RWMutex
-	listColsBuilt     bool
+	schema                  *Schema
+	Name                    string             `json:"name"`
+	PartitionKeys           Columns            `json:"partition_keys"`
+	ClusteringKeys          Columns            `json:"clustering_keys"`
+	Columns                 Columns            `json:"columns"`
+	Indexes                 []IndexDef         `json:"indexes,omitempty"`
+	MaterializedViews       []MaterializedView `json:"materialized_views,omitempty"`
+	KnownIssues             KnownIssues        `json:"known_issues"`
+	TableOptions            []string           `json:"table_options,omitempty"`
+	SortKeyNames            []string           `json:"-"`
+	listCols                []ListColInfo
+	PartitionKeysLenValues  int `json:"-"`
+	ClusteringKeysLenValues int `json:"-"`
+	ColumnsLenValues        int `json:"-"`
+	TotalLenValues          int `json:"-"`
+	mu                      sync.RWMutex
+	listColsOnce            sync.Once
 }
 
 func (t *Table) SelectColumnNames() []string {
@@ -107,7 +112,19 @@ func (t *Table) SupportsChanges() bool {
 
 func (t *Table) Init(s *Schema) {
 	t.schema = s
-	t.buildListColCache()
+	t.listColsOnce.Do(t.buildListColCache)
+	t.PartitionKeysLenValues = t.PartitionKeys.LenValues()
+	t.ClusteringKeysLenValues = t.ClusteringKeys.LenValues()
+	t.ColumnsLenValues = t.Columns.LenValues()
+	t.TotalLenValues = t.PartitionKeysLenValues + t.ClusteringKeysLenValues + t.ColumnsLenValues
+
+	t.SortKeyNames = make([]string, 0, len(t.PartitionKeys)+len(t.ClusteringKeys))
+	for _, pk := range t.PartitionKeys {
+		t.SortKeyNames = append(t.SortKeyNames, pk.Name)
+	}
+	for _, ck := range t.ClusteringKeys {
+		t.SortKeyNames = append(t.SortKeyNames, ck.Name)
+	}
 }
 
 // buildListColCache scans columns once and caches list column metadata.
@@ -121,16 +138,14 @@ func (t *Table) buildListColCache() {
 			})
 		}
 	}
-	t.listColsBuilt = true
 }
 
 // ListColumns returns cached list column info. Returns nil if the table
 // has no list columns — callers can skip deduplication entirely.
 // Lazily builds the cache on first call if Init() wasn't called.
+// Safe for concurrent use via sync.Once.
 func (t *Table) ListColumns() []ListColInfo {
-	if !t.listColsBuilt {
-		t.buildListColCache()
-	}
+	t.listColsOnce.Do(t.buildListColCache)
 	return t.listCols
 }
 

@@ -67,8 +67,8 @@ func NewValidation(
 		maxAttempts = 10
 	}
 
-	if delay <= 10*time.Millisecond {
-		delay = 200 * time.Millisecond
+	if delay <= 100*time.Millisecond {
+		delay = 2 * time.Second
 	}
 
 	statementGenerator := statements.New(
@@ -104,21 +104,39 @@ func releaseKeys(stmt *typedef.Stmt) {
 	}
 }
 
-func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
+// runResult represents the outcome of a single validation attempt.
+// When needsRetry is true, the stmt is NOT released and should be
+// scheduled for retry. When needsRetry is false, the stmt has been
+// released (or handed to handleCheckFailure which releases it).
+type runResult struct {
+	err        error
+	stmt       *typedef.Stmt
+	attempt    int
+	needsRetry bool
+}
+
+func (v *Validation) run(ctx context.Context, metric prometheus.Counter) runResult {
 	stmt, stmtErr := v.statement.Select(ctx)
 	if errors.Is(stmtErr, utils.ErrNoPartitionKeyValues) {
-		return utils.ErrNoPartitionKeyValues
+		return runResult{err: utils.ErrNoPartitionKeyValues}
 	}
 
 	if stmt == nil {
 		if v.status.HasReachedErrorCount() {
 			v.stopFlag.SetSoft(true)
 		}
-		return ErrNoStatement
+		return runResult{err: ErrNoStatement}
 	}
 
-	// Delegate retries to the store implementation.
-	validatedRows, err := v.store.Check(ctx, v.table, stmt, 0)
+	return v.checkOnce(ctx, stmt, 0, metric)
+}
+
+// checkOnce performs a single validation attempt on a statement. Used both
+// for fresh queries and for retries. On success it releases keys and records
+// metrics. On a retryable failure it returns needsRetry=true with the stmt
+// still held. On a final failure it calls handleCheckFailure which releases keys.
+func (v *Validation) checkOnce(ctx context.Context, stmt *typedef.Stmt, attempt int, metric prometheus.Counter) runResult {
+	validatedRows, err := v.store.CheckOnce(ctx, v.table, stmt, attempt)
 	if err == nil {
 		metric.Add(float64(validatedRows))
 		v.status.AddValidatedRows(validatedRows)
@@ -129,16 +147,17 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 			}
 		}
 		releaseKeys(stmt)
-		return nil
+		return runResult{}
 	}
 
 	// Context cancellation/deadline — not a data discrepancy.
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		releaseKeys(stmt)
-		return nil
+		return runResult{}
 	}
 
-	return v.handleCheckFailure(err, stmt)
+	// Signal that this can be retried (caller decides based on attempt count)
+	return runResult{err: err, stmt: stmt, attempt: attempt, needsRetry: true}
 }
 
 // handleCheckFailure processes a non-context store.Check error: it records the
@@ -347,104 +366,163 @@ func (v *Validation) Do(ctx context.Context) error {
 
 	validatedRowsMetric := metrics.ValidatedRows.WithLabelValues(v.table.Name)
 	deletedPartitionsCh := v.generator.Deleted()
-	defer func() {
-		// no-op
-	}()
+
+	rq := newRetryQueue(v.maxAttempts, v.delay, 100*time.Millisecond)
+	defer rq.Drain(releaseKeys)
 
 	for !v.stopFlag.IsHardOrSoft() {
-		// Check for deleted partitions to validate or perform regular validation
+		// First, check if any retries are ready (non-blocking).
+		if idx := rq.Ready(); idx >= 0 {
+			retry := rq.Take(idx)
+			result := v.checkOnce(ctx, retry.stmt, retry.attempt, validatedRowsMetric)
+			if err := v.handleRunResult(result, rq); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// Main select: context, deleted partitions, retry timer, or new work.
+		retryTimerCh := rq.EarliestTimer()
+
 		select {
 		case <-ctx.Done():
 			return nil
+
 		case deletedKeys, ok := <-deletedPartitionsCh:
 			if !ok {
-				// Channel closed, stop processing deleted partitions
 				deletedPartitionsCh = nil
 				continue
 			}
 
-			// Validate that the deleted partition is actually gone
-			deletionNS := deletedKeys.DeletedAtNS
-			err := executionTime.RunFuncE(func() error {
-				return v.validateDeletedPartition(ctx, deletedKeys, deletionNS)
-			})
-
-			if err == nil {
-				// Deleted partition validation succeeded
-				v.status.ReadOp()
-				continue
+			if err := v.handleDeletedPartition(ctx, &executionTime, deletedKeys); err != nil {
+				return err
 			}
 
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				continue
-			}
-
-			// Handle validation error
-			var jobErr *joberror.JobError
-			if errors.As(err, &jobErr) {
-				v.status.AddReadError(*jobErr)
-			} else {
-				panic(fmt.Sprintf("invalid type err %T: %v", err, err))
-			}
-
-			if v.status.HasReachedErrorCount() {
-				v.stopFlag.SetSoft(true)
-				return ErrValidationJobStopped
+		case <-retryTimerCh:
+			// A retry timer fired — pick it up.
+			retry := rq.TakeFirst()
+			result := v.checkOnce(ctx, retry.stmt, retry.attempt, validatedRowsMetric)
+			if err := v.handleRunResult(result, rq); err != nil {
+				return err
 			}
 
 		default:
-			// Perform regular validation
-			err := executionTime.RunFuncE(func() error {
-				return v.run(ctx, validatedRowsMetric)
-			})
-
-			if err == nil {
-				continue
-			}
-
-			if errors.Is(err, utils.ErrNoPartitionKeyValues) {
-				timer := utils.GetTimer(100 * time.Millisecond)
-				select {
-				case <-timer.C:
-					utils.PutTimer(timer)
-					continue
-				case <-ctx.Done():
-					utils.PutTimer(timer)
-					return nil
-				}
-			}
-
-			if errors.Is(err, context.Canceled) {
-				return context.Canceled
-			}
-
-			if errors.Is(err, ErrNoStatement) {
-				// No statement generated at this moment, back off briefly and retry
-				timer := utils.GetTimer(100 * time.Millisecond)
-				select {
-				case <-timer.C:
-					utils.PutTimer(timer)
-					continue
-				case <-ctx.Done():
-					utils.PutTimer(timer)
-					return nil
-				}
-			}
-
-			// Handle different error types that can be returned from the store
-			var jobErr *joberror.JobError
-			if errors.As(err, &jobErr) {
-				// It's already a joberror.JobError, use it directly
-				v.status.AddReadError(*jobErr)
-			} else {
-				panic(fmt.Sprintf("invalid type err %T: %v", err, err))
-			}
-
-			if v.status.HasReachedErrorCount() {
-				v.stopFlag.SetSoft(true)
-				return ErrValidationJobStopped
+			if err := v.handleNewWork(ctx, &executionTime, validatedRowsMetric, rq); err != nil {
+				return err
 			}
 		}
+	}
+
+	return nil
+}
+
+// handleDeletedPartition validates a single deleted-partition event received
+// from the generator's Deleted channel. Returns a non-nil error only when the
+// worker must stop.
+func (v *Validation) handleDeletedPartition(ctx context.Context, executionTime *metrics.RunningTime, deletedKeys typedef.PartitionKeys) error {
+	deletionNS := deletedKeys.DeletedAtNS
+	err := executionTime.RunFuncE(func() error {
+		return v.validateDeletedPartition(ctx, deletedKeys, deletionNS)
+	})
+
+	if err == nil {
+		v.status.ReadOp()
+		return nil
+	}
+
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+
+	var jobErr *joberror.JobError
+	if errors.As(err, &jobErr) {
+		v.status.AddReadError(*jobErr)
+	} else {
+		panic(fmt.Sprintf("invalid type err %T: %v", err, err))
+	}
+
+	if v.status.HasReachedErrorCount() {
+		v.stopFlag.SetSoft(true)
+		metrics.WorkerStopEvents.WithLabelValues("validation", "error_budget").Inc()
+		return ErrValidationJobStopped
+	}
+
+	return nil
+}
+
+// handleNewWork performs new validation work and processes the result,
+// including short sleeps on transient no-data conditions. Returns a non-nil
+// error only when the worker must stop.
+func (v *Validation) handleNewWork(ctx context.Context, executionTime *metrics.RunningTime, metric prometheus.Counter, rq *retryQueue) error {
+	executionTime.Start()
+	result := v.run(ctx, metric)
+	executionTime.Record()
+
+	if result.err == nil && !result.needsRetry {
+		return nil
+	}
+
+	if waitOnTransientError(ctx, result.err) {
+		return nil
+	}
+
+	if errors.Is(result.err, context.Canceled) {
+		return context.Canceled
+	}
+
+	return v.handleRunResult(result, rq)
+}
+
+// waitOnTransientError checks whether err is a transient "no data yet"
+// condition (ErrNoPartitionKeyValues or ErrNoStatement) and, if so, sleeps
+// briefly before returning true. Returns false for all other errors.
+func waitOnTransientError(ctx context.Context, err error) bool {
+	if !errors.Is(err, utils.ErrNoPartitionKeyValues) && !errors.Is(err, ErrNoStatement) {
+		return false
+	}
+
+	timer := utils.GetTimer(100 * time.Millisecond)
+	select {
+	case <-timer.C:
+		utils.PutTimer(timer)
+	case <-ctx.Done():
+		utils.PutTimer(timer)
+	}
+
+	return true
+}
+
+// handleRunResult processes a runResult: if the stmt can be retried it is
+// scheduled on the retry queue; otherwise the failure is recorded and error
+// budget checked. Returns a non-nil error only when the worker must stop.
+func (v *Validation) handleRunResult(result runResult, rq *retryQueue) error {
+	if !result.needsRetry {
+		return nil
+	}
+
+	// Try to schedule a retry.
+	if rq.Schedule(result.stmt, result.attempt) {
+		// Stmt ownership transferred to the retry queue — do NOT release keys.
+		return nil
+	}
+
+	// All retries exhausted — treat as final failure.
+	metrics.ValidationRetriesExhausted.Inc()
+	failErr := v.handleCheckFailure(result.err, result.stmt)
+	if failErr == nil {
+		return nil
+	}
+
+	var jobErr *joberror.JobError
+	if errors.As(failErr, &jobErr) {
+		v.status.AddReadError(*jobErr)
+	} else {
+		panic(fmt.Sprintf("invalid type err %T: %v", failErr, failErr))
+	}
+
+	if v.status.HasReachedErrorCount() {
+		v.stopFlag.SetSoft(true)
+		return ErrValidationJobStopped
 	}
 
 	return nil

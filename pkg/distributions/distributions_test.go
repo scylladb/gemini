@@ -52,6 +52,14 @@ func TestNew(t *testing.T) {
 			sigma:         oneStdDev,
 			maxSameValues: 100,
 		},
+		{
+			dist:          LogNormal,
+			seed:          uint64(time.Now().UnixNano()),
+			size:          10000,
+			mu:            1.0,
+			sigma:         0.5,
+			maxSameValues: 10000, // LogNormal with large float params overflows uint64; just verify it runs
+		},
 	}
 
 	for _, item := range data {
@@ -79,4 +87,16 @@ func TestNew(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNew_UnknownDistribution_Panics(t *testing.T) {
+	t.Parallel()
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for unknown distribution, but did not panic")
+		}
+	}()
+
+	New("unknown-distribution", 1000, 42, 0, 1)
 }

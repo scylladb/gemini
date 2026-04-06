@@ -39,9 +39,9 @@ import (
 )
 
 const (
-	committerBatchSize      = 64
+	committerBatchSize      = 256
 	statementChBuffer       = 1000
-	statementFileBufferSize = 32 * 1024
+	statementFileBufferSize = 64 * 1024
 	statementDirPerm        = 0o755
 	statementFilePerm       = 0o644
 	// Delay before fetching statements for a job error to ensure all statements are persisted and ready
@@ -89,7 +89,6 @@ func New(
 	oracleSession, testSession func() (*gocql.Session, error),
 	hosts []string,
 	port int,
-	dockerMode bool,
 	username, password string,
 	partitionKeys typedef.Columns,
 	repl replication.Replication,
@@ -109,7 +108,7 @@ func New(
 
 	createKeyspace, createTable := buildCreateTableQuery(keyspace, table, partitionKeys, repl)
 
-	session, err := newSession(hosts, port, dockerMode, username, password, l)
+	session, err := newSession(hosts, port, username, password, l)
 	if err != nil {
 		return nil, err
 	}

@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -370,6 +371,160 @@ func getFlagState(flag *stop.Flag) string {
 		return "hard"
 	default:
 		return "no-signal"
+	}
+}
+
+func TestName(t *testing.T) {
+	t.Parallel()
+	flag := stop.NewFlag("my-flag")
+	if flag.Name() != "my-flag" {
+		t.Errorf("Name() = %q; want %q", flag.Name(), "my-flag")
+	}
+}
+
+func TestGetStateName(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		want  string
+		state uint32
+	}{
+		{state: stop.SignalNoop, want: "no-signal"},
+		{state: stop.SignalSoftStop, want: "soft"},
+		{state: stop.SignalHardStop, want: "hard"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			t.Parallel()
+			got := stop.GetStateName(tc.state)
+			if got != tc.want {
+				t.Errorf("GetStateName(%d) = %q; want %q", tc.state, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetStateName_UnknownSignal_Panics(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("expected panic for unknown signal, got none")
+		}
+	}()
+	stop.GetStateName(99)
+}
+
+func TestAddHandler2_MatchingSignal_Fires(t *testing.T) {
+	t.Parallel()
+	flag := stop.NewFlag("h2-match")
+
+	var fired bool
+	flag.AddHandler2(func() { fired = true }, stop.SignalHardStop)
+	flag.SetHard(false)
+
+	if !fired {
+		t.Error("handler was not called when expected signal fired")
+	}
+}
+
+func TestAddHandler2_NonMatchingSignal_DoesNotFire(t *testing.T) {
+	t.Parallel()
+	flag := stop.NewFlag("h2-no-match")
+
+	var fired bool
+	flag.AddHandler2(func() { fired = true }, stop.SignalHardStop)
+	flag.SetSoft(false)
+
+	if fired {
+		t.Error("handler must not fire when signal does not match")
+	}
+}
+
+func TestAddHandler2_NoopExpected_FiresOnAnySignal(t *testing.T) {
+	t.Parallel()
+
+	for _, sig := range []struct {
+		trigger func(*stop.Flag)
+		name    string
+	}{
+		{func(f *stop.Flag) { f.SetSoft(false) }, "soft"},
+		{func(f *stop.Flag) { f.SetHard(false) }, "hard"},
+	} {
+		t.Run(sig.name, func(t *testing.T) {
+			t.Parallel()
+			flag := stop.NewFlag("h2-noop-" + sig.name)
+			var fired bool
+			flag.AddHandler2(func() { fired = true }, stop.SignalNoop)
+			sig.trigger(flag)
+			if !fired {
+				t.Error("AddHandler2 with SignalNoop must fire on any signal")
+			}
+		})
+	}
+}
+
+func TestCancelContextOnSignal_CancelsOnMatchingSignal(t *testing.T) {
+	t.Parallel()
+	flag := stop.NewFlag("ctx-cancel")
+	ctx := flag.CancelContextOnSignal(t.Context(), stop.SignalHardStop)
+
+	flag.SetHard(false)
+
+	if ctx.Err() == nil {
+		t.Error("context must be cancelled after SetHard")
+	}
+}
+
+func TestCancelContextOnSignal_NotCancelledOnWrongSignal(t *testing.T) {
+	t.Parallel()
+	flag := stop.NewFlag("ctx-no-cancel")
+	ctx := flag.CancelContextOnSignal(t.Context(), stop.SignalHardStop)
+
+	flag.SetSoft(false)
+
+	if ctx.Err() != nil {
+		t.Error("context must not be cancelled for non-matching signal")
+	}
+}
+
+func TestSyncList_AppendAndGet(t *testing.T) {
+	t.Parallel()
+	var list stop.SyncList[int]
+
+	list.Append(1)
+	list.Append(2)
+	list.Append(3)
+
+	got := list.Get()
+	if len(got) != 3 {
+		t.Fatalf("Get() len = %d; want 3", len(got))
+	}
+	for i, v := range []int{1, 2, 3} {
+		if got[i] != v {
+			t.Errorf("Get()[%d] = %d; want %d", i, got[i], v)
+		}
+	}
+}
+
+func TestSyncList_ConcurrentAppend(t *testing.T) {
+	t.Parallel()
+	var list stop.SyncList[int]
+	const n = 100
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := range n {
+		go func(v int) {
+			defer wg.Done()
+			list.Append(v)
+		}(i)
+	}
+	wg.Wait()
+
+	got := list.Get()
+	if len(got) != n {
+		t.Errorf("after %d concurrent Appends, Get() len = %d; want %d", n, len(got), n)
 	}
 }
 

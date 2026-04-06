@@ -43,7 +43,7 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 	containers := testutils.TestContainers(t)
 	logger := zaptest.NewLogger(t)
 
-	session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+	session, err := newSession(containers.TestHosts, 0, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -371,7 +371,7 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 	}
 
 	// Create statement logger
-	session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+	session, err := newSession(containers.TestHosts, 0, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -646,7 +646,7 @@ func TestCQLStatements_Fetch_MultiPartition_Comprehensive(t *testing.T) {
 		).Exec())
 	}
 
-	session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+	session, err := newSession(containers.TestHosts, 0, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -766,7 +766,7 @@ func TestCQLStatements_Insert_ConcurrentWrites(t *testing.T) {
 	containers := testutils.TestContainers(t)
 	logger := zaptest.NewLogger(t)
 
-	session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+	session, err := newSession(containers.TestHosts, 0, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -885,7 +885,7 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 		"error_key", "value",
 	).Exec())
 
-	session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+	session, err := newSession(containers.TestHosts, 0, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 

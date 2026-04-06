@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -284,10 +283,11 @@ func (st StatementType) PossibleAsyncOperation() bool {
 	}
 }
 
+// Values holds partition key values as a map from column name to value slice.
+// It is safe for concurrent reads after initialization. Only Merge() and
+// UnmarshalJSON() mutate the map and must not be called concurrently with reads.
 type Values struct {
 	data map[string][]any
-
-	mu sync.RWMutex
 }
 
 type ValidationData struct {
@@ -312,8 +312,6 @@ func NewValuesFromMap(m map[string][]any) *Values {
 }
 
 func (v *Values) Get(name string) []any {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
 	if values, ok := v.data[name]; ok {
 		return values
 	}
@@ -324,20 +322,15 @@ func (v *Values) Get(name string) []any {
 func (v *Values) Keys() []string {
 	keys := make([]string, 0, len(v.data))
 
-	v.mu.RLock()
 	for k := range v.data {
 		keys = append(keys, k)
 	}
-	v.mu.RUnlock()
 
 	sort.Strings(keys)
 	return keys
 }
 
 func (v *Values) Len() int {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
 	return len(v.data)
 }
 
@@ -346,25 +339,18 @@ func (v *Values) ToCQLValues(pks Columns) []any {
 		return []any{}
 	}
 
-	v.mu.RLock()
 	values := make([]any, 0, len(v.data)*len(v.data[pks[0].Name]))
 
 	for _, pk := range pks {
 		values = append(values, v.data[pk.Name]...)
 	}
-	v.mu.RUnlock()
 
 	return values
 }
 
+// Merge copies all entries from values into v. Must not be called
+// concurrently with reads on v (call before sharing v across goroutines).
 func (v *Values) Merge(values *Values) {
-	// Lock receiver first, then argument — consistent ordering prevents ABBA deadlock
-	// when two Values merge into each other concurrently.
-	v.mu.Lock()
-	values.mu.RLock()
-	defer values.mu.RUnlock()
-	defer v.mu.Unlock()
-
 	for k, value := range values.data {
 		v.data[k] = append(v.data[k], value...)
 	}
@@ -384,9 +370,6 @@ func (v *Values) MarshalJSON() ([]byte, error) {
 		return []byte("null"), nil
 	}
 
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
 	return json.Marshal(v.data)
 }
 
@@ -398,9 +381,6 @@ func (v *Values) UnmarshalJSON(data []byte) error {
 	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
 		return nil
 	}
-
-	v.mu.Lock()
-	defer v.mu.Unlock()
 
 	if v.data == nil {
 		v.data = make(map[string][]any)
@@ -431,17 +411,10 @@ func (v *Values) Copy() *Values {
 		return nil
 	}
 
-	v.mu.RLock()
-	m := maps.Clone(v.data)
-	v.mu.RUnlock()
-
-	return &Values{data: m}
+	return &Values{data: maps.Clone(v.data)}
 }
 
 func (v *Values) Data() []any {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
 	values := make([]any, 0, len(v.data))
 
 	keys := make([]string, 0, len(v.data))

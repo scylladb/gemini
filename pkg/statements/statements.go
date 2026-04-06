@@ -17,6 +17,10 @@ package statements
 import (
 	"math"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/scylladb/gocqlx/v3/qb"
+
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/partitions"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
@@ -53,15 +57,31 @@ const (
 const MutationStatementsCount = 3
 
 type Generator struct {
-	generator        partitions.Interface
-	random           utils.Random
-	table            *typedef.Table
-	valueRangeConfig *typedef.ValueRangeConfig
-	ratioController  *RatioController
-	keyspace         string
-	keyspaceAndTable string
-	selectColumns    []string
-	useLWT           bool
+	generator                  partitions.Interface
+	random                     utils.Random
+	metricSelIndex             prometheus.Counter
+	metricSelMulti             prometheus.Counter
+	metricSelSingle            prometheus.Counter
+	metricIntendedDelete       prometheus.Counter
+	metricIntendedUpdate       prometheus.Counter
+	metricIntendedInsert       prometheus.Counter
+	metricMutCounterUpd        prometheus.Counter
+	metricMutDelete            prometheus.Counter
+	metricMutInsertJSON        prometheus.Counter
+	metricMutInsert            prometheus.Counter
+	cachedMultiPartitionSelect map[int]string
+	cachedMultiPartitionDelete map[int]string
+	ratioController            *RatioController
+	valueRangeConfig           *typedef.ValueRangeConfig
+	table                      *typedef.Table
+	cachedDeleteQuery          string
+	cachedSelectQuery          string
+	cachedInsertJSONQuery      string
+	cachedInsertQuery          string
+	keyspaceAndTable           string
+	keyspace                   string
+	selectColumns              []string
+	useLWT                     bool
 }
 
 func New(
@@ -73,7 +93,7 @@ func New(
 	ratioController *RatioController,
 	useLWT bool,
 ) *Generator {
-	return &Generator{
+	g := &Generator{
 		keyspace:         schema,
 		keyspaceAndTable: schema + "." + table.Name,
 		table:            table,
@@ -83,6 +103,87 @@ func New(
 		generator:        valueGenerator,
 		ratioController:  ratioController,
 		selectColumns:    table.SelectColumnNames(),
+	}
+	g.buildCachedQueries()
+
+	// Pre-resolve Prometheus counters to avoid per-call WithLabelValues() lookups.
+	g.metricMutInsert = metrics.StatementsGenerated.WithLabelValues("mutation", "insert")
+	g.metricMutInsertJSON = metrics.StatementsGenerated.WithLabelValues("mutation", "insert_json")
+	g.metricMutDelete = metrics.StatementsGenerated.WithLabelValues("mutation", "delete")
+	g.metricMutCounterUpd = metrics.StatementsGenerated.WithLabelValues("mutation", "counter_update")
+	g.metricIntendedInsert = metrics.StatementsGenerated.WithLabelValues("intended", "insert")
+	g.metricIntendedUpdate = metrics.StatementsGenerated.WithLabelValues("intended", "update")
+	g.metricIntendedDelete = metrics.StatementsGenerated.WithLabelValues("intended", "delete")
+	g.metricSelSingle = metrics.StatementsGenerated.WithLabelValues("select", "single_partition")
+	g.metricSelMulti = metrics.StatementsGenerated.WithLabelValues("select", "multi_partition")
+	g.metricSelIndex = metrics.StatementsGenerated.WithLabelValues("select", "index")
+
+	return g
+}
+
+// buildCachedQueries pre-builds query strings that are identical for every
+// invocation with the same table schema. This avoids repeated bytes.Buffer
+// allocations and string building in the hot path.
+func (g *Generator) buildCachedQueries() {
+	// Cache INSERT query
+	builder := qb.Insert(g.keyspaceAndTable)
+	for _, pk := range g.table.PartitionKeys {
+		builder.Columns(pk.Name)
+	}
+	for _, ck := range g.table.ClusteringKeys {
+		builder.Columns(ck.Name)
+	}
+	for _, col := range g.table.Columns {
+		switch colType := col.Type.(type) {
+		case *typedef.TupleType:
+			builder.TupleColumn(col.Name, len(colType.ValueTypes))
+		default:
+			builder.Columns(col.Name)
+		}
+	}
+	g.cachedInsertQuery, _ = builder.ToCql()
+
+	// Cache INSERT JSON query
+	jsonBuilder := qb.Insert(g.keyspaceAndTable).Json()
+	g.cachedInsertJSONQuery, _ = jsonBuilder.ToCql()
+
+	// Cache single-partition SELECT query
+	selectBuilder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
+	for _, pk := range g.table.PartitionKeys {
+		selectBuilder = selectBuilder.Where(qb.Eq(pk.Name))
+	}
+	g.cachedSelectQuery, _ = selectBuilder.ToCql()
+
+	// Cache single-partition DELETE query
+	deleteBuilder := qb.Delete(g.keyspaceAndTable)
+	for _, pk := range g.table.PartitionKeys {
+		deleteBuilder = deleteBuilder.Where(qb.Eq(pk.Name))
+	}
+	g.cachedDeleteQuery, _ = deleteBuilder.ToCql()
+
+	// Cache all multi-partition SELECT and DELETE variants.
+	// numQueryPKs ranges from 1 to max where i^pkLen < MaxCartesianProductCount.
+	pkLen := g.table.PartitionKeys.Len()
+	maxPKs := int(MaxCartesianProductCount) // upper bound, usually ~100
+	g.cachedMultiPartitionSelect = make(map[int]string, maxPKs)
+	g.cachedMultiPartitionDelete = make(map[int]string, maxPKs)
+
+	for n := 1; n <= maxPKs; n++ {
+		if math.Pow(float64(n), float64(pkLen)) >= MaxCartesianProductCount {
+			break
+		}
+
+		sb := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
+		for _, pk := range g.table.PartitionKeys {
+			sb.Where(qb.InTuple(pk.Name, n))
+		}
+		g.cachedMultiPartitionSelect[n], _ = sb.ToCql()
+
+		db := qb.Delete(g.keyspaceAndTable)
+		for _, pk := range g.table.PartitionKeys {
+			db.Where(qb.InTuple(pk.Name, n))
+		}
+		g.cachedMultiPartitionDelete[n], _ = db.ToCql()
 	}
 }
 

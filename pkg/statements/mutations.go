@@ -32,21 +32,28 @@ func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) (*
 
 	switch g.ratioController.GetMutationStatementType(filterDeletes...) {
 	case StatementTypeInsert:
+		g.metricIntendedInsert.Inc()
 		if g.table.IsCounterTable() {
+			g.metricMutCounterUpd.Inc()
 			return g.Update(ctx)
 		}
 
 		if g.ratioController.GetInsertSubtype() == InsertJSONStatement {
 			if g.table.KnownIssues[typedef.KnownIssuesJSONWithTuples] {
+				g.metricMutInsert.Inc()
 				return g.Insert(ctx)
 			}
 
+			g.metricMutInsertJSON.Inc()
 			return g.InsertJSON(ctx)
 		}
 
+		g.metricMutInsert.Inc()
 		return g.Insert(ctx)
 	case StatementTypeUpdate:
+		g.metricIntendedUpdate.Inc()
 		if g.table.IsCounterTable() {
+			g.metricMutCounterUpd.Inc()
 			return g.Update(ctx)
 		}
 
@@ -54,11 +61,15 @@ func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) (*
 		//       Falling back to Insert for now, until everything else is stable
 
 		if g.ratioController.GetInsertSubtype() == InsertJSONStatement {
+			g.metricMutInsertJSON.Inc()
 			return g.InsertJSON(ctx)
 		}
 
+		g.metricMutInsert.Inc()
 		return g.Insert(ctx)
 	case StatementTypeDelete:
+		g.metricIntendedDelete.Inc()
+		g.metricMutDelete.Inc()
 		return g.Delete(ctx)
 	default:
 		panic("Invalid mutation statement type")

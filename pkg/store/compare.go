@@ -43,17 +43,23 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 	// appends in Scylla when inserts are retried.
 	deduplicateListValues(table, testRows)
 
-	// Sort both sides (stable) to aid deterministic behavior when rendering diffs.
-	// We sort by partition keys first, then clustering keys to ensure stable
-	// and consistent comparison regardless of the order returned by the database.
-	cmp := func(a, b Row) int {
+	// Sort both sides (stable) by partition keys then clustering keys.
+	// Uses cached SortKeyNames to avoid rebuilding key list per call.
+	sortKeys := table.SortKeyNames
+	if len(sortKeys) == 0 {
+		// Fallback for tables not initialized via Init()
+		sortKeys = make([]string, 0, len(table.PartitionKeys)+len(table.ClusteringKeys))
 		for _, pk := range table.PartitionKeys {
-			if c := compareValues(a.Get(pk.Name), b.Get(pk.Name)); c != 0 {
-				return c
-			}
+			sortKeys = append(sortKeys, pk.Name)
 		}
 		for _, ck := range table.ClusteringKeys {
-			if c := compareValues(a.Get(ck.Name), b.Get(ck.Name)); c != 0 {
+			sortKeys = append(sortKeys, ck.Name)
+		}
+	}
+
+	cmp := func(a, b Row) int {
+		for _, name := range sortKeys {
+			if c := compareValues(a.Get(name), b.Get(name)); c != 0 {
 				return c
 			}
 		}
@@ -68,6 +74,7 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 
 	// Fast-path: if rows are deeply equal after sort, all match.
 	if reflect.DeepEqual(testRows, oracleRows) {
+		metrics.ValidationRowsMatched.Add(float64(len(testRows)))
 		return ComparisonResult{Table: table, MatchCount: len(testRows)}
 	}
 
@@ -98,6 +105,8 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 			}
 		}
 
+		metrics.ValidationRowsMissingInTest.Add(float64(len(result.OracleOnlyRows)))
+		metrics.ValidationRowsMissingInOracle.Add(float64(len(result.TestOnlyRows)))
 		return result
 	}
 
@@ -115,6 +124,9 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 			result.MatchCount++
 		}
 	}
+
+	metrics.ValidationRowsMatched.Add(float64(result.MatchCount))
+	metrics.ValidationRowsDifferent.Add(float64(len(result.DifferentRows)))
 
 	return result
 }

@@ -32,37 +32,42 @@ import (
 )
 
 func (g *Generator) Insert(_ context.Context) (*typedef.Stmt, error) {
-	builder := qb.Insert(g.keyspaceAndTable)
-	if g.useLWT && g.random.Uint32()%10 == 0 {
-		builder.Unique()
-	}
-
-	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
+	values := make([]any, 0, g.table.TotalLenValues)
 
 	pks := g.generator.Next()
 
 	for _, pk := range g.table.PartitionKeys {
-		builder.Columns(pk.Name)
 		values = append(values, pks.Values.Get(pk.Name)...)
 	}
 
 	for _, ck := range g.table.ClusteringKeys {
-		builder.Columns(ck.Name)
-		values = append(values, ck.Type.GenValue(g.random, g.valueRangeConfig)...)
+		values = ck.Type.GenValueOut(values, g.random, g.valueRangeConfig)
 	}
 
 	for _, col := range g.table.Columns {
-		switch colType := col.Type.(type) {
-		case *typedef.TupleType:
-			builder.TupleColumn(col.Name, len(colType.ValueTypes))
-			values = append(values, col.Type.GenValue(g.random, g.valueRangeConfig)...)
-		default:
-			builder.Columns(col.Name)
-			values = append(values, col.Type.GenValue(g.random, g.valueRangeConfig)...)
-		}
+		values = col.Type.GenValueOut(values, g.random, g.valueRangeConfig)
 	}
 
-	query, _ := builder.ToCql()
+	query := g.cachedInsertQuery
+	if g.useLWT && g.random.Uint32()%10 == 0 {
+		// LWT variant needs IF NOT EXISTS — can't use cache, build fresh
+		builder := qb.Insert(g.keyspaceAndTable).Unique()
+		for _, pk := range g.table.PartitionKeys {
+			builder.Columns(pk.Name)
+		}
+		for _, ck := range g.table.ClusteringKeys {
+			builder.Columns(ck.Name)
+		}
+		for _, col := range g.table.Columns {
+			switch colType := col.Type.(type) {
+			case *typedef.TupleType:
+				builder.TupleColumn(col.Name, len(colType.ValueTypes))
+			default:
+				builder.Columns(col.Name)
+			}
+		}
+		query, _ = builder.ToCql()
+	}
 
 	return &typedef.Stmt{
 		PartitionKeys: []typedef.PartitionKeys{pks},
@@ -78,7 +83,7 @@ func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 	}
 
 	pks := g.generator.Next()
-	values := make(map[string]any, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues()+g.table.Columns.LenValues())
+	values := make(map[string]any, g.table.TotalLenValues)
 
 	for _, pk := range g.table.PartitionKeys {
 		switch t := pk.Type.(type) {
@@ -103,10 +108,9 @@ func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 		return nil, err
 	}
 
-	query, _ := qb.Insert(g.keyspaceAndTable).Json().ToCql()
 	return &typedef.Stmt{
 		PartitionKeys: []typedef.PartitionKeys{pks},
-		Query:         query,
+		Query:         g.cachedInsertJSONQuery,
 		QueryType:     typedef.InsertJSONStatementType,
 		Values:        []any{utils.UnsafeString(jsonString)},
 	}, nil

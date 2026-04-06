@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -359,6 +360,7 @@ func (d *deletedPartitions) processReady() time.Duration {
 		select {
 		case d.ch <- earliest.keys:
 			processed++
+			metrics.DeletedPartitionsEmitted.Inc()
 
 			if earliest.counter >= len(d.buckets) {
 				// Final emission done; remove and release original keys once
@@ -443,9 +445,11 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	if wasEmpty || readyAtNs < d.nextReadyNs.Load() {
 		d.nextReadyNs.Store(readyAtNs)
 	}
+	pendingLen := d.heap.Len()
 	d.mu.Unlock()
 
 	d.deleted.Add(1)
+	metrics.DeletedPartitionsPending.Set(float64(pendingLen))
 }
 
 // DeleteBulk adds multiple deleted partitions in a single lock acquisition
