@@ -310,9 +310,9 @@ func TestSummariseStatements_CountsWrites(t *testing.T) {
 	ts3 := ts2.Add(time.Second)
 	s := summariseStatements([]stmtLogLine{{
 		Statements: rawEntries(t, []stmtLogEntry{
-			{Timestamp: ts1, Statement: "INSERT INTO ks.t (pk0) VALUES (?)"},
-			{Timestamp: ts2, Statement: "UPDATE ks.t SET c=1 WHERE pk0=?"},
-			{Timestamp: ts3, Statement: "DELETE FROM ks.t WHERE pk0=?"},
+			{Timestamp: cqlTimestamp{ts1}, Statement: "INSERT INTO ks.t (pk0) VALUES (?)"},
+			{Timestamp: cqlTimestamp{ts2}, Statement: "UPDATE ks.t SET c=1 WHERE pk0=?"},
+			{Timestamp: cqlTimestamp{ts3}, Statement: "DELETE FROM ks.t WHERE pk0=?"},
 		}),
 	}})
 	assert.Equal(t, 2, s.WriteCount)
@@ -331,7 +331,7 @@ func TestSummariseStatements_IgnoresSelect(t *testing.T) {
 	t.Parallel()
 	s := summariseStatements([]stmtLogLine{{
 		Statements: rawEntries(t, []stmtLogEntry{
-			{Timestamp: time.Now(), Statement: "SELECT * FROM ks.t WHERE pk0=?"},
+			{Timestamp: cqlTimestamp{time.Now()}, Statement: "SELECT * FROM ks.t WHERE pk0=?"},
 		}),
 	}})
 	assert.Zero(t, s.WriteCount)
@@ -343,9 +343,9 @@ func TestSummariseStatements_TracksHosts(t *testing.T) {
 	t.Parallel()
 	s := summariseStatements([]stmtLogLine{{
 		Statements: rawEntries(t, []stmtLogEntry{
-			{Timestamp: time.Now(), Statement: "INSERT INTO ks.t (pk0) VALUES (?)", Host: "10.0.0.1"},
-			{Timestamp: time.Now(), Statement: "INSERT INTO ks.t (pk0) VALUES (?)", Host: "10.0.0.2"},
-			{Timestamp: time.Now(), Statement: "INSERT INTO ks.t (pk0) VALUES (?)", Host: "10.0.0.1"},
+			{Timestamp: cqlTimestamp{time.Now()}, Statement: "INSERT INTO ks.t (pk0) VALUES (?)", Host: "10.0.0.1"},
+			{Timestamp: cqlTimestamp{time.Now()}, Statement: "INSERT INTO ks.t (pk0) VALUES (?)", Host: "10.0.0.2"},
+			{Timestamp: cqlTimestamp{time.Now()}, Statement: "INSERT INTO ks.t (pk0) VALUES (?)", Host: "10.0.0.1"},
 		}),
 	}})
 	assert.Equal(t, []string{"10.0.0.1", "10.0.0.2"}, s.Hosts)
@@ -355,8 +355,8 @@ func TestSummariseStatements_CountsWriteErrors(t *testing.T) {
 	t.Parallel()
 	s := summariseStatements([]stmtLogLine{{
 		Statements: rawEntries(t, []stmtLogEntry{
-			{Timestamp: time.Now(), Statement: "INSERT INTO ks.t (pk0) VALUES (?)", Error: "timeout"},
-			{Timestamp: time.Now(), Statement: "INSERT INTO ks.t (pk0) VALUES (?)"},
+			{Timestamp: cqlTimestamp{time.Now()}, Statement: "INSERT INTO ks.t (pk0) VALUES (?)", Error: "timeout"},
+			{Timestamp: cqlTimestamp{time.Now()}, Statement: "INSERT INTO ks.t (pk0) VALUES (?)"},
 		}),
 	}})
 	assert.Equal(t, 2, s.WriteCount)
@@ -368,13 +368,81 @@ func TestSummariseStatements_CountsDeleteErrors(t *testing.T) {
 	t.Parallel()
 	s := summariseStatements([]stmtLogLine{{
 		Statements: rawEntries(t, []stmtLogEntry{
-			{Timestamp: time.Now(), Statement: "DELETE FROM ks.t WHERE pk0=?", Error: "timeout"},
-			{Timestamp: time.Now(), Statement: "DELETE FROM ks.t WHERE pk0=?"},
+			{Timestamp: cqlTimestamp{time.Now()}, Statement: "DELETE FROM ks.t WHERE pk0=?", Error: "timeout"},
+			{Timestamp: cqlTimestamp{time.Now()}, Statement: "DELETE FROM ks.t WHERE pk0=?"},
 		}),
 	}})
 	assert.Equal(t, 2, s.DeleteCount)
 	assert.Equal(t, 1, s.DeleteErrors)
 	assert.Equal(t, 0, s.WriteErrors)
+}
+
+func TestCQLTimestamp_UnmarshalJSON(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		input string
+		want  time.Time
+	}{
+		{
+			name:  "RFC3339",
+			input: `"2026-02-23T12:00:00Z"`,
+			want:  time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:  "RFC3339Nano",
+			input: `"2026-02-23T12:00:00.123456789Z"`,
+			want:  time.Date(2026, 2, 23, 12, 0, 0, 123456789, time.UTC),
+		},
+		{
+			name:  "Scylla space separator compact offset",
+			input: `"2026-02-23 12:00:00.000+0000"`,
+			want:  time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:  "Scylla T separator compact offset",
+			input: `"2026-02-23T12:00:00.000+0000"`,
+			want:  time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:  "Scylla space separator with Z",
+			input: `"2026-02-23 12:00:00.000Z"`,
+			want:  time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var ct cqlTimestamp
+			err := ct.UnmarshalJSON([]byte(tt.input))
+			require.NoError(t, err)
+			assert.True(t, tt.want.Equal(ct.Time), "got %v, want %v", ct.Time, tt.want)
+		})
+	}
+}
+
+func TestParseStatements_ScyllaTimestampFormat(t *testing.T) {
+	t.Parallel()
+	// Simulate the exact JSON format that Scylla's SELECT JSON produces
+	// for a timestamp column: space-separated date/time with +0000 offset.
+	raw := json.RawMessage(`{"ts":"2026-04-05 16:19:27.000+0000","statement":"INSERT INTO ks.t (pk0) VALUES (?)","host":"10.0.0.1"}`)
+	lines := []stmtLogLine{{Statements: []json.RawMessage{raw}}}
+	entries := parseStatements(lines)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "INSERT INTO ks.t (pk0) VALUES (?)", entries[0].Statement)
+	assert.False(t, entries[0].Timestamp.IsZero(), "timestamp should not be zero")
+}
+
+func TestSummariseStatements_ScyllaTimestampFormat(t *testing.T) {
+	t.Parallel()
+	// Verify that statement entries with Scylla timestamp format are counted.
+	raw1 := json.RawMessage(`{"ts":"2026-04-05 16:19:27.000+0000","statement":"INSERT INTO ks.t (pk0) VALUES (?)","host":"10.0.0.1"}`)
+	raw2 := json.RawMessage(`{"ts":"2026-04-05 16:20:00.000+0000","statement":"DELETE FROM ks.t WHERE pk0=?","host":"10.0.0.2"}`)
+	s := summariseStatements([]stmtLogLine{{Statements: []json.RawMessage{raw1, raw2}}})
+	assert.Equal(t, 1, s.WriteCount, "should count 1 write")
+	assert.Equal(t, 1, s.DeleteCount, "should count 1 delete")
+	require.NotNil(t, s.FirstWriteTime, "first write time should be set")
+	require.NotNil(t, s.FirstDeleteTime, "first delete time should be set")
 }
 
 func TestBuildCorruptionEntries_Empty(t *testing.T) {

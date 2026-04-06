@@ -68,7 +68,6 @@ func TestCompareCollectedRows_MultiPKMultiCK_SortingAndDiff(t *testing.T) {
 	assert.Equal(t, 2, diff.TestRow.Get("ck2"))
 }
 
-
 func TestRowKeyString_CompositeFormatting(t *testing.T) {
 	t.Parallel()
 

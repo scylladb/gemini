@@ -31,13 +31,13 @@ type Table struct {
 	schema            *Schema
 	listCols          []ListColInfo // cached list column info, built by Init
 	listColsBuilt     bool
+	KnownIssues       KnownIssues        `json:"known_issues"`
 	Name              string             `json:"name"`
 	PartitionKeys     Columns            `json:"partition_keys"`
 	ClusteringKeys    Columns            `json:"clustering_keys"`
 	Columns           Columns            `json:"columns"`
 	Indexes           []IndexDef         `json:"indexes,omitempty"`
 	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
-	KnownIssues       KnownIssues        `json:"known_issues"`
 	TableOptions      []string           `json:"table_options,omitempty"`
 
 	// Cached computed values — set once by Init(), never change.
