@@ -41,21 +41,6 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
-// applyLocalhostTranslator installs an AddressTranslator on cluster that
-// rewrites every peer IP to 127.0.0.1, preserving the port.  This is the
-// Docker/testcontainer workaround: when a node advertises its internal
-// container IP as rpc_address, gocql would otherwise try to reconnect to an
-// IP that is unreachable from the host.  A warning is logged because silently
-// rerouting all traffic to a single address would cause very confusing
-// behaviour in production.
-func applyLocalhostTranslator(cluster *gocql.ClusterConfig, logger *zap.Logger) {
-	logger.Warn("DockerMode is enabled: all discovered peer addresses will be translated to 127.0.0.1; do NOT enable this in production")
-	localhostIP := net.ParseIP("127.0.0.1")
-	cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, p int) (net.IP, int) {
-		return localhostIP, p
-	})
-}
-
 type cqlStore struct {
 	cqlRequestsMetric         [typedef.StatementTypeCount]prometheus.Counter
 	cqlErrorRequestsMetric    [typedef.StatementTypeCount]prometheus.Counter
@@ -464,14 +449,6 @@ func CreateCluster(
 
 	if config.Port > 0 {
 		cluster.Port = config.Port
-	}
-
-	// DockerMode: translate every discovered peer address back to 127.0.0.1 so
-	// that gocql always dials through the host-mapped port instead of the
-	// internal Docker IP (which is unreachable from the host).
-	// This must only be enabled explicitly — never inferred from port/host values.
-	if config.DockerMode {
-		applyLocalhostTranslator(cluster, logger)
 	}
 
 	cluster.Timeout = config.RequestTimeout

@@ -19,7 +19,6 @@ package testutils
 import (
 	"fmt"
 	"math/rand/v2"
-	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -46,9 +45,6 @@ type (
 		Test            *gocql.Session
 		OracleHosts     []string
 		TestHosts       []string
-		// DockerMode is true when the clusters were started via testcontainers
-		// and require address translation (all peer IPs rewritten to 127.0.0.1).
-		DockerMode bool
 	}
 
 	ipUsed struct {
@@ -110,7 +106,7 @@ func createScyllaNetwork(tb testing.TB) *testcontainers.DockerNetwork {
 	return sharedNetwork
 }
 
-func createClusterConfig(port int, dockerMode bool, hosts ...string) *gocql.ClusterConfig {
+func createClusterConfig(port int, hosts ...string) *gocql.ClusterConfig {
 	cluster := gocql.NewCluster(hosts...)
 	if port > 0 {
 		cluster.Port = port
@@ -126,25 +122,13 @@ func createClusterConfig(port int, dockerMode bool, hosts ...string) *gocql.Clus
 	cluster.Consistency = gocql.Quorum
 	cluster.DefaultTimestamp = false
 
-	// When dockerMode is true, tests connect via a host-mapped port (e.g.
-	// localhost:19042) and the node advertises its internal Docker IP as
-	// rpc_address.  Gocql would then try to reconnect to that internal IP which
-	// is unreachable from the host.  Translate every discovered address back to
-	// 127.0.0.1 so gocql always uses the mapped port.
-	if dockerMode {
-		localhostIP := net.ParseIP("127.0.0.1")
-		cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, p int) (net.IP, int) {
-			return localhostIP, p
-		})
-	}
-
 	return cluster
 }
 
-func createScyllaSession(tb testing.TB, port int, dockerMode bool, hosts ...string) *ScyllaContainer {
+func createScyllaSession(tb testing.TB, port int, hosts ...string) *ScyllaContainer {
 	tb.Helper()
 
-	testCluster := createClusterConfig(port, dockerMode, hosts...)
+	testCluster := createClusterConfig(port, hosts...)
 	if err := testCluster.Validate(); err != nil {
 		tb.Fatalf("failed to validate test ScyllaDB cluster: %v", err)
 	}
@@ -165,7 +149,6 @@ func createScyllaSession(tb testing.TB, port int, dockerMode bool, hosts ...stri
 		Test:        session,
 		TestCluster: testCluster,
 		TestHosts:   hosts,
-		DockerMode:  dockerMode,
 	}
 }
 
@@ -207,7 +190,7 @@ func spawnScylla(tb testing.TB, name, version string, sharedNetwork *testcontain
 	host := Must(scyllaContainer.Host(tb.Context()))
 	port := Must(scyllaContainer.MappedPort(tb.Context(), "9042/tcp"))
 
-	container := createScyllaSession(tb, int(Must(strconv.ParseInt(port.Port(), 10, 32))), true, host)
+	container := createScyllaSession(tb, int(Must(strconv.ParseInt(port.Port(), 10, 32))), host)
 	switch name {
 	case "oracle":
 		container.OracleContainer = scyllaContainer
@@ -253,7 +236,7 @@ func SingleScylla(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 
 		port := int(Must(strconv.ParseInt(portStr, 10, 32)))
 
-		return createScyllaSession(tb, port, false, strings.Split(hosts, ",")...)
+		return createScyllaSession(tb, port, strings.Split(hosts, ",")...)
 	}
 
 	tb.Fatal("GEMINI_USE_DOCKER_SCYLLA is set to false, but using in-memory ScyllaDB is not supported in this build")
@@ -305,9 +288,8 @@ func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 			// Provide fresh ClusterConfig instances for use by stores to avoid
 			// reusing a ClusterConfig that already created a session (which would panic
 			// due to sharing host selection policy between sessions).
-			TestCluster:   createClusterConfig(testPort, true, testScylla.TestHosts...),
-			OracleCluster: createClusterConfig(oraclePort, true, oracleScylla.TestHosts...),
-			DockerMode:    true,
+			TestCluster:   createClusterConfig(testPort, testScylla.TestHosts...),
+			OracleCluster: createClusterConfig(oraclePort, oracleScylla.TestHosts...),
 		}
 	}
 
@@ -344,16 +326,16 @@ func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 
 		testPort := int(Must(strconv.ParseInt(testPortStr, 10, 32)))
 
-		oracleSession := createScyllaSession(tb, oraclePort, false, strings.Split(oracleHosts, ",")...)
-		testSession := createScyllaSession(tb, testPort, false, strings.Split(testHosts, ",")...)
+		oracleSession := createScyllaSession(tb, oraclePort, strings.Split(oracleHosts, ",")...)
+		testSession := createScyllaSession(tb, testPort, strings.Split(testHosts, ",")...)
 
 		return &ScyllaContainer{
 			Oracle:        oracleSession.Test,
 			OracleHosts:   oracleSession.TestHosts,
-			OracleCluster: createClusterConfig(oraclePort, false, strings.Split(oracleHosts, ",")...),
+			OracleCluster: createClusterConfig(oraclePort, strings.Split(oracleHosts, ",")...),
 			Test:          testSession.Test,
 			TestHosts:     testSession.TestHosts,
-			TestCluster:   createClusterConfig(testPort, false, strings.Split(testHosts, ",")...),
+			TestCluster:   createClusterConfig(testPort, strings.Split(testHosts, ",")...),
 		}
 	}
 

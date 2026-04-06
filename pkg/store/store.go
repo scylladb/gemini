@@ -89,7 +89,6 @@ type (
 		Port                    int
 		RequestTimeout          time.Duration
 		ConnectTimeout          time.Duration
-		DockerMode              bool
 		UseServerSideTimestamps bool
 	}
 	Config struct {
@@ -187,7 +186,6 @@ func New(
 					testStore.getSession,
 					cfg.OracleClusterConfig.Hosts,
 					cfg.OracleClusterConfig.Port,
-					cfg.OracleClusterConfig.DockerMode,
 					cfg.OracleClusterConfig.Username,
 					cfg.OracleClusterConfig.Password,
 					partitionKeyColumns,
@@ -330,15 +328,22 @@ func (ds delegatingStore) executeParallelMutations(
 	// Update context with attempt number
 	ctxData := AcquireContextData(stmt, attempt)
 	doCtx := WithContextData(ctx, ctxData)
-	defer ReleaseContextData(ctxData)
 
 	// Use a pooled channel for both mutations
 	ch := mutationChPool.Get().(chan mutationChanRes)
 
+	// wg tracks goroutines so we can wait for them to fully finish before
+	// releasing ctxData. The observer (ClusterObserver.ObserveQuery) runs
+	// inside the goroutine and reads ctxData.Statement; releasing it early
+	// causes a data race.
+	var wg sync.WaitGroup
+
 	expected := 0
 	if retryTest {
 		expected++
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			err := ds.testStore.mutate(doCtx, stmt, timestamp)
 			select {
 			case ch <- mutationChanRes{oracle: false, err: err}:
@@ -348,7 +353,9 @@ func (ds delegatingStore) executeParallelMutations(
 	}
 	if retryOracle && ds.oracleStore != nil {
 		expected++
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			err := ds.oracleStore.mutate(doCtx, stmt, timestamp)
 			select {
 			case ch <- mutationChanRes{oracle: true, err: err}:
@@ -357,9 +364,13 @@ func (ds delegatingStore) executeParallelMutations(
 		}()
 	}
 
-	// Wait for results
+	// Wait for results; on context cancellation waitForMutationResults returns
+	// early, but the goroutines may still be running. We must wait for them to
+	// complete before releasing ctxData to avoid a data race in ObserveQuery.
 	ds.waitForMutationResults(doCtx, ch, &result, retryTest, retryOracle, expected)
+	wg.Wait()
 	mutationChPool.Put(ch)
+	ReleaseContextData(ctxData)
 
 	return result
 }
@@ -558,10 +569,11 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	return mutationErr
 }
 
-//nolint:gocyclo
 // checkOnceInternal performs a single validation attempt. On success it returns
 // the matched row count and nil error. On failure it returns the validation
 // error with comparison results attached (when applicable).
+//
+//nolint:gocyclo
 func (ds delegatingStore) checkOnceInternal(
 	ctx context.Context,
 	table *typedef.Table,
@@ -570,11 +582,11 @@ func (ds delegatingStore) checkOnceInternal(
 ) (int, error) {
 	cd := AcquireContextData(stmt, attempt)
 	doCtx := WithContextData(ctx, cd)
-	defer ReleaseContextData(cd)
 
 	// If there is no oracle, just count test rows
 	if ds.oracleStore == nil {
 		testRows, testErr := ds.testStore.load(doCtx, stmt)
+		ReleaseContextData(cd)
 		if testErr != nil {
 			validationErr := NewValidationError("validation", stmt)
 			validationErr.AddAttempt(testErr)
@@ -587,7 +599,14 @@ func (ds delegatingStore) checkOnceInternal(
 	// Run iterators in parallel using a pooled channel (size 2)
 	ch := rowsTaggedChPool.Get().(chan rowsTagged)
 
+	// wg tracks goroutines so we can wait for them to fully finish before
+	// releasing cd. The observer (ClusterObserver.ObserveQuery) runs inside
+	// the goroutine and reads cd.Statement; releasing it early causes a race.
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	go func() {
+		defer wg.Done()
 		rows, err := ds.testStore.load(doCtx, stmt)
 		select {
 		case ch <- rowsTagged{oracle: false, rows: rows, err: err}:
@@ -596,6 +615,7 @@ func (ds delegatingStore) checkOnceInternal(
 	}()
 
 	go func() {
+		defer wg.Done()
 		rows, err := ds.oracleStore.load(doCtx, stmt)
 		select {
 		case ch <- rowsTagged{oracle: true, rows: rows, err: err}:
@@ -616,12 +636,16 @@ func (ds delegatingStore) checkOnceInternal(
 			}
 			received++
 		case <-doCtx.Done():
+			wg.Wait()
 			rowsTaggedChPool.Put(ch)
+			ReleaseContextData(cd)
 			metrics.ContextCancellations.WithLabelValues("load", "deadline").Inc()
 			return 0, doCtx.Err()
 		}
 	}
+	wg.Wait()
 	rowsTaggedChPool.Put(ch)
+	ReleaseContextData(cd)
 
 	// Extract results
 	testRows, oracleRows := tRes.rows, oRes.rows

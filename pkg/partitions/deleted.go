@@ -445,10 +445,11 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	if wasEmpty || readyAtNs < d.nextReadyNs.Load() {
 		d.nextReadyNs.Store(readyAtNs)
 	}
+	pendingLen := d.heap.Len()
 	d.mu.Unlock()
 
 	d.deleted.Add(1)
-	metrics.DeletedPartitionsPending.Set(float64(d.heap.Len()))
+	metrics.DeletedPartitionsPending.Set(float64(pendingLen))
 }
 
 // DeleteBulk adds multiple deleted partitions in a single lock acquisition

@@ -48,7 +48,7 @@ func TestNewSession_Integration(t *testing.T) {
 	t.Run("create session successfully", func(t *testing.T) {
 		t.Parallel()
 
-		session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+		session, err := newSession(containers.TestHosts, 0, "", "", logger)
 		require.NoError(t, err)
 		require.NotNil(t, session)
 		defer session.Close()
@@ -61,7 +61,7 @@ func TestNewSession_Integration(t *testing.T) {
 	t.Run("invalid host", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := newSession([]string{"invalid-host-12345.example.com"}, 0, false, "", "", logger)
+		_, err := newSession([]string{"invalid-host-12345.example.com"}, 0, "", "", logger)
 		assert.Error(t, err)
 	})
 }
@@ -72,7 +72,7 @@ func TestNewStatements_Integration(t *testing.T) {
 	containers := testutils.TestContainers(t)
 	logger := zaptest.NewLogger(t)
 
-	session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+	session, err := newSession(containers.TestHosts, 0, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -138,7 +138,7 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 	containers := testutils.TestContainers(t)
 	logger := zaptest.NewLogger(t)
 
-	session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+	session, err := newSession(containers.TestHosts, 0, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -248,7 +248,7 @@ func TestNewStatements_WithTupleType_Integration(t *testing.T) {
 	containers := testutils.TestContainers(t)
 	logger := zaptest.NewLogger(t)
 
-	session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+	session, err := newSession(containers.TestHosts, 0, "", "", logger)
 	require.NoError(t, err)
 	defer session.Close()
 
@@ -329,7 +329,7 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 	).Exec())
 
 	// Create statement logger
-	session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+	session, err := newSession(containers.TestHosts, 0, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -488,7 +488,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 	}
 
 	// Create statement logger
-	session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+	session, err := newSession(containers.TestHosts, 0, "", "", logger)
 	require.NoError(t, err)
 	defer session.Close()
 
@@ -704,7 +704,6 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 		func() (*gocql.Session, error) { return containers.Test, nil },
 		containers.TestHosts,
 		0,
-		containers.DockerMode,
 		"", "",
 		partitionKeys,
 		replication.NewSimpleStrategy(),
@@ -724,7 +723,7 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 
 		// Cleanup logs keyspace
 		logsKS := GetScyllaStatementLogsKeyspace(testKS)
-		session, err := newSession(containers.TestHosts, 0, containers.DockerMode, "", "", logger)
+		session, err := newSession(containers.TestHosts, 0, "", "", logger)
 		if err != nil {
 			t.Logf("cleanup: failed to create session for logs keyspace drop: %v", err)
 		} else if session != nil {

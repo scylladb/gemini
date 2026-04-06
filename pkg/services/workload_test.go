@@ -38,7 +38,7 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string, dockerMode bool) store.Config {
+func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string) store.Config {
 	tb.Helper()
 	var oracleConfig *store.ScyllaClusterConfig
 
@@ -61,7 +61,6 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string, dockerMode b
 			Consistency:             gocql.Quorum.String(),
 			Hosts:                   oracleHosts,
 			Port:                    oraclePort,
-			DockerMode:              dockerMode,
 			RequestTimeout:          10 * time.Second,
 			ConnectTimeout:          10 * time.Second,
 			UseServerSideTimestamps: true,
@@ -82,7 +81,6 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string, dockerMode b
 			Consistency:             gocql.Quorum.String(),
 			Hosts:                   testHosts,
 			Port:                    testPort,
-			DockerMode:              dockerMode,
 			RequestTimeout:          10 * time.Second,
 			ConnectTimeout:          10 * time.Second,
 			UseServerSideTimestamps: false,
@@ -260,7 +258,7 @@ func TestWorkload(t *testing.T) {
 			t.Parallel()
 
 			assert := require.New(t)
-			storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+			storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts)
 			schema := getSchema(t)
 			stopFlag := stop.NewFlag(t.Name())
 			t.Cleanup(func() {
@@ -299,7 +297,7 @@ func TestWorkloadWithoutOracle(t *testing.T) {
 			t.Parallel()
 			logger := getLogger(t)
 			assert := require.New(t)
-			storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+			storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts)
 			schema := getSchema(t)
 			stopFlag := stop.NewFlag(t.Name())
 			t.Cleanup(func() {
@@ -358,7 +356,7 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 
 	assert := require.New(t)
 	logger := getLogger(t)
-	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts)
 	schema := getSchema(t)
 	stopFlag := stop.NewFlag(t.Name())
 	t.Cleanup(func() {
@@ -453,7 +451,7 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 
 	assert := require.New(t)
 	logger := getLogger(t)
-	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts)
 	schema := getSchema(t, &typedef.Table{
 		Name: "table_all",
 		PartitionKeys: typedef.Columns{

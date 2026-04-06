@@ -15,7 +15,6 @@
 package scylla
 
 import (
-	"net"
 	"slices"
 	"time"
 
@@ -31,22 +30,7 @@ func GetScyllaStatementLogsTable(originalTable string) string {
 	return originalTable + "_statements"
 }
 
-// applyLocalhostTranslator installs an AddressTranslator on cluster that
-// rewrites every peer IP to 127.0.0.1, preserving the port.  This is the
-// Docker/testcontainer workaround: when a node advertises its internal
-// container IP as rpc_address, gocql would otherwise try to reconnect to an
-// IP that is unreachable from the host.  A warning is logged because silently
-// rerouting all traffic to a single address causes confusing behaviour in
-// production.
-func applyLocalhostTranslator(cluster *gocql.ClusterConfig, logger *zap.Logger) {
-	logger.Warn("DockerMode is enabled: all discovered peer addresses will be translated to 127.0.0.1; do NOT enable this in production")
-	localhostIP := net.ParseIP("127.0.0.1")
-	cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, p int) (net.IP, int) {
-		return localhostIP, p
-	})
-}
-
-func newSession(hosts []string, port int, dockerMode bool, username, password string, logger *zap.Logger) (*gocql.Session, error) {
+func newSession(hosts []string, port int, username, password string, logger *zap.Logger) (*gocql.Session, error) {
 	cluster := gocql.NewCluster(slices.Clone(hosts)...)
 	cluster.Consistency = gocql.Quorum
 	cluster.DefaultTimestamp = false
@@ -63,12 +47,6 @@ func newSession(hosts []string, port int, dockerMode bool, username, password st
 
 	if port > 0 {
 		cluster.Port = port
-	}
-
-	// DockerMode: translate every discovered peer address back to 127.0.0.1.
-	// Must only be enabled explicitly — never inferred from port/host values.
-	if dockerMode {
-		applyLocalhostTranslator(cluster, logger)
 	}
 
 	if username != "" && password != "" {

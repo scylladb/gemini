@@ -89,7 +89,6 @@ func New(
 	oracleSession, testSession func() (*gocql.Session, error),
 	hosts []string,
 	port int,
-	dockerMode bool,
 	username, password string,
 	partitionKeys typedef.Columns,
 	repl replication.Replication,
@@ -109,7 +108,7 @@ func New(
 
 	createKeyspace, createTable := buildCreateTableQuery(keyspace, table, partitionKeys, repl)
 
-	session, err := newSession(hosts, port, dockerMode, username, password, l)
+	session, err := newSession(hosts, port, username, password, l)
 	if err != nil {
 		return nil, err
 	}
