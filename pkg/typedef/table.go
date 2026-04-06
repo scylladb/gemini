@@ -29,15 +29,15 @@ type ListColInfo struct {
 
 type Table struct {
 	schema            *Schema
-	listCols          []ListColInfo // cached list column info, built by Init
-	listColsBuilt     bool
-	KnownIssues       KnownIssues        `json:"known_issues"`
+	listCols          []ListColInfo      // cached list column info, built by Init
+	listColsOnce      sync.Once          // ensures buildListColCache is called exactly once
 	Name              string             `json:"name"`
 	PartitionKeys     Columns            `json:"partition_keys"`
 	ClusteringKeys    Columns            `json:"clustering_keys"`
 	Columns           Columns            `json:"columns"`
 	Indexes           []IndexDef         `json:"indexes,omitempty"`
 	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
+	KnownIssues       KnownIssues        `json:"known_issues"`
 	TableOptions      []string           `json:"table_options,omitempty"`
 
 	// Cached computed values — set once by Init(), never change.
@@ -119,7 +119,7 @@ func (t *Table) SupportsChanges() bool {
 
 func (t *Table) Init(s *Schema) {
 	t.schema = s
-	t.buildListColCache()
+	t.listColsOnce.Do(t.buildListColCache)
 	t.PartitionKeysLenValues = t.PartitionKeys.LenValues()
 	t.ClusteringKeysLenValues = t.ClusteringKeys.LenValues()
 	t.ColumnsLenValues = t.Columns.LenValues()
@@ -145,16 +145,14 @@ func (t *Table) buildListColCache() {
 			})
 		}
 	}
-	t.listColsBuilt = true
 }
 
 // ListColumns returns cached list column info. Returns nil if the table
 // has no list columns — callers can skip deduplication entirely.
 // Lazily builds the cache on first call if Init() wasn't called.
+// Safe for concurrent use via sync.Once.
 func (t *Table) ListColumns() []ListColInfo {
-	if !t.listColsBuilt {
-		t.buildListColCache()
-	}
+	t.listColsOnce.Do(t.buildListColCache)
 	return t.listCols
 }
 

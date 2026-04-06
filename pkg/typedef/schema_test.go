@@ -157,6 +157,149 @@ func TestSchemaMarshalUnmarshalNotChanged(t *testing.T) {
 	}
 }
 
+func TestSchemaConfig_Getters(t *testing.T) {
+	t.Parallel()
+
+	sc := &SchemaConfig{
+		MaxTables:         7,
+		MaxPartitionKeys:  5,
+		MinPartitionKeys:  2,
+		MaxClusteringKeys: 4,
+		MinClusteringKeys: 1,
+		MaxColumns:        10,
+		MinColumns:        3,
+		MaxPKBlobLength:   64,
+		MinPKBlobLength:   8,
+		MaxPKStringLength: 128,
+		MinPKStringLength: 4,
+		UseLWT:            true,
+		MaxBlobLength:     1000,
+		MinBlobLength:     10,
+		MaxStringLength:   500,
+		MinStringLength:   5,
+	}
+
+	if got := sc.GetMaxTables(); got != 7 {
+		t.Errorf("GetMaxTables() = %d; want 7", got)
+	}
+	if got := sc.GetMaxPartitionKeys(); got != 5 {
+		t.Errorf("GetMaxPartitionKeys() = %d; want 5", got)
+	}
+	if got := sc.GetMinPartitionKeys(); got != 2 {
+		t.Errorf("GetMinPartitionKeys() = %d; want 2", got)
+	}
+	if got := sc.GetMaxClusteringKeys(); got != 4 {
+		t.Errorf("GetMaxClusteringKeys() = %d; want 4", got)
+	}
+	if got := sc.GetMinClusteringKeys(); got != 1 {
+		t.Errorf("GetMinClusteringKeys() = %d; want 1", got)
+	}
+	if got := sc.GetMaxColumns(); got != 10 {
+		t.Errorf("GetMaxColumns() = %d; want 10", got)
+	}
+	if got := sc.GetMinColumns(); got != 3 {
+		t.Errorf("GetMinColumns() = %d; want 3", got)
+	}
+
+	prc := sc.GetPartitionRangeConfig()
+	if prc.MaxBlobLength != 64 {
+		t.Errorf("GetPartitionRangeConfig().MaxBlobLength = %d; want 64", prc.MaxBlobLength)
+	}
+	if prc.MinBlobLength != 8 {
+		t.Errorf("GetPartitionRangeConfig().MinBlobLength = %d; want 8", prc.MinBlobLength)
+	}
+	if prc.MaxStringLength != 128 {
+		t.Errorf("GetPartitionRangeConfig().MaxStringLength = %d; want 128", prc.MaxStringLength)
+	}
+	if prc.MinStringLength != 4 {
+		t.Errorf("GetPartitionRangeConfig().MinStringLength = %d; want 4", prc.MinStringLength)
+	}
+	if !prc.UseLWT {
+		t.Error("GetPartitionRangeConfig().UseLWT = false; want true")
+	}
+
+	vrc := sc.GetValueRangeConfig()
+	if vrc.MaxBlobLength != 1000 {
+		t.Errorf("GetValueRangeConfig().MaxBlobLength = %d; want 1000", vrc.MaxBlobLength)
+	}
+	if vrc.MinBlobLength != 10 {
+		t.Errorf("GetValueRangeConfig().MinBlobLength = %d; want 10", vrc.MinBlobLength)
+	}
+	if vrc.MaxStringLength != 500 {
+		t.Errorf("GetValueRangeConfig().MaxStringLength = %d; want 500", vrc.MaxStringLength)
+	}
+	if vrc.MinStringLength != 5 {
+		t.Errorf("GetValueRangeConfig().MinStringLength = %d; want 5", vrc.MinStringLength)
+	}
+}
+
+func TestSchema_GetHash(t *testing.T) {
+	t.Parallel()
+
+	s := &Schema{
+		Keyspace: Keyspace{Name: "ks1"},
+		Tables: []*Table{
+			{
+				Name:          "t1",
+				PartitionKeys: Columns{{Name: "pk", Type: TypeInt}},
+			},
+		},
+	}
+
+	h1 := s.GetHash()
+	if h1 == "" {
+		t.Fatal("GetHash() returned empty string")
+	}
+
+	// Stable across repeated calls.
+	h2 := s.GetHash()
+	if h1 != h2 {
+		t.Errorf("GetHash() not stable: %q vs %q", h1, h2)
+	}
+
+	// Different schema → different hash.
+	s2 := &Schema{
+		Keyspace: Keyspace{Name: "ks2"},
+		Tables: []*Table{
+			{
+				Name:          "t2",
+				PartitionKeys: Columns{{Name: "pk", Type: TypeText}},
+			},
+		},
+	}
+	h3 := s2.GetHash()
+	if h1 == h3 {
+		t.Error("GetHash() should differ for different schemas")
+	}
+}
+
+func TestMaterializedView_PartitionKeysLenValues(t *testing.T) {
+	t.Parallel()
+
+	mv := &MaterializedView{
+		Name: "mv1",
+		PartitionKeys: Columns{
+			{Name: "pk1", Type: TypeInt},
+			{Name: "pk2", Type: TypeText},
+		},
+	}
+
+	// Not set yet — lazy calculation.
+	lv := mv.PartitionKeysLenValues()
+	if lv != 2 {
+		t.Errorf("PartitionKeysLenValues() = %d; want 2 (two simple-type PKs)", lv)
+	}
+
+	// Second call returns cached value.
+	lv2 := mv.PartitionKeysLenValues()
+	if lv != lv2 {
+		t.Errorf("PartitionKeysLenValues() not stable: %d vs %d", lv, lv2)
+	}
+}
+
+// nolint: revive
+var _ = fullSchema // ensure fullSchema compilation reference
+
 // nolint: revive
 var fullSchema = Schema{
 	Keyspace: Keyspace{

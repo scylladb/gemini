@@ -279,6 +279,145 @@ func TestValidColumnsForDelete(t *testing.T) {
 	}
 }
 
+func TestColumnDef_IsValidForPrimaryKey(t *testing.T) {
+	t.Parallel()
+
+	validTypes := []typedef.SimpleType{
+		typedef.TypeAscii, typedef.TypeBigint, typedef.TypeBlob, typedef.TypeDate,
+		typedef.TypeDecimal, typedef.TypeDouble, typedef.TypeFloat, typedef.TypeInet,
+		typedef.TypeInt, typedef.TypeSmallint, typedef.TypeText, typedef.TypeTime,
+		typedef.TypeTimestamp, typedef.TypeTimeuuid, typedef.TypeTinyint,
+		typedef.TypeUuid, typedef.TypeVarchar, typedef.TypeVarint,
+	}
+	for _, st := range validTypes {
+		cd := typedef.ColumnDef{Name: string(st), Type: st}
+		if !cd.IsValidForPrimaryKey() {
+			t.Errorf("IsValidForPrimaryKey() = false for %s; want true", st)
+		}
+	}
+
+	// Duration and Boolean are NOT in PkTypes.
+	for _, st := range []typedef.SimpleType{typedef.TypeDuration, typedef.TypeBoolean} {
+		cd := typedef.ColumnDef{Name: string(st), Type: st}
+		if cd.IsValidForPrimaryKey() {
+			t.Errorf("IsValidForPrimaryKey() = true for %s; want false", st)
+		}
+	}
+}
+
+func TestColumns_ValidColumnsForPrimaryKey(t *testing.T) {
+	t.Parallel()
+
+	cols := typedef.Columns{
+		{Name: "pk_int", Type: typedef.TypeInt},
+		{Name: "pk_text", Type: typedef.TypeText},
+		{Name: "no_pk_bool", Type: typedef.TypeBoolean},
+		{Name: "no_pk_dur", Type: typedef.TypeDuration},
+	}
+
+	valid := cols.ValidColumnsForPrimaryKey()
+	if valid.Len() != 2 {
+		t.Errorf("ValidColumnsForPrimaryKey() len = %d; want 2", valid.Len())
+	}
+	names := valid.Names()
+	if names[0] != "pk_int" {
+		t.Errorf("ValidColumnsForPrimaryKey()[0].Name = %q; want pk_int", names[0])
+	}
+	if names[1] != "pk_text" {
+		t.Errorf("ValidColumnsForPrimaryKey()[1].Name = %q; want pk_text", names[1])
+	}
+}
+
+func TestColumns_ValidColumnsForPrimaryKey_AllValid(t *testing.T) {
+	t.Parallel()
+
+	cols := typedef.Columns{
+		{Name: "pk1", Type: typedef.TypeInt},
+		{Name: "pk2", Type: typedef.TypeText},
+	}
+	valid := cols.ValidColumnsForPrimaryKey()
+	if valid.Len() != 2 {
+		t.Errorf("ValidColumnsForPrimaryKey() len = %d; want 2", valid.Len())
+	}
+}
+
+func TestColumns_ValidColumnsForPrimaryKey_NoneValid(t *testing.T) {
+	t.Parallel()
+
+	cols := typedef.Columns{
+		{Name: "c1", Type: typedef.TypeBoolean},
+		{Name: "c2", Type: typedef.TypeDuration},
+	}
+	valid := cols.ValidColumnsForPrimaryKey()
+	if valid.Len() != 0 {
+		t.Errorf("ValidColumnsForPrimaryKey() len = %d; want 0", valid.Len())
+	}
+}
+
+func TestColumns_Random(t *testing.T) {
+	t.Parallel()
+
+	cols := typedef.Columns{
+		{Name: "c1", Type: typedef.TypeInt},
+		{Name: "c2", Type: typedef.TypeText},
+		{Name: "c3", Type: typedef.TypeBoolean},
+	}
+
+	r := rand.New(rand.NewPCG(42, 0))
+	for range 20 {
+		col := cols.Random(r)
+		found := false
+		for _, c := range cols {
+			if c.Name == col.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Random() returned column %q not in the set", col.Name)
+		}
+	}
+}
+
+func TestColumns_ToJSONMap(t *testing.T) {
+	t.Parallel()
+
+	cols := typedef.Columns{
+		{Name: "col_int", Type: typedef.TypeInt},
+		{Name: "col_text", Type: typedef.TypeText},
+		{Name: "col_bool", Type: typedef.TypeBoolean},
+	}
+
+	r := rand.New(rand.NewPCG(1, 0))
+	p := typedef.ValueRangeConfig{MaxStringLength: 10, MinStringLength: 1, MaxBlobLength: 10, MinBlobLength: 1}
+	out := cols.ToJSONMap(make(map[string]any), r, p)
+
+	if len(out) != 3 {
+		t.Errorf("ToJSONMap() returned map with %d keys; want 3", len(out))
+	}
+	for _, col := range cols {
+		if _, ok := out[col.Name]; !ok {
+			t.Errorf("ToJSONMap() missing key %q", col.Name)
+		}
+	}
+}
+
+func TestColumns_ValueVariationsNumber(t *testing.T) {
+	t.Parallel()
+
+	cols := typedef.Columns{
+		{Name: "c1", Type: typedef.TypeBoolean}, // 2 variations
+		{Name: "c2", Type: typedef.TypeBoolean}, // 2 variations
+	}
+
+	p := typedef.ValueRangeConfig{MaxStringLength: 10, MinStringLength: 1, MaxBlobLength: 10, MinBlobLength: 1}
+	got := cols.ValueVariationsNumber(p)
+	// 2 * 2 = 4
+	if got != 4 {
+		t.Errorf("ValueVariationsNumber() = %v; want 4", got)
+	}
+}
+
 func getTestSchema(r *rand.Rand) *typedef.Schema {
 	sc := &typedef.SchemaConfig{
 		ReplicationStrategy:       replication.NewSimpleStrategy(),
