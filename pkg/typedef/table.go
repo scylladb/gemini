@@ -39,7 +39,7 @@ type Table struct {
 	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
 	TableOptions      []string           `json:"table_options,omitempty"`
 	mu                sync.RWMutex
-	listColsBuilt     bool
+	listColsOnce      sync.Once
 }
 
 func (t *Table) SelectColumnNames() []string {
@@ -107,7 +107,8 @@ func (t *Table) SupportsChanges() bool {
 
 func (t *Table) Init(s *Schema) {
 	t.schema = s
-	t.buildListColCache()
+	// Pre-warm the list-column cache while still single-threaded.
+	t.listColsOnce.Do(t.buildListColCache)
 }
 
 // buildListColCache scans columns once and caches list column metadata.
@@ -121,16 +122,13 @@ func (t *Table) buildListColCache() {
 			})
 		}
 	}
-	t.listColsBuilt = true
 }
 
 // ListColumns returns cached list column info. Returns nil if the table
 // has no list columns — callers can skip deduplication entirely.
-// Lazily builds the cache on first call if Init() wasn't called.
+// Thread-safe: the cache is built at most once using sync.Once.
 func (t *Table) ListColumns() []ListColInfo {
-	if !t.listColsBuilt {
-		t.buildListColCache()
-	}
+	t.listColsOnce.Do(t.buildListColCache)
 	return t.listCols
 }
 

@@ -15,10 +15,14 @@
 package store
 
 import (
+	"math/big"
 	"testing"
+	"time"
 
+	"github.com/gocql/gocql"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -124,24 +128,424 @@ func TestRowsToKeyStrings_PreservesOrder(t *testing.T) {
 	assert.Equal(t, []string{"pk=1,ck=2", "pk=3,ck=4"}, got)
 }
 
+func TestDeduplicateSlice_AllTypes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("[]any with int64 duplicates", func(t *testing.T) {
+		t.Parallel()
+		s := []any{int64(1), int64(2), int64(1), int64(3), int64(2)}
+		newVal, before, after := deduplicateSlice(s)
+		assert.Equal(t, 5, before)
+		assert.Equal(t, 3, after)
+		assert.Equal(t, []any{int64(1), int64(2), int64(3)}, newVal)
+	})
+
+	t.Run("[]any already unique", func(t *testing.T) {
+		t.Parallel()
+		s := []any{int64(1), int64(2), int64(3)}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, before, after)
+	})
+
+	t.Run("nil value", func(t *testing.T) {
+		t.Parallel()
+		_, before, after := deduplicateSlice(nil)
+		assert.Equal(t, 0, before)
+		assert.Equal(t, 0, after)
+	})
+
+	// ── bool ─────────────────────────────────────────────────────────────────
+
+	t.Run("[]bool", func(t *testing.T) {
+		t.Parallel()
+		s := []bool{true, false, true, true}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 4, before)
+		assert.Equal(t, 2, after)
+		assert.Equal(t, []bool{true, false}, s[:after])
+	})
+
+	t.Run("*[]bool", func(t *testing.T) {
+		t.Parallel()
+		s := []bool{true, false, true}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+		assert.Equal(t, []bool{true, false}, s[:after])
+	})
+
+	t.Run("*[]bool nil pointer", func(t *testing.T) {
+		t.Parallel()
+		var p *[]bool
+		_, before, after := deduplicateSlice(p)
+		assert.Equal(t, 0, before)
+		assert.Equal(t, 0, after)
+	})
+
+	// ── int (CQL int) ─────────────────────────────────────────────────────────
+
+	t.Run("[]int", func(t *testing.T) {
+		t.Parallel()
+		s := []int{1, 2, 1, 3}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 4, before)
+		assert.Equal(t, 3, after)
+		assert.Equal(t, []int{1, 2, 3}, s[:after])
+	})
+
+	t.Run("*[]int", func(t *testing.T) {
+		t.Parallel()
+		s := []int{1, 1, 2}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+		assert.Equal(t, []int{1, 2}, s[:after])
+	})
+
+	// ── int8 (tinyint) ───────────────────────────────────────────────────────
+
+	t.Run("[]int8", func(t *testing.T) {
+		t.Parallel()
+		s := []int8{1, 2, 1, 3}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 4, before)
+		assert.Equal(t, 3, after)
+		assert.Equal(t, []int8{1, 2, 3}, s[:after])
+	})
+
+	t.Run("*[]int8", func(t *testing.T) {
+		t.Parallel()
+		s := []int8{5, 5, 6}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+		assert.Equal(t, []int8{5, 6}, s[:after])
+	})
+
+	// ── int16 (smallint) ─────────────────────────────────────────────────────
+
+	t.Run("[]int16", func(t *testing.T) {
+		t.Parallel()
+		s := []int16{10, 20, 10, 30}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 4, before)
+		assert.Equal(t, 3, after)
+		assert.Equal(t, []int16{10, 20, 30}, s[:after])
+	})
+
+	t.Run("*[]int16", func(t *testing.T) {
+		t.Parallel()
+		s := []int16{100, 100, 200}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+	})
+
+	// ── int32 ────────────────────────────────────────────────────────────────
+
+	t.Run("[]int32", func(t *testing.T) {
+		t.Parallel()
+		s := []int32{1, 2, 1}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+		assert.Equal(t, []int32{1, 2}, s[:after])
+	})
+
+	t.Run("*[]int32", func(t *testing.T) {
+		t.Parallel()
+		s := []int32{7, 7, 8}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+	})
+
+	// ── int64 (bigint) ───────────────────────────────────────────────────────
+
+	t.Run("[]int64", func(t *testing.T) {
+		t.Parallel()
+		s := []int64{100, 200, 100, 300}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 4, before)
+		assert.Equal(t, 3, after)
+		assert.Equal(t, []int64{100, 200, 300}, s[:after])
+	})
+
+	t.Run("*[]int64", func(t *testing.T) {
+		t.Parallel()
+		// This is the real-world gocql scan form for list<bigint>
+		s := []int64{
+			1290817393298494093,
+			1290817393298494093,
+			5837704151482537345,
+			5837704151482537345,
+		}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 4, before)
+		assert.Equal(t, 2, after)
+		assert.Equal(t, []int64{1290817393298494093, 5837704151482537345}, s[:after])
+	})
+
+	// ── float32 (float) ──────────────────────────────────────────────────────
+
+	t.Run("[]float32", func(t *testing.T) {
+		t.Parallel()
+		s := []float32{1.1, 2.2, 1.1}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+	})
+
+	t.Run("*[]float32", func(t *testing.T) {
+		t.Parallel()
+		s := []float32{3.14, 3.14, 2.72}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+	})
+
+	// ── float64 (double) ─────────────────────────────────────────────────────
+
+	t.Run("[]float64", func(t *testing.T) {
+		t.Parallel()
+		s := []float64{1.1, 2.2, 1.1}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+	})
+
+	t.Run("*[]float64", func(t *testing.T) {
+		t.Parallel()
+		s := []float64{0.1, 0.2, 0.1, 0.3}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 4, before)
+		assert.Equal(t, 3, after)
+	})
+
+	// ── string (text, ascii, varchar, inet) ──────────────────────────────────
+
+	t.Run("[]string", func(t *testing.T) {
+		t.Parallel()
+		s := []string{"a", "b", "a", "c"}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 4, before)
+		assert.Equal(t, 3, after)
+		assert.Equal(t, []string{"a", "b", "c"}, s[:after])
+	})
+
+	t.Run("*[]string", func(t *testing.T) {
+		t.Parallel()
+		s := []string{"x", "x", "y"}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+	})
+
+	// ── gocql.UUID (uuid, timeuuid) ───────────────────────────────────────────
+
+	t.Run("[]gocql.UUID", func(t *testing.T) {
+		t.Parallel()
+		u1 := gocql.MustRandomUUID()
+		u2 := gocql.MustRandomUUID()
+		s := []gocql.UUID{u1, u2, u1}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+		assert.Equal(t, []gocql.UUID{u1, u2}, s[:after])
+	})
+
+	t.Run("*[]gocql.UUID", func(t *testing.T) {
+		t.Parallel()
+		u1 := gocql.MustRandomUUID()
+		s := []gocql.UUID{u1, u1, u1}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 1, after)
+	})
+
+	// ── time.Time (timestamp, date) ───────────────────────────────────────────
+
+	t.Run("[]time.Time", func(t *testing.T) {
+		t.Parallel()
+		t1 := time.Now().Round(time.Second)
+		t2 := t1.Add(time.Hour)
+		s := []time.Time{t1, t2, t1}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+		assert.True(t, s[0].Equal(t1))
+		assert.True(t, s[1].Equal(t2))
+	})
+
+	t.Run("*[]time.Time", func(t *testing.T) {
+		t.Parallel()
+		t1 := time.Now().Round(time.Second)
+		s := []time.Time{t1, t1, t1}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 1, after)
+	})
+
+	// ── time.Duration (CQL time) ──────────────────────────────────────────────
+
+	t.Run("[]time.Duration", func(t *testing.T) {
+		t.Parallel()
+		s := []time.Duration{time.Second, time.Minute, time.Second}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+	})
+
+	t.Run("*[]time.Duration", func(t *testing.T) {
+		t.Parallel()
+		s := []time.Duration{time.Hour, time.Hour}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 2, before)
+		assert.Equal(t, 1, after)
+	})
+
+	// ── gocql.Duration (CQL duration) ─────────────────────────────────────────
+
+	t.Run("[]gocql.Duration", func(t *testing.T) {
+		t.Parallel()
+		d1 := gocql.Duration{Months: 1, Days: 2, Nanoseconds: 3}
+		d2 := gocql.Duration{Months: 4, Days: 5, Nanoseconds: 6}
+		s := []gocql.Duration{d1, d2, d1}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+		assert.Equal(t, d1, s[0])
+		assert.Equal(t, d2, s[1])
+	})
+
+	t.Run("*[]gocql.Duration", func(t *testing.T) {
+		t.Parallel()
+		d := gocql.Duration{Months: 1}
+		s := []gocql.Duration{d, d, d}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 1, after)
+	})
+
+	// ── []byte (blob) ─────────────────────────────────────────────────────────
+
+	t.Run("[][]byte", func(t *testing.T) {
+		t.Parallel()
+		b1 := []byte{0x01, 0x02}
+		b2 := []byte{0x03, 0x04}
+		s := [][]byte{b1, b2, {0x01, 0x02}} // third is equal to b1 by value
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+	})
+
+	t.Run("*[][]byte", func(t *testing.T) {
+		t.Parallel()
+		b := []byte{0xAA, 0xBB}
+		s := [][]byte{b, b, {0xCC}}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+	})
+
+	// ── *big.Int (varint) ────────────────────────────────────────────────────
+
+	t.Run("[]*big.Int", func(t *testing.T) {
+		t.Parallel()
+		v1 := big.NewInt(123)
+		v2 := big.NewInt(456)
+		v3 := big.NewInt(123) // equal to v1 by value
+		s := []*big.Int{v1, v2, v3}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+		assert.Equal(t, 0, s[0].Cmp(big.NewInt(123)))
+		assert.Equal(t, 0, s[1].Cmp(big.NewInt(456)))
+	})
+
+	t.Run("*[]*big.Int", func(t *testing.T) {
+		t.Parallel()
+		v := big.NewInt(999)
+		s := []*big.Int{v, v, big.NewInt(999)}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 1, after)
+	})
+
+	// ── *inf.Dec (decimal) ───────────────────────────────────────────────────
+
+	t.Run("[]*inf.Dec", func(t *testing.T) {
+		t.Parallel()
+		d1 := inf.NewDec(12345, 2) // 123.45
+		d2 := inf.NewDec(67890, 3) // 67.890
+		d3 := inf.NewDec(12345, 2) // equal to d1
+		s := []*inf.Dec{d1, d2, d3}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 2, after)
+		assert.Equal(t, 0, s[0].Cmp(d1))
+		assert.Equal(t, 0, s[1].Cmp(d2))
+	})
+
+	t.Run("*[]*inf.Dec", func(t *testing.T) {
+		t.Parallel()
+		d := inf.NewDec(1, 0)
+		s := []*inf.Dec{d, d, inf.NewDec(1, 0)}
+		_, before, after := deduplicateSlice(&s)
+		assert.Equal(t, 3, before)
+		assert.Equal(t, 1, after)
+	})
+
+	// ── single-element slice (no-op) ──────────────────────────────────────────
+
+	t.Run("single element is never modified", func(t *testing.T) {
+		t.Parallel()
+		s := []int64{42}
+		_, before, after := deduplicateSlice(s)
+		assert.Equal(t, 1, before)
+		assert.Equal(t, 1, after)
+	})
+}
+
+// TestDeduplicateListValues covers the full deduplicateListValues path,
+// verifying that the row value is mutated in-place for all stored forms.
 func TestDeduplicateListValues(t *testing.T) {
 	t.Parallel()
 
 	listType := &typedef.Collection{ComplexType: typedef.TypeList, ValueType: typedef.TypeInt}
 	setType := &typedef.Collection{ComplexType: typedef.TypeSet, ValueType: typedef.TypeInt}
 
-	t.Run("list column deduped", func(t *testing.T) {
+	t.Run("[]any list column deduped", func(t *testing.T) {
 		t.Parallel()
 		table := &typedef.Table{
 			PartitionKeys: []typedef.ColumnDef{{Name: "pk", Type: typedef.TypeInt}},
 			Columns:       []typedef.ColumnDef{{Name: "vals", Type: listType}},
 		}
-		// Use int32 to match gocql's CQL int → Go int32 mapping
 		rows := Rows{
 			makeRow([]string{"pk", "vals"}, []any{int32(1), []any{int32(10), int32(20), int32(10), int32(30)}}),
 		}
 		deduplicateListValues(table, rows)
-		assert.Equal(t, []any{int32(10), int32(20), int32(30)}, rows[0].Get("vals"))
+		// The []any is compacted in-place; we read back the full slice but only
+		// the first `after` elements are valid — here the row stores the original
+		// slice reference and the caller sees the compacted view via Set.
+		got := rows[0].Get("vals").([]any)
+		assert.Equal(t, []any{int32(10), int32(20), int32(30)}, got[:3])
+	})
+
+	t.Run("*[]int64 list column deduped (real gocql form)", func(t *testing.T) {
+		t.Parallel()
+		bigintListType := &typedef.Collection{ComplexType: typedef.TypeList, ValueType: typedef.TypeBigint}
+		table := &typedef.Table{
+			PartitionKeys: []typedef.ColumnDef{{Name: "pk", Type: typedef.TypeInt}},
+			Columns:       []typedef.ColumnDef{{Name: "col4", Type: bigintListType}},
+		}
+		s := []int64{100, 100, 200, 200, 300}
+		rows := Rows{
+			makeRow([]string{"pk", "col4"}, []any{int32(1), &s}),
+		}
+		deduplicateListValues(table, rows)
+		// The underlying slice is mutated; s[:3] holds the deduped values.
+		assert.Equal(t, []int64{100, 200, 300}, s[:3])
 	})
 
 	t.Run("non-list columns untouched", func(t *testing.T) {
@@ -172,26 +576,84 @@ func TestDeduplicateListValues(t *testing.T) {
 	})
 }
 
+// TestCompareCollectedRows_ListDuplicatesMatch is an end-to-end test: either
+// cluster side may have duplicate entries in a list column; after dedup both
+// sides should match.
 func TestCompareCollectedRows_ListDuplicatesMatch(t *testing.T) {
 	t.Parallel()
 
-	listType := &typedef.Collection{ComplexType: typedef.TypeList, ValueType: typedef.TypeInt}
-	table := &typedef.Table{
-		PartitionKeys: []typedef.ColumnDef{{Name: "pk", Type: typedef.TypeInt}},
-		Columns:       []typedef.ColumnDef{{Name: "vals", Type: listType}},
-	}
+	for _, tc := range []struct {
+		name      string
+		testVal   any
+		oracleVal any
+	}{
+		{
+			name:      "test-side []any duplicates",
+			testVal:   []any{int32(10), int32(20), int32(10)},
+			oracleVal: []any{int32(10), int32(20)},
+		},
+		{
+			// Real gocql scan form: list<bigint> → *[]int64
+			name: "test-side *[]int64 duplicates",
+			testVal: func() *[]int64 {
+				s := []int64{100, 200, 100, 300, 200}
+				return &s
+			}(),
+			oracleVal: func() *[]int64 {
+				s := []int64{100, 200, 300}
+				return &s
+			}(),
+		},
+		{
+			name:      "test-side []int64 duplicates",
+			testVal:   []int64{1, 2, 1, 3},
+			oracleVal: []int64{1, 2, 3},
+		},
+		{
+			name:      "oracle-side []any duplicates",
+			testVal:   []any{int32(10), int32(20)},
+			oracleVal: []any{int32(10), int32(20), int32(10)},
+		},
+		{
+			name: "oracle-side *[]int64 duplicates",
+			testVal: func() *[]int64 {
+				s := []int64{100, 200, 300}
+				return &s
+			}(),
+			oracleVal: func() *[]int64 {
+				s := []int64{100, 200, 100, 300, 200}
+				return &s
+			}(),
+		},
+		{
+			name:      "both sides []string duplicates",
+			testVal:   []string{"a", "b", "a", "c"},
+			oracleVal: []string{"a", "b", "b", "c"},
+		},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	// Test side has duplicates in the list, oracle does not
-	testRows := Rows{
-		makeRow([]string{"pk", "vals"}, []any{int32(1), []any{int32(10), int32(20), int32(10)}}),
-	}
-	oracleRows := Rows{
-		makeRow([]string{"pk", "vals"}, []any{int32(1), []any{int32(10), int32(20)}}),
-	}
+			listType := &typedef.Collection{ComplexType: typedef.TypeList, ValueType: typedef.TypeInt}
+			table := &typedef.Table{
+				PartitionKeys: []typedef.ColumnDef{{Name: "pk", Type: typedef.TypeInt}},
+				Columns:       []typedef.ColumnDef{{Name: "vals", Type: listType}},
+			}
 
-	res := CompareCollectedRows(table, testRows, oracleRows)
-	assert.NoError(t, res.ToError())
-	assert.Equal(t, 1, res.MatchCount)
+			testRows := Rows{
+				makeRow([]string{"pk", "vals"}, []any{int32(1), tc.testVal}),
+			}
+			oracleRows := Rows{
+				makeRow([]string{"pk", "vals"}, []any{int32(1), tc.oracleVal}),
+			}
+
+			res := CompareCollectedRows(table, testRows, oracleRows)
+			assert.NoError(t, res.ToError())
+			assert.Equal(t, 1, res.MatchCount)
+			assert.Empty(t, res.DifferentRows)
+		})
+	}
 }
 
 func TestZipAndCompare_UnorderedIterators(t *testing.T) {
