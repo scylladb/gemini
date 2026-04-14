@@ -15,8 +15,10 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"reflect"
 	"slices"
 	"strings"
@@ -24,6 +26,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"go.uber.org/multierr"
+	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -38,10 +41,10 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 		return result
 	}
 
-	// Only deduplicate list values on the test side — oracle never has
-	// duplicate list items. This is a workaround for non-idempotent list
-	// appends in Scylla when inserts are retried.
+	// Deduplicate list values on both sides. Duplicate list items can appear
+	// on either cluster when inserts are retried (non-idempotent list appends).
 	deduplicateListValues(table, testRows)
+	deduplicateListValues(table, oracleRows)
 
 	// Sort both sides (stable) to aid deterministic behavior when rendering diffs.
 	// We sort by partition keys first, then clustering keys to ensure stable
@@ -317,10 +320,6 @@ func canonicalizeRow(row Row) map[string]string {
 	return out
 }
 
-// deduplicateListValues deduplicates values in CQL list columns in-place.
-// This works around a Scylla issue where insert retries can cause list columns
-// to accumulate duplicate values. Uses cached list column info from the table
-// and type-aware comparison based on the list's ValueType.
 func deduplicateListValues(table *typedef.Table, rows Rows) {
 	if table == nil || len(rows) == 0 {
 		return
@@ -334,103 +333,416 @@ func deduplicateListValues(table *typedef.Table, rows Rows) {
 	for _, row := range rows {
 		for i := range listCols {
 			val := row.Get(listCols[i].Name)
-			slice, ok := val.([]any)
-			if !ok || len(slice) <= 1 {
-				continue
-			}
-			deduped := deduplicateByType(slice, listCols[i].ValueType)
-			if len(deduped) != len(slice) {
-				row.Set(listCols[i].Name, deduped)
-				metrics.ValidationRowsDeduplicated.Add(float64(len(slice) - len(deduped)))
+			newVal, before, after := deduplicateSlice(val)
+			if after != before {
+				row.Set(listCols[i].Name, newVal)
+				metrics.ValidationRowsDeduplicated.Add(float64(before - after))
 			}
 		}
 	}
 }
 
-// deduplicateByType removes duplicate elements from a list using type-aware
-// comparison. For types that are directly comparable (int, string, etc.), it
-// uses a typed set with zero string conversion. For complex types it falls
-// back to compareValues-based dedup.
-func deduplicateByType(s []any, vt typedef.SimpleType) []any {
-	switch vt {
-	case typedef.TypeInt:
-		return deduplicateTyped[int32](s)
-	case typedef.TypeBigint:
-		return deduplicateTyped[int64](s)
-	case typedef.TypeSmallint:
-		return deduplicateTyped[int16](s)
-	case typedef.TypeTinyint:
-		return deduplicateTyped[int8](s)
-	case typedef.TypeFloat:
-		return deduplicateTyped[float32](s)
-	case typedef.TypeDouble:
-		return deduplicateTyped[float64](s)
-	case typedef.TypeBoolean:
-		return deduplicateTyped[bool](s)
-	case typedef.TypeText, typedef.TypeAscii, typedef.TypeVarchar:
-		return deduplicateTyped[string](s)
-	case typedef.TypeUuid, typedef.TypeTimeuuid:
-		return deduplicateUUID(s)
+
+//nolint:cyclop
+func deduplicateSlice(val any) (newVal any, before, after int) {
+	if val == nil {
+		return nil, 0, 0
+	}
+
+	switch s := val.(type) {
+	// ── []any ────────────────────────────────────────────────────────────────
+	case []any:
+		n := deduplicateAny(s)
+		return s[:n], len(s), n
+
+	// ── bool ─────────────────────────────────────────────────────────────────
+	case []bool:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]bool:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── int (CQL int → Go int) ────────────────────────────────────────────────
+	case []int:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]int:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── int8 (tinyint) ───────────────────────────────────────────────────────
+	case []int8:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]int8:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── int16 (smallint) ─────────────────────────────────────────────────────
+	case []int16:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]int16:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── int32 (not produced by gocql for list elements, but guard anyway) ────
+	case []int32:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]int32:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── int64 (bigint, counter) ───────────────────────────────────────────────
+	case []int64:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]int64:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── float32 (float) ──────────────────────────────────────────────────────
+	case []float32:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]float32:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── float64 (double) ─────────────────────────────────────────────────────
+	case []float64:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]float64:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── string (text, ascii, varchar, inet) ──────────────────────────────────
+	case []string:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]string:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── gocql.UUID (uuid, timeuuid) — [16]byte, comparable ───────────────────
+	case []gocql.UUID:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]gocql.UUID:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── time.Time (timestamp, date) ───────────────────────────────────────────
+	case []time.Time:
+		n := deduplicateTimeSlice(s)
+		return s[:n], len(s), n
+	case *[]time.Time:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateTimeSlice(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── time.Duration (CQL time → nanoseconds) ────────────────────────────────
+	case []time.Duration:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]time.Duration:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── gocql.Duration (CQL duration: months/days/nanoseconds struct) ─────────
+	case []gocql.Duration:
+		n := deduplicateInPlace(s)
+		return s[:n], len(s), n
+	case *[]gocql.Duration:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateInPlace(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── []byte (blob) — not comparable, use bytes.Equal ──────────────────────
+	case [][]byte:
+		n := deduplicateBlobSlice(s)
+		return s[:n], len(s), n
+	case *[][]byte:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateBlobSlice(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── *big.Int (varint) ────────────────────────────────────────────────────
+	case []*big.Int:
+		n := deduplicateBigIntSlice(s)
+		return s[:n], len(s), n
+	case *[]*big.Int:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateBigIntSlice(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
+	// ── *inf.Dec (decimal) ───────────────────────────────────────────────────
+	case []*inf.Dec:
+		n := deduplicateDecSlice(s)
+		return s[:n], len(s), n
+	case *[]*inf.Dec:
+		if s == nil {
+			return val, 0, 0
+		}
+		b := len(*s)
+		n := deduplicateDecSlice(*s)
+		*s = (*s)[:n]
+		return val, b, n
+
 	default:
-		return deduplicateGeneric(s)
+		// Reflection fallback for any unknown/future gocql type.
+		newV, b, a := deduplicateReflect(val)
+		return newV, b, a
 	}
 }
 
-// deduplicateTyped uses a typed map for O(1) lookup without any string conversion.
-func deduplicateTyped[T comparable](s []any) []any {
-	seen := make(map[T]struct{}, len(s))
-	result := s[:0] // reuse backing array
+const dedupSmallThreshold = 16
+
+func deduplicateInPlace[T comparable](s []T) int {
+	n := len(s)
+	if n <= 1 {
+		return n
+	}
+
+	if n <= dedupSmallThreshold {
+		// Allocation-free linear scan — no heap pressure for the common case.
+		w := 1 // s[0] is always kept
+	outer:
+		for i := 1; i < n; i++ {
+			for j := range w {
+				if s[j] == s[i] {
+					continue outer
+				}
+			}
+			s[w] = s[i]
+			w++
+		}
+		return w
+	}
+
+	// Hash-map path for large slices — O(n) amortised.
+	seen := make(map[T]struct{}, n)
+	w := 0
 	for _, v := range s {
-		tv, ok := v.(T)
-		if !ok {
-			result = append(result, v)
-			continue
+		if _, exists := seen[v]; !exists {
+			seen[v] = struct{}{}
+			s[w] = v
+			w++
 		}
-		if _, exists := seen[tv]; exists {
-			continue
-		}
-		seen[tv] = struct{}{}
-		result = append(result, v)
 	}
-	return result
+	return w
 }
 
-// deduplicateUUID handles gocql.UUID which is [16]byte and comparable.
-func deduplicateUUID(s []any) []any {
-	seen := make(map[gocql.UUID]struct{}, len(s))
-	result := s[:0]
-	for _, v := range s {
-		u, ok := v.(gocql.UUID)
-		if !ok {
-			result = append(result, v)
-			continue
-		}
-		if _, exists := seen[u]; exists {
-			continue
-		}
-		seen[u] = struct{}{}
-		result = append(result, v)
+func deduplicateAny(s []any) int {
+	if len(s) <= 1 {
+		return len(s)
 	}
-	return result
-}
-
-// deduplicateGeneric falls back to compareValues for types that aren't
-// directly map-keyable ([]byte, *big.Int, *inf.Dec, time.Duration, etc.).
-func deduplicateGeneric(s []any) []any {
-	result := s[:0]
+	w := 0
 	for _, v := range s {
 		found := false
-		for _, existing := range result {
-			if compareValues(existing, v) == 0 {
+		for j := range w {
+			if compareValues(s[j], v) == 0 {
 				found = true
 				break
 			}
 		}
 		if !found {
-			result = append(result, v)
+			s[w] = v
+			w++
 		}
 	}
-	return result
+	return w
+}
+
+func deduplicateTimeSlice(s []time.Time) int {
+	if len(s) <= 1 {
+		return len(s)
+	}
+	w := 0
+outer:
+	for _, v := range s {
+		for j := range w {
+			if s[j].Equal(v) {
+				continue outer
+			}
+		}
+		s[w] = v
+		w++
+	}
+	return w
+}
+
+// deduplicateBlobSlice deduplicates [][]byte in-place using bytes.Equal.
+func deduplicateBlobSlice(s [][]byte) int {
+	if len(s) <= 1 {
+		return len(s)
+	}
+	w := 0
+outer:
+	for _, v := range s {
+		for j := range w {
+			if bytes.Equal(s[j], v) {
+				continue outer
+			}
+		}
+		s[w] = v
+		w++
+	}
+	return w
+}
+
+// deduplicateBigIntSlice deduplicates []*big.Int in-place using Cmp.
+func deduplicateBigIntSlice(s []*big.Int) int {
+	if len(s) <= 1 {
+		return len(s)
+	}
+	w := 0
+outer:
+	for _, v := range s {
+		for j := range w {
+			if s[j].Cmp(v) == 0 {
+				continue outer
+			}
+		}
+		s[w] = v
+		w++
+	}
+	return w
+}
+
+// deduplicateDecSlice deduplicates []*inf.Dec in-place using Cmp.
+func deduplicateDecSlice(s []*inf.Dec) int {
+	if len(s) <= 1 {
+		return len(s)
+	}
+	w := 0
+outer:
+	for _, v := range s {
+		for j := range w {
+			if s[j].Cmp(v) == 0 {
+				continue outer
+			}
+		}
+		s[w] = v
+		w++
+	}
+	return w
+}
+
+// deduplicateReflect is a reflection-based fallback for unknown slice types.
+// It handles *[]T and []T by extracting the underlying slice and comparing
+// elements via compareValues. Returns (val, 0, 0) if val is not a slice.
+func deduplicateReflect(val any) (newVal any, before, after int) {
+	rv := reflect.ValueOf(val)
+	isPtr := rv.Kind() == reflect.Ptr
+	if isPtr {
+		if rv.IsNil() {
+			return val, 0, 0
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Slice {
+		return val, 0, 0
+	}
+	n := rv.Len()
+	if n <= 1 {
+		return val, n, n
+	}
+
+	w := 0
+outer:
+	for i := range n {
+		v := rv.Index(i).Interface()
+		for j := range w {
+			if compareValues(rv.Index(j).Interface(), v) == 0 {
+				continue outer
+			}
+		}
+		rv.Index(w).Set(rv.Index(i))
+		w++
+	}
+
+	resliced := rv.Slice(0, w)
+	if isPtr {
+		// Truncate the slice behind the pointer in-place.
+		rv.Set(resliced)
+		return val, n, w
+	}
+	return resliced.Interface(), n, w
 }
 
 // canonicalValueString returns a stable, pointer-safe string for a value.
