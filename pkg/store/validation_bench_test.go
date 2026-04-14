@@ -458,23 +458,29 @@ func BenchmarkCanonicalValueString(b *testing.B) {
 // canonicalizeRow builds a map[string]string per row — one allocation per
 // differing row in diffRows.
 
+// BenchmarkCanonicalizeRow is kept as an end-to-end proxy: canonicalizeRow was
+// removed in favour of inlining canonicalValueString calls inside diffRows.
+// We benchmark diffRows directly at the same col widths to capture the same cost.
 func BenchmarkCanonicalizeRow(b *testing.B) {
 	for _, nCols := range []int{4, 8, 16, 32} {
 		nCols := nCols
 		table := makeScalarTable(nCols - 2)
-		row := makeScalarRow(table, 1, 1)
+		testRow := makeScalarRow(table, 1, 1)
+		oracleRow := makeScalarRow(table, 1, 1)
+		// Differ on 1 column so diffRows produces output
+		oracleRow.Set("v0", int32(9999))
 
 		b.Run(fmt.Sprintf("cols=%d", nCols), func(b *testing.B) {
 			b.ReportAllocs()
 			for range b.N {
-				_ = canonicalizeRow(row)
+				_ = diffRows(table, oracleRow, testRow)
 			}
 		})
 	}
 }
 
 // ── BenchmarkDiffRows ────────────────────────────────────────────────────────
-// diffRows allocates two canonicalizeRow maps plus a key union slice.
+// diffRows iterates columns directly and calls canonicalValueString inline.
 // Benchmark with varying column widths and diff fractions.
 
 func BenchmarkDiffRows(b *testing.B) {

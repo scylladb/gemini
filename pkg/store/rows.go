@@ -58,6 +58,13 @@ func (r Row) Get(columnName string) any {
 	return nil
 }
 
+// hasColumn reports whether the row has a column with the given name.
+// Unlike Get, it distinguishes "column absent" from "column present with nil value".
+func (r Row) hasColumn(columnName string) bool {
+	_, ok := r.columns[columnName]
+	return ok
+}
+
 // Set sets the value for the given column name
 func (r Row) Set(columnName string, value any) {
 	if idx, ok := r.columns[columnName]; ok {
@@ -98,6 +105,207 @@ func (r Row) MarshalJSON() ([]byte, error) {
 		}
 	}
 	return json.Marshal(out)
+}
+
+// valuesEqual reports whether two values are semantically equal, handling
+// cross-type pointer/value equivalence correctly.
+//
+// Unlike compareValues (which falls back to fmt.Sprint for cross-type pairs and
+// therefore prints pointer addresses for pointer types), valuesEqual explicitly
+// handles all cross-type deref cases: *T vs T and T vs *T for every gocql scalar.
+//
+// Rules:
+//   - nil == nil (regardless of type)
+//   - nil pointer != non-nil value
+//   - *T(x) == T(x) iff *x == x
+//   - T(x) == *T(x) iff x == *x
+//   - For all same-type pairs: uses the same logic as compareValues
+//
+//nolint:gocyclo,cyclop
+func valuesEqual(a, b any) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	// Fast path: same type — delegate to compareValues (zero-allocation for all
+	// known concrete types).
+	if compareValues(a, b) == 0 {
+		return true
+	}
+
+	// Slow path: cross-type pointer/value pairs.
+	// We handle every scalar type gocql can return.
+	switch av := a.(type) {
+	case string:
+		if bv, ok := b.(*string); ok {
+			return bv != nil && av == *bv
+		}
+	case *string:
+		if bv, ok := b.(string); ok {
+			return av != nil && *av == bv
+		}
+	case bool:
+		if bv, ok := b.(*bool); ok {
+			return bv != nil && av == *bv
+		}
+	case *bool:
+		if bv, ok := b.(bool); ok {
+			return av != nil && *av == bv
+		}
+	case int:
+		if bv, ok := b.(*int); ok {
+			return bv != nil && av == *bv
+		}
+	case *int:
+		if bv, ok := b.(int); ok {
+			return av != nil && *av == bv
+		}
+	case int8:
+		if bv, ok := b.(*int8); ok {
+			return bv != nil && av == *bv
+		}
+	case *int8:
+		if bv, ok := b.(int8); ok {
+			return av != nil && *av == bv
+		}
+	case int16:
+		if bv, ok := b.(*int16); ok {
+			return bv != nil && av == *bv
+		}
+	case *int16:
+		if bv, ok := b.(int16); ok {
+			return av != nil && *av == bv
+		}
+	case int32:
+		if bv, ok := b.(*int32); ok {
+			return bv != nil && av == *bv
+		}
+	case *int32:
+		if bv, ok := b.(int32); ok {
+			return av != nil && *av == bv
+		}
+	case int64:
+		if bv, ok := b.(*int64); ok {
+			return bv != nil && av == *bv
+		}
+	case *int64:
+		if bv, ok := b.(int64); ok {
+			return av != nil && *av == bv
+		}
+	case uint:
+		if bv, ok := b.(*uint); ok {
+			return bv != nil && av == *bv
+		}
+	case *uint:
+		if bv, ok := b.(uint); ok {
+			return av != nil && *av == bv
+		}
+	case uint8:
+		if bv, ok := b.(*uint8); ok {
+			return bv != nil && av == *bv
+		}
+	case *uint8:
+		if bv, ok := b.(uint8); ok {
+			return av != nil && *av == bv
+		}
+	case uint16:
+		if bv, ok := b.(*uint16); ok {
+			return bv != nil && av == *bv
+		}
+	case *uint16:
+		if bv, ok := b.(uint16); ok {
+			return av != nil && *av == bv
+		}
+	case uint32:
+		if bv, ok := b.(*uint32); ok {
+			return bv != nil && av == *bv
+		}
+	case *uint32:
+		if bv, ok := b.(uint32); ok {
+			return av != nil && *av == bv
+		}
+	case uint64:
+		if bv, ok := b.(*uint64); ok {
+			return bv != nil && av == *bv
+		}
+	case *uint64:
+		if bv, ok := b.(uint64); ok {
+			return av != nil && *av == bv
+		}
+	case float32:
+		if bv, ok := b.(*float32); ok {
+			return bv != nil && av == *bv
+		}
+	case *float32:
+		if bv, ok := b.(float32); ok {
+			return av != nil && *av == bv
+		}
+	case float64:
+		if bv, ok := b.(*float64); ok {
+			return bv != nil && av == *bv
+		}
+	case *float64:
+		if bv, ok := b.(float64); ok {
+			return av != nil && *av == bv
+		}
+	case time.Duration:
+		if bv, ok := b.(*time.Duration); ok {
+			return bv != nil && av == *bv
+		}
+	case *time.Duration:
+		if bv, ok := b.(time.Duration); ok {
+			return av != nil && *av == bv
+		}
+	case gocql.UUID:
+		if bv, ok := b.(*gocql.UUID); ok {
+			return bv != nil && av == *bv
+		}
+	case *gocql.UUID:
+		if bv, ok := b.(gocql.UUID); ok {
+			return av != nil && *av == bv
+		}
+	case time.Time:
+		if bv, ok := b.(*time.Time); ok {
+			return bv != nil && av.Equal(*bv)
+		}
+	case *time.Time:
+		if bv, ok := b.(time.Time); ok {
+			return av != nil && av.Equal(bv)
+		}
+	}
+
+	// Last resort: canonicalValueString dereferences all pointer types and
+	// formats with strconv — safe, no address leakage.
+	return canonicalValueString(a) == canonicalValueString(b)
+}
+
+// rowsEqual reports whether two Rows slices are value-equal.
+// It replaces reflect.DeepEqual(a, b) in the fast-path of CompareCollectedRows.
+// reflect.DeepEqual allocates heavily when walking the map[string]int inside
+// every Row and treats *string(x) != string(x).
+//
+// rowsEqual uses valuesEqual which handles cross-type pointer/value equivalence
+// (e.g. *string vs string with the same content) without leaking pointer addresses.
+func rowsEqual(a, b Rows) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		av := a[i].values
+		bv := b[i].values
+		if len(av) != len(bv) {
+			return false
+		}
+		for j := range av {
+			if !valuesEqual(av[j], bv[j]) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // rowsCmp compares two rows column-by-column using their value order.
