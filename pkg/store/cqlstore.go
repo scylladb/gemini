@@ -362,9 +362,9 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			default:
 			}
 
-			rowData, rdErr := iter.RowData()
-			if rdErr != nil {
-				yield(Row{}, rdErr)
+			rowData, rowErr := iter.RowData()
+			if rowErr != nil {
+				yield(Row{}, rowErr)
 				return
 			}
 			if !iter.Scan(rowData.Values...) {

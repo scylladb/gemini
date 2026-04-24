@@ -30,7 +30,6 @@ package store
 // profile run can attribute cost to the right function.
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"slices"
@@ -485,9 +484,9 @@ func BenchmarkCanonicalizeRow(b *testing.B) {
 
 func BenchmarkDiffRows(b *testing.B) {
 	type diffCase struct {
-		nCols   int
-		nDiffed int // how many columns differ between oracle and test
 		desc    string
+		nCols   int
+		nDiffed int
 	}
 	cases := []diffCase{
 		{nCols: 4, nDiffed: 1, desc: "cols=4/diff=1"},
@@ -718,8 +717,9 @@ func BenchmarkCompareCollectedRows_CountMismatch(b *testing.B) {
 
 func BenchmarkZipAndCompare(b *testing.B) {
 	type zipCase struct {
-		nRows, nExtra int
-		scenario      string
+		scenario string
+		nRows    int
+		nExtra   int
 	}
 	cases := []zipCase{
 		{nRows: 10, nExtra: 2, scenario: "allMatch"},
@@ -728,7 +728,7 @@ func BenchmarkZipAndCompare(b *testing.B) {
 	}
 
 	table := makeScalarTable(4)
-	ctx := context.Background()
+	ctx := b.Context()
 
 	for _, tc := range cases {
 		tc := tc

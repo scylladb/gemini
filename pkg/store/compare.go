@@ -226,6 +226,8 @@ func rowKeyString(table *typedef.Table, row Row) string {
 // and a keySeen map, we collect sorted column names once from oracleRow and
 // compare values on the fly, writing to a strings.Builder directly.
 // This eliminates ~3 map allocations and ~2N string allocations per call.
+//
+//nolint:gocyclo
 func diffRows(table *typedef.Table, oracleRow, testRow Row) string {
 	// Build a sorted list of all column names present in either row.
 	// In the same-count path both rows always have the same schema, so
@@ -348,7 +350,7 @@ func deduplicateListValues(table *typedef.Table, rows Rows) {
 	}
 }
 
-//nolint:cyclop
+//nolint:gocyclo,cyclop
 func deduplicateSlice(val any) (newVal any, before, after int) {
 	if val == nil {
 		return nil, 0, 0
@@ -755,7 +757,7 @@ outer:
 // boxing. Numeric types use strconv instead of fmt.Sprintf to avoid
 // allocating a temporary interface value on the fmt path.
 //
-//nolint:cyclop
+//nolint:gocyclo,cyclop
 func canonicalValueString(v any) string {
 	if v == nil {
 		return "null"

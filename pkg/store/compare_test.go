@@ -583,9 +583,9 @@ func TestCompareCollectedRows_ListDuplicatesMatch(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name      string
 		testVal   any
 		oracleVal any
+		name      string
 	}{
 		{
 			name:      "test-side []any duplicates",
