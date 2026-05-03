@@ -432,7 +432,7 @@ func (v *Values) Copy() *Values {
 	}
 
 	v.mu.RLock()
-	m := maps.Clone(v.data)
+	m := maps.Clone(v.data) //nolint:govet // inline: type parameter inference not yet supported by inliner
 	v.mu.RUnlock()
 
 	return &Values{data: m}

@@ -72,27 +72,20 @@ type (
 		Recent  []string `json:"recent,omitempty"`
 	}
 
+	// Logger is a non-blocking statement logger. When the bounded channel is
+	// full, items spill into an overflow buffer. A background drainer pump
+	// moves overflow items into the channel as space opens. This ensures the
+	// logger NEVER drops items (forensic record) and NEVER blocks the data
+	// path (gocql observer goroutines call LogStmt synchronously).
 	Logger struct {
-		closer    io.Closer
-		ch        chan Item
-		done      chan struct{}
-		drainerWG sync.WaitGroup
-
-		// Overflow buffer used when the bounded channel is full. The
-		// statement logger MUST NOT drop items (it is the forensic record
-		// for failures), and it MUST NOT block the data path (gocql
-		// observer goroutines call LogStmt synchronously — blocking them
-		// freezes every mutation/validation worker, see the 2026-04-30 hang
-		// post-mortem). The overflow buffer reconciles those two
-		// constraints: LogStmt is non-blocking, items are kept in memory
-		// until the downstream committer drains the channel, and a
-		// background drainer pump moves overflow items into the channel as
-		// soon as space opens up.
-		overflowMu  sync.Mutex
-		overflow    []Item
+		closer      io.Closer
+		ch          chan Item
+		done        chan struct{}
 		overflowSig chan struct{}
-
-		closeOnce sync.Once
+		overflow    []Item
+		drainerWG   sync.WaitGroup
+		closeOnce   sync.Once
+		overflowMu  sync.Mutex
 	}
 
 	options struct {
