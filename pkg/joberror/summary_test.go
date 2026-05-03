@@ -164,6 +164,29 @@ func TestErrorKindFromResults_Empty(t *testing.T) {
 	assert.Equal(t, "unknown", errorKindFromResults(&ComparisonResults{}))
 }
 
+func TestErrorKindFromOperationError_QuorumUnavailable(t *testing.T) {
+	t.Parallel()
+	msg := "Validation failed: Operation failed for ks1.table1 - received 0 responses and 1 failures from 1 CL=QUORUM. (potentially executed: false)"
+	assert.Equal(t, "quorum unavailable", errorKindFromOperationError(msg, nil))
+}
+
+func TestErrorKindFromOperationError_ConsistencyUnavailable(t *testing.T) {
+	t.Parallel()
+	msg := "Operation failed for ks1.table1 - received 0 responses and 1 failures from 1 CL=ONE. (potentially executed: false)"
+	assert.Equal(t, "consistency unavailable", errorKindFromOperationError(msg, nil))
+}
+
+func TestBuildCorruptionEntries_UsesOperationErrorKindWhenNoDiff(t *testing.T) {
+	t.Parallel()
+	entries := BuildCorruptionEntries([]JobError{{
+		Timestamp:     time.Now().UTC(),
+		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"pk0": {int32(1)}}),
+		Message:       "Validation failed: Operation failed for ks1.table1 - received 0 responses and 1 failures from 1 CL=QUORUM. (potentially executed: false)",
+	}}, nil, nil)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "quorum unavailable", entries[0].ErrorKind)
+}
+
 func TestMergeHosts_Dedup(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, []string{"a", "b", "c"}, mergeHosts([]string{"a", "b"}, []string{"b", "c"}))
