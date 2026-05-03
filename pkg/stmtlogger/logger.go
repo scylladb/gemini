@@ -204,8 +204,9 @@ func (l *Logger) drainOverflow() {
 	defer l.drainerWG.Done()
 
 	// Use a short ticker as a safety net in case a wakeup signal is missed
-	// during a tight race; the cost is negligible because the ticker only
-	// fires when there is overflow to drain.
+	// during a tight race between LogStmt and the select below.  The ticker
+	// fires unconditionally every 50ms, but the inner loop exits immediately
+	// when the overflow queue is empty, so idle cost is negligible.
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 

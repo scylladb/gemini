@@ -448,7 +448,7 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	// This bounds memory at the cost of skipping re-validation for the
 	// evicted (oldest) entries. With high DELETE throughput and long bucket
 	// durations, the heap can grow to millions of entries otherwise.
-	d.evictExcess()
+	evicted := d.collectExcess()
 
 	// Update next ready time if this is the earliest or heap was empty
 	if wasEmpty || readyAtNs < d.nextReadyNs.Load() {
@@ -456,31 +456,46 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	}
 	d.mu.Unlock()
 
+	// Run onDone callbacks outside the lock to avoid holding d.mu while
+	// invoking partition cleanup (which may acquire other locks).
+	d.runEvicted(evicted)
+
 	d.deleted.Add(1)
 }
 
-// evictExcess pops the oldest (earliest readyAt) entries from the heap when
-// it exceeds maxHeapSize, calling onDone to release each evicted partition.
+// collectExcess pops the oldest (earliest readyAt) entries from the heap when
+// it exceeds maxHeapSize and returns them.  The caller is responsible for
+// invoking onDone on each returned entry AFTER releasing d.mu.
 // MUST be called with d.mu held.
-func (d *deletedPartitions) evictExcess() {
+func (d *deletedPartitions) collectExcess() []deletedPartition {
 	if d.maxHeapSize <= 0 {
-		return
+		return nil
 	}
-	var n uint64
+	var evicted []deletedPartition
 	for d.heap.Len() > d.maxHeapSize {
-		evicted, ok := d.heap.popInline()
+		e, ok := d.heap.popInline()
 		if !ok {
 			break
 		}
-		if evicted.onDone != nil {
-			evicted.onDone()
+		evicted = append(evicted, e)
+	}
+	return evicted
+}
+
+// runEvicted invokes onDone callbacks for evicted entries and updates metrics.
+// MUST be called WITHOUT d.mu held.
+func (d *deletedPartitions) runEvicted(evicted []deletedPartition) {
+	if len(evicted) == 0 {
+		return
+	}
+	for i := range evicted {
+		if evicted[i].onDone != nil {
+			evicted[i].onDone()
 		}
-		n++
 	}
-	if n > 0 {
-		d.evicted.Add(n)
-		metrics.DeletedPartitionsHeapEvictions.Add(float64(n))
-	}
+	n := uint64(len(evicted))
+	d.evicted.Add(n)
+	metrics.DeletedPartitionsHeapEvictions.Add(float64(n))
 }
 
 // DeleteBulk adds multiple deleted partitions in a single lock acquisition
@@ -526,13 +541,16 @@ func (d *deletedPartitions) DeleteBulk(keys []typedef.PartitionKeys) {
 	}
 
 	// Evict oldest entries if the heap exceeds the configured cap.
-	d.evictExcess()
+	evicted := d.collectExcess()
 
 	// Update next ready time if needed
 	if wasEmpty || minReadyNs < d.nextReadyNs.Load() {
 		d.nextReadyNs.Store(minReadyNs)
 	}
 	d.mu.Unlock()
+
+	// Run onDone callbacks outside the lock.
+	d.runEvicted(evicted)
 
 	d.deleted.Add(uint64(len(keys)))
 }

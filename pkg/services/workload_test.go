@@ -389,7 +389,7 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 		StatementRatios:       defaultStatementRatios(),
 		IOWorkerPoolSize:      128,
 		MaxErrorsToStore:      maxErrorsCount,
-		Duration:              1 * time.Minute,
+		Duration:              30 * time.Second,
 		PartitionCount:        partitionCount,
 		MutationConcurrency:   8,
 		ReadConcurrency:       16,
@@ -397,7 +397,7 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	}, storeConfig, schema, logger, stopFlag)
 	assert.NoError(err)
 
-	time.AfterFunc(15*time.Second, func() {
+	time.AfterFunc(10*time.Second, func() {
 		truncateQuery := fmt.Sprintf("TRUNCATE TABLE %s.%s", schema.Keyspace.Name, schema.Tables[0].Name)
 		if err = scyllaContainer.Test.Query(truncateQuery).Exec(); err != nil {
 			t.Logf("Failed to execute truncate query: %v", err)

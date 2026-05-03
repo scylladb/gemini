@@ -72,8 +72,8 @@ func testGeminiDetectsRowsMissingFromSUT(t *testing.T, containers *testutils.Scy
 	const (
 		partitionCount = 5000
 		seed           = 1001
-		totalDuration  = 1 * time.Minute
-		sabotageAfter  = 15 * time.Second
+		totalDuration  = 30 * time.Second
+		sabotageAfter  = 10 * time.Second
 	)
 
 	schema := divergenceSchema(t)
@@ -113,8 +113,8 @@ func testGeminiDetectsExtraRowsInSUT(t *testing.T, containers *testutils.ScyllaC
 	const (
 		partitionCount = 5000
 		seed           = 1002
-		totalDuration  = 1 * time.Minute
-		sabotageAfter  = 15 * time.Second
+		totalDuration  = 30 * time.Second
+		sabotageAfter  = 10 * time.Second
 	)
 
 	schema := divergenceSchema(t)
