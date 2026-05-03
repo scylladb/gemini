@@ -800,8 +800,14 @@ func TestWorkloadWriteThenValidate(t *testing.T) {
 	assert.Zero(writeStatus.WriteErrors.Load(), "write phase should have no errors")
 	assert.NoError(writeWorkload.Close())
 
-	// Phase 2: Read-only validation of the data written above
+	// Phase 2: Read-only validation of the data written above.
+	// Use a fresh stop flag because the first phase's soft-stop timer may
+	// have already latched the original flag (one-way transition).
 	t.Log("Phase 2: Read-only validation")
+	readStopFlag := stop.NewFlag(t.Name() + "/read")
+	t.Cleanup(func() {
+		readStopFlag.SetHard(true)
+	})
 	readWorkload, err := NewWorkload(&WorkloadConfig{
 		RunningMode:           jobs.ReadMode,
 		PartitionDistribution: distributions.Zipf,
@@ -812,7 +818,7 @@ func TestWorkloadWriteThenValidate(t *testing.T) {
 		PartitionCount:        partitionCount,
 		ReadConcurrency:       32,
 		DropSchema:            false, // Reuse existing schema+data
-	}, storeConfig, schema, logger, stopFlag)
+	}, storeConfig, schema, logger, readStopFlag)
 	assert.NoError(err)
 	assert.NoError(readWorkload.Run(t.Context()))
 	assert.NoError(readWorkload.Close())
