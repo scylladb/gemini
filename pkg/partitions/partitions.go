@@ -177,26 +177,29 @@ func (p *Partitions) valuesNoLock(part *Partition) typedef.PartitionKeys {
 		ID:     part.id,
 		Release: func() {
 			if part.refCount.Add(-1) == 0 {
-				p.deleteValidation(part.id)
+				p.deleteValidation(part.id, true)
 			}
 		},
 	}
 }
 
-func (p *Partitions) deleteValidation(id uuid.UUID) {
+// deleteValidation removes the validation metadata for a partition UUID.
+// When retired is true (i.e. the partition slot was replaced via Replace and
+// the deleted-partitions heap has fully drained), the UUID→idx mapping is also
+// removed. For live partitions whose refCount merely drops to zero between
+// uses, only the validationMap entry is removed — the uuidToIdx entry MUST
+// stay so that MarkInvalid can still locate the slot.
+func (p *Partitions) deleteValidation(id uuid.UUID, retired bool) {
 	p.validationMu.Lock()
 	delete(p.validationMap, id)
-	// Also retire the UUID→idx mapping. This is invoked from the Release
-	// closure when refCount drops to zero, which only happens after the
-	// deleted-partitions heap has finished emitting every bucket and
-	// invoked onDone (see Replace + deleted.Delete). At that point no
-	// validator can still be holding a reference to this UUID, so any
-	// subsequent MarkInvalid(id) is correctly a no-op rather than
-	// dangerously remapping the OLD UUID onto a slot now owned by a NEW
-	// partition. Without this delete the map grew unbounded — every
-	// production DELETE leaks one entry forever (root cause of the
-	// 2026-04-30 partitions memory growth).
-	delete(p.uuidToIdx, id)
+	if retired {
+		// Safe to remove: the partition has been replaced and the deleted-
+		// partitions heap has finished emitting every bucket. No validator
+		// can still be holding a reference to this UUID. Without this delete
+		// the map grows unbounded — every production DELETE leaks one entry
+		// forever (root cause of the 2026-04-30 partitions memory growth).
+		delete(p.uuidToIdx, id)
+	}
 	p.validationMu.Unlock()
 }
 
@@ -222,7 +225,7 @@ func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
 		Release: func() {
 			once.Do(func() {
 				if part.refCount.Add(-1) == 0 {
-					p.deleteValidation(id)
+					p.deleteValidation(id, false)
 				}
 			})
 		},
@@ -250,7 +253,7 @@ func (p *Partitions) valuesCopy(idx uint64) typedef.PartitionKeys {
 		Release: func() {
 			once.Do(func() {
 				if part.refCount.Add(-1) == 0 {
-					p.deleteValidation(id)
+					p.deleteValidation(id, false)
 				}
 			})
 		},
