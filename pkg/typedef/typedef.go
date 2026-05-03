@@ -46,12 +46,13 @@ type (
 	}
 
 	PartitionRangeConfig struct {
-		DeleteBuckets   []time.Duration
-		MaxBlobLength   int
-		MinBlobLength   int
-		MaxStringLength int
-		MinStringLength int
-		UseLWT          bool
+		DeleteBuckets      []time.Duration
+		MaxDeletedHeapSize int
+		MaxBlobLength      int
+		MinBlobLength      int
+		MaxStringLength    int
+		MinStringLength    int
+		UseLWT             bool
 	}
 
 	ValueRangeConfig struct {

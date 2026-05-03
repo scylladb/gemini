@@ -203,7 +203,7 @@ func TestDeletedPartitionsBasic(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{100 * time.Millisecond, 200 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		require.NotNil(t, d)
 		assert.Equal(t, 0, d.Len())
 		d.Close()
@@ -213,7 +213,7 @@ func TestDeletedPartitionsBasic(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -227,7 +227,7 @@ func TestDeletedPartitionsBasic(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		const count = 10
@@ -249,7 +249,7 @@ func TestDeletedPartitionsTimeBuckets(t *testing.T) {
 		t.Parallel()
 		delay := 50 * time.Millisecond
 		buckets := []time.Duration{delay}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -280,7 +280,7 @@ func TestDeletedPartitionsTimeBuckets(t *testing.T) {
 			50 * time.Millisecond,
 			50 * time.Millisecond,
 		}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -307,7 +307,7 @@ func TestDeletedPartitionsTimeBuckets(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{30 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Delete partitions in specific order
@@ -347,7 +347,7 @@ func TestDeletedPartitionsConcurrency(t *testing.T) {
 	t.Run("concurrent_deletes", func(t *testing.T) {
 		t.Parallel()
 		buckets := []time.Duration{50 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		const goroutines = 10
@@ -377,7 +377,7 @@ func TestDeletedPartitionsConcurrency(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{10 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		const writers = 5
@@ -430,7 +430,7 @@ func TestDeletedPartitionsConcurrency(t *testing.T) {
 	t.Run("concurrent_len_and_delete", func(t *testing.T) {
 		t.Parallel()
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		var wg sync.WaitGroup
@@ -466,7 +466,7 @@ func TestDeletedPartitionsBackgroundProcessor(t *testing.T) {
 	t.Run("processes_ready_partitions", func(t *testing.T) {
 		t.Parallel()
 		buckets := []time.Duration{50 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -485,7 +485,7 @@ func TestDeletedPartitionsBackgroundProcessor(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{1 * time.Second} // Long delay
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -507,7 +507,7 @@ func TestDeletedPartitionsBackgroundProcessor(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 		buckets := []time.Duration{10 * time.Millisecond}
-		d := newDeleted(ctx, buckets)
+		d := newDeleted(ctx, buckets, 0)
 
 		values := typedef.NewValues(1)
 		d.Delete(typedef.PartitionKeys{Values: values})
@@ -534,7 +534,7 @@ func TestDeletedPartitionsBackgroundProcessor(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{10 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 
 		d.Close()
 
@@ -561,7 +561,7 @@ func TestDeletedPartitionsChannelBehavior(t *testing.T) {
 	t.Run("channel_full_requeues", func(t *testing.T) {
 		t.Parallel()
 		buckets := []time.Duration{10 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Fill channel to capacity (buffer is 100)
@@ -599,7 +599,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 	t.Run("empty_buckets", func(t *testing.T) {
 		t.Parallel()
 		buckets := []time.Duration{}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Should handle empty buckets gracefully (will panic on access)
@@ -628,7 +628,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		}()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(nil, buckets) // nolint:staticcheck
+		d := newDeleted(nil, buckets, 0) // nolint:staticcheck
 		defer d.Close()
 	})
 
@@ -636,7 +636,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{0}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -655,7 +655,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{24 * time.Hour}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -676,7 +676,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{20 * time.Millisecond, 20 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -713,7 +713,7 @@ func TestDeletedPartitionsIntegration(t *testing.T) {
 			200 * time.Millisecond,
 			300 * time.Millisecond,
 		}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		const totalDeletes = 50
@@ -766,7 +766,7 @@ func sumMapValues(m map[*typedef.Values]int) int {
 func BenchmarkDeletedPartitions(b *testing.B) {
 	b.Run("delete", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		b.ResetTimer()
@@ -778,7 +778,7 @@ func BenchmarkDeletedPartitions(b *testing.B) {
 
 	b.Run("delete_and_receive", func(b *testing.B) {
 		buckets := []time.Duration{1 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		// Consumer goroutine
@@ -798,7 +798,7 @@ func BenchmarkDeletedPartitions(b *testing.B) {
 
 	b.Run("concurrent_deletes", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		b.ResetTimer()

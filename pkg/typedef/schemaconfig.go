@@ -26,6 +26,7 @@ type SchemaConfig struct {
 	OracleReplicationStrategy replication.Replication
 	TableOptions              []tableopts.Option
 	DeleteBuckets             []time.Duration
+	MaxDeletedHeapSize        int
 	MaxUDTParts               int
 	MaxStringLength           int
 	MinBlobLength             int
@@ -109,12 +110,13 @@ func (sc *SchemaConfig) GetMinColumns() int {
 
 func (sc *SchemaConfig) GetPartitionRangeConfig() PartitionRangeConfig {
 	return PartitionRangeConfig{
-		MaxBlobLength:   sc.MaxPKBlobLength,
-		MinBlobLength:   sc.MinPKBlobLength,
-		MaxStringLength: sc.MaxPKStringLength,
-		MinStringLength: sc.MinPKStringLength,
-		UseLWT:          sc.UseLWT,
-		DeleteBuckets:   sc.DeleteBuckets,
+		MaxBlobLength:      sc.MaxPKBlobLength,
+		MinBlobLength:      sc.MinPKBlobLength,
+		MaxStringLength:    sc.MaxPKStringLength,
+		MinStringLength:    sc.MinPKStringLength,
+		UseLWT:             sc.UseLWT,
+		DeleteBuckets:      sc.DeleteBuckets,
+		MaxDeletedHeapSize: sc.MaxDeletedHeapSize,
 	}
 }
 

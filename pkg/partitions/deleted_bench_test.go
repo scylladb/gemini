@@ -332,7 +332,7 @@ func BenchmarkMemoryEfficiency(b *testing.B) {
 func BenchmarkBulkOperations(b *testing.B) {
 	b.Run("delete_single", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		b.ResetTimer()
@@ -344,7 +344,7 @@ func BenchmarkBulkOperations(b *testing.B) {
 
 	b.Run("delete_bulk_10", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		b.ResetTimer()
@@ -359,7 +359,7 @@ func BenchmarkBulkOperations(b *testing.B) {
 
 	b.Run("delete_bulk_50", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		b.ResetTimer()
@@ -374,7 +374,7 @@ func BenchmarkBulkOperations(b *testing.B) {
 
 	b.Run("delete_bulk_100", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		b.ResetTimer()
@@ -392,7 +392,7 @@ func BenchmarkBulkOperations(b *testing.B) {
 func BenchmarkFastPath(b *testing.B) {
 	b.Run("fast_path_check", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		// Add one item with future ready time
@@ -408,7 +408,7 @@ func BenchmarkFastPath(b *testing.B) {
 
 	b.Run("process_ready_fast_path", func(b *testing.B) {
 		buckets := []time.Duration{1 * time.Second} // Far in future
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		// Add items that won't be ready
@@ -429,7 +429,7 @@ func BenchmarkFastPath(b *testing.B) {
 func BenchmarkHeapShrinking(b *testing.B) {
 	b.Run("shrink_after_spike", func(b *testing.B) {
 		buckets := []time.Duration{1 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		b.ResetTimer()
@@ -472,7 +472,7 @@ func BenchmarkUnixNanoComparison(b *testing.B) {
 func BenchmarkConcurrentBulk(b *testing.B) {
 	b.Run("concurrent_bulk_delete", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		b.ResetTimer()

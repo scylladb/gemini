@@ -185,6 +185,16 @@ var (
 		},
 	)
 
+	// DeletedPartitionsHeapEvictions counts partitions evicted from the
+	// deleted-partitions heap because it exceeded its configured cap.
+	// Non-zero means re-validation of some old DELETEs was skipped.
+	DeletedPartitionsHeapEvictions = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "deleted_partitions_heap_evictions_total",
+			Help: "Total number of deleted-partition entries evicted from the heap due to size cap.",
+		},
+	)
+
 	StatementLoggerFlushes = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "statement_logger_flushes_total",
@@ -257,6 +267,7 @@ func init() {
 		StatementLoggerItems,
 		StatementLoggerOverflowItems,
 		StatementLoggerOverflowTotal,
+		DeletedPartitionsHeapEvictions,
 		StatementLoggerFlushes,
 		StatementErrorLastTS,
 		WorkersCurrent,

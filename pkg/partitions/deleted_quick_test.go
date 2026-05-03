@@ -26,7 +26,7 @@ func TestDeletedQuickCheck(t *testing.T) {
 	t.Parallel()
 
 	buckets := []time.Duration{50 * time.Millisecond}
-	d := newDeleted(t.Context(), buckets)
+	d := newDeleted(t.Context(), buckets, 0)
 	defer d.Close()
 
 	t.Log("Created deleted partitions tracker")

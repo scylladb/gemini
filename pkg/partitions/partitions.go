@@ -126,7 +126,7 @@ func New(
 			partitionValuesLen: uint64(partitionValuesLen),
 			parts:              parts,
 		},
-		deleted:       newDeleted(ctx, config.DeleteBuckets, false),
+		deleted:       newDeleted(ctx, config.DeleteBuckets, config.MaxDeletedHeapSize),
 		r:             *random.NewGoRoutineSafeRandom(r),
 		table:         table,
 		config:        config,
