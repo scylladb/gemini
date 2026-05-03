@@ -163,6 +163,28 @@ var (
 		},
 	)
 
+	// StatementLoggerOverflowItems tracks the number of items currently held
+	// in the producer-side overflow buffer. This grows when the downstream
+	// committer cannot keep up (e.g. Scylla logger cluster stalled by a
+	// nemesis) and drains back to zero once the committer recovers.
+	// Items are NEVER dropped — this gauge is what you watch to detect a
+	// stalled committer.
+	StatementLoggerOverflowItems = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "statement_logger_overflow_items",
+			Help: "Number of statement log items currently held in the producer-side overflow buffer.",
+		},
+	)
+
+	// StatementLoggerOverflowTotal counts every time LogStmt had to fall back
+	// to the overflow buffer because the bounded channel was full.
+	StatementLoggerOverflowTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "statement_logger_overflow_total",
+			Help: "Total number of statement log items routed via the overflow buffer because the channel was full.",
+		},
+	)
+
 	StatementLoggerFlushes = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "statement_logger_flushes_total",
@@ -233,6 +255,8 @@ func init() {
 		StatementLoggerEnqueuedTotal,
 		StatementLoggerDequeuedTotal,
 		StatementLoggerItems,
+		StatementLoggerOverflowItems,
+		StatementLoggerOverflowTotal,
 		StatementLoggerFlushes,
 		StatementErrorLastTS,
 		WorkersCurrent,
