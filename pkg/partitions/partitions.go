@@ -136,12 +136,8 @@ func New(
 		maxInvalid:    maxInvalid,
 	}
 
-	// Only start deleted-partitions processing when time buckets are configured.
-	// When no buckets are provided, the feature is fully disabled (no goroutines,
-	// nil channel), so regular validation proceeds unaffected.
-	if len(config.DeleteBuckets) > 0 {
-		go p.deleted.start(100 * time.Millisecond)
-	}
+	// NOTE: deleted-partitions background goroutine is started internally by
+	// newDeleted() when timeBuckets is non-empty. Do NOT start it again here.
 
 	p.parts.count.Store(count)
 
