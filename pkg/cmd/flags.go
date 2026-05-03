@@ -206,7 +206,7 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		StringArrayVarP(&deletedPartitionsTimeBucket, "deleted-partitions-time-bucket", "", []string{"1m", "10m", "1h"}, "Time after to check if data resurrection has occurred for the deleted partitions")
 	cmd.Flags().
-		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "zipf",
+		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform",
 			"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
 	cmd.Flags().
 		Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution")
