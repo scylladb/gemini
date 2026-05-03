@@ -104,8 +104,8 @@ type SelectRatios struct {
 func DefaultStatementRatios() Ratios {
 	return Ratios{
 		MutationRatios: MutationRatios{
-			InsertRatio: 0.75,
-			UpdateRatio: 0.2,
+			InsertRatio: 0.70,
+			UpdateRatio: 0.25,
 			DeleteRatio: 0.05,
 			InsertSubtypeRatios: InsertRatios{
 				RegularInsertRatio: 0.9,
