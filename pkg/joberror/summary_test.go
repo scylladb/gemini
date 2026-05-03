@@ -380,9 +380,9 @@ func TestSummariseStatements_CountsDeleteErrors(t *testing.T) {
 func TestCQLTimestamp_UnmarshalJSON(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
+		want  time.Time
 		name  string
 		input string
-		want  time.Time
 	}{
 		{
 			name:  "RFC3339",

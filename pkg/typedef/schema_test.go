@@ -127,7 +127,17 @@ func TestSchemaMarshalUnmarshalNotChanged(t *testing.T) {
 		t.Fatalf("unable to marshal schema json, error=%s\n", err)
 	}
 
-	if diff := cmp.Diff(fullSchemaExpected, fullSchemaMarshaled); diff != "" {
+	var fullSchemaExpectedJSON any
+	if err = json.Unmarshal(fullSchemaExpected, &fullSchemaExpectedJSON); err != nil {
+		t.Fatalf("unable to unmarshal expected schema json, error=%s\n", err)
+	}
+
+	var fullSchemaMarshaledJSON any
+	if err = json.Unmarshal(fullSchemaMarshaled, &fullSchemaMarshaledJSON); err != nil {
+		t.Fatalf("unable to unmarshal marshaled schema json, error=%s\n", err)
+	}
+
+	if diff := cmp.Diff(fullSchemaExpectedJSON, fullSchemaMarshaledJSON); diff != "" {
 		t.Errorf("schema not the same after marshal, diff=%s", diff)
 		t.Error(
 			"if you sure that this changes really needed - you should notify QA about this changes by create new issue https://github.com/scylladb/scylla-cluster-tests/issues/new\n" +
