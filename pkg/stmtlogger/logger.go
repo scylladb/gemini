@@ -74,9 +74,11 @@ type (
 
 	// Logger is a non-blocking statement logger. When the bounded channel is
 	// full, items spill into an overflow buffer. A background drainer pump
-	// moves overflow items into the channel as space opens. This ensures the
-	// logger NEVER drops items (forensic record) and NEVER blocks the data
-	// path (gocql observer goroutines call LogStmt synchronously).
+	// moves overflow items into the channel as space opens. On Close(), any
+	// remaining overflow items are forwarded to the channel with a blocking
+	// send before the channel is closed, so no items are ever silently
+	// discarded (forensic record). LogStmt is always non-blocking (gocql
+	// observer goroutines call it synchronously).
 	Logger struct {
 		closer      io.Closer
 		ch          chan Item
@@ -200,6 +202,12 @@ func (l *Logger) LogStmt(item Item) error {
 // bounded channel as soon as the committer makes room. It is the reason the
 // statement logger can keep its "never drop" guarantee while LogStmt remains
 // non-blocking.
+//
+// When l.done is closed, drainOverflow does NOT exit immediately: it first
+// forwards all remaining overflow items to l.ch with blocking sends (safe
+// because the inner committer — l.closer — is still alive at that point),
+// then exits. Close() therefore only needs to wait for this goroutine and
+// can close l.ch immediately after.
 func (l *Logger) drainOverflow() {
 	defer l.drainerWG.Done()
 
@@ -213,39 +221,75 @@ func (l *Logger) drainOverflow() {
 	for {
 		select {
 		case <-l.done:
+			// LogStmt has been shut down. Drain whatever remains in the
+			// overflow buffer before signalling the drainer is done.
+			// Sends are blocking here: the inner committer is still alive
+			// because Close() calls l.closer.Close() only after we return.
+			l.flushRemainingOverflow()
 			return
 		case <-l.overflowSig:
 		case <-ticker.C:
 		}
 
-		for {
-			l.overflowMu.Lock()
-			if len(l.overflow) == 0 {
-				l.overflowMu.Unlock()
-				break
-			}
-			next := l.overflow[0]
-			l.overflowMu.Unlock()
+		l.drainOverflowStep()
+	}
+}
 
-			select {
-			case l.ch <- next:
-				l.overflowMu.Lock()
-				// Pop front; reuse underlying array — when it grows
-				// large, replace it to release memory back to the
-				// allocator.
-				l.overflow = l.overflow[1:]
-				if cap(l.overflow) > 4096 && len(l.overflow) < cap(l.overflow)/4 {
-					compact := make([]Item, len(l.overflow))
-					copy(compact, l.overflow)
-					l.overflow = compact
-				}
-				depth := len(l.overflow)
-				l.overflowMu.Unlock()
-				metrics.StatementLoggerOverflowItems.Set(float64(depth))
-			case <-l.done:
-				return
-			}
+// drainOverflowStep forwards items from the overflow buffer to l.ch during
+// normal (non-shutdown) operation.  It exits as soon as either the overflow
+// queue is empty or l.ch is full (the next ticker/signal will retry).
+func (l *Logger) drainOverflowStep() {
+	for {
+		l.overflowMu.Lock()
+		if len(l.overflow) == 0 {
+			l.overflowMu.Unlock()
+			return
 		}
+		next := l.overflow[0]
+		l.overflowMu.Unlock()
+
+		select {
+		case l.ch <- next:
+			l.overflowMu.Lock()
+			// Pop front; reuse underlying array — when it grows
+			// large, replace it to release memory back to the
+			// allocator.
+			l.overflow = l.overflow[1:]
+			if cap(l.overflow) > 4096 && len(l.overflow) < cap(l.overflow)/4 {
+				compact := make([]Item, len(l.overflow))
+				copy(compact, l.overflow)
+				l.overflow = compact
+			}
+			depth := len(l.overflow)
+			l.overflowMu.Unlock()
+			metrics.StatementLoggerOverflowItems.Set(float64(depth))
+		case <-l.done:
+			// Shutdown fired while we were waiting for channel space.
+			// Stop here; flushRemainingOverflow will handle the rest.
+			return
+		}
+	}
+}
+
+// flushRemainingOverflow forwards every item still in the overflow buffer to
+// l.ch using blocking sends.  It is called only from drainOverflow after
+// l.done is closed, so LogStmt is no longer enqueueing new items and the
+// inner committer (l.closer) is still running.
+func (l *Logger) flushRemainingOverflow() {
+	for {
+		l.overflowMu.Lock()
+		if len(l.overflow) == 0 {
+			metrics.StatementLoggerOverflowItems.Set(0)
+			l.overflowMu.Unlock()
+			return
+		}
+		next := l.overflow[0]
+		l.overflow = l.overflow[1:]
+		depth := len(l.overflow)
+		l.overflowMu.Unlock()
+
+		metrics.StatementLoggerOverflowItems.Set(float64(depth))
+		l.ch <- next // block; consumer must eventually drain before it exits
 	}
 }
 
@@ -254,33 +298,18 @@ func (l *Logger) Close() error {
 
 	l.closeOnce.Do(func() {
 		// Signal all in-flight and future LogStmt calls to bail out.
+		// The drainer (drainOverflow) keeps running after this: it will
+		// forward every remaining overflow item to l.ch with blocking
+		// sends before it exits.
 		close(l.done)
 
-		// Wait for the drainer to exit before flushing residual overflow
-		// items so we own the overflow slice exclusively.
+		// Wait for the drainer to finish draining all overflow.
+		// Only after this point is it safe to close l.ch, because the
+		// drainer is the sole remaining sender.
 		l.drainerWG.Wait()
 
-		// Best-effort flush of overflow items into ch so the committer
-		// can persist them before shutdown. If ch is nil or full, items
-		// remain in the overflow buffer in memory until process exit —
-		// they are never dropped silently while the process runs.
+		// Close the data channel so downstream consumers see EOF.
 		if l.ch != nil {
-			l.overflowMu.Lock()
-			for _, it := range l.overflow {
-				select {
-				case l.ch <- it:
-				default:
-					// Committer already shutting down; stop here to
-					// avoid blocking Close indefinitely.
-					goto closeChannel
-				}
-			}
-			l.overflow = nil
-		closeChannel:
-			metrics.StatementLoggerOverflowItems.Set(float64(len(l.overflow)))
-			l.overflowMu.Unlock()
-
-			// Close the data channel so downstream consumers see EOF.
 			close(l.ch)
 		}
 

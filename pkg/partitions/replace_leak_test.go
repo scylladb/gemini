@@ -83,8 +83,13 @@ func TestReplaceDoesNotLeakUUIDToIdx(t *testing.T) {
 	}()
 
 	// Hammer Replace() to mimic the production delete workload.
+	// The mutation code always calls Release() on the returned keys after
+	// executing the DELETE statement, so we do the same here.
 	for i := uint64(0); i < replacePass; i++ {
-		parts.Replace(i % count)
+		oldKeys := parts.Replace(i % count)
+		if oldKeys.Release != nil {
+			oldKeys.Release()
+		}
 	}
 
 	// Give the deleted-partitions background processor time to flush
