@@ -126,7 +126,7 @@ func New(
 			partitionValuesLen: uint64(partitionValuesLen),
 			parts:              parts,
 		},
-		deleted:       newDeleted(ctx, config.DeleteBuckets, false),
+		deleted:       newDeleted(ctx, config.DeleteBuckets, config.MaxDeletedHeapSize),
 		r:             *random.NewGoRoutineSafeRandom(r),
 		table:         table,
 		config:        config,
@@ -136,12 +136,8 @@ func New(
 		maxInvalid:    maxInvalid,
 	}
 
-	// Only start deleted-partitions processing when time buckets are configured.
-	// When no buckets are provided, the feature is fully disabled (no goroutines,
-	// nil channel), so regular validation proceeds unaffected.
-	if len(config.DeleteBuckets) > 0 {
-		go p.deleted.start(100 * time.Millisecond)
-	}
+	// NOTE: deleted-partitions background goroutine is started internally by
+	// newDeleted() when timeBuckets is non-empty. Do NOT start it again here.
 
 	p.parts.count.Store(count)
 
@@ -177,20 +173,29 @@ func (p *Partitions) valuesNoLock(part *Partition) typedef.PartitionKeys {
 		ID:     part.id,
 		Release: func() {
 			if part.refCount.Add(-1) == 0 {
-				p.deleteValidation(part.id)
+				p.deleteValidation(part.id, true)
 			}
 		},
 	}
 }
 
-func (p *Partitions) deleteValidation(id uuid.UUID) {
+// deleteValidation removes the validation metadata for a partition UUID.
+// When retired is true (i.e. the partition slot was replaced via Replace and
+// the deleted-partitions heap has fully drained), the UUID→idx mapping is also
+// removed. For live partitions whose refCount merely drops to zero between
+// uses, only the validationMap entry is removed — the uuidToIdx entry MUST
+// stay so that MarkInvalid can still locate the slot.
+func (p *Partitions) deleteValidation(id uuid.UUID, retired bool) {
 	p.validationMu.Lock()
 	delete(p.validationMap, id)
-	// Do NOT remove from uuidToIdx here. The UUID→idx mapping must remain alive
-	// for the entire lifetime of the partition at that slot so that MarkInvalid
-	// can still find it after all outstanding references have been released.
-	// uuidToIdx is cleaned up in fill() / Replace() when a new partition occupies
-	// the slot and the old UUID is genuinely retired.
+	if retired {
+		// Safe to remove: the partition has been replaced and the deleted-
+		// partitions heap has finished emitting every bucket. No validator
+		// can still be holding a reference to this UUID. Without this delete
+		// the map grows unbounded — every production DELETE leaks one entry
+		// forever (root cause of the 2026-04-30 partitions memory growth).
+		delete(p.uuidToIdx, id)
+	}
 	p.validationMu.Unlock()
 }
 
@@ -216,7 +221,7 @@ func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
 		Release: func() {
 			once.Do(func() {
 				if part.refCount.Add(-1) == 0 {
-					p.deleteValidation(id)
+					p.deleteValidation(id, false)
 				}
 			})
 		},
@@ -244,7 +249,7 @@ func (p *Partitions) valuesCopy(idx uint64) typedef.PartitionKeys {
 		Release: func() {
 			once.Do(func() {
 				if part.refCount.Add(-1) == 0 {
-					p.deleteValidation(id)
+					p.deleteValidation(id, false)
 				}
 			})
 		},
@@ -278,8 +283,13 @@ func (p *Partitions) fill(idx uint64) {
 	}
 	p.uuidToIdx[id] = idx
 	// Retire the old UUID from the slot mapping now that a new partition owns it.
+	// fill() is only called when the slot has no live references (initial
+	// population or ReplaceWithoutOld), so we can safely clean both maps
+	// here — there is no Release closure pending to fire deleteValidation
+	// for us.
 	if oldPart != nil && oldPart.id != (uuid.UUID{}) {
 		delete(p.uuidToIdx, oldPart.id)
+		delete(p.validationMap, oldPart.id)
 	}
 	p.validationMu.Unlock()
 
@@ -428,12 +438,13 @@ func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
 	p.parts.parts[idx] = &Partition{values: values, id: id}
 	p.parts.mu.Unlock()
 
-	// Do NOT explicitly delete oldPart.id from uuidToIdx here.
-	// Outstanding references to the old partition (e.g. a validation goroutine
-	// mid-retry) still hold the old UUID. Removing it prematurely means
-	// MarkInvalid() can no longer locate the partition by UUID and silently
-	// drops the error. The old UUID will be cleaned up naturally when the last
-	// caller invokes Release() and refCount drops to zero (via deleteValidation).
+	// uuidToIdx[oldPart.id] stays in place until the deleted-partitions
+	// heap finishes emitting every bucket and invokes onDone, which fires
+	// the Release closure → deleteValidation(oldPart.id) → removes both
+	// validationMap and uuidToIdx entries. Removing it earlier would
+	// break MarkInvalid for validators still holding the old UUID; not
+	// removing it at all (the previous behavior) leaked one entry per
+	// production DELETE forever — see deleteValidation comments.
 
 	// If the slot was previously marked invalid, clear it so the new partition
 	// is visible to Next()/ReplaceNext() again.

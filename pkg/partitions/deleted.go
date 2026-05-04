@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -60,16 +61,19 @@ type (
 		buckets      []time.Duration
 		heap         deletedPartitionHeap
 		deleted      atomic.Uint64
+		evicted      atomic.Uint64
 		nextReadyNs  atomic.Int64
+		maxHeapSize  int
 		batchSize    int
 		lastShrinkNs int64
 		mu           sync.RWMutex
+		closeOnce    sync.Once
 	}
 )
 
 const initialCapacity = 4096
 
-func newDeleted(base context.Context, timeBuckets []time.Duration, start ...bool) *deletedPartitions {
+func newDeleted(base context.Context, timeBuckets []time.Duration, maxHeapSize int, start ...bool) *deletedPartitions {
 	// Always return a valid instance so callers can safely use it even when
 	// delete buckets are not configured. In that case, we disable background
 	// processing and channel emission, but still track counters.
@@ -100,6 +104,7 @@ func newDeleted(base context.Context, timeBuckets []time.Duration, start ...bool
 		buckets: timeBuckets,
 		// Increase batch size so the emitter drains cohorts faster without tight loops
 		batchSize:    64,
+		maxHeapSize:  maxHeapSize,
 		lastShrinkNs: time.Now().UnixNano(),
 	}
 
@@ -305,7 +310,7 @@ func (h *deletedPartitionHeap) shrinkIfNeeded() {
 func (d *deletedPartitions) start(checkInterval time.Duration) {
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
-	defer close(d.ch)
+	defer d.closeOnce.Do(func() { close(d.ch) })
 
 	for {
 		select {
@@ -439,13 +444,58 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	wasEmpty := d.heap.Len() == 0
 	d.heap.pushInline(dp)
 
+	// Evict oldest entries if the heap exceeds the configured cap.
+	// This bounds memory at the cost of skipping re-validation for the
+	// evicted (oldest) entries. With high DELETE throughput and long bucket
+	// durations, the heap can grow to millions of entries otherwise.
+	evicted := d.collectExcess()
+
 	// Update next ready time if this is the earliest or heap was empty
 	if wasEmpty || readyAtNs < d.nextReadyNs.Load() {
 		d.nextReadyNs.Store(readyAtNs)
 	}
 	d.mu.Unlock()
 
+	// Run onDone callbacks outside the lock to avoid holding d.mu while
+	// invoking partition cleanup (which may acquire other locks).
+	d.runEvicted(evicted)
+
 	d.deleted.Add(1)
+}
+
+// collectExcess pops the oldest (earliest readyAt) entries from the heap when
+// it exceeds maxHeapSize and returns them.  The caller is responsible for
+// invoking onDone on each returned entry AFTER releasing d.mu.
+// MUST be called with d.mu held.
+func (d *deletedPartitions) collectExcess() []deletedPartition {
+	if d.maxHeapSize <= 0 {
+		return nil
+	}
+	var evicted []deletedPartition
+	for d.heap.Len() > d.maxHeapSize {
+		e, ok := d.heap.popInline()
+		if !ok {
+			break
+		}
+		evicted = append(evicted, e)
+	}
+	return evicted
+}
+
+// runEvicted invokes onDone callbacks for evicted entries and updates metrics.
+// MUST be called WITHOUT d.mu held.
+func (d *deletedPartitions) runEvicted(evicted []deletedPartition) {
+	if len(evicted) == 0 {
+		return
+	}
+	for i := range evicted {
+		if evicted[i].onDone != nil {
+			evicted[i].onDone()
+		}
+	}
+	n := uint64(len(evicted))
+	d.evicted.Add(n)
+	metrics.DeletedPartitionsHeapEvictions.Add(float64(n))
 }
 
 // DeleteBulk adds multiple deleted partitions in a single lock acquisition
@@ -490,11 +540,17 @@ func (d *deletedPartitions) DeleteBulk(keys []typedef.PartitionKeys) {
 		})
 	}
 
+	// Evict oldest entries if the heap exceeds the configured cap.
+	evicted := d.collectExcess()
+
 	// Update next ready time if needed
 	if wasEmpty || minReadyNs < d.nextReadyNs.Load() {
 		d.nextReadyNs.Store(minReadyNs)
 	}
 	d.mu.Unlock()
+
+	// Run onDone callbacks outside the lock.
+	d.runEvicted(evicted)
 
 	d.deleted.Add(uint64(len(keys)))
 }

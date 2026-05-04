@@ -31,7 +31,7 @@ func TestDeleteBulk(t *testing.T) {
 	t.Run("bulk_delete_empty", func(t *testing.T) {
 		t.Parallel()
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Should handle empty batch gracefully
@@ -43,7 +43,7 @@ func TestDeleteBulk(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		batch := []typedef.PartitionKeys{{Values: typedef.NewValues(1)}}
@@ -55,7 +55,7 @@ func TestDeleteBulk(t *testing.T) {
 
 	t.Run("bulk_delete_multiple", func(t *testing.T) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		batch := make([]typedef.PartitionKeys, 50)
@@ -73,7 +73,7 @@ func TestDeleteBulk(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		batch := make([]typedef.PartitionKeys, 10)
@@ -91,8 +91,8 @@ func TestDeleteBulk(t *testing.T) {
 	t.Run("bulk_delete_stamps_DeletedAtNS", func(t *testing.T) {
 		t.Parallel()
 		before := time.Now().UnixNano()
-		buckets := []time.Duration{1 * time.Second}  // long bucket so items stay in heap
-		d := newDeleted(t.Context(), buckets, false) // false = don't start background goroutine
+		buckets := []time.Duration{1 * time.Second}     // long bucket so items stay in heap
+		d := newDeleted(t.Context(), buckets, 0, false) // false = don't start background goroutine
 		defer d.Close()
 
 		batch := make([]typedef.PartitionKeys, 5)
@@ -123,8 +123,8 @@ func TestDeleteBulk(t *testing.T) {
 func TestDelete_DeletedAtNS(t *testing.T) {
 	t.Parallel()
 	before := time.Now().UnixNano()
-	buckets := []time.Duration{1 * time.Second}  // long bucket so item stays in heap
-	d := newDeleted(t.Context(), buckets, false) // false = don't start background goroutine
+	buckets := []time.Duration{1 * time.Second}     // long bucket so item stays in heap
+	d := newDeleted(t.Context(), buckets, 0, false) // false = don't start background goroutine
 	defer d.Close()
 
 	d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
@@ -142,7 +142,7 @@ func TestDelete_DeletedAtNS(t *testing.T) {
 func TestFastPathOptimization(t *testing.T) {
 	t.Run("fast_path_no_lock", func(t *testing.T) {
 		buckets := []time.Duration{1 * time.Second}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Add item with future ready time
@@ -160,7 +160,7 @@ func TestFastPathOptimization(t *testing.T) {
 
 	t.Run("next_ready_updated_on_delete", func(t *testing.T) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		before := d.nextReadyNs.Load()
@@ -264,7 +264,7 @@ func TestBatchProcessing(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{1 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Add many items
@@ -332,7 +332,7 @@ func TestAdaptiveBackgroundInterval(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{50 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Add item
@@ -359,7 +359,7 @@ func TestConcurrentBulkDelete(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		const goroutines = 10

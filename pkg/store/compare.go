@@ -715,7 +715,7 @@ outer:
 // elements via compareValues. Returns (val, 0, 0) if val is not a slice.
 func deduplicateReflect(val any) (newVal any, before, after int) {
 	rv := reflect.ValueOf(val)
-	isPtr := rv.Kind() == reflect.Ptr
+	isPtr := rv.Kind() == reflect.Pointer
 	if isPtr {
 		if rv.IsNil() {
 			return val, 0, 0
@@ -918,7 +918,7 @@ func canonicalValueString(v any) string {
 		// then recurse once with the concrete value.
 		rv := reflect.ValueOf(val)
 		originalKind := rv.Kind()
-		for rv.IsValid() && rv.Kind() == reflect.Ptr {
+		for rv.IsValid() && rv.Kind() == reflect.Pointer {
 			if rv.IsNil() {
 				return "null"
 			}
@@ -930,7 +930,7 @@ func canonicalValueString(v any) string {
 		// Only recurse if we actually dereferenced at least one pointer level.
 		// If originalKind was not a pointer, this is a non-pointer unknown type;
 		// use fmt.Sprintf as final fallback.
-		if originalKind == reflect.Ptr {
+		if originalKind == reflect.Pointer {
 			return canonicalValueString(rv.Interface())
 		}
 		return fmt.Sprintf("%v", val)

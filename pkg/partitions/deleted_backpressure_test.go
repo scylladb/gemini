@@ -33,7 +33,7 @@ func TestNoBackpressure(t *testing.T) {
 		t.Parallel()
 		// Use long bucket so items don't get processed quickly
 		buckets := []time.Duration{10 * time.Second}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Add many items - should never block
@@ -64,7 +64,7 @@ func TestNoBackpressure(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{10 * time.Second}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Add large batch - should never block
@@ -96,7 +96,7 @@ func TestNoBackpressure(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{10 * time.Second}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Multiple goroutines adding items concurrently
@@ -140,7 +140,7 @@ func TestNoBackpressure(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{1 * time.Hour} // Very long - won't process
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Add many more items than initial capacity
@@ -163,7 +163,7 @@ func TestHeapMemoryManagement(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Add more than initial capacity
@@ -181,7 +181,7 @@ func TestHeapMemoryManagement(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{10 * time.Second}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Add items just past initial capacity
@@ -201,7 +201,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 	t.Run("empty_heap_works", func(t *testing.T) {
 		t.Parallel()
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Empty heap should work fine
@@ -213,7 +213,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Should handle empty slice without issue
@@ -227,7 +227,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 		buckets := []time.Duration{10 * time.Millisecond}
-		d := newDeleted(ctx, buckets)
+		d := newDeleted(ctx, buckets, 0)
 
 		// Add some items
 		for range 100 {
@@ -253,7 +253,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 	t.Run("nil_buckets_increments_counter_only", func(t *testing.T) {
 		t.Parallel()
 
-		d := newDeleted(t.Context(), nil) // nil buckets
+		d := newDeleted(t.Context(), nil, 0) // nil buckets
 		defer d.Close()
 
 		// Should just increment counter, not add to heap
@@ -267,7 +267,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 	t.Run("empty_buckets_increments_counter_only", func(t *testing.T) {
 		t.Parallel()
 
-		d := newDeleted(t.Context(), []time.Duration{}) // empty buckets
+		d := newDeleted(t.Context(), []time.Duration{}, 0) // empty buckets
 		defer d.Close()
 
 		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
@@ -281,7 +281,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 func BenchmarkDeletePerformance(b *testing.B) {
 	b.Run("single_delete", func(b *testing.B) {
 		buckets := []time.Duration{1 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		// Consume items
@@ -299,7 +299,7 @@ func BenchmarkDeletePerformance(b *testing.B) {
 
 	b.Run("bulk_delete", func(b *testing.B) {
 		buckets := []time.Duration{1 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		// Consume items
@@ -327,7 +327,7 @@ func BenchmarkDeletePerformance(b *testing.B) {
 
 	b.Run("concurrent_deletes", func(b *testing.B) {
 		buckets := []time.Duration{1 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		// Consume items
@@ -347,7 +347,7 @@ func BenchmarkDeletePerformance(b *testing.B) {
 
 	b.Run("high_volume_no_consumer", func(b *testing.B) {
 		buckets := []time.Duration{10 * time.Second} // Long bucket, won't process
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		// No consumer - heap will grow

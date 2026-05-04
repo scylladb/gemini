@@ -46,6 +46,11 @@ const (
 	statementFilePerm       = 0o644
 	// Delay before fetching statements for a job error to ensure all statements are persisted and ready
 	statementErrorFetchDelay = 30 * time.Second
+	// Per-batch timeout for inserting statement logs into the Scylla logger
+	// cluster. Without this, a stalled Scylla cluster (e.g. during a nemesis)
+	// hangs the committer forever, fills the LogStmt channel and freezes every
+	// gocql observer callback — wedging all mutation/validation workers.
+	committerBatchTimeout = 10 * time.Second
 )
 
 type (
@@ -453,7 +458,13 @@ func (s *Logger) insertWorker() {
 		s.wg.Done()
 	}()
 
-	ctx := context.Background()
+	// Per-batch context deadline (committerBatchTimeout) is what keeps a
+	// stalled Scylla logger cluster (e.g. during a nemesis) from blocking
+	// the worker indefinitely. Before this, ExecuteBatch with
+	// context.Background() would hang forever, fill the upstream LogStmt
+	// channel, and freeze every gocql observer callback (and thus every
+	// mutation/validation worker). Root cause of the 2026-04-30 hang.
+	parentCtx := context.Background()
 
 	s.logger.Debug("committer worker started")
 	argsCap := s.cqlStatements.argsCap()
@@ -464,12 +475,17 @@ func (s *Logger) insertWorker() {
 	idx := 0
 
 	for {
-		// Block for at least one item
+		// Block until an item arrives or the channel is closed.
 		first, ok := <-s.channel
 		if !ok {
 			return
 		}
 
+		// Per-batch context with a hard deadline. Without this, a stalled
+		// Scylla logger cluster causes ExecuteBatch to block forever,
+		// filling LogStmt's channel and freezing every gocql observer
+		// callback (and thus every mutation/validation worker).
+		ctx, cancel := context.WithTimeout(parentCtx, committerBatchTimeout)
 		batch := s.makeBatch(ctx)
 
 		// Helper to add an item to the batch
@@ -506,6 +522,7 @@ func (s *Logger) insertWorker() {
 		}
 		// Execute current batch with fallback
 		s.executeBatchWithFallback(ctx, batch, held, idx)
+		cancel()
 		idx = 0
 		if exiting {
 			return
@@ -572,6 +589,12 @@ func (s *Logger) openStatementFile(name string) (*bufio.Writer, func() error, er
 }
 
 func (s *Logger) Close() error {
+	// NOTE: we deliberately do NOT cancel s.ctx here. The upstream
+	// stmtlogger.Logger.Close() closes s.channel after flushing its
+	// overflow buffer; insertWorker drains the channel until it sees the
+	// close signal, guaranteeing no item is lost. The per-batch timeout
+	// (committerBatchTimeout) is what keeps a stalled Scylla logger
+	// cluster from blocking the worker indefinitely.
 	s.wg.Wait()
 	return nil
 }

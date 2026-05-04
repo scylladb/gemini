@@ -163,6 +163,38 @@ var (
 		},
 	)
 
+	// StatementLoggerOverflowItems tracks the number of items currently held
+	// in the producer-side overflow buffer. This grows when the downstream
+	// committer cannot keep up (e.g. Scylla logger cluster stalled by a
+	// nemesis) and drains back to zero once the committer recovers.
+	// Items are NEVER dropped — this gauge is what you watch to detect a
+	// stalled committer.
+	StatementLoggerOverflowItems = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "statement_logger_overflow_items",
+			Help: "Number of statement log items currently held in the producer-side overflow buffer.",
+		},
+	)
+
+	// StatementLoggerOverflowTotal counts every time LogStmt had to fall back
+	// to the overflow buffer because the bounded channel was full.
+	StatementLoggerOverflowTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "statement_logger_overflow_total",
+			Help: "Total number of statement log items routed via the overflow buffer because the channel was full.",
+		},
+	)
+
+	// DeletedPartitionsHeapEvictions counts partitions evicted from the
+	// deleted-partitions heap because it exceeded its configured cap.
+	// Non-zero means re-validation of some old DELETEs was skipped.
+	DeletedPartitionsHeapEvictions = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "deleted_partitions_heap_evictions_total",
+			Help: "Total number of deleted-partition entries evicted from the heap due to size cap.",
+		},
+	)
+
 	StatementLoggerFlushes = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "statement_logger_flushes_total",
@@ -233,6 +265,9 @@ func init() {
 		StatementLoggerEnqueuedTotal,
 		StatementLoggerDequeuedTotal,
 		StatementLoggerItems,
+		StatementLoggerOverflowItems,
+		StatementLoggerOverflowTotal,
+		DeletedPartitionsHeapEvictions,
 		StatementLoggerFlushes,
 		StatementErrorLastTS,
 		WorkersCurrent,

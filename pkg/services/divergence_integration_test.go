@@ -70,10 +70,10 @@ func testGeminiDetectsRowsMissingFromSUT(t *testing.T, containers *testutils.Scy
 	t.Helper()
 
 	const (
-		partitionCount = 100
+		partitionCount = 5000
 		seed           = 1001
-		totalDuration  = 1 * time.Minute
-		sabotageAfter  = 15 * time.Second
+		totalDuration  = 30 * time.Second
+		sabotageAfter  = 10 * time.Second
 	)
 
 	schema := divergenceSchema(t)
@@ -111,10 +111,10 @@ func testGeminiDetectsExtraRowsInSUT(t *testing.T, containers *testutils.ScyllaC
 	t.Helper()
 
 	const (
-		partitionCount = 100
+		partitionCount = 5000
 		seed           = 1002
-		totalDuration  = 1 * time.Minute
-		sabotageAfter  = 15 * time.Second
+		totalDuration  = 30 * time.Second
+		sabotageAfter  = 10 * time.Second
 	)
 
 	schema := divergenceSchema(t)
@@ -146,7 +146,7 @@ func testGeminiAcceptsIdenticalClusters(t *testing.T, containers *testutils.Scyl
 	t.Helper()
 
 	const (
-		partitionCount = 100
+		partitionCount = 5000
 		seed           = 1003
 		totalDuration  = 30 * time.Second
 	)

@@ -271,13 +271,13 @@ func TestWorkload(t *testing.T) {
 				RunningMode:           test.mode,
 				PartitionDistribution: distributions.Uniform,
 				Seed:                  1,
-				IOWorkerPoolSize:      16,
+				IOWorkerPoolSize:      64,
 				MaxErrorsToStore:      1,
 				WarmupDuration:        test.warmup,
 				Duration:              test.duration,
 				PartitionCount:        10000,
-				MutationConcurrency:   1,
-				ReadConcurrency:       3,
+				MutationConcurrency:   4,
+				ReadConcurrency:       8,
 				DropSchema:            true,
 			}, storeConfig, schema, getLogger(t), stopFlag)
 
@@ -310,13 +310,13 @@ func TestWorkloadWithoutOracle(t *testing.T) {
 				RunningMode:           test.mode,
 				PartitionDistribution: distributions.Uniform,
 				Seed:                  1,
-				IOWorkerPoolSize:      2,
+				IOWorkerPoolSize:      16,
 				MaxErrorsToStore:      1,
 				WarmupDuration:        test.warmup,
 				Duration:              test.duration,
-				PartitionCount:        100,
-				MutationConcurrency:   1,
-				ReadConcurrency:       1,
+				PartitionCount:        1000,
+				MutationConcurrency:   2,
+				ReadConcurrency:       4,
 				DropSchema:            true,
 			}, storeConfig, schema, logger, stopFlag)
 
@@ -329,15 +329,24 @@ func TestWorkloadWithoutOracle(t *testing.T) {
 	}
 }
 
-func statementRatio() statements.Ratios {
+// defaultStatementRatios returns balanced ratios for integration tests:
+// 70% insert, 25% update, 5% delete — exercises all mutation paths while
+// keeping deletes low enough that the partition pool doesn't churn excessively.
+func defaultStatementRatios() statements.Ratios {
 	return statements.Ratios{
 		MutationRatios: statements.MutationRatios{
-			InsertRatio: 0.75,
+			InsertRatio: 0.70,
 			UpdateRatio: 0.25,
-			DeleteRatio: 0,
+			DeleteRatio: 0.05,
 			InsertSubtypeRatios: statements.InsertRatios{
 				RegularInsertRatio: 0.9,
 				JSONInsertRatio:    0.1,
+			},
+			DeleteSubtypeRatios: statements.DeleteRatios{
+				WholePartitionRatio:     0.4,
+				SingleRowRatio:          0.3,
+				SingleColumnRatio:       0.2,
+				MultiplePartitionsRatio: 0.1,
 			},
 		},
 		ValidationRatios: statements.ValidationRatios{
@@ -366,7 +375,7 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	})
 
 	const (
-		partitionCount = 100
+		partitionCount = 5000
 		seed           = 4
 		maxErrorsCount = 1
 	)
@@ -375,22 +384,20 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	t.Log("Phase 1: Running mixed workload to populate and validate data")
 	mixedWorkload, err := NewWorkload(&WorkloadConfig{
 		RunningMode:           jobs.MixedMode,
-		PartitionDistribution: distributions.Uniform,
+		PartitionDistribution: distributions.Zipf,
 		Seed:                  seed,
-		RandomStringBuffer:    1024,
-		StatementRatios:       statementRatio(),
+		StatementRatios:       defaultStatementRatios(),
 		IOWorkerPoolSize:      128,
 		MaxErrorsToStore:      maxErrorsCount,
-		WarmupDuration:        0,
-		Duration:              1 * time.Minute,
+		Duration:              30 * time.Second,
 		PartitionCount:        partitionCount,
-		MutationConcurrency:   1,
-		ReadConcurrency:       4,
+		MutationConcurrency:   8,
+		ReadConcurrency:       16,
 		DropSchema:            true,
 	}, storeConfig, schema, logger, stopFlag)
 	assert.NoError(err)
 
-	time.AfterFunc(15*time.Second, func() {
+	time.AfterFunc(10*time.Second, func() {
 		truncateQuery := fmt.Sprintf("TRUNCATE TABLE %s.%s", schema.Keyspace.Name, schema.Tables[0].Name)
 		if err = scyllaContainer.Test.Query(truncateQuery).Exec(); err != nil {
 			t.Logf("Failed to execute truncate query: %v", err)
@@ -492,34 +499,34 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 	})
 
 	const (
-		partitionCount = 100 // Reduced from 1000 to prevent stalling
+		partitionCount = 1000
 		seed           = 20
-		maxErrorsCount = 1 // Increased to capture more errors if they occur
+		maxErrorsCount = 1
 	)
 
 	workload, err := NewWorkload(&WorkloadConfig{
 		RunningMode:           jobs.MixedMode,
-		PartitionDistribution: distributions.Uniform,
+		PartitionDistribution: distributions.Zipf,
 		Seed:                  seed,
-		IOWorkerPoolSize:      64, // Reduced from 16 to avoid overwhelming the system
+		IOWorkerPoolSize:      64,
 		MaxErrorsToStore:      maxErrorsCount,
-		WarmupDuration:        2 * time.Second,  // Reduced from 5s
-		Duration:              15 * time.Second, // Reduced from 10s to prevent stalling
+		WarmupDuration:        5 * time.Second,
+		Duration:              20 * time.Second,
 		PartitionCount:        partitionCount,
-		MutationConcurrency:   2,
-		ReadConcurrency:       8, // Reduced from 3 to avoid read bottlenecks
+		MutationConcurrency:   4,
+		ReadConcurrency:       8,
 		DropSchema:            true,
 		StatementRatios: statements.Ratios{
 			MutationRatios: statements.MutationRatios{
-				InsertRatio: 0.8,
-				UpdateRatio: 0.1,
+				InsertRatio: 0.7,
+				UpdateRatio: 0.2,
 				DeleteRatio: 0.1,
 				InsertSubtypeRatios: statements.InsertRatios{
-					RegularInsertRatio: 1.0, // Only regular inserts, no JSON to simplify
+					RegularInsertRatio: 1.0,
 					JSONInsertRatio:    0.0,
 				},
 				DeleteSubtypeRatios: statements.DeleteRatios{
-					WholePartitionRatio:     0.5, // Simplified delete ratios
+					WholePartitionRatio:     0.5,
 					SingleRowRatio:          0.5,
 					SingleColumnRatio:       0.0,
 					MultiplePartitionsRatio: 0.0,
@@ -527,7 +534,7 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 			},
 			ValidationRatios: statements.ValidationRatios{
 				SelectSubtypeRatios: statements.SelectRatios{
-					SinglePartitionRatio:                  0.5, // Simplified to most reliable queries
+					SinglePartitionRatio:                  0.5,
 					MultiplePartitionRatio:                0.0,
 					ClusteringRangeRatio:                  0.5,
 					MultiplePartitionClusteringRangeRatio: 0.0,
@@ -561,4 +568,264 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 	// Verify we did some work
 	assert.Greater(status.WriteOps.Load(), uint64(0), "should have performed some write operations")
 	assert.GreaterOrEqual(status.ReadOps.Load(), uint64(0), "should have performed some read operations")
+}
+
+// TestWorkloadHighConcurrency exercises Gemini with production-like concurrency
+// settings: Zipf distribution (hot-spot access pattern), 50k partitions, and
+// high mutation+read concurrency.  This mirrors the SCT configuration but with
+// a shorter duration to keep CI stable.
+func TestWorkloadHighConcurrency(t *testing.T) {
+	t.Parallel()
+	scyllaContainer := testutils.TestContainers(t)
+
+	assert := require.New(t)
+	logger := getLogger(t)
+	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+	schema := getSchema(t)
+	stopFlag := stop.NewFlag(t.Name())
+	t.Cleanup(func() {
+		stopFlag.SetHard(true)
+	})
+
+	workload, err := NewWorkload(&WorkloadConfig{
+		RunningMode:           jobs.MixedMode,
+		PartitionDistribution: distributions.Zipf,
+		Seed:                  70, // Same seed as SCT to exercise the same code paths
+		IOWorkerPoolSize:      128,
+		MaxErrorsToStore:      1,
+		WarmupDuration:        5 * time.Second,
+		Duration:              30 * time.Second,
+		PartitionCount:        50000,
+		MutationConcurrency:   16,
+		ReadConcurrency:       32,
+		DropSchema:            true,
+		StatementRatios:       defaultStatementRatios(),
+	}, storeConfig, schema, logger, stopFlag)
+
+	assert.NoError(err)
+	assert.NoError(workload.Run(t.Context()))
+	assert.NoError(workload.Close())
+
+	status := workload.GetGlobalStatus()
+	t.Logf("HighConcurrency: WriteOps=%d, ReadOps=%d, ValidatedRows=%d",
+		status.WriteOps.Load(), status.ReadOps.Load(), status.ValidatedRows.Load())
+
+	assert.Zero(status.WriteErrors.Load(), "should have no write errors")
+	assert.Zero(status.ReadErrors.Load(), "should have no read errors")
+	assert.Equal(0, status.Errors.Len(), "should have no stored errors")
+	assert.Greater(status.WriteOps.Load(), uint64(0), "must have performed writes")
+	assert.Greater(status.ReadOps.Load(), uint64(0), "must have performed reads")
+	assert.Greater(status.ValidatedRows.Load(), uint64(0), "must have validated rows")
+}
+
+// TestWorkloadDeleteHeavy exercises the deleted-partitions heap with an
+// aggressive 40% DELETE ratio.  This is the code path that caused memory growth
+// in production (retained partition references for ~71min in delete buckets).
+// The test uses short delete buckets (1s, 2s, 5s) to ensure entries cycle
+// through quickly on CI.
+func TestWorkloadDeleteHeavy(t *testing.T) {
+	t.Parallel()
+	scyllaContainer := testutils.TestContainers(t)
+
+	assert := require.New(t)
+	logger := getLogger(t)
+	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+
+	// Custom schema with short delete buckets to exercise the full
+	// deleted-partitions lifecycle within the test duration.
+	schema := &typedef.Schema{
+		Keyspace: typedef.Keyspace{
+			Replication:       replication.NewSimpleStrategy(),
+			OracleReplication: replication.NewSimpleStrategy(),
+			Name:              "ks_delete_heavy",
+		},
+		Tables: []*typedef.Table{
+			{
+				Name: "table_del",
+				PartitionKeys: typedef.Columns{
+					{Name: "pk1", Type: typedef.TypeInt},
+				},
+				ClusteringKeys: typedef.Columns{
+					{Name: "ck1", Type: typedef.TypeInt},
+				},
+				Columns: typedef.Columns{
+					{Name: "val", Type: typedef.TypeText},
+				},
+			},
+		},
+		Config: typedef.SchemaConfig{
+			ReplicationStrategy:              replication.NewSimpleStrategy(),
+			OracleReplicationStrategy:        replication.NewSimpleStrategy(),
+			MaxTables:                        1,
+			MinPartitionKeys:                 1,
+			MaxPartitionKeys:                 1,
+			MinClusteringKeys:                1,
+			MaxClusteringKeys:                1,
+			MinColumns:                       1,
+			MaxColumns:                       1,
+			MaxStringLength:                  64,
+			MinStringLength:                  1,
+			MaxBlobLength:                    32,
+			MinBlobLength:                    1,
+			MaxPKStringLength:                8,
+			MinPKStringLength:                1,
+			MaxPKBlobLength:                  32,
+			MinPKBlobLength:                  1,
+			CQLFeature:                       typedef.CQLFeatureNormal,
+			AsyncObjectStabilizationDelay:    25 * time.Millisecond,
+			AsyncObjectStabilizationAttempts: 5,
+			// Short buckets so partitions cycle through delete→reuse quickly
+			DeleteBuckets: []time.Duration{1 * time.Second, 2 * time.Second, 5 * time.Second},
+		},
+	}
+
+	stopFlag := stop.NewFlag(t.Name())
+	t.Cleanup(func() {
+		stopFlag.SetHard(true)
+	})
+
+	workload, err := NewWorkload(&WorkloadConfig{
+		RunningMode:           jobs.MixedMode,
+		PartitionDistribution: distributions.Uniform,
+		Seed:                  42,
+		IOWorkerPoolSize:      64,
+		MaxErrorsToStore:      1,
+		WarmupDuration:        3 * time.Second,
+		Duration:              25 * time.Second,
+		PartitionCount:        5000,
+		MutationConcurrency:   8,
+		ReadConcurrency:       16,
+		DropSchema:            true,
+		StatementRatios: statements.Ratios{
+			MutationRatios: statements.MutationRatios{
+				InsertRatio: 0.4,
+				UpdateRatio: 0.2,
+				DeleteRatio: 0.4,
+				InsertSubtypeRatios: statements.InsertRatios{
+					RegularInsertRatio: 1.0,
+					JSONInsertRatio:    0.0,
+				},
+				DeleteSubtypeRatios: statements.DeleteRatios{
+					WholePartitionRatio:     0.3,
+					SingleRowRatio:          0.4,
+					SingleColumnRatio:       0.2,
+					MultiplePartitionsRatio: 0.1,
+				},
+			},
+			ValidationRatios: statements.ValidationRatios{
+				SelectSubtypeRatios: statements.SelectRatios{
+					SinglePartitionRatio:                  0.7,
+					MultiplePartitionRatio:                0.2,
+					ClusteringRangeRatio:                  0.1,
+					MultiplePartitionClusteringRangeRatio: 0.0,
+					SingleIndexRatio:                      0.0,
+				},
+			},
+		},
+	}, storeConfig, schema, logger, stopFlag)
+
+	assert.NoError(err)
+	assert.NoError(workload.Run(t.Context()))
+	assert.NoError(workload.Close())
+
+	status := workload.GetGlobalStatus()
+	t.Logf("DeleteHeavy: WriteOps=%d, ReadOps=%d, ValidatedRows=%d, WriteErrors=%d, ReadErrors=%d",
+		status.WriteOps.Load(), status.ReadOps.Load(), status.ValidatedRows.Load(),
+		status.WriteErrors.Load(), status.ReadErrors.Load())
+
+	assert.Zero(status.WriteErrors.Load(), "should have no write errors")
+	assert.Zero(status.ReadErrors.Load(), "should have no read errors")
+	assert.Equal(0, status.Errors.Len(), "should have no stored errors")
+	assert.Greater(status.WriteOps.Load(), uint64(0), "must have performed writes")
+	assert.Greater(status.ReadOps.Load(), uint64(0), "must have performed reads")
+}
+
+// TestWorkloadWriteThenValidate exercises the write→read two-phase pattern:
+// first saturate the clusters with writes only (no concurrent reads), then
+// do a full validation pass.  This catches bugs where validation-only mode
+// fails to read data written in a prior phase.
+func TestWorkloadWriteThenValidate(t *testing.T) {
+	t.Parallel()
+	scyllaContainer := testutils.TestContainers(t)
+
+	assert := require.New(t)
+	logger := getLogger(t)
+	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+	schema := getSchema(t)
+	stopFlag := stop.NewFlag(t.Name())
+	t.Cleanup(func() {
+		stopFlag.SetHard(true)
+	})
+
+	const (
+		partitionCount = 10000
+		seed           = 99
+	)
+
+	// Phase 1: Write-only at high concurrency
+	t.Log("Phase 1: Write-only workload")
+	writeWorkload, err := NewWorkload(&WorkloadConfig{
+		RunningMode:           jobs.WriteMode,
+		PartitionDistribution: distributions.Zipf,
+		Seed:                  seed,
+		IOWorkerPoolSize:      128,
+		MaxErrorsToStore:      1,
+		Duration:              15 * time.Second,
+		PartitionCount:        partitionCount,
+		MutationConcurrency:   16,
+		DropSchema:            true,
+		StatementRatios: statements.Ratios{
+			MutationRatios: statements.MutationRatios{
+				InsertRatio: 0.8,
+				UpdateRatio: 0.2,
+				DeleteRatio: 0.0,
+				InsertSubtypeRatios: statements.InsertRatios{
+					RegularInsertRatio: 0.8,
+					JSONInsertRatio:    0.2,
+				},
+			},
+			ValidationRatios: statements.ValidationRatios{
+				SelectSubtypeRatios: statements.SelectRatios{
+					SinglePartitionRatio: 1.0,
+				},
+			},
+		},
+	}, storeConfig, schema, logger, stopFlag)
+	assert.NoError(err)
+	assert.NoError(writeWorkload.Run(t.Context()))
+
+	writeStatus := writeWorkload.GetGlobalStatus()
+	t.Logf("Write phase: WriteOps=%d", writeStatus.WriteOps.Load())
+	assert.Greater(writeStatus.WriteOps.Load(), uint64(0), "write phase must produce writes")
+	assert.Zero(writeStatus.WriteErrors.Load(), "write phase should have no errors")
+	assert.NoError(writeWorkload.Close())
+
+	// Phase 2: Read-only validation of the data written above.
+	// Use a fresh stop flag because the first phase's soft-stop timer may
+	// have already latched the original flag (one-way transition).
+	t.Log("Phase 2: Read-only validation")
+	readStopFlag := stop.NewFlag(t.Name() + "/read")
+	t.Cleanup(func() {
+		readStopFlag.SetHard(true)
+	})
+	readWorkload, err := NewWorkload(&WorkloadConfig{
+		RunningMode:           jobs.ReadMode,
+		PartitionDistribution: distributions.Zipf,
+		Seed:                  seed,
+		IOWorkerPoolSize:      128,
+		MaxErrorsToStore:      1,
+		Duration:              15 * time.Second,
+		PartitionCount:        partitionCount,
+		ReadConcurrency:       32,
+		DropSchema:            false, // Reuse existing schema+data
+	}, storeConfig, schema, logger, readStopFlag)
+	assert.NoError(err)
+	assert.NoError(readWorkload.Run(t.Context()))
+	assert.NoError(readWorkload.Close())
+
+	readStatus := readWorkload.GetGlobalStatus()
+	t.Logf("Read phase: ReadOps=%d, ValidatedRows=%d, ReadErrors=%d",
+		readStatus.ReadOps.Load(), readStatus.ValidatedRows.Load(), readStatus.ReadErrors.Load())
+	assert.Zero(readStatus.ReadErrors.Load(), "validation must find no divergence")
+	assert.Greater(readStatus.ReadOps.Load(), uint64(0), "read phase must perform reads")
 }

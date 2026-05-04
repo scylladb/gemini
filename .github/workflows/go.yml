@@ -14,7 +14,7 @@ on:
 
 jobs:
   build:
-    timeout-minutes: 6
+    timeout-minutes: 15
     name: Lint Test and Build
     runs-on: ubuntu-24.04
     steps:

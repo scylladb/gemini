@@ -24,7 +24,7 @@ import (
 // TestHeapMemoryEfficiency validates that the optimized heap uses less memory
 func TestHeapMemoryEfficiency(t *testing.T) {
 	buckets := []time.Duration{100 * time.Millisecond}
-	d := newDeleted(t.Context(), buckets)
+	d := newDeleted(t.Context(), buckets, 0)
 	defer d.Close()
 
 	// Add many items

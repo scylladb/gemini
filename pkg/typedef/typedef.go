@@ -46,12 +46,13 @@ type (
 	}
 
 	PartitionRangeConfig struct {
-		DeleteBuckets   []time.Duration
-		MaxBlobLength   int
-		MinBlobLength   int
-		MaxStringLength int
-		MinStringLength int
-		UseLWT          bool
+		DeleteBuckets      []time.Duration
+		MaxDeletedHeapSize int
+		MaxBlobLength      int
+		MinBlobLength      int
+		MaxStringLength    int
+		MinStringLength    int
+		UseLWT             bool
 	}
 
 	ValueRangeConfig struct {
@@ -432,7 +433,7 @@ func (v *Values) Copy() *Values {
 	}
 
 	v.mu.RLock()
-	m := maps.Clone(v.data)
+	m := maps.Clone(v.data) //nolint:govet // inline: type parameter inference not yet supported by inliner
 	v.mu.RUnlock()
 
 	return &Values{data: m}

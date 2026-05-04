@@ -59,6 +59,7 @@ var (
 	maxRetriesMutateSleep            time.Duration
 	maxErrorsToStore                 int
 	partitionCount                   uint64
+	maxDeletedHeapSize               int
 	partitionKeyDistribution         string
 	normalDistMean                   float64
 	normalDistSigma                  float64
@@ -198,9 +199,14 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		Uint64VarP(&partitionCount, "partition-count", "", 2_000_000, "Number of Scylla Partitions")
 	cmd.Flags().
+		IntVarP(&maxDeletedHeapSize, "max-deleted-heap-size", "", -1,
+			"Maximum number of entries in the deleted-partitions heap. "+
+				"-1 means unlimited (default, preserves old behaviour). "+
+				"Set to a positive value (e.g. partition-count * 5) to bound memory when DELETE throughput is high.")
+	cmd.Flags().
 		StringArrayVarP(&deletedPartitionsTimeBucket, "deleted-partitions-time-bucket", "", []string{"1m", "10m", "1h"}, "Time after to check if data resurrection has occurred for the deleted partitions")
 	cmd.Flags().
-		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "zipf",
+		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform",
 			"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
 	cmd.Flags().
 		Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution")
