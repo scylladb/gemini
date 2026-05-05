@@ -106,14 +106,25 @@ func (m *Mutation) run(ctx context.Context) error {
 	// For context deadline expirations (CQL RequestTimeout or job shutdown), don't
 	// count as data errors. This covers both the raw error and MutationError whose
 	// FinalError is DeadlineExceeded (all retries timed out on a slow CI runner).
+	// Exception: if the stores ended up asymmetric (one committed, the other timed
+	// out on all retries), mark the affected partitions invalid so the validation
+	// phase skips them rather than reporting a false divergence.
+	// OracleStoreSuccess is only set true when an oracle is configured (see
+	// delegatingStore.Mutate), so this check is safe when oracleStore == nil.
 	if errors.Is(err, context.DeadlineExceeded) {
+		var mutErr *store.MutationError
+		if errors.As(err, &mutErr) && mutErr.OracleStoreSuccess != mutErr.TestStoreSuccess {
+			for i := range mutateStmt.PartitionKeys {
+				m.statement.MarkInvalid(&mutateStmt.PartitionKeys[i])
+			}
+		}
 		return nil
 	}
 
 	// If this is a comprehensive mutation error (all retries failed for a non-timeout
 	// reason), surface it as a write error.
-	var mutErr *store.MutationError
-	if errors.As(err, &mutErr) {
+	var mutationFailErr *store.MutationError
+	if errors.As(err, &mutationFailErr) {
 		je := &joberror.JobError{
 			Err:       err,
 			Timestamp: time.Now(),

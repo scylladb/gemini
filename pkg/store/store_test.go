@@ -42,6 +42,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
+			inflight:           new(sync.WaitGroup),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,
@@ -71,6 +72,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		testStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
+			inflight:           new(sync.WaitGroup),
 			testStore:          testStore,
 			oracleStore:        nil, // No oracle store
 			logger:             logger,
@@ -95,6 +97,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
+			inflight:           new(sync.WaitGroup),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,
@@ -133,6 +136,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
+			inflight:           new(sync.WaitGroup),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,
@@ -170,6 +174,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
+			inflight:           new(sync.WaitGroup),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,
@@ -204,6 +209,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
+			inflight:           new(sync.WaitGroup),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,
@@ -265,6 +271,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		oracleStore := &mockStoreLoader{}
 
 		ds := &delegatingStore{
+			inflight:           new(sync.WaitGroup),
 			testStore:          testStore,
 			oracleStore:        oracleStore,
 			logger:             logger,

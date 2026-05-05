@@ -18,6 +18,7 @@ package store
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -73,6 +74,7 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 	}
 
 	store := &delegatingStore{
+		inflight:           new(sync.WaitGroup),
 		oracleStore:        newCQLStoreWithSession(scyllaContainer.OracleCluster, schema, zap.NewNop(), "", "oracle"),
 		testStore:          newCQLStoreWithSession(scyllaContainer.TestCluster, schema, zap.NewNop(), "", "test"),
 		logger:             zap.NewNop(),
