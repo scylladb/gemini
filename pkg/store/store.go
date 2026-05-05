@@ -227,27 +227,19 @@ func New(
 }
 
 type delegatingStore struct {
-	// inflight tracks goroutines spawned by executeParallelMutations that are
-	// still waiting for a CQL response. Close() drains this before closing the
-	// CQL sessions so that in-flight goroutines never touch a closed session
-	// (which would produce "use of closed network connection" errors and silent
-	// data divergence between oracle and test).
-	inflight             *sync.WaitGroup
 	oracleStore          storeLoader
 	testStore            storeLoader
 	logger               *zap.Logger
 	statementLogger      *stmtlogger.Logger
-	mutationRetrySleep   time.Duration
+	inflight             *sync.WaitGroup
+	keyspaceAndTable     string
+	partitionKeyColumns  typedef.Columns
 	mutationRetries      int
-	validationRetrySleep time.Duration
 	minimumDelay         time.Duration
 	validationRetries    int
+	validationRetrySleep time.Duration
+	mutationRetrySleep   time.Duration
 	serverSideTimestamps bool
-	// partitionKeyColumns and keyspaceAndTable are used to build compensating
-	// DELETE statements when a timeout causes an asymmetric commit (one store
-	// committed, the other did not).
-	partitionKeyColumns typedef.Columns
-	keyspaceAndTable    string
 }
 
 // getLogger returns a non-nil logger. If delegatingStore.logger is nil (e.g.,
