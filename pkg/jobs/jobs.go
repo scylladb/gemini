@@ -232,6 +232,7 @@ func (j *Jobs) Run(
 						j.store,
 						mode != WarmupMode,
 						newSrc,
+						log.Named("mutation").With(zap.String("table", table.Name), zap.Int("worker_id", i)),
 					)
 
 					workerID := i

@@ -295,9 +295,12 @@ func (ds delegatingStore) buildPartitionDeleteStmt(keys *typedef.PartitionKeys) 
 // store actually committed.
 //
 // A fresh background context with a 15 s deadline is used because the original
-// request context has already expired.  Errors are logged but not returned; this
-// is a best-effort operation.  Returns true if all deletes completed without
-// error.
+// request context has already expired — we intentionally do NOT propagate a
+// cancelled/timed-out context here.  This means the compensation is not
+// sensitive to global shutdown signals; callers that need cancellation should
+// ensure the process exits promptly (e.g. via the watchdog).
+// Errors are logged but not returned; this is a best-effort operation.
+// Returns true if all deletes completed without error.
 func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt) bool {
 	if len(stmt.PartitionKeys) == 0 || len(ds.partitionKeyColumns) == 0 {
 		return true
@@ -316,7 +319,7 @@ func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt) bool {
 		}
 
 		if err := ds.testStore.mutate(compCtx, deleteStmt, ts); err != nil {
-			ds.getLogger().Warn("compensating delete on test store failed",
+			ds.getLogger().Error("compensating delete on test store failed — partition may be asymmetric",
 				zap.String("partition", stmt.PartitionKeys[i].ID.String()),
 				zap.Error(err))
 			ok = false
@@ -324,7 +327,7 @@ func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt) bool {
 
 		if ds.oracleStore != nil {
 			if err := ds.oracleStore.mutate(compCtx, deleteStmt, ts); err != nil {
-				ds.getLogger().Warn("compensating delete on oracle store failed",
+				ds.getLogger().Error("compensating delete on oracle store failed — partition may be asymmetric",
 					zap.String("partition", stmt.PartitionKeys[i].ID.String()),
 					zap.Error(err))
 				ok = false
@@ -340,6 +343,11 @@ func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt) bool {
 // such a timeout.  This distinguishes transient timeouts from hard failures
 // (e.g. serialisation errors, network errors) that should propagate to the
 // caller as write errors.
+//
+// Assumption: individual store errors are plain values, not errors.Join
+// composites.  delegatingStore stores one error per store; the only joined
+// errors appear in the finalErr that is passed to MutationError.Finalize,
+// which is never inspected by this function.
 func isOnlyTimeoutFailure(result mutationResult) bool {
 	testTimeout := result.testErr == nil || errors.Is(result.testErr, context.DeadlineExceeded)
 	oracleTimeout := result.oracleErr == nil || errors.Is(result.oracleErr, context.DeadlineExceeded)

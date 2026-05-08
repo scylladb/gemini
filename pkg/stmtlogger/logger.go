@@ -20,6 +20,8 @@ import (
 	"time"
 	"unsafe"
 
+	"go.uber.org/zap"
+
 	"github.com/samber/mo"
 
 	"github.com/scylladb/gemini/pkg/metrics"
@@ -81,6 +83,7 @@ type (
 	// observer goroutines call it synchronously).
 	Logger struct {
 		closer      io.Closer
+		logger      *zap.Logger
 		ch          chan Item
 		done        chan struct{}
 		overflowSig chan struct{}
@@ -93,6 +96,7 @@ type (
 	options struct {
 		channel     chan Item
 		innerLogger io.Closer
+		zapLogger   *zap.Logger
 	}
 
 	Option func(*options) error
@@ -119,6 +123,13 @@ func WithLogger(logger io.Closer, err error) Option {
 	}
 }
 
+func WithZapLogger(l *zap.Logger) Option {
+	return func(o *options) error {
+		o.zapLogger = l
+		return nil
+	}
+}
+
 func NewLogger(opts ...Option) (*Logger, error) {
 	o := options{
 		channel: make(chan Item, defaultChanSize),
@@ -130,8 +141,13 @@ func NewLogger(opts ...Option) (*Logger, error) {
 		}
 	}
 
+	if o.zapLogger == nil {
+		o.zapLogger = zap.NewNop()
+	}
+
 	l := &Logger{
 		closer:      o.innerLogger,
+		logger:      o.zapLogger,
 		ch:          o.channel,
 		done:        make(chan struct{}),
 		overflowSig: make(chan struct{}, 1),
@@ -275,6 +291,19 @@ func (l *Logger) drainOverflowStep() {
 // l.ch using blocking sends.  It is called only from drainOverflow after
 // l.done is closed, so LogStmt is no longer enqueueing new items and the
 // inner committer (l.closer) is still running.
+//
+// Theoretical TOCTOU note: there is a narrow window between LogStmt's check
+// of <-l.done and the append to l.overflow where a late item may land in the
+// overflow buffer after close(l.done) is called but before drainOverflow
+// reaches flushRemainingOverflow.  This is fine: flushRemainingOverflow
+// holds overflowMu on each iteration and drains whatever is present, so
+// those late items will be picked up.  No items are silently dropped.
+//
+// Each blocking send is guarded by a 10 s per-item deadline.  If the
+// downstream committer stalls (e.g. disk I/O stall), we log a warning
+// and continue rather than blocking forever until the watchdog kills us.
+const flushPerItemTimeout = 10 * time.Second
+
 func (l *Logger) flushRemainingOverflow() {
 	for {
 		l.overflowMu.Lock()
@@ -289,7 +318,19 @@ func (l *Logger) flushRemainingOverflow() {
 		l.overflowMu.Unlock()
 
 		metrics.StatementLoggerOverflowItems.Set(float64(depth))
-		l.ch <- next // block; consumer must eventually drain before it exits
+
+		// Use a timer instead of an unconditional blocking send so that
+		// a stalled committer does not lock us up until the watchdog
+		// fires (potentially minutes later).
+		timer := time.NewTimer(flushPerItemTimeout)
+		select {
+		case l.ch <- next:
+			timer.Stop()
+		case <-timer.C:
+			l.logger.Warn("flushRemainingOverflow: downstream committer stalled, dropping overflow item after timeout",
+				zap.Duration("timeout", flushPerItemTimeout),
+			)
+		}
 	}
 }
 

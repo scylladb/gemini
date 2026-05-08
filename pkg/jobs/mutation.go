@@ -20,6 +20,8 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/partitions"
@@ -39,6 +41,7 @@ type Mutation struct {
 	status    *status.GlobalStatus
 	stopFlag  *stop.Flag
 	schema    *typedef.Schema
+	logger    *zap.Logger
 	delete    bool
 }
 
@@ -52,6 +55,7 @@ func NewMutation(
 	store store.Store,
 	del bool,
 	seed [32]byte,
+	logger *zap.Logger,
 ) *Mutation {
 	vc := schema.Config.GetValueRangeConfig()
 	statementGenerator := statements.New(
@@ -64,6 +68,10 @@ func NewMutation(
 		schema.Config.UseLWT,
 	)
 
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
 	return &Mutation{
 		schema:    schema,
 		table:     table,
@@ -73,6 +81,7 @@ func NewMutation(
 		stopFlag:  stopFlag,
 		store:     store,
 		delete:    del,
+		logger:    logger,
 	}
 }
 
@@ -115,6 +124,11 @@ func (m *Mutation) run(ctx context.Context) error {
 		var mutErr *store.MutationError
 		if errors.As(err, &mutErr) && mutErr.OracleStoreSuccess != mutErr.TestStoreSuccess {
 			for i := range mutateStmt.PartitionKeys {
+				m.logger.Debug("marking partition invalid due to asymmetric write timeout",
+					zap.String("partition_id", mutateStmt.PartitionKeys[i].ID.String()),
+					zap.Bool("test_store_success", mutErr.TestStoreSuccess),
+					zap.Bool("oracle_store_success", mutErr.OracleStoreSuccess),
+				)
 				m.statement.MarkInvalid(&mutateStmt.PartitionKeys[i])
 			}
 		}
