@@ -455,6 +455,13 @@ func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
 	oldKeys := p.valuesNoLock(oldPart)
 
 	if p.deleted != nil {
+		// Take a second reference on behalf of the deleted-partition heap.
+		// valuesNoLock already incremented refCount by 1 for the caller;
+		// we bump it again so both the caller's Release and the heap's
+		// onDone share the same closure safely: refCount reaches 0 — and
+		// uuidToIdx is retired — only when the last holder releases,
+		// preventing premature removal while heap buckets are still pending.
+		oldPart.refCount.Add(1)
 		p.deleted.Delete(oldKeys)
 	}
 	return oldKeys

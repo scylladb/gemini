@@ -86,6 +86,13 @@ func New(
 	}
 }
 
+// MarkInvalid marks the partition identified by keys as permanently invalid so
+// that future Next() calls skip it and the validation phase does not SELECT it.
+// Delegates directly to the underlying partitions.Interface.
+func (g *Generator) MarkInvalid(keys *typedef.PartitionKeys) bool {
+	return g.generator.MarkInvalid(keys)
+}
+
 func (g *Generator) getMultiplePartitionKeys() int {
 	l := g.table.PartitionKeys.Len()
 	if l == 0 {

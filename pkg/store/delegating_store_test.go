@@ -17,6 +17,7 @@ package store
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -108,6 +109,7 @@ func TestDelegatingStore_Mutate_SucceedsAfterRetry(t *testing.T) {
 	retryErr := errors.New("transient")
 	test := &fakeStore{nameStr: "test", mutateSeq: []error{retryErr, nil}}
 	ds := &delegatingStore{
+		inflight:             new(sync.WaitGroup),
 		testStore:            test,
 		mutationRetries:      2,
 		mutationRetrySleep:   1 * time.Millisecond,
@@ -129,6 +131,7 @@ func TestDelegatingStore_Mutate_BothFail_ReturnsError(t *testing.T) {
 	oracle := &fakeStore{nameStr: "oracle", mutateSeq: []error{e2, e2}}
 
 	ds := &delegatingStore{
+		inflight:             new(sync.WaitGroup),
 		testStore:            test,
 		oracleStore:          oracle,
 		mutationRetries:      1, // two attempts total
@@ -147,6 +150,7 @@ func TestDelegatingStore_Mutate_ContextCanceledDuringBackoff_ReturnsNil(t *testi
 	test := &fakeStore{nameStr: "test", mutateSeq: []error{retryErr, retryErr}}
 
 	ds := &delegatingStore{
+		inflight:        new(sync.WaitGroup),
 		testStore:       test,
 		mutationRetries: 2,
 		// Use longer delays to ensure we cancel during the backoff sleep path

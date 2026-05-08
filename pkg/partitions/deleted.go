@@ -38,6 +38,11 @@ import (
 //
 // The heap ensures we always process partitions in time order, making it efficient to check
 // if any partitions are ready for validation without scanning all entries.
+//
+// Eviction policy: when the heap exceeds maxHeapSize, entries with the *largest* readyAt
+// (i.e. the newest, furthest from their validation deadline) are discarded.  This preserves
+// entries that have nearly waited out their full bucket window — the exact opposite of what
+// would happen if we evicted the minimum.
 type (
 	deletedPartition struct {
 		readyAt time.Time
@@ -207,6 +212,69 @@ func (h *deletedPartitionHeap) pushInline(dp deletedPartition) {
 		pos = parent
 	}
 	h.data[pos] = dp
+}
+
+// siftInline restores min-heap order at pos by first bubbling up, then down.
+// Use this after placing a replacement element at an arbitrary position.
+//
+//go:inline
+func (h *deletedPartitionHeap) siftInline(pos int) {
+	if pos >= h.len {
+		return
+	}
+
+	elem := h.data[pos]
+
+	// Bubble up
+	for pos > 0 {
+		parent := (pos - 1) >> 1
+		if !elem.readyAt.Before(h.data[parent].readyAt) {
+			break
+		}
+		h.data[pos] = h.data[parent]
+		pos = parent
+	}
+	h.data[pos] = elem
+
+	// Bubble down from the final bubble-up position
+	h.fixInline(pos)
+}
+
+// popMaxInline removes and returns the element with the largest readyAt value.
+// In a min-heap the maximum always lives in a leaf node (indices [len/2, len-1]).
+// This is the correct operation for eviction: we discard the newest entries
+// (furthest from their validation deadline) rather than the entries that are
+// soonest to be validated.
+//
+//go:inline
+func (h *deletedPartitionHeap) popMaxInline() (deletedPartition, bool) {
+	if h.len == 0 {
+		return deletedPartition{}, false
+	}
+
+	// Scan leaf nodes to find the maximum.
+	maxIdx := h.len / 2
+	for i := maxIdx + 1; i < h.len; i++ {
+		if h.data[i].readyAt.After(h.data[maxIdx].readyAt) {
+			maxIdx = i
+		}
+	}
+
+	maxElem := h.data[maxIdx]
+	h.len--
+
+	if maxIdx == h.len {
+		// Max was the last element — just clear and return.
+		h.data[h.len] = deletedPartition{}
+		return maxElem, true
+	}
+
+	// Replace the gap with the last element and restore heap order.
+	h.data[maxIdx] = h.data[h.len]
+	h.data[h.len] = deletedPartition{} // Clear for GC
+	h.siftInline(maxIdx)
+
+	return maxElem, true
 }
 
 // popInline removes and returns the minimum element
@@ -463,9 +531,13 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	d.deleted.Add(1)
 }
 
-// collectExcess pops the oldest (earliest readyAt) entries from the heap when
-// it exceeds maxHeapSize and returns them.  The caller is responsible for
-// invoking onDone on each returned entry AFTER releasing d.mu.
+// collectExcess pops the newest (largest readyAt) entries from the heap when
+// it exceeds maxHeapSize and returns them. Evicting the entries furthest from
+// their validation deadline is the correct policy: entries that have nearly
+// waited out their full bucket window are preserved, while freshly-added
+// entries with the longest remaining wait are discarded instead.
+// The caller is responsible for invoking onDone on each returned entry AFTER
+// releasing d.mu.
 // MUST be called with d.mu held.
 func (d *deletedPartitions) collectExcess() []deletedPartition {
 	if d.maxHeapSize <= 0 {
@@ -473,7 +545,7 @@ func (d *deletedPartitions) collectExcess() []deletedPartition {
 	}
 	var evicted []deletedPartition
 	for d.heap.Len() > d.maxHeapSize {
-		e, ok := d.heap.popInline()
+		e, ok := d.heap.popMaxInline()
 		if !ok {
 			break
 		}

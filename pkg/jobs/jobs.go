@@ -170,43 +170,46 @@ func (j *Jobs) Run(
 
 	g, gCtx := errgroup.WithContext(timeoutCtx)
 
+	// Create exactly one soft-stop timer and one watchdog timer for this
+	// Run() invocation, regardless of how many tables are in the schema.
+	// Creating them inside the table loop would spawn N timer goroutines
+	// all firing at the same absolute deadline, producing N dump files and
+	// N racing os.Exit(2) calls.
+	if duration > 0 {
+		softTimer := time.AfterFunc(duration+1*time.Second, func() {
+			log.Debug("workload timeout reached, setting soft stop (no parent propagation)")
+			// Do not propagate to parent; each Run call manages its own lifecycle.
+			stopFlag.SetSoft(false)
+		})
+
+		// Hard watchdog: if workers are still alive grace-period after
+		// the deadline, we are deadlocked (most likely because some
+		// downstream component back-pressured a goroutine that the
+		// stop flag cannot reach — e.g. the 2026-04-30 statement
+		// logger hang). Dump every goroutine stack to a file so the
+		// next post-mortem takes minutes instead of days, then
+		// os.Exit so SCT does not have to sit out its own 48h
+		// timeout.
+		watchdogDeadline := duration + watchdogGracePeriod
+		watchdogTimer := time.AfterFunc(watchdogDeadline, func() {
+			dumpPath := watchdogDump(log)
+			log.Error("watchdog deadline exceeded — workers did not exit, forcing process exit",
+				zap.Duration("deadline", watchdogDeadline),
+				zap.String("goroutine_dump", dumpPath),
+			)
+			watchdogExit()
+		})
+
+		// Stop both timers once Run returns so they cannot fire
+		// after the workload completes (important for tests and
+		// sequential workloads that call Run multiple times).
+		defer softTimer.Stop()
+		defer watchdogTimer.Stop()
+	}
+
 	for _, table := range j.schema.Tables {
 		generator := partitions.New(gCtx, j.random, idxFunc, table, partsConfig, partsCount, maxErrors)
 		log.Debug("processing table", zap.String("table", table.Name))
-
-		// Additionally, request a graceful stop of workers after the duration
-		// so that loops depending on the stop flag can exit promptly.
-		if duration > 0 {
-			softTimer := time.AfterFunc(duration+1*time.Second, func() {
-				log.Debug("workload timeout reached, setting soft stop (no parent propagation)")
-				// Do not propagate to parent; each Run call manages its own lifecycle.
-				stopFlag.SetSoft(false)
-			})
-
-			// Hard watchdog: if workers are still alive grace-period after
-			// the deadline, we are deadlocked (most likely because some
-			// downstream component back-pressured a goroutine that the
-			// stop flag cannot reach — e.g. the 2026-04-30 statement
-			// logger hang). Dump every goroutine stack to a file so the
-			// next post-mortem takes minutes instead of days, then
-			// os.Exit so SCT does not have to sit out its own 48h
-			// timeout.
-			watchdogDeadline := duration + watchdogGracePeriod
-			watchdogTimer := time.AfterFunc(watchdogDeadline, func() {
-				dumpPath := watchdogDump(log)
-				log.Error("watchdog deadline exceeded — workers did not exit, forcing process exit",
-					zap.Duration("deadline", watchdogDeadline),
-					zap.String("goroutine_dump", dumpPath),
-				)
-				watchdogExit()
-			})
-
-			// Stop both timers once Run returns so they cannot fire
-			// after the workload completes (important for tests and
-			// sequential workloads that call Run multiple times).
-			defer softTimer.Stop()
-			defer watchdogTimer.Stop()
-		}
 
 		for _, m := range j.parseMode(mode) {
 			switch m {
@@ -229,6 +232,7 @@ func (j *Jobs) Run(
 						j.store,
 						mode != WarmupMode,
 						newSrc,
+						log.Named("mutation").With(zap.String("table", table.Name), zap.Int("worker_id", i)),
 					)
 
 					workerID := i
