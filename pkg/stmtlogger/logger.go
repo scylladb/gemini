@@ -20,9 +20,8 @@ import (
 	"time"
 	"unsafe"
 
-	"go.uber.org/zap"
-
 	"github.com/samber/mo"
+	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"

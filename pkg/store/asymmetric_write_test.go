@@ -115,9 +115,9 @@ func TestIsOnlyTimeoutFailure(t *testing.T) {
 
 // compensateStore is a fakeStore that counts mutate calls and can be made to fail.
 type compensateStore struct {
+	muErr error
 	fakeStore
-	muErr       error
-	muCalls     atomic.Int64
+	muCalls atomic.Int64
 }
 
 func (c *compensateStore) mutate(_ context.Context, _ *typedef.Stmt, _ mo.Option[time.Time]) error {
@@ -239,9 +239,9 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 
 // blockingStore is a storeLoader whose mutate blocks until released.
 type blockingStore struct {
-	fakeStore
-	release chan struct{}
 	ret     error
+	release chan struct{}
+	fakeStore
 }
 
 func newBlockingStore(ret error) *blockingStore {
