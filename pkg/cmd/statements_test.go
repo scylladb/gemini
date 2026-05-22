@@ -130,7 +130,7 @@ func TestParseStatementRatiosJSON_PartialConfigurations(t *testing.T) {
 			if tc.validateDeleteSum {
 				deleteSum := ratios.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio +
 					ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio +
-					ratios.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio +
+					ratios.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio +
 					ratios.MutationRatios.DeleteSubtypeRatios.MultiplePartitionsRatio
 				if math.Abs(deleteSum-1.0) > tolerance {
 					t.Errorf("Delete subtypes sum: got %.3f, expected 1.0", deleteSum)
@@ -195,7 +195,7 @@ func TestParseStatementRatiosJSON_File(t *testing.T) {
 					"delete_subtypes": {
 						"whole_partition": 0.25,
 						"single_row": 0.25,
-						"single_column": 0.25,
+						"clustering_subset": 0.25,
 						"multiple_partitions": 0.25
 					}
 				},
@@ -285,7 +285,7 @@ func TestParseStatementRatiosJSON_File(t *testing.T) {
 			if tc.validateDeleteSum {
 				deleteSum := ratios.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio +
 					ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio +
-					ratios.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio +
+					ratios.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio +
 					ratios.MutationRatios.DeleteSubtypeRatios.MultiplePartitionsRatio
 				if math.Abs(deleteSum-1.0) > tolerance {
 					t.Errorf("Delete subtypes sum: got %.3f, expected 1.0", deleteSum)

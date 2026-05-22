@@ -33,7 +33,7 @@ const (
 	SelectFromMaterializedViewStatementType
 	DeleteWholePartitionType
 	DeleteSingleRowType
-	DeleteSingleColumnType
+	DeleteClusteringSubsetType
 	DeleteMultiplePartitionsType
 	InsertStatementType
 	InsertJSONStatementType

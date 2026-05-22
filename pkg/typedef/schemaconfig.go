@@ -27,6 +27,7 @@ type SchemaConfig struct {
 	TableOptions              []tableopts.Option
 	DeleteBuckets             []time.Duration
 	MaxDeletedHeapSize        int
+	RowTrackerCapacity        int
 	MaxUDTParts               int
 	MaxStringLength           int
 	MinBlobLength             int
@@ -109,6 +110,14 @@ func (sc *SchemaConfig) GetMinColumns() int {
 }
 
 func (sc *SchemaConfig) GetPartitionRangeConfig() PartitionRangeConfig {
+	rowTrackerCapacity := sc.RowTrackerCapacity
+	if rowTrackerCapacity < 0 {
+		// Auto-sizing should have been resolved upstream (workload.go).
+		// If we reach here with -1 it means no ratios context is available;
+		// fall back to the default capacity.
+		rowTrackerCapacity = 1000
+	}
+
 	return PartitionRangeConfig{
 		MaxBlobLength:      sc.MaxPKBlobLength,
 		MinBlobLength:      sc.MinPKBlobLength,
@@ -117,6 +126,7 @@ func (sc *SchemaConfig) GetPartitionRangeConfig() PartitionRangeConfig {
 		UseLWT:             sc.UseLWT,
 		DeleteBuckets:      sc.DeleteBuckets,
 		MaxDeletedHeapSize: sc.MaxDeletedHeapSize,
+		RowTrackerCapacity: rowTrackerCapacity,
 	}
 }
 

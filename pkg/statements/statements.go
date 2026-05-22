@@ -15,12 +15,19 @@
 package statements
 
 import (
+	"errors"
 	"math"
 
 	"github.com/scylladb/gemini/pkg/partitions"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
+
+// ErrNoTrackedRows is returned by targeted delete generators (deleteSingleRow,
+// deleteClusteringSubset) when the row tracker is empty. Callers should treat this as a
+// transient "nothing to do" signal and skip the operation rather than falling
+// back to random data.
+var ErrNoTrackedRows = errors.New("no tracked rows available")
 
 const (
 	SelectSinglePartitionQuery int = iota
@@ -34,7 +41,7 @@ const (
 const (
 	DeleteWholePartition = iota
 	DeleteSingleRow
-	DeleteSingleColumn
+	DeleteClusteringSubset
 	DeleteMultiplePartitions
 	DeleteStatementCount
 )
@@ -53,15 +60,18 @@ const (
 const MutationStatementsCount = 3
 
 type Generator struct {
-	generator        partitions.Interface
-	random           utils.Random
-	table            *typedef.Table
-	valueRangeConfig *typedef.ValueRangeConfig
-	ratioController  *RatioController
-	keyspace         string
-	keyspaceAndTable string
-	selectColumns    []string
-	useLWT           bool
+	generator                     partitions.Interface
+	random                        utils.Random
+	table                         *typedef.Table
+	valueRangeConfig              *typedef.ValueRangeConfig
+	ratioController               *RatioController
+	keyspace                      string
+	keyspaceAndTable              string
+	deleteWholePartitionQuery     string
+	deleteSingleRowQuery          string
+	selectColumns                 []string
+	deleteClusteringSubsetQueries []string
+	useLWT                        bool
 }
 
 func New(
@@ -73,7 +83,7 @@ func New(
 	ratioController *RatioController,
 	useLWT bool,
 ) *Generator {
-	return &Generator{
+	g := &Generator{
 		keyspace:         schema,
 		keyspaceAndTable: schema + "." + table.Name,
 		table:            table,
@@ -84,6 +94,8 @@ func New(
 		ratioController:  ratioController,
 		selectColumns:    table.SelectColumnNames(),
 	}
+	g.buildCachedDeleteQueries()
+	return g
 }
 
 // MarkInvalid marks the partition identified by keys as permanently invalid so
@@ -91,6 +103,18 @@ func New(
 // Delegates directly to the underlying partitions.Interface.
 func (g *Generator) MarkInvalid(keys *typedef.PartitionKeys) bool {
 	return g.generator.MarkInvalid(keys)
+}
+
+// TrackRow stores a row observed during validation for later deletion.
+// Delegates directly to the underlying partitions.Interface.
+func (g *Generator) TrackRow(row partitions.TrackedRow) {
+	g.generator.TrackRow(row)
+}
+
+// PopTrackedRow retrieves a previously tracked row for deletion.
+// Delegates directly to the underlying partitions.Interface.
+func (g *Generator) PopTrackedRow() (partitions.TrackedRow, bool) {
+	return g.generator.PopTrackedRow()
 }
 
 func (g *Generator) getMultiplePartitionKeys() int {

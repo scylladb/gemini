@@ -57,7 +57,11 @@ type Store interface {
 
 	Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
 	Mutate(context.Context, *typedef.Stmt) error
-	Check(context.Context, *typedef.Table, *typedef.Stmt, int) (int, error)
+	// Check validates a statement against both stores. It returns the number of
+	// matched rows, the raw test-store rows (used by the validation layer to
+	// sample rows for the row tracker without issuing a second SELECT), and any
+	// error.
+	Check(context.Context, *typedef.Table, *typedef.Stmt, int) (int, Rows, error)
 }
 
 type (
@@ -722,7 +726,7 @@ func (ds delegatingStore) Check(
 	table *typedef.Table,
 	stmt *typedef.Stmt,
 	_ int,
-) (int, error) {
+) (int, Rows, error) {
 	validationErr := NewValidationError("validation", stmt)
 	maxAttempts := ds.validationRetries
 	if maxAttempts <= 0 {
@@ -745,7 +749,7 @@ func (ds delegatingStore) Check(
 				validationErr.AddAttempt(testErr)
 				lastErr = testErr
 			} else {
-				return len(testRows), nil
+				return len(testRows), testRows, nil
 			}
 		} else {
 			// Run iterators in parallel using a single channel (size 2)
@@ -757,7 +761,9 @@ func (ds delegatingStore) Check(
 
 			ch := make(chan rowsTagged, 2)
 
+			ds.inflight.Add(2)
 			go func() {
+				defer ds.inflight.Done()
 				rows, err := ds.testStore.load(doCtx, stmt)
 				select {
 				case ch <- rowsTagged{oracle: false, rows: rows, err: err}:
@@ -766,6 +772,7 @@ func (ds delegatingStore) Check(
 			}()
 
 			go func() {
+				defer ds.inflight.Done()
 				rows, err := ds.oracleStore.load(doCtx, stmt)
 				select {
 				case ch <- rowsTagged{oracle: true, rows: rows, err: err}:
@@ -786,7 +793,7 @@ func (ds delegatingStore) Check(
 					}
 					received++
 				case <-doCtx.Done():
-					return 0, doCtx.Err()
+					return 0, nil, doCtx.Err()
 				}
 			}
 
@@ -811,7 +818,7 @@ func (ds delegatingStore) Check(
 				compErr := result.ToError()
 				if compErr == nil {
 					// No differences found
-					return result.MatchCount, nil
+					return result.MatchCount, testRows, nil
 				}
 
 				// Found differences, record them and store the comparison results
@@ -839,26 +846,26 @@ func (ds delegatingStore) Check(
 			case <-ctx.Done():
 				utils.PutTimer(timer)
 				if errors.Is(ctx.Err(), context.Canceled) {
-					return 0, context.Canceled
+					return 0, nil, context.Canceled
 				}
-				return 0, pkgerrors.Wrap(ctx.Err(), "validation cancelled during retry delay")
+				return 0, nil, pkgerrors.Wrap(ctx.Err(), "validation cancelled during retry delay")
 			}
 		}
 	}
 
 	// All attempts failed
 	if validationErr.TotalAttempts.Load() == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
 
 	if errors.Is(ctx.Err(), context.Canceled) {
-		return 0, context.Canceled
+		return 0, nil, context.Canceled
 	}
 
 	// Finalize the validation error with summary
 	validationErr.Finalize(lastErr)
 
-	return 0, validationErr
+	return 0, nil, validationErr
 }
 
 func (ds delegatingStore) Close() error {

@@ -308,7 +308,7 @@ func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *job
 	case typedef.SelectStatementType, typedef.SelectRangeStatementType,
 		typedef.InsertStatementType, typedef.InsertJSONStatementType,
 		typedef.UpdateStatementType, typedef.DeleteWholePartitionType,
-		typedef.DeleteSingleRowType, typedef.DeleteSingleColumnType:
+		typedef.DeleteSingleRowType, typedef.DeleteClusteringSubsetType:
 		//nolint:govet
 		statements, err := fetchPartitionKeys(ctx, c.session, stmt, item.PartitionKeys.ToCQLValues(c.partitionKeys))
 		if err != nil {

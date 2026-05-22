@@ -210,7 +210,7 @@ func (m *Mutation) Do(ctx context.Context) error {
 			return nil
 		}
 
-		if errors.Is(err, ErrNoStatement) {
+		if errors.Is(err, ErrNoStatement) || errors.Is(err, statements.ErrNoTrackedRows) {
 			// No statement generated at this moment, back off briefly and retry
 			timer := utils.GetTimer(100 * time.Millisecond)
 			select {
@@ -231,8 +231,7 @@ func (m *Mutation) Do(ctx context.Context) error {
 				m.stopFlag.SetSoft(true)
 				return ErrMutationJobStopped
 			}
-			// Continue procesjobErr)
-			//			if m.status.HasReachedEsing; transient errors should not halt immediately
+			// Continue processing; transient errors should not halt immediately
 			continue
 		}
 

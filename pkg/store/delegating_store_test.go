@@ -181,7 +181,7 @@ func TestDelegatingStore_Check_OracleNil_ReturnsCount(t *testing.T) {
 	table := &typedef.Table{Name: "t"}
 	stmt := typedef.SimpleStmt("SELECT * FROM ks.t WHERE pk0=?", typedef.SelectStatementType)
 
-	n, err := ds.Check(t.Context(), table, stmt, 1)
+	n, _, err := ds.Check(t.Context(), table, stmt, 1)
 	require.NoError(t, err)
 	assert.Equal(t, 3, n)
 }
@@ -195,18 +195,18 @@ func TestDelegatingStore_Check_WithOracle_DiffAndMatch(t *testing.T) {
 	// First a mismatch
 	test1 := &fakeStore{nameStr: "test", loadRows: Rows{NewRow([]string{"pk0", "v"}, []any{1, "a"})}}
 	oracle1 := &fakeStore{nameStr: "oracle", loadRows: Rows{NewRow([]string{"pk0", "v"}, []any{1, "b"})}}
-	ds1 := &delegatingStore{testStore: test1, oracleStore: oracle1, validationRetries: 1, minimumDelay: 1 * time.Millisecond}
+	ds1 := &delegatingStore{testStore: test1, oracleStore: oracle1, validationRetries: 1, minimumDelay: 1 * time.Millisecond, inflight: new(sync.WaitGroup)}
 	errStmt := typedef.SimpleStmt("SELECT * FROM ks.t WHERE pk0=1", typedef.SelectStatementType)
-	n, err := ds1.Check(t.Context(), table, errStmt, 1)
+	n, _, err := ds1.Check(t.Context(), table, errStmt, 1)
 	require.Error(t, err)
 	assert.Equal(t, 0, n)
 
 	// Then a match
 	test2 := &fakeStore{nameStr: "test", loadRows: Rows{NewRow([]string{"pk0", "v"}, []any{1, "a"})}}
 	oracle2 := &fakeStore{nameStr: "oracle", loadRows: Rows{NewRow([]string{"pk0", "v"}, []any{1, "a"})}}
-	ds2 := &delegatingStore{testStore: test2, oracleStore: oracle2, validationRetries: 1}
+	ds2 := &delegatingStore{testStore: test2, oracleStore: oracle2, validationRetries: 1, inflight: new(sync.WaitGroup)}
 	okStmt := typedef.SimpleStmt("SELECT * FROM ks.t WHERE pk0=1", typedef.SelectStatementType)
-	n2, err2 := ds2.Check(t.Context(), table, okStmt, 1)
+	n2, _, err2 := ds2.Check(t.Context(), table, okStmt, 1)
 	require.NoError(t, err2)
 	assert.Equal(t, 1, n2)
 }

@@ -53,8 +53,11 @@ type Jobs struct {
 	name                string
 	mutationConcurrency int
 	readConcurrency     int
+	targetedDeleteRatio float64
 }
 
+// ErrNoStatement is returned when no statement can be generated at this moment
+// (e.g. no partition key is available yet). Callers back off briefly and retry.
 var ErrNoStatement = errors.New("no statement generated")
 
 // watchdogGracePeriod is the time after the configured run duration after
@@ -117,6 +120,7 @@ func New(
 	ratioController *statements.RatioController,
 	logger *zap.Logger,
 	src *rand.ChaCha8,
+	ratios statements.Ratios,
 ) *Jobs {
 	logger.Info("creating jobs",
 		zap.Int("mutation_concurrency", mutationConcurrency),
@@ -132,6 +136,7 @@ func New(
 		readConcurrency:     readConcurrency,
 		mutationConcurrency: mutationConcurrency,
 		ratioController:     ratioController,
+		targetedDeleteRatio: ratios.TargetedDeleteRatio(),
 	}
 }
 
@@ -207,8 +212,10 @@ func (j *Jobs) Run(
 		defer watchdogTimer.Stop()
 	}
 
+	generators := make([]*partitions.Partitions, 0, len(j.schema.Tables))
 	for _, table := range j.schema.Tables {
 		generator := partitions.New(gCtx, j.random, idxFunc, table, partsConfig, partsCount, maxErrors)
+		generators = append(generators, generator)
 		log.Debug("processing table", zap.String("table", table.Name))
 
 		for _, m := range j.parseMode(mode) {
@@ -279,6 +286,7 @@ func (j *Jobs) Run(
 						stopFlag,
 						j.store,
 						newSrc,
+						j.targetedDeleteRatio,
 					)
 
 					workerID := i
@@ -310,7 +318,11 @@ func (j *Jobs) Run(
 	}
 
 	log.Info("waiting for all workers to complete")
-	return g.Wait()
+	err := g.Wait()
+	for _, gen := range generators {
+		gen.Close()
+	}
+	return err
 }
 
 //nolint
