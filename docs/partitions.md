@@ -1200,10 +1200,11 @@ The partitions system is a high-performance, thread-safe manager for partition k
 1. **Efficient Storage**: Flat array layout for cache efficiency
 2. **Flexible Access**: Multiple distribution patterns (uniform, zipfian, sequential)
 3. **Sophisticated Deletion Tracking**: Time-bucket based validation with min-heap
-4. **Lock-Free Fast Paths**: Atomic operations and lock-free checks
-5. **Memory Optimized**: Dynamic growth/shrinking, batch processing
-6. **No Backpressure**: Delete operations never block
-7. **Production Ready**: Extensive testing, benchmarking, and monitoring
+4. **Row Tracking**: Bounded ring buffer for targeted single-row and cluster deletions (see [Targeted Deletions](targeted-deletions.md))
+5. **Lock-Free Fast Paths**: Atomic operations and lock-free checks
+6. **Memory Optimized**: Dynamic growth/shrinking, batch processing
+7. **No Backpressure**: Delete operations never block
+8. **Production Ready**: Extensive testing, benchmarking, and monitoring
 
 The delete buckets system is particularly innovative, allowing validation of eventual consistency at multiple time intervals, ensuring that distributed database deletions propagate correctly across all replicas and survive compaction processes.
 

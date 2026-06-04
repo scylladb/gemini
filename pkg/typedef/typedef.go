@@ -48,6 +48,7 @@ type (
 	PartitionRangeConfig struct {
 		DeleteBuckets      []time.Duration
 		MaxDeletedHeapSize int
+		RowTrackerCapacity int
 		MaxBlobLength      int
 		MinBlobLength      int
 		MaxStringLength    int
@@ -137,8 +138,8 @@ func (st StatementType) String() string {
 		return "SelectFromMaterializedViewStatement"
 	case DeleteSingleRowType:
 		return "DeleteSingleRow"
-	case DeleteSingleColumnType:
-		return "DeleteSingleColumn"
+	case DeleteClusteringSubsetType:
+		return "DeleteClusteringSubset"
 	case DeleteMultiplePartitionsType:
 		return "DeleteMultiplePartitions"
 	case DeleteWholePartitionType:
@@ -228,7 +229,7 @@ func (st StatementType) IsUpdate() bool {
 func (st StatementType) IsDelete() bool {
 	switch st {
 	case DeleteWholePartitionType, DeleteMultiplePartitionsType,
-		DeleteSingleColumnType, DeleteSingleRowType:
+		DeleteClusteringSubsetType, DeleteSingleRowType:
 		return true
 	default:
 		return false
@@ -261,7 +262,7 @@ func (st StatementType) OpType() OpType {
 	case UpdateStatementType:
 		return OpUpdate
 	case DeleteWholePartitionType, DeleteMultiplePartitionsType,
-		DeleteSingleColumnType, DeleteSingleRowType:
+		DeleteClusteringSubsetType, DeleteSingleRowType:
 		return OpDelete
 	case AlterColumnStatementType, DropColumnStatementType, AddColumnStatementType,
 		DropTableStatementType, CreateTableStatementType, DropTypeStatementType,

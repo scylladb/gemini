@@ -87,7 +87,7 @@ type InsertRatios struct {
 type DeleteRatios struct {
 	WholePartitionRatio     float64 `json:"whole_partition"`
 	SingleRowRatio          float64 `json:"single_row"`
-	SingleColumnRatio       float64 `json:"single_column"`
+	ClusteringSubsetRatio   float64 `json:"clustering_subset"`
 	MultiplePartitionsRatio float64 `json:"multiple_partitions"`
 }
 
@@ -112,9 +112,9 @@ func DefaultStatementRatios() Ratios {
 				JSONInsertRatio:    0.1,
 			},
 			DeleteSubtypeRatios: DeleteRatios{
-				WholePartitionRatio:     0.4,
+				WholePartitionRatio:     0.3,
 				SingleRowRatio:          0.3,
-				SingleColumnRatio:       0.2,
+				ClusteringSubsetRatio:   0.3,
 				MultiplePartitionsRatio: 0.1,
 			},
 		},
@@ -174,7 +174,7 @@ func (c *RatioController) validate(ratios Ratios) error {
 		// Check delete subtype ratios
 		deleteSum := ratios.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio +
 			ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio +
-			ratios.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio +
+			ratios.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio +
 			ratios.MutationRatios.DeleteSubtypeRatios.MultiplePartitionsRatio
 		if math.Abs(deleteSum-1.0) > tolerance {
 			return fmt.Errorf("delete subtype ratios sum to %.3f, expected 1.0", deleteSum)
@@ -219,7 +219,7 @@ func (c *RatioController) buildCDFs(ratios Ratios) {
 			ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio,
 		ratios.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio +
 			ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio +
-			ratios.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio,
+			ratios.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio,
 		1.0, // All delete types
 	}
 
@@ -274,7 +274,7 @@ func (c *RatioController) GetDeleteSubtype() int {
 
 	for i, cdf := range c.deleteCDF {
 		if r <= cdf {
-			return i // DeleteWholePartition, DeleteSingleRow, DeleteSingleColumn, DeleteMultiplePartitions
+			return i // DeleteWholePartition, DeleteSingleRow, DeleteClusteringSubset, DeleteMultiplePartitions
 		}
 	}
 
@@ -331,7 +331,7 @@ func (c Ratios) GetStatementInfo() map[string]any {
 		"delete_subtypes": map[string]float64{
 			"whole_partition":     c.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio,
 			"single_row":          c.MutationRatios.DeleteSubtypeRatios.SingleRowRatio,
-			"single_column":       c.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio,
+			"clustering_subset":   c.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio,
 			"multiple_partitions": c.MutationRatios.DeleteSubtypeRatios.MultiplePartitionsRatio,
 		},
 		"select_subtypes": map[string]float64{
@@ -342,4 +342,42 @@ func (c Ratios) GetStatementInfo() map[string]any {
 			"single_index":                        selectRatios.SingleIndexRatio,
 		},
 	}
+}
+
+// rowTrackerCapacityScale is the linear scaling factor used to convert the
+// effective targeted-delete ratio into a row tracker capacity.
+// Calibration: at the default config (deleteRatio=0.05, targeted subtypes=0.6),
+// effective=0.03 → capacity = 0.03 * 33333 ≈ 1000.
+const (
+	rowTrackerCapacityScale = 33333
+	rowTrackerCapacityMin   = 100
+	rowTrackerCapacityMax   = 100_000
+)
+
+// TargetedDeleteRatio returns the effective probability that a mutation will be
+// a targeted delete (single-row or cluster) that consumes rows from the tracker.
+// This is: deleteRatio * (singleRowRatio + clusterRatio).
+func (c Ratios) TargetedDeleteRatio() float64 {
+	dr := c.MutationRatios.DeleteRatio
+	if dr < 0.001 {
+		return 0
+	}
+	targeted := c.MutationRatios.DeleteSubtypeRatios.SingleRowRatio +
+		c.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio
+	return dr * targeted
+}
+
+// ComputeRowTrackerCapacity returns the recommended row tracker capacity based
+// on the configured deletion ratios. Returns 0 when targeted deletions are
+// effectively disabled, scaling up to a maximum of rowTrackerCapacityMax for
+// heavy delete workloads.
+func (c Ratios) ComputeRowTrackerCapacity() int {
+	effective := c.TargetedDeleteRatio()
+	if effective < 0.001 {
+		return 0
+	}
+
+	capacity := int(effective * rowTrackerCapacityScale)
+
+	return max(rowTrackerCapacityMin, min(rowTrackerCapacityMax, capacity))
 }

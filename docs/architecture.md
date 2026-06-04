@@ -10,7 +10,7 @@ Gemini has two primary job types:
 
 1. **MutationJob** (`pkg/jobs/mutation.go`): Applies mutations (INSERT, DELETE) to both clusters. Each mutation worker continuously generates and executes statements until the stop condition is met. The job tracks success/failure metrics and respects error budgets.
 
-2. **ValidationJob** (`pkg/jobs/validation.go`): Reads rows from both clusters and compares them. When differences are detected, an error is raised. Validation supports configurable retry attempts with stabilization delays to handle eventual consistency.
+2. **ValidationJob** (`pkg/jobs/validation.go`): Reads rows from both clusters and compares them. When differences are detected, an error is raised. Validation supports configurable retry attempts with stabilization delays to handle eventual consistency. On each successful validation, a random subset of the returned rows is pushed into the row tracker for use by targeted delete operations — reusing rows already fetched by `Check` with no extra SELECT.
 
 > **Note**: UPDATE statements are currently disabled and converted to INSERTs internally. DDL operations (ALTER) are also temporarily disabled pending v2 stabilization.
 
@@ -33,6 +33,35 @@ In `mixed` mode, both mutation and validation workers run concurrently. Each wor
 
 Workers are managed using Go's `errgroup` for coordinated startup and shutdown. When the error budget is reached or duration expires, a soft stop is signaled and workers gracefully terminate.
 
+For each table, a `partitions.Partitions` generator is created and registered. After all workers finish (`g.Wait()` returns), each generator is explicitly closed (`generator.Close()`) to release its background goroutine immediately.
+
+## Store Layer
+
+The `Store` interface (`pkg/store/store.go`) wraps both the test cluster and the oracle cluster:
+
+```go
+type Store interface {
+    Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
+    Mutate(context.Context, *typedef.Stmt) error
+    // Returns matched row count, raw test-store rows, and any error.
+    // testRows are reused by the validation layer for row-tracker sampling
+    // without issuing a second SELECT.
+    Check(context.Context, *typedef.Table, *typedef.Stmt, int) (int, Rows, error)
+    Close() error
+}
+```
+
+### inflight WaitGroup
+
+Both `Mutate` and `Check` goroutines register with `delegatingStore.inflight` before launching:
+
+```
+Mutate goroutines:  inflight.Add(1) … defer inflight.Done()
+Check goroutines:   inflight.Add(2) … defer inflight.Done()  (one per cluster)
+```
+
+`Close()` calls `inflight.Wait()` before closing CQL sessions. This prevents "use of closed network connection" races on both mutation and SELECT paths when the context is cancelled.
+
 ## Partitions System
 
 The partition system (`pkg/partitions/`) is the core component that manages partition key generation and tracking.
@@ -41,12 +70,13 @@ The partition system (`pkg/partitions/`) is the core component that manages part
 
 ```go
 type Partitions struct {
-    table   *typedef.Table           // Table definition
+    table   *typedef.Table                  // Table definition
     idxFunc distributions.DistributionFunc  // Distribution for partition selection
-    deleted *deletedPartitions       // Tracks recently deleted partitions
+    deleted *deletedPartitions              // Tracks recently deleted partitions
     r       random.GoRoutineSafeRandom      // Thread-safe random source
     config  typedef.PartitionRangeConfig    // Value range configuration
-    parts   partitions               // Slice of partition values
+    parts   partitions                      // Slice of partition values
+    tracker *RowTracker                     // Bounded FIFO queue for targeted deletes
 }
 ```
 
@@ -58,8 +88,11 @@ type Partitions struct {
 | `Get(idx)` | Returns partition values at the given index |
 | `Next()` | Returns the next partition using the distribution function |
 | `Extend()` | Adds a new partition to the pool |
-| `Replace(idx)` | Generates new values for a partition, tracking the old ones as deleted |
+| `Replace(idx)` | Generates new values for a partition, tracking the old ones as deleted; invalidates all tracked rows for the replaced partition |
 | `Deleted()` | Returns a channel of recently deleted partition keys for validation |
+| `TrackRow(row)` | Pushes a row into the row tracker (used by validation workers) |
+| `PopTrackedRow()` | Pops the oldest valid row from the row tracker (used by mutation workers) |
+| `Close()` | Stops the background deleted-partitions goroutine |
 
 ### Partition Key Generation
 
@@ -83,7 +116,7 @@ When a partition is deleted, its keys are tracked in a time-bucketed heap struct
 
 Key features:
 - **Min-heap** sorted by "ready at" time for efficient processing
-- **Background goroutine** emits ready partitions via channel
+- **Background goroutine** emits ready partitions via channel; exits when the generator's context is cancelled
 - **Configurable time buckets** control when deleted partitions become eligible for validation
 - **Memory optimized** with pre-allocated backing arrays
 
@@ -115,9 +148,31 @@ type Generator struct {
 Statement types include:
 - **SELECT**: Single partition, multiple partition, clustering range, index queries
 - **INSERT**: Regular and JSON format
-- **DELETE**: Whole partition, single row, single column, multiple partitions
+- **DELETE**: Whole partition, single row, clustering subset (CK prefix), multiple partitions
 
 The `RatioController` manages the probability distribution of different statement types based on user configuration.
+
+### Targeted Delete Operations
+
+Single-row and clustering-subset deletes use a **row tracker** to delete rows known to exist. During each successful `store.Check()`, the test-store rows are returned alongside the match count — the validation layer samples a random count (between 1 and N) from those rows and pushes them into a bounded FIFO queue. No second SELECT is issued. Mutation workers pop rows from this tracker to build DELETE statements with real clustering key values.
+
+- **Single-row delete**: binds all partition key columns + all clustering key columns — deletes exactly one row.
+- **Clustering-subset delete**: binds all partition key columns + a random prefix of `n` clustering key columns where `1 ≤ n < len(ClusteringKeys)` — deletes every row sharing that prefix (a CQL prefix/range tombstone).
+
+When no tracked rows are available, targeted deletes return `ErrNoTrackedRows` and the mutation worker backs off briefly before retrying — no random fallback is used. The tracker capacity is auto-sized from deletion ratios and can be controlled via `--row-tracker-capacity`.
+
+See [Targeted Deletions](targeted-deletions.md) for full details.
+
+## Statement Logger
+
+The statement logger (`pkg/stmtlogger/`) records executed CQL statements for post-run debugging. It is backed by a bounded channel with an unbounded overflow buffer and a background drainer goroutine.
+
+On shutdown (`Logger.Close()`):
+1. `close(done)` signals all in-flight `LogStmt` calls to bail out
+2. The drainer goroutine flushes all remaining overflow items to the channel with a **single 30-second total-budget deadline** — if the downstream committer stalls, all remaining items are dropped at once after 30 s and a warning is logged
+3. The channel is closed and the inner committer (`io.Closer`) is stopped
+
+The 30-second total budget (replacing the old per-item 10 s timer) ensures `workload.Close()` returns in bounded time regardless of overflow depth.
 
 ## Data Structures
 
@@ -185,14 +240,13 @@ type Type interface {
 | Package | Purpose |
 |---------|---------|
 | `pkg/jobs` | Job definitions (mutation, validation) |
-| `pkg/partitions` | Partition key management and deleted tracking |
+| `pkg/partitions` | Partition key management, deleted tracking, row tracker |
 | `pkg/statements` | CQL statement generation |
 | `pkg/typedef` | Core type definitions (Schema, Table, Columns, Types) |
 | `pkg/schema` | Schema loading and generation |
 | `pkg/distributions` | Partition selection distributions |
-| `pkg/store` | Database interaction layer (oracle + test clusters) |
+| `pkg/store` | Database interaction layer (oracle + test clusters, inflight tracking) |
 | `pkg/status` | Global status tracking (ops counters, errors) |
 | `pkg/stop` | Graceful shutdown coordination |
 | `pkg/metrics` | Prometheus metrics |
-| `pkg/stmtlogger` | Statement logging for debugging |
-
+| `pkg/stmtlogger` | Statement logging for debugging (bounded channel + overflow buffer) |

@@ -22,6 +22,7 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/scylladb/gocqlx/v3/qb"
 
@@ -37,16 +38,20 @@ import (
 )
 
 type Validation struct {
-	generator     partitions.Interface
-	store         store.Store
-	table         *typedef.Table
-	statement     *statements.Generator
-	status        *status.GlobalStatus
-	stopFlag      *stop.Flag
-	keyspaceName  string
-	selectColumns []string
-	maxAttempts   int
-	delay         time.Duration
+	generator        partitions.Interface
+	store            store.Store
+	random           *rand.Rand
+	statement        *statements.Generator
+	status           *status.GlobalStatus
+	stopFlag         *stop.Flag
+	table            *typedef.Table
+	keyspaceName     string
+	selectColumns    []string
+	permScratch      []int
+	maxAttempts      int
+	delay            time.Duration
+	sampleRate       float64
+	maxSamplesPerRun int
 }
 
 func NewValidation(
@@ -58,6 +63,7 @@ func NewValidation(
 	stopFlag *stop.Flag,
 	store store.Store,
 	seed [32]byte,
+	targetedDeleteRatio float64,
 ) *Validation {
 	maxAttempts := schema.Config.AsyncObjectStabilizationAttempts
 	delay := schema.Config.AsyncObjectStabilizationDelay
@@ -71,27 +77,39 @@ func NewValidation(
 		delay = 200 * time.Millisecond
 	}
 
+	rng := rand.New(rand.NewChaCha8(seed))
+
 	statementGenerator := statements.New(
 		schema.Keyspace.Name,
 		generator,
 		table,
-		rand.New(rand.NewChaCha8(seed)),
+		rng,
 		&vc,
 		statementRatioController,
 		schema.Config.UseLWT,
 	)
 
+	// Compute sample rate based on the effective targeted delete ratio.
+	// When targeted deletes are disabled, we don't sample at all.
+	// At the default config (targetedDeleteRatio=0.03) this gives ~10%.
+	// Scales linearly up to 50% for heavy delete workloads.
+	sampleRate := min(0.50, targetedDeleteRatio*3.5)
+	maxSamplesPerRun := max(1, min(10, int(30*sampleRate)))
+
 	return &Validation{
-		table:         table,
-		keyspaceName:  schema.Keyspace.Name,
-		statement:     statementGenerator,
-		generator:     generator,
-		status:        status,
-		stopFlag:      stopFlag,
-		store:         store,
-		maxAttempts:   maxAttempts,
-		selectColumns: table.SelectColumnNames(),
-		delay:         delay,
+		table:            table,
+		keyspaceName:     schema.Keyspace.Name,
+		statement:        statementGenerator,
+		generator:        generator,
+		status:           status,
+		stopFlag:         stopFlag,
+		store:            store,
+		random:           rng,
+		maxAttempts:      maxAttempts,
+		selectColumns:    table.SelectColumnNames(),
+		delay:            delay,
+		sampleRate:       sampleRate,
+		maxSamplesPerRun: maxSamplesPerRun,
 	}
 }
 
@@ -118,7 +136,9 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 	}
 
 	// Delegate retries to the store implementation.
-	validatedRows, err := v.store.Check(ctx, v.table, stmt, 0)
+	// testRows are returned by Check for free — they were already fetched for
+	// comparison, so we reuse them for row-tracker sampling without a second SELECT.
+	validatedRows, testRows, err := v.store.Check(ctx, v.table, stmt, 0)
 	if err == nil {
 		metric.Add(float64(validatedRows))
 		v.status.AddValidatedRows(validatedRows)
@@ -128,6 +148,33 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 				v.generator.ValidationSuccess(&stmt.PartitionKeys[i])
 			}
 		}
+
+		// Sample rows for the row tracker (used by targeted deletions).
+		// We reuse the testRows already fetched by Check — no extra SELECT.
+		//
+		// Fill-zone behaviour:
+		//   < 30%  (lean)    — always push; bypass probabilistic sample-rate gate.
+		//   30–70% (healthy) — no extra sampling; queue is in a good state.
+		//   70–90% (filling) — probabilistic gate: only push when random draw < sampleRate.
+		//   ≥ 90%  (full)   — skip entirely; queue is nearly full.
+		if v.generator != nil && len(v.table.ClusteringKeys) > 0 && len(testRows) > 0 {
+			fill := v.generator.RowTrackerFillRatio()
+			switch {
+			case fill >= partitions.FillZoneSkip:
+				// Queue is ≥90% full — skip sampling to avoid wasted work.
+			case fill >= partitions.FillZoneSampled:
+				// Queue is filling (70–90%) — apply the probabilistic gate.
+				if v.random.Float64() < v.sampleRate {
+					v.sampleRowsForTracker(stmt, testRows, false)
+				}
+			case fill < partitions.FillZoneAlwaysPush:
+				// Queue is lean (<30%) — always push regardless of sample rate.
+				v.sampleRowsForTracker(stmt, testRows, true)
+			default:
+				// Queue is healthy (30–70%) — no extra sampling needed.
+			}
+		}
+
 		releaseKeys(stmt)
 		return nil
 	}
@@ -139,6 +186,113 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) error {
 	}
 
 	return v.handleCheckFailure(err, stmt)
+}
+
+// sampleRowsForTracker pushes a random subset of already-fetched test rows
+// into the row tracker for later use by targeted delete operations.
+// It reuses the rows returned by Check — no additional SELECT is issued.
+//
+// n is drawn uniformly from [1, len(rows)], so between one row and all rows
+// may be pushed per call. When forceAll is true (queue is lean, fill <
+// FillZoneAlwaysPush) the maxSamplesPerRun cap is bypassed.
+func (v *Validation) sampleRowsForTracker(stmt *typedef.Stmt, rows store.Rows, forceAll bool) {
+	if len(rows) == 0 || len(stmt.PartitionKeys) == 0 {
+		return
+	}
+
+	type candidate struct {
+		values []any
+		id     uuid.UUID
+	}
+	candidates := make([]candidate, len(stmt.PartitionKeys))
+	for i := range stmt.PartitionKeys {
+		pk := &stmt.PartitionKeys[i]
+		values := make([]any, 0, v.table.PartitionKeys.LenValues())
+		for _, col := range v.table.PartitionKeys {
+			values = append(values, pk.Values.Get(col.Name)...)
+		}
+		candidates[i] = candidate{id: pk.ID, values: values}
+	}
+	single := len(candidates) == 1
+
+	matchPartition := func(row store.Row) int {
+		if single {
+			return 0
+		}
+		for ci := range candidates {
+			matched := true
+			for ki, col := range v.table.PartitionKeys {
+				if !store.ValuesEqual(row.Get(col.Name), candidates[ci].values[ki]) {
+					matched = false
+					break
+				}
+			}
+			if matched {
+				return ci
+			}
+		}
+		return -1
+	}
+
+	// Pick a random number of rows to push: between 1 and len(rows).
+	limit := 1 + v.random.IntN(len(rows))
+	if !forceAll && limit > v.maxSamplesPerRun {
+		limit = v.maxSamplesPerRun
+	}
+
+	perm := v.samplingPerm(len(rows))
+
+	sampled := 0
+	for i := 0; i < len(perm) && sampled < limit; i++ {
+		j := i + v.random.IntN(len(perm)-i)
+		perm[i], perm[j] = perm[j], perm[i]
+
+		row := rows[perm[i]]
+
+		ci := matchPartition(row)
+		if ci < 0 {
+			continue
+		}
+
+		ckValues := make([]any, 0, v.table.ClusteringKeys.LenValues())
+
+		// Extract clustering key values from the row.
+		validRow := true
+		for _, ck := range v.table.ClusteringKeys {
+			val := row.Get(ck.Name)
+			if val == nil {
+				validRow = false
+				break
+			}
+			ckValues = append(ckValues, val)
+		}
+
+		if !validRow {
+			continue
+		}
+
+		v.generator.TrackRow(partitions.TrackedRow{
+			PartitionID:      candidates[ci].id,
+			PartitionValues:  candidates[ci].values, // shared slice; callers treat as read-only
+			ClusteringValues: ckValues,
+		})
+		sampled++
+	}
+}
+
+func (v *Validation) samplingPerm(n int) []int {
+	if len(v.permScratch) == n {
+		return v.permScratch
+	}
+	if cap(v.permScratch) >= n {
+		v.permScratch = v.permScratch[:n]
+	} else {
+		v.permScratch = make([]int, n)
+	}
+	for i := range v.permScratch {
+		v.permScratch[i] = i
+	}
+	return v.permScratch
 }
 
 // handleCheckFailure processes a non-context store.Check error: it records the
@@ -311,7 +465,7 @@ func (v *Validation) validateDeletedPartition(ctx context.Context, keys typedef.
 		}
 	}()
 
-	if _, err := v.store.Check(ctx, v.table, stmt, 0); err != nil {
+	if _, _, err := v.store.Check(ctx, v.table, stmt, 0); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return err
 		}

@@ -378,6 +378,7 @@ func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 		AsyncObjectStabilizationDelay:    asyncObjectStabilizationDelay,
 		DeleteBuckets:                    deletedBuckets,
 		MaxDeletedHeapSize:               maxDeletedHeapSize,
+		RowTrackerCapacity:               rowTrackerCapacity,
 		MinPKStringLength:                minPKStringLength,
 		MaxPKBlobLength:                  maxPKBlobLength,
 		MaxPKStringLength:                maxPKStringLength,
@@ -413,6 +414,7 @@ func createSchemaConfig(datasetSize string, logger *zap.Logger) typedef.SchemaCo
 			MinBlobLength:                    10,
 			MinStringLength:                  10,
 			DeleteBuckets:                    defaultConfig.DeleteBuckets,
+			RowTrackerCapacity:               defaultConfig.RowTrackerCapacity,
 		}
 	default:
 		return defaultConfig

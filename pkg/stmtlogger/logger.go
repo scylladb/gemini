@@ -298,12 +298,17 @@ func (l *Logger) drainOverflowStep() {
 // holds overflowMu on each iteration and drains whatever is present, so
 // those late items will be picked up.  No items are silently dropped.
 //
-// Each blocking send is guarded by a 10 s per-item deadline.  If the
-// downstream committer stalls (e.g. disk I/O stall), we log a warning
-// and continue rather than blocking forever until the watchdog kills us.
-const flushPerItemTimeout = 10 * time.Second
+// The entire flush is bounded by a single total-budget deadline (30 s).
+// A per-item timer would multiply: 10 s × N items can hold workload.Close
+// for many minutes when the overflow has accumulated and gocql is dropping
+// writes. With a shared deadline the worst case is always 30 s regardless
+// of overflow depth.
+const flushTotalTimeout = 30 * time.Second
 
 func (l *Logger) flushRemainingOverflow() {
+	deadline := time.NewTimer(flushTotalTimeout)
+	defer deadline.Stop()
+
 	for {
 		l.overflowMu.Lock()
 		if len(l.overflow) == 0 {
@@ -318,17 +323,19 @@ func (l *Logger) flushRemainingOverflow() {
 
 		metrics.StatementLoggerOverflowItems.Set(float64(depth))
 
-		// Use a timer instead of an unconditional blocking send so that
-		// a stalled committer does not lock us up until the watchdog
-		// fires (potentially minutes later).
-		timer := time.NewTimer(flushPerItemTimeout)
 		select {
 		case l.ch <- next:
-			timer.Stop()
-		case <-timer.C:
-			l.logger.Warn("flushRemainingOverflow: downstream committer stalled, dropping overflow item after timeout",
-				zap.Duration("timeout", flushPerItemTimeout),
+		case <-deadline.C:
+			l.overflowMu.Lock()
+			dropped := 1 + len(l.overflow)
+			l.overflow = l.overflow[:0]
+			l.overflowMu.Unlock()
+			metrics.StatementLoggerOverflowItems.Set(0)
+			l.logger.Warn("flushRemainingOverflow: downstream committer stalled, dropping remaining overflow items",
+				zap.Int("dropped", dropped),
+				zap.Duration("budget", flushTotalTimeout),
 			)
+			return
 		}
 	}
 }

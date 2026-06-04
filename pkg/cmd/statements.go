@@ -172,9 +172,9 @@ func fixDeleteSubtypes(ratios *statements.Ratios, mutation map[string]any, defau
 		providedFields["single_row"] = true
 		totalProvided += ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio
 	}
-	if _, found := deleteSubtypes["single_column"]; found {
-		providedFields["single_column"] = true
-		totalProvided += ratios.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio
+	if _, found := deleteSubtypes["clustering_subset"]; found {
+		providedFields["clustering_subset"] = true
+		totalProvided += ratios.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio
 	}
 	if _, found := deleteSubtypes["multiple_partitions"]; found {
 		providedFields["multiple_partitions"] = true
@@ -194,8 +194,8 @@ func fixDeleteSubtypes(ratios *statements.Ratios, mutation map[string]any, defau
 		if !providedFields["single_row"] {
 			ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio = perUnprovided
 		}
-		if !providedFields["single_column"] {
-			ratios.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio = perUnprovided
+		if !providedFields["clustering_subset"] {
+			ratios.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio = perUnprovided
 		}
 		if !providedFields["multiple_partitions"] {
 			ratios.MutationRatios.DeleteSubtypeRatios.MultiplePartitionsRatio = perUnprovided

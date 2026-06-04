@@ -31,6 +31,21 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
+func TestPrimaryKeyTypes_AreSingleValue(t *testing.T) {
+	t.Parallel()
+
+	for _, typ := range typedef.PkTypes {
+		if got := typ.LenValue(); got != 1 {
+			t.Errorf("PkTypes member %q: LenValue()=%d, want 1 (row tracker requires single-value key types)", typ.Name(), got)
+		}
+	}
+	for _, typ := range typedef.PartitionKeyTypes {
+		if got := typ.LenValue(); got != 1 {
+			t.Errorf("PartitionKeyTypes member %q: LenValue()=%d, want 1 (row tracker requires single-value key types)", typ.Name(), got)
+		}
+	}
+}
+
 var allSimpleTypes = []typedef.SimpleType{
 	typedef.TypeAscii,
 	typedef.TypeBigint,

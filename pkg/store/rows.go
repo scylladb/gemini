@@ -122,7 +122,7 @@ func (r Row) MarshalJSON() ([]byte, error) {
 //   - For all same-type pairs: uses the same logic as compareValues
 //
 //nolint:gocyclo,cyclop
-func valuesEqual(a, b any) bool {
+func ValuesEqual(a, b any) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -300,7 +300,7 @@ func rowsEqual(a, b Rows) bool {
 			return false
 		}
 		for j := range av {
-			if !valuesEqual(av[j], bv[j]) {
+			if !ValuesEqual(av[j], bv[j]) {
 				return false
 			}
 		}

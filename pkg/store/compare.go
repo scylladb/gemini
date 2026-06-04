@@ -252,7 +252,7 @@ func diffRows(table *typedef.Table, oracleRow, testRow Row) string {
 	// Check for any actual differences before paying the Builder cost.
 	diffCount := 0
 	for _, k := range keys {
-		if !valuesEqual(oracleRow.Get(k), testRow.Get(k)) {
+		if !ValuesEqual(oracleRow.Get(k), testRow.Get(k)) {
 			diffCount++
 		}
 	}
@@ -311,7 +311,7 @@ func diffRows(table *typedef.Table, oracleRow, testRow Row) string {
 			b.WriteString(": ")
 			b.WriteString(canonicalValueString(oVal))
 			b.WriteByte('\n')
-		case !valuesEqual(oVal, tVal):
+		case !ValuesEqual(oVal, tVal):
 			b.WriteString("- ")
 			b.WriteString(k)
 			b.WriteString(": ")

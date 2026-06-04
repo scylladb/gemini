@@ -61,6 +61,19 @@ type (
 		// InvalidCount returns the current number of permanently invalid partitions.
 		InvalidCount() uint64
 
+		// Row tracking for targeted single-row deletions.
+		// TrackRow stores a row observed during validation for later deletion.
+		TrackRow(row TrackedRow)
+		// PopTrackedRow retrieves a previously tracked row for deletion.
+		// Returns false if no tracked rows are available.
+		PopTrackedRow() (TrackedRow, bool)
+		// TrackedRowCount returns the number of currently tracked rows.
+		TrackedRowCount() uint64
+		// RowTrackerFillRatio returns the fill level of the row tracker as a
+		// value in [0, 1]. Used by the validation job to select the appropriate
+		// sampling zone (always-push / sampled / skip).
+		RowTrackerFillRatio() float64
+
 		Len() uint64
 		Close()
 	}
@@ -84,12 +97,13 @@ type (
 		table         *typedef.Table
 		idxFunc       distributions.DistributionFunc
 		deleted       *deletedPartitions
+		rowTracker    *RowTracker
 		validationMap map[uuid.UUID]*typedef.ValidationData
 		uuidToIdx     map[uuid.UUID]uint64
 		invalidByIdx  sync.Map
 		r             random.GoRoutineSafeRandom
-		config        typedef.PartitionRangeConfig
 		parts         partitions
+		config        typedef.PartitionRangeConfig
 		invalidCount  atomic.Uint64
 		maxInvalid    uint64
 		validationMu  sync.RWMutex
@@ -127,6 +141,7 @@ func New(
 			parts:              parts,
 		},
 		deleted:       newDeleted(ctx, config.DeleteBuckets, config.MaxDeletedHeapSize),
+		rowTracker:    NewRowTracker(uint64(config.RowTrackerCapacity)),
 		r:             *random.NewGoRoutineSafeRandom(r),
 		table:         table,
 		config:        config,
@@ -464,6 +479,15 @@ func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
 		oldPart.refCount.Add(1)
 		p.deleted.Delete(oldKeys)
 	}
+
+	// Purge any tracked rows that belong to the old partition so that
+	// targeted-delete operations do not attempt to delete rows from a
+	// partition that no longer exists. Release closures are called inside
+	// Invalidate, outside any internal lock.
+	if p.rowTracker != nil {
+		p.rowTracker.Invalidate(oldPart.id)
+	}
+
 	return oldKeys
 }
 
@@ -616,6 +640,40 @@ func (p *Partitions) IsInvalid(idx uint64) bool {
 // InvalidCount returns the current number of permanently invalid partitions.
 func (p *Partitions) InvalidCount() uint64 {
 	return p.invalidCount.Load()
+}
+
+// TrackRow stores a row observed during validation for later deletion.
+func (p *Partitions) TrackRow(row TrackedRow) {
+	if p.rowTracker == nil {
+		return
+	}
+	p.rowTracker.Push(row)
+}
+
+// PopTrackedRow retrieves a previously tracked row for deletion.
+// Returns false if no tracked rows are available.
+func (p *Partitions) PopTrackedRow() (TrackedRow, bool) {
+	if p.rowTracker == nil {
+		return TrackedRow{}, false
+	}
+	return p.rowTracker.Pop()
+}
+
+// TrackedRowCount returns the number of currently tracked rows.
+func (p *Partitions) TrackedRowCount() uint64 {
+	if p.rowTracker == nil {
+		return 0
+	}
+	return p.rowTracker.Len()
+}
+
+// RowTrackerFillRatio returns the fill level of the row tracker in [0, 1].
+// Returns 0 when row tracking is disabled.
+func (p *Partitions) RowTrackerFillRatio() float64 {
+	if p.rowTracker == nil {
+		return 0
+	}
+	return p.rowTracker.FillRatio()
 }
 
 func generateValue(r utils.Random, table *typedef.Table, config typedef.RangeConfig) []any {
