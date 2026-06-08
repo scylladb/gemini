@@ -20,9 +20,7 @@ package typedef_test
 import (
 	"fmt"
 	"testing"
-	"time"
 
-	"github.com/gocql/gocql"
 	"github.com/stretchr/testify/require"
 
 	"github.com/scylladb/gemini/pkg/testutils"
@@ -36,12 +34,12 @@ func TestComplexTypesAsPartitionKeys_Integration(t *testing.T) {
 
 	containers := testutils.TestContainers(t)
 
-	testCluster := gocql.NewCluster(containers.TestHosts[0])
-	testCluster.Consistency = gocql.Quorum
-	testCluster.Timeout = 30 * time.Second
-	session, err := testCluster.CreateSession()
-	require.NoError(t, err, "Failed to create session")
-	defer session.Close()
+	// Use the session testutils already established (correct host-mapped port +
+	// address translation); building a fresh cluster from TestHosts alone would
+	// default to port 9042, which is not where the container is published.
+	session := containers.Test
+
+	var err error
 
 	keyspace := testutils.GenerateUniqueKeyspaceName(t)
 

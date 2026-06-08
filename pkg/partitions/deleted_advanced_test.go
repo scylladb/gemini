@@ -16,6 +16,7 @@ package partitions
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -40,52 +41,54 @@ func TestDeleteBulk(t *testing.T) {
 	})
 
 	t.Run("bulk_delete_single", func(t *testing.T) {
-		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{100 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets, 0)
-		defer d.Close()
+			batch := []typedef.PartitionKeys{{Values: typedef.NewValues(1)}}
+			d.DeleteBulk(batch)
 
-		batch := []typedef.PartitionKeys{{Values: typedef.NewValues(1)}}
-		d.DeleteBulk(batch)
-
-		time.Sleep(10 * time.Millisecond)
-		assert.Equal(t, 1, d.Len())
+			time.Sleep(10 * time.Millisecond)
+			assert.Equal(t, 1, d.Len())
+		})
 	})
 
 	t.Run("bulk_delete_multiple", func(t *testing.T) {
-		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets, 0)
-		defer d.Close()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{100 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		batch := make([]typedef.PartitionKeys, 50)
-		for i := range batch {
-			batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
-		}
-		d.DeleteBulk(batch)
+			batch := make([]typedef.PartitionKeys, 50)
+			for i := range batch {
+				batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
+			}
+			d.DeleteBulk(batch)
 
-		time.Sleep(10 * time.Millisecond)
-		assert.Equal(t, 50, d.Len())
-		assert.Equal(t, uint64(50), d.deleted.Load())
+			time.Sleep(10 * time.Millisecond)
+			assert.Equal(t, 50, d.Len())
+			assert.Equal(t, uint64(50), d.deleted.Load())
+		})
 	})
 
 	t.Run("bulk_delete_sets_next_ready", func(t *testing.T) {
-		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{100 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets, 0)
-		defer d.Close()
+			batch := make([]typedef.PartitionKeys, 10)
+			for i := range batch {
+				batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
+			}
+			d.DeleteBulk(batch)
 
-		batch := make([]typedef.PartitionKeys, 10)
-		for i := range batch {
-			batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
-		}
-		d.DeleteBulk(batch)
-
-		// Check that nextReadyNs is set
-		time.Sleep(10 * time.Millisecond)
-		nextNs := d.nextReadyNs.Load()
-		assert.Greater(t, nextNs, int64(0))
+			// Check that nextReadyNs is set
+			time.Sleep(10 * time.Millisecond)
+			nextNs := d.nextReadyNs.Load()
+			assert.Greater(t, nextNs, int64(0))
+		})
 	})
 
 	t.Run("bulk_delete_stamps_DeletedAtNS", func(t *testing.T) {
@@ -141,36 +144,40 @@ func TestDelete_DeletedAtNS(t *testing.T) {
 // TestFastPathOptimization tests the atomic fast-path check
 func TestFastPathOptimization(t *testing.T) {
 	t.Run("fast_path_no_lock", func(t *testing.T) {
-		buckets := []time.Duration{1 * time.Second}
-		d := newDeleted(t.Context(), buckets, 0)
-		defer d.Close()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{1 * time.Second}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		// Add item with future ready time
-		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
-		time.Sleep(10 * time.Millisecond)
+			// Add item with future ready time
+			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
+			time.Sleep(10 * time.Millisecond)
 
-		// Process should return quickly via fast path
-		start := time.Now()
-		waitTime := d.processReady()
-		elapsed := time.Since(start)
+			// Process should return quickly via fast path
+			start := time.Now()
+			waitTime := d.processReady()
+			elapsed := time.Since(start)
 
-		assert.Greater(t, waitTime, 500*time.Millisecond)
-		assert.Less(t, elapsed, 10*time.Millisecond) // Should be very fast
+			assert.Greater(t, waitTime, 500*time.Millisecond)
+			assert.Less(t, elapsed, 10*time.Millisecond) // Should be very fast
+		})
 	})
 
 	t.Run("next_ready_updated_on_delete", func(t *testing.T) {
-		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets, 0)
-		defer d.Close()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{100 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		before := d.nextReadyNs.Load()
-		assert.Equal(t, int64(0), before)
+			before := d.nextReadyNs.Load()
+			assert.Equal(t, int64(0), before)
 
-		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
-		time.Sleep(5 * time.Millisecond)
+			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
+			time.Sleep(5 * time.Millisecond)
 
-		after := d.nextReadyNs.Load()
-		assert.Greater(t, after, int64(0))
+			after := d.nextReadyNs.Load()
+			assert.Greater(t, after, int64(0))
+		})
 	})
 }
 
@@ -258,29 +265,43 @@ func TestHeapShrinking(t *testing.T) {
 
 // TestBatchProcessing tests batch processing optimization
 func TestBatchProcessing(t *testing.T) {
-	t.Parallel()
-
 	t.Run("batch_size_limits_processing", func(t *testing.T) {
-		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{1 * time.Millisecond}
+			// start=false: drive processReady() ourselves so the assertion is
+			// about the per-cycle batch limit, not about when the background
+			// ticker happens to fire.
+			d := newDeleted(t.Context(), buckets, 0, false)
+			defer d.Close()
 
-		buckets := []time.Duration{1 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets, 0)
-		defer d.Close()
+			// Queue more items than a single batch can process.
+			const items = 100
+			require.Greater(t, items, d.batchSize)
+			for range items {
+				d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
+			}
+			require.Equal(t, items, d.Len())
 
-		// Add many items
-		for range 100 {
-			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
-		}
+			// Advance past the bucket delay so every queued item is ready.
+			time.Sleep(10 * time.Millisecond)
 
-		// Wait for all to be ready
-		time.Sleep(50 * time.Millisecond)
+			heapLen := func() int {
+				d.mu.Lock()
+				defer d.mu.Unlock()
+				return d.heap.Len()
+			}
 
-		// Process should be limited by batch size
-		d.mu.Lock()
-		initialLen := d.heap.Len()
-		d.mu.Unlock()
+			// One processing cycle must emit at most batchSize items, leaving the
+			// remainder queued — this is the batching guarantee.
+			d.processReady()
+			assert.Equal(t, items-d.batchSize, heapLen(),
+				"one processReady cycle should process exactly batchSize (%d) of the %d ready items",
+				d.batchSize, items)
 
-		assert.GreaterOrEqual(t, initialLen, 50)
+			// A second cycle drains what is left (fewer than batchSize remain).
+			d.processReady()
+			assert.Equal(t, 0, heapLen(), "second cycle should drain the remaining items")
+		})
 	})
 }
 
@@ -327,64 +348,61 @@ func TestUnixNanoComparison(t *testing.T) {
 
 // TestAdaptiveBackgroundInterval tests the adaptive ticker logic
 func TestAdaptiveBackgroundInterval(t *testing.T) {
-	t.Parallel()
 	t.Run("interval_adapts_to_ready_time", func(t *testing.T) {
-		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{50 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		buckets := []time.Duration{50 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets, 0)
-		defer d.Close()
+			// Add item
+			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 
-		// Add item
-		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
+			// The background processor should adapt its interval
+			time.Sleep(100 * time.Millisecond)
 
-		// The background processor should adapt its interval
-		time.Sleep(100 * time.Millisecond)
-
-		// Item should be processed
-		select {
-		case val := <-d.ch:
-			require.NotNil(t, val)
-		case <-time.After(200 * time.Millisecond):
-			t.Fatal("Expected item to be ready")
-		}
+			// Item should be processed
+			select {
+			case val := <-d.ch:
+				require.NotNil(t, val)
+			case <-time.After(200 * time.Millisecond):
+				t.Fatal("Expected item to be ready")
+			}
+		})
 	})
 }
 
 // TestConcurrentBulkDelete tests concurrent bulk operations
 func TestConcurrentBulkDelete(t *testing.T) {
-	t.Parallel()
-
 	t.Run("concurrent_bulk_deletes", func(t *testing.T) {
-		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{100 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets, 0)
-		defer d.Close()
+			const goroutines = 10
+			const batchSize = 10
+			done := make(chan bool, goroutines)
 
-		const goroutines = 10
-		const batchSize = 10
-		done := make(chan bool, goroutines)
+			for range goroutines {
+				go func() {
+					batch := make([]typedef.PartitionKeys, batchSize)
+					for i := range batch {
+						batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
+					}
+					d.DeleteBulk(batch)
+					done <- true
+				}()
+			}
 
-		for range goroutines {
-			go func() {
-				batch := make([]typedef.PartitionKeys, batchSize)
-				for i := range batch {
-					batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
-				}
-				d.DeleteBulk(batch)
-				done <- true
-			}()
-		}
+			// Wait for all goroutines
+			for range goroutines {
+				<-done
+			}
 
-		// Wait for all goroutines
-		for range goroutines {
-			<-done
-		}
+			time.Sleep(20 * time.Millisecond)
 
-		time.Sleep(20 * time.Millisecond)
-
-		// Check total count
-		assert.Equal(t, uint64(goroutines*batchSize), d.deleted.Load())
+			// Check total count
+			assert.Equal(t, uint64(goroutines*batchSize), d.deleted.Load())
+		})
 	})
 }

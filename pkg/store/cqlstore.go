@@ -52,6 +52,11 @@ func applyLocalhostTranslator(cluster *gocql.ClusterConfig, logger *zap.Logger) 
 	cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, p int) (net.IP, int) {
 		return localhostIP, p
 	})
+	// The shard-aware port (19042) is published on a *different* host port than
+	// the one we connected through, so the translated address 127.0.0.1:19042 is
+	// unreachable. Disable shard-aware connections so gocql only uses the mapped
+	// CQL port.
+	cluster.DisableShardAwarePort = true
 }
 
 type cqlStore struct {

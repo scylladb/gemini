@@ -195,6 +195,17 @@ var (
 		},
 	)
 
+	// DeletedPartitionsSampledOut counts partitions that were dropped before
+	// entering the deleted-partitions heap by the admission sampler. Sampling
+	// keeps the steady-state heap size near its cap under high DELETE
+	// throughput, trading some re-validation coverage for bounded memory.
+	DeletedPartitionsSampledOut = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "deleted_partitions_sampled_out_total",
+			Help: "Total number of deleted-partition entries dropped before entering the heap by the admission sampler.",
+		},
+	)
+
 	StatementLoggerFlushes = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "statement_logger_flushes_total",
@@ -268,6 +279,7 @@ func init() {
 		StatementLoggerOverflowItems,
 		StatementLoggerOverflowTotal,
 		DeletedPartitionsHeapEvictions,
+		DeletedPartitionsSampledOut,
 		StatementLoggerFlushes,
 		StatementErrorLastTS,
 		WorkersCurrent,

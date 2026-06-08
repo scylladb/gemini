@@ -67,11 +67,15 @@ func TestNew_BasicConfiguration(t *testing.T) {
 	cfg := Config{
 		TestClusterConfig: ScyllaClusterConfig{
 			Hosts:               scyllaContainer.TestHosts,
+			Port:                scyllaContainer.TestCluster.Port,
+			DockerMode:          scyllaContainer.DockerMode,
 			Consistency:         "QUORUM",
 			HostSelectionPolicy: HostSelectionRoundRobin,
 		},
 		OracleClusterConfig: &ScyllaClusterConfig{
 			Hosts:               scyllaContainer.OracleHosts,
+			Port:                scyllaContainer.OracleCluster.Port,
+			DockerMode:          scyllaContainer.DockerMode,
 			Consistency:         "QUORUM",
 			HostSelectionPolicy: HostSelectionRoundRobin,
 		},
@@ -138,6 +142,8 @@ func TestNew_WithoutOracleCluster(t *testing.T) {
 	cfg := Config{
 		TestClusterConfig: ScyllaClusterConfig{
 			Hosts:               scyllaContainer.TestHosts,
+			Port:                scyllaContainer.TestCluster.Port,
+			DockerMode:          scyllaContainer.DockerMode,
 			Consistency:         "QUORUM",
 			HostSelectionPolicy: HostSelectionRoundRobin,
 		},
@@ -200,6 +206,8 @@ func TestNew_DefaultConfiguration(t *testing.T) {
 	cfg := Config{
 		TestClusterConfig: ScyllaClusterConfig{
 			Hosts:               scyllaContainer.TestHosts,
+			Port:                scyllaContainer.TestCluster.Port,
+			DockerMode:          scyllaContainer.DockerMode,
 			Consistency:         "QUORUM",
 			HostSelectionPolicy: HostSelectionRoundRobin,
 		},

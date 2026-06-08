@@ -15,12 +15,13 @@
 package partitions
 
 import (
+	"context"
 	"math/rand/v2"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -41,86 +42,97 @@ import (
 // deleted-partitions heap occupancy (which itself drains as buckets
 // expire).
 func TestReplaceDoesNotLeakUUIDToIdx(t *testing.T) {
-	t.Parallel()
+	// Runs in a testing/synctest bubble: the fake clock fast-forwards through
+	// the bucket delays deterministically, so the regression guard no longer
+	// depends on a real 10s Eventually poll. The deleted-partitions background
+	// processor and the drainer goroutine both live in the bubble and are torn
+	// down before the bubble exits.
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			count       = uint64(64)
+			replacePass = 5_000
+		)
 
-	const (
-		count       = uint64(64)
-		replacePass = 5_000
-	)
+		// Use a bubble-internal context (NOT t.Context()): a goroutine blocked
+		// on a channel owned outside the bubble is never "durably blocked", so
+		// the fake clock would not advance.
+		ctx, cancel := context.WithCancel(t.Context())
 
-	src, fn := distributions.New(distributions.Uniform, count, 1, 0, 0)
-	table := createTestTable()
-	config := typedef.PartitionRangeConfig{
-		MaxBlobLength:   100,
-		MinBlobLength:   10,
-		MaxStringLength: 50,
-		MinStringLength: 5,
-		// Use a very short bucket so deleted-partition entries drain
-		// quickly during the test, exercising the cleanup path.
-		DeleteBuckets: []time.Duration{50 * time.Millisecond},
-	}
-	parts := New(t.Context(), rand.New(src), fn, table, config, count, 0)
-	t.Cleanup(parts.Close)
+		src, fn := distributions.New(distributions.Uniform, count, 1, 0, 0)
+		table := createTestTable()
+		config := typedef.PartitionRangeConfig{
+			MaxBlobLength:   100,
+			MinBlobLength:   10,
+			MaxStringLength: 50,
+			MinStringLength: 5,
+			// Use a very short bucket so deleted-partition entries drain
+			// quickly during the test, exercising the cleanup path.
+			DeleteBuckets: []time.Duration{50 * time.Millisecond},
+		}
+		parts := New(ctx, rand.New(src), fn, table, config, count, 0)
 
-	// Drain the deleted channel so processReady can pop entries and fire
-	// the onDone closures (which call deleteValidation under the hood).
-	drainerDone := make(chan struct{})
-	go func() {
-		defer close(drainerDone)
-		for {
-			select {
-			case keys, ok := <-parts.Deleted():
-				if !ok {
+		// Drain the deleted channel so processReady can pop entries and fire
+		// the onDone closures (which call deleteValidation under the hood).
+		drainerDone := make(chan struct{})
+		go func() {
+			defer close(drainerDone)
+			for {
+				select {
+				case keys, ok := <-parts.Deleted():
+					if !ok {
+						return
+					}
+					if keys.Release != nil {
+						keys.Release()
+					}
+				case <-ctx.Done():
 					return
 				}
-				if keys.Release != nil {
-					keys.Release()
-				}
-			case <-t.Context().Done():
-				return
+			}
+		}()
+
+		// Hammer Replace() to mimic the production delete workload.
+		// The mutation code always calls Release() on the returned keys after
+		// executing the DELETE statement, so we do the same here.
+		for i := uint64(0); i < replacePass; i++ {
+			oldKeys := parts.Replace(i % count)
+			if oldKeys.Release != nil {
+				oldKeys.Release()
 			}
 		}
-	}()
 
-	// Hammer Replace() to mimic the production delete workload.
-	// The mutation code always calls Release() on the returned keys after
-	// executing the DELETE statement, so we do the same here.
-	for i := uint64(0); i < replacePass; i++ {
-		oldKeys := parts.Replace(i % count)
-		if oldKeys.Release != nil {
-			oldKeys.Release()
-		}
-	}
+		// Let the background processor flush every bucket. In the bubble this
+		// fast-forwards instantly; synctest.Wait() then blocks until the
+		// processor and drainer have caught up and gone idle.
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
 
-	// Give the deleted-partitions background processor time to flush
-	// every bucket and call onDone for each entry.
-	require.Eventually(t, func() bool {
 		parts.validationMu.RLock()
-		defer parts.validationMu.RUnlock()
-		// Once the heap has fully drained, both maps must shrink back to
-		// roughly the live partition count (one entry per live slot).
-		// Allow a little slack for in-flight items.
-		return len(parts.uuidToIdx) <= int(count)*2 &&
-			len(parts.validationMap) <= int(count)*2
-	}, 10*time.Second, 50*time.Millisecond,
-		"uuidToIdx/validationMap should shrink after deleted-partition heap drains; "+
-			"this is the regression guard for the 2026-04-30 leak")
+		uuidToIdxLen := len(parts.uuidToIdx)
+		validationMapLen := len(parts.validationMap)
+		parts.validationMu.RUnlock()
 
-	parts.validationMu.RLock()
-	uuidToIdxLen := len(parts.uuidToIdx)
-	validationMapLen := len(parts.validationMap)
-	parts.validationMu.RUnlock()
+		// Once the heap has fully drained, both maps must shrink back to roughly
+		// the live partition count (one entry per live slot).
+		assert.LessOrEqual(t, uuidToIdxLen, int(count)*2,
+			"uuidToIdx/validationMap should shrink after the deleted-partition heap drains; "+
+				"this is the regression guard for the 2026-04-30 leak")
+		assert.LessOrEqual(t, validationMapLen, int(count)*2,
+			"validationMap should shrink after the deleted-partition heap drains")
 
-	// Hard upper bound: under no circumstance should the maps hold one
-	// entry per Replace call. Before the fix this was exactly the
-	// failure mode (uuidToIdxLen would be ~replacePass).
-	assert.Less(t, uuidToIdxLen, int(count)*4,
-		"uuidToIdx leaks one entry per Replace; got %d entries after %d replaces",
-		uuidToIdxLen, replacePass)
-	assert.Less(t, validationMapLen, int(count)*4,
-		"validationMap leaks one entry per Replace; got %d entries after %d replaces",
-		validationMapLen, replacePass)
+		// Hard upper bound: under no circumstance should the maps hold one
+		// entry per Replace call. Before the fix this was exactly the
+		// failure mode (uuidToIdxLen would be ~replacePass).
+		assert.Less(t, uuidToIdxLen, int(count)*4,
+			"uuidToIdx leaks one entry per Replace; got %d entries after %d replaces",
+			uuidToIdxLen, replacePass)
+		assert.Less(t, validationMapLen, int(count)*4,
+			"validationMap leaks one entry per Replace; got %d entries after %d replaces",
+			validationMapLen, replacePass)
 
-	parts.Close()
-	<-drainerDone
+		// Tear down all bubble goroutines before returning.
+		cancel()
+		parts.Close()
+		<-drainerDone
+	})
 }

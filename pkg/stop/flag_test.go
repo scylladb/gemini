@@ -23,56 +23,62 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/scylladb/gemini/pkg/stop"
 )
 
 func TestHardStop(t *testing.T) {
-	t.Parallel()
-	testFlag, ctx, workersDone := initVars()
-	workers := 30
+	// synctest bubble: testSignals uses the fake clock + synctest.Wait() to
+	// drive the worker goroutines deterministically instead of real sleeps.
+	synctest.Test(t, func(t *testing.T) {
+		testFlag, ctx, workersDone := initVars()
+		workers := 30
 
-	testSignals(t, workersDone, workers, testFlag.IsHard, testFlag.SetHard)
-	if ctx.Err() == nil {
-		t.Error("Error:SetHard function does not apply hardStopHandler")
-	}
+		testSignals(t, workersDone, workers, testFlag.IsHard, testFlag.SetHard)
+		if ctx.Err() == nil {
+			t.Error("Error:SetHard function does not apply hardStopHandler")
+		}
+	})
 }
 
 func TestSoftStop(t *testing.T) {
-	t.Parallel()
-	testFlag, ctx, workersDone := initVars()
-	workers := 30
+	synctest.Test(t, func(t *testing.T) {
+		testFlag, ctx, workersDone := initVars()
+		workers := 30
 
-	testSignals(t, workersDone, workers, testFlag.IsSoft, testFlag.SetSoft)
-	if ctx.Err() != nil {
-		t.Error("Error:SetSoft function apply hardStopHandler")
-	}
+		testSignals(t, workersDone, workers, testFlag.IsSoft, testFlag.SetSoft)
+		if ctx.Err() != nil {
+			t.Error("Error:SetSoft function apply hardStopHandler")
+		}
+	})
 }
 
 func TestSoftOrHardStop(t *testing.T) {
-	t.Parallel()
-	testFlag, ctx, workersDone := initVars()
-	workers := 30
+	synctest.Test(t, func(t *testing.T) {
+		testFlag, ctx, workersDone := initVars()
+		workers := 30
 
-	testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetSoft)
-	if ctx.Err() != nil {
-		t.Error("Error:SetSoft function apply hardStopHandler")
-	}
+		testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetSoft)
+		if ctx.Err() != nil {
+			t.Error("Error:SetSoft function apply hardStopHandler")
+		}
 
-	workersDone.Store(uint32(0))
-	testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetHard)
-	if ctx.Err() != nil {
-		t.Error("Error:SetHard function apply hardStopHandler after SetSoft")
-	}
+		workersDone.Store(uint32(0))
+		testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetHard)
+		if ctx.Err() != nil {
+			t.Error("Error:SetHard function apply hardStopHandler after SetSoft")
+		}
 
-	testFlag, ctx, workersDone = initVars()
-	workersDone.Store(uint32(0))
+		testFlag, ctx, workersDone = initVars()
+		workersDone.Store(uint32(0))
 
-	testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetHard)
-	if ctx.Err() == nil {
-		t.Error("Error:SetHard function does not apply hardStopHandler")
-	}
+		testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetHard)
+		if ctx.Err() == nil {
+			t.Error("Error:SetHard function does not apply hardStopHandler")
+		}
+	})
 }
 
 func initVars() (testFlag *stop.Flag, ctx context.Context, workersDone *atomic.Uint32) {
@@ -101,15 +107,19 @@ func testSignals(
 			}
 		}()
 	}
-	time.Sleep(200 * time.Millisecond)
+
+	// Let the workers reach their first poll-sleep (or finish immediately, if
+	// the flag was already stopped by a previous call on a reused flag).
+	synctest.Wait()
+
 	setFunc(false)
 
-	for i := 0; i != 10; i++ {
-		time.Sleep(100 * time.Millisecond)
-		if workersDone.Load() == uint32(workers) {
-			break
-		}
-	}
+	// After the signal, each worker observes it on its next poll and exits.
+	// The root must sleep so the fake clock advances past the workers' poll
+	// interval (synctest.Wait alone does not advance the clock — it only waits
+	// for quiescence). synctest.Wait() then confirms every worker has exited.
+	time.Sleep(50 * time.Millisecond)
+	synctest.Wait()
 
 	setFuncName := runtime.FuncForPC(reflect.ValueOf(setFunc).Pointer()).Name()
 	setFuncName, _ = strings.CutSuffix(setFuncName, "-fm")

@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,21 +37,9 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string, dockerMode bool) store.Config {
+func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string, testPort, oraclePort int, dockerMode bool) store.Config {
 	tb.Helper()
 	var oracleConfig *store.ScyllaClusterConfig
-
-	// Allow overriding ports via environment for external clusters (e.g., docker-compose)
-	parsePort := func(env string) int {
-		if v := os.Getenv(env); v != "" {
-			if p, err := strconv.Atoi(v); err == nil && p > 0 {
-				return p
-			}
-		}
-		return 0
-	}
-	testPort := parsePort("GEMINI_TEST_PORT")
-	oraclePort := parsePort("GEMINI_ORACLE_PORT")
 
 	if len(oracleHosts) > 0 {
 		oracleConfig = &store.ScyllaClusterConfig{
@@ -260,7 +247,14 @@ func TestWorkload(t *testing.T) {
 			t.Parallel()
 
 			assert := require.New(t)
-			storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+			storeConfig := getStoreConfig(
+				t,
+				scyllaContainer.TestHosts,
+				scyllaContainer.OracleHosts,
+				scyllaContainer.TestPort(),
+				scyllaContainer.OraclePort(),
+				scyllaContainer.DockerMode,
+			)
 			schema := getSchema(t)
 			stopFlag := stop.NewFlag(t.Name())
 			t.Cleanup(func() {
@@ -299,7 +293,14 @@ func TestWorkloadWithoutOracle(t *testing.T) {
 			t.Parallel()
 			logger := getLogger(t)
 			assert := require.New(t)
-			storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+			storeConfig := getStoreConfig(
+				t,
+				scyllaContainer.TestHosts,
+				scyllaContainer.OracleHosts,
+				scyllaContainer.TestPort(),
+				scyllaContainer.OraclePort(),
+				scyllaContainer.DockerMode,
+			)
 			schema := getSchema(t)
 			stopFlag := stop.NewFlag(t.Name())
 			t.Cleanup(func() {
@@ -367,7 +368,7 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 
 	assert := require.New(t)
 	logger := getLogger(t)
-	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.TestPort(), scyllaContainer.OraclePort(), scyllaContainer.DockerMode)
 	schema := getSchema(t)
 	stopFlag := stop.NewFlag(t.Name())
 	t.Cleanup(func() {
@@ -460,7 +461,7 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 
 	assert := require.New(t)
 	logger := getLogger(t)
-	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.TestPort(), scyllaContainer.OraclePort(), scyllaContainer.DockerMode)
 	schema := getSchema(t, &typedef.Table{
 		Name: "table_all",
 		PartitionKeys: typedef.Columns{
@@ -580,7 +581,7 @@ func TestWorkloadHighConcurrency(t *testing.T) {
 
 	assert := require.New(t)
 	logger := getLogger(t)
-	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.TestPort(), scyllaContainer.OraclePort(), scyllaContainer.DockerMode)
 	schema := getSchema(t)
 	stopFlag := stop.NewFlag(t.Name())
 	t.Cleanup(func() {
@@ -629,7 +630,7 @@ func TestWorkloadDeleteHeavy(t *testing.T) {
 
 	assert := require.New(t)
 	logger := getLogger(t)
-	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.TestPort(), scyllaContainer.OraclePort(), scyllaContainer.DockerMode)
 
 	// Custom schema with short delete buckets to exercise the full
 	// deleted-partitions lifecycle within the test duration.
@@ -750,7 +751,7 @@ func TestWorkloadWriteThenValidate(t *testing.T) {
 
 	assert := require.New(t)
 	logger := getLogger(t)
-	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.DockerMode)
+	storeConfig := getStoreConfig(t, scyllaContainer.TestHosts, scyllaContainer.OracleHosts, scyllaContainer.TestPort(), scyllaContainer.OraclePort(), scyllaContainer.DockerMode)
 	schema := getSchema(t)
 	stopFlag := stop.NewFlag(t.Name())
 	t.Cleanup(func() {

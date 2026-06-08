@@ -17,6 +17,7 @@ package partitions
 import (
 	"container/heap"
 	"context"
+	"math"
 	"math/rand/v2"
 	"sync"
 	"sync/atomic"
@@ -59,16 +60,30 @@ type (
 		len  int
 	}
 
+	// rateEstimator computes a smoothed estimate of how many partitions per
+	// second are being admitted into the deleted-partitions tracker. It uses a
+	// fixed accounting window plus an exponential moving average so the estimate
+	// is stable under bursty traffic. All state is atomic; no external lock is
+	// required and observe() is safe to call from many goroutines concurrently.
+	rateEstimator struct {
+		windowStartNs  atomic.Int64
+		windowCount    atomic.Int64
+		ratePerSecBits atomic.Uint64 // float64 bits of the EWMA estimate (events/sec)
+	}
+
 	deletedPartitions struct {
 		ctx          context.Context
 		ch           chan typedef.PartitionKeys
 		cancel       context.CancelFunc
 		buckets      []time.Duration
 		heap         deletedPartitionHeap
+		rate         rateEstimator
 		deleted      atomic.Uint64
 		evicted      atomic.Uint64
+		sampledOut   atomic.Uint64
 		nextReadyNs  atomic.Int64
 		maxHeapSize  int
+		residenceSec float64
 		batchSize    int
 		lastShrinkNs int64
 		mu           sync.RWMutex
@@ -76,7 +91,63 @@ type (
 	}
 )
 
-const initialCapacity = 4096
+const (
+	initialCapacity = 4096
+
+	// rateWindowNs is the length of the accounting window over which the
+	// admission rate is measured before being folded into the EWMA.
+	rateWindowNs = int64(time.Second)
+
+	// rateEWMAAlpha is the smoothing factor for the admission-rate EWMA. A
+	// higher value reacts faster to changes; a lower value is steadier.
+	rateEWMAAlpha = 0.3
+)
+
+// observe records that n partitions were admitted at nowNs and rolls the
+// accounting window into the EWMA when it has elapsed. It is lock-free and safe
+// for concurrent use.
+func (e *rateEstimator) observe(n, nowNs int64) {
+	e.windowCount.Add(n)
+
+	start := e.windowStartNs.Load()
+	if start == 0 {
+		// First observation — anchor the window. If several goroutines race
+		// here only one wins; the rest simply keep counting.
+		e.windowStartNs.CompareAndSwap(0, nowNs)
+		return
+	}
+
+	elapsed := nowNs - start
+	if elapsed < rateWindowNs {
+		return
+	}
+
+	// Window elapsed: exactly one goroutine rolls it over.
+	if !e.windowStartNs.CompareAndSwap(start, nowNs) {
+		return
+	}
+
+	count := e.windowCount.Swap(0)
+	instant := float64(count) / (float64(elapsed) / float64(time.Second))
+
+	for {
+		oldBits := e.ratePerSecBits.Load()
+		old := math.Float64frombits(oldBits)
+		newRate := instant
+		if old > 0 {
+			newRate = rateEWMAAlpha*instant + (1-rateEWMAAlpha)*old
+		}
+		if e.ratePerSecBits.CompareAndSwap(oldBits, math.Float64bits(newRate)) {
+			return
+		}
+	}
+}
+
+// perSec returns the current smoothed admission rate in events per second, or 0
+// if not enough data has been gathered yet.
+func (e *rateEstimator) perSec() float64 {
+	return math.Float64frombits(e.ratePerSecBits.Load())
+}
 
 func newDeleted(base context.Context, timeBuckets []time.Duration, maxHeapSize int, start ...bool) *deletedPartitions {
 	// Always return a valid instance so callers can safely use it even when
@@ -110,6 +181,7 @@ func newDeleted(base context.Context, timeBuckets []time.Duration, maxHeapSize i
 		// Increase batch size so the emitter drains cohorts faster without tight loops
 		batchSize:    64,
 		maxHeapSize:  maxHeapSize,
+		residenceSec: residenceSeconds(timeBuckets),
 		lastShrinkNs: time.Now().UnixNano(),
 	}
 
@@ -476,6 +548,73 @@ func (d *deletedPartitions) processReady() time.Duration {
 	return 0
 }
 
+// residenceSeconds returns the time, in seconds, a partition is expected to
+// occupy the heap: the SUM of every bucket delay. A deleted partition is
+// re-scheduled through each bucket in turn before it is finally evicted, so it
+// stays in the heap for the total of all bucket durations — not just the
+// largest one. Using only the max would under-estimate residence for
+// multi-bucket configs, under-sample, and let the heap rely on hard eviction.
+// Returns 0 when no buckets are configured.
+func residenceSeconds(buckets []time.Duration) float64 {
+	var total time.Duration
+	for _, b := range buckets {
+		total += b
+	}
+	return total.Seconds()
+}
+
+// sampleRate returns the probability in (0, 1] with which a freshly-deleted
+// partition should be admitted into the heap. The goal is to keep the
+// steady-state heap size near maxHeapSize: over one residence window the
+// tracker admits roughly admissionRate * residenceSeconds partitions, so
+// admitting a maxHeapSize/(admissionRate*residenceSeconds) fraction leaves
+// about maxHeapSize entries once partitions start aging out. residenceSeconds
+// is the SUM of all bucket delays (a partition passes through every bucket).
+//
+// Example: at 2000 deletes/s, a single 1h bucket (3600s total residence) and a
+// 1M cap, sampleRate = 1e6 / (2000*3600) ≈ 0.139 (≈14%).
+//
+// Returns 1.0 (admit everything) when sampling is disabled (no cap configured),
+// when the admission rate is not yet known, or when the projected inflow is
+// already within the cap.
+func (d *deletedPartitions) sampleRate() float64 {
+	if d.maxHeapSize <= 0 || d.residenceSec <= 0 {
+		return 1.0
+	}
+
+	rate := d.rate.perSec()
+	if rate <= 0 {
+		return 1.0
+	}
+
+	expected := rate * d.residenceSec
+	if expected <= float64(d.maxHeapSize) {
+		return 1.0
+	}
+
+	return float64(d.maxHeapSize) / expected
+}
+
+// admit reports whether a single partition should be kept given a sampling
+// rate previously computed by sampleRate. A rate >= 1.0 always admits.
+//
+//go:inline
+func admit(rate float64) bool {
+	return rate >= 1.0 || rand.Float64() < rate
+}
+
+// dropSampled releases the keys of a partition rejected by the admission
+// sampler and updates the relevant counters. The partition is still counted as
+// deleted; it is simply not tracked for re-validation.
+func (d *deletedPartitions) dropSampled(keys typedef.PartitionKeys) {
+	if keys.Release != nil {
+		keys.Release()
+	}
+	d.sampledOut.Add(1)
+	metrics.DeletedPartitionsSampledOut.Add(1)
+	d.deleted.Add(1)
+}
+
 // Delete adds a deleted partition to the tracking system
 // Optimized with:
 // - Minimal lock time
@@ -492,6 +631,15 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	}
 
 	now := time.Now()
+
+	// Measure the admission rate and sample before touching the heap so that
+	// under high DELETE throughput we never let the heap balloon past its cap.
+	d.rate.observe(1, now.UnixNano())
+	if rate := d.sampleRate(); !admit(rate) {
+		d.dropSampled(keys)
+		return
+	}
+
 	keys.DeletedAtNS = uint64(now.UnixNano())
 	// Apply jitter to avoid aligning many items on the exact same boundary
 	readyAt := now.Add(d.buckets[0]).Add(jitterDuration(d.buckets[0]))
@@ -589,6 +737,34 @@ func (d *deletedPartitions) DeleteBulk(keys []typedef.PartitionKeys) {
 	}
 
 	now := time.Now()
+
+	// Measure the admission rate over the whole batch, then sample per-key so
+	// the kept fraction matches the configured cap under high throughput.
+	d.rate.observe(int64(len(keys)), now.UnixNano())
+	if rate := d.sampleRate(); rate < 1.0 {
+		kept := keys[:0]
+		var dropped int
+		for i := range keys {
+			if admit(rate) {
+				kept = append(kept, keys[i])
+				continue
+			}
+			if keys[i].Release != nil {
+				keys[i].Release()
+			}
+			dropped++
+		}
+		keys = kept
+		if dropped > 0 {
+			d.sampledOut.Add(uint64(dropped))
+			metrics.DeletedPartitionsSampledOut.Add(float64(dropped))
+			d.deleted.Add(uint64(dropped))
+		}
+		if len(keys) == 0 {
+			return
+		}
+	}
+
 	// Apply the same jitter policy for bulk scheduling
 	readyAt := now.Add(d.buckets[0]).Add(jitterDuration(d.buckets[0]))
 	readyAtNs := readyAt.UnixNano()
