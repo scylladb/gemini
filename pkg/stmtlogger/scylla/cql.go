@@ -29,6 +29,7 @@ import (
 	"github.com/scylladb/gocqlx/v3/qb"
 
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -161,8 +162,13 @@ func newStatements(
 }
 
 func (c *cqlStatements) Insert(ctx context.Context, item stmtlogger.Item) error {
-	valuesPtr := c.buildArgs(item)
+	valuesPtr, ok := c.buildArgs(item)
 	defer c.releaseArgs(valuesPtr)
+
+	if !ok {
+		metrics.StatementLoggerMalformedTotal.Inc()
+		return nil
+	}
 
 	q := c.session.QueryWithContext(ctx, c.insertStmt, *valuesPtr...)
 	defer q.Release()
@@ -174,12 +180,13 @@ func (c *cqlStatements) Insert(ctx context.Context, item stmtlogger.Item) error 
 	return nil
 }
 
-func (c *cqlStatements) buildArgs(item stmtlogger.Item) *[]any {
+func (c *cqlStatements) buildArgs(item stmtlogger.Item) (*[]any, bool) {
 	valuesPtr := c.valuePool.Get().(*[]any)
 	// reset capacity but keep underlying storage
 	*valuesPtr = (*valuesPtr)[:0]
-	*valuesPtr = c.fillArgs(*valuesPtr, item)
-	return valuesPtr
+	var ok bool
+	*valuesPtr, ok = c.fillArgs(*valuesPtr, item)
+	return valuesPtr, ok
 }
 
 // releaseArgs returns a previously borrowed args slice to the pool.
@@ -195,9 +202,24 @@ func (c *cqlStatements) argsCap() int {
 
 // fillArgs fills dst with the arguments for the provided item and returns the
 // resulting slice. dst is truncated to length 0 but capacity is preserved.
-func (c *cqlStatements) fillArgs(dst []any, item stmtlogger.Item) []any {
+//
+// The second return is false when the item is malformed — specifically when the
+// number of partition-key values it carries does not match the _logs INSERT
+// arity (c.partitionKeys.LenValues()). Such an item, if sent, makes gocql reject
+// the whole batch client-side with "expected N values got M". Callers MUST drop
+// the item (and count metrics.StatementLoggerMalformedTotal) rather than enqueue
+// it, otherwise a single buggy generator floods errors and triggers the
+// row-by-row fallback storm that previously OOM-killed the loader.
+func (c *cqlStatements) fillArgs(dst []any, item stmtlogger.Item) ([]any, bool) {
 	// truncate to zero length, keep capacity
 	dst = dst[:0]
+
+	// Append the partition-key values straight into the pooled dst (no throwaway
+	// intermediate slice) and validate the arity by the number appended.
+	dst = item.PartitionKeys.Values.AppendCQLValues(dst, c.partitionKeys)
+	if len(dst) != c.partitionKeys.LenValues() {
+		return dst[:0], false
+	}
 
 	var itemErr string
 	if item.Error.IsLeft() {
@@ -208,7 +230,6 @@ func (c *cqlStatements) fillArgs(dst []any, item stmtlogger.Item) []any {
 		itemErr = item.Error.MustRight()
 	}
 
-	dst = append(dst, item.PartitionKeys.Values.ToCQLValues(c.partitionKeys)...)
 	dst = append(dst,
 		item.Start.Time,
 		item.Type,
@@ -221,7 +242,7 @@ func (c *cqlStatements) fillArgs(dst []any, item stmtlogger.Item) []any {
 		item.Duration.Duration,
 	)
 
-	return dst
+	return dst, true
 }
 
 func fetchPartitionKeys(ctx context.Context, session *gocql.Session, stmt string, values []any) ([]json.RawMessage, error) {

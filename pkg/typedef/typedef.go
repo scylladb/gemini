@@ -359,6 +359,25 @@ func (v *Values) ToCQLValues(pks Columns) []any {
 	return values
 }
 
+// AppendCQLValues appends this Values' CQL bind values for the given partition
+// keys to dst (in pks order) and returns the extended slice. It is the
+// allocation-free counterpart to ToCQLValues: callers that already hold a
+// reusable/pooled buffer (e.g. the statement-logger committer) avoid the
+// throwaway intermediate slice ToCQLValues would otherwise allocate per call.
+func (v *Values) AppendCQLValues(dst []any, pks Columns) []any {
+	if v == nil {
+		return dst
+	}
+
+	v.mu.RLock()
+	for _, pk := range pks {
+		dst = append(dst, v.data[pk.Name]...)
+	}
+	v.mu.RUnlock()
+
+	return dst
+}
+
 func (v *Values) Merge(values *Values) {
 	// Lock receiver first, then argument — consistent ordering prevents ABBA deadlock
 	// when two Values merge into each other concurrently.

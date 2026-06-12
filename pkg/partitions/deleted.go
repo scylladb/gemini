@@ -61,9 +61,12 @@ type (
 	}
 
 	// rateEstimator computes a smoothed estimate of how many partitions per
-	// second are being admitted into the deleted-partitions tracker. It uses a
-	// fixed accounting window plus an exponential moving average so the estimate
-	// is stable under bursty traffic. All state is atomic; no external lock is
+	// second are being DELETED — i.e. the incoming delete rate, measured before
+	// admission sampling (observe() is called on every Delete/DeleteBulk, ahead
+	// of the sampleRate()/admit() decision). sampleRate() then derives the
+	// admission probability from this pre-sampling rate. It uses a fixed
+	// accounting window plus an exponential moving average so the estimate is
+	// stable under bursty traffic. All state is atomic; no external lock is
 	// required and observe() is safe to call from many goroutines concurrently.
 	rateEstimator struct {
 		windowStartNs  atomic.Int64
@@ -95,17 +98,17 @@ const (
 	initialCapacity = 4096
 
 	// rateWindowNs is the length of the accounting window over which the
-	// admission rate is measured before being folded into the EWMA.
+	// incoming delete rate is measured before being folded into the EWMA.
 	rateWindowNs = int64(time.Second)
 
-	// rateEWMAAlpha is the smoothing factor for the admission-rate EWMA. A
+	// rateEWMAAlpha is the smoothing factor for the delete-rate EWMA. A
 	// higher value reacts faster to changes; a lower value is steadier.
 	rateEWMAAlpha = 0.3
 )
 
-// observe records that n partitions were admitted at nowNs and rolls the
-// accounting window into the EWMA when it has elapsed. It is lock-free and safe
-// for concurrent use.
+// observe records that n partitions were deleted at nowNs (counted before
+// admission sampling) and rolls the accounting window into the EWMA when it has
+// elapsed. It is lock-free and safe for concurrent use.
 func (e *rateEstimator) observe(n, nowNs int64) {
 	e.windowCount.Add(n)
 

@@ -23,7 +23,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync/atomic"
-	"syscall"
 )
 
 // The ScyllaDB node pool is per-process, but `go test ./...` runs each package's
@@ -66,14 +65,12 @@ func newRegistryToken() string {
 }
 
 // pidAlive reports whether a process with the given PID currently exists.
+// The platform-specific liveness probe lives in platform_{unix,windows}.go.
 func pidAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	// Signal 0 performs error checking without sending a signal: nil means the
-	// process exists; EPERM means it exists but is owned by someone else.
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
+	return processAlive(pid)
 }
 
 // withRegistry runs fn while holding an exclusive flock on the registry, passing
@@ -91,11 +88,11 @@ func withRegistry(fn func([]registryEntry) []registryEntry) {
 	}
 	defer func() { _ = lock.Close() }()
 
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	if err = flockExclusive(lock); err != nil {
 		fn(nil)
 		return
 	}
-	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
+	defer func() { _ = flockUnlock(lock) }()
 
 	entries := reapDeadOwners(readRegistry())
 	writeRegistry(fn(entries))

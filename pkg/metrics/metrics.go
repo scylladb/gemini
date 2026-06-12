@@ -168,7 +168,9 @@ var (
 	// committer cannot keep up (e.g. Scylla logger cluster stalled by a
 	// nemesis) and drains back to zero once the committer recovers.
 	// Items are NEVER dropped — this gauge is what you watch to detect a
-	// stalled committer.
+	// stalled committer. The buffer is bounded: once it reaches its cap LogStmt
+	// blocks producers (back-pressure) rather than dropping or growing without
+	// limit, so this gauge plateaus at the cap instead of climbing toward OOM.
 	StatementLoggerOverflowItems = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "statement_logger_overflow_items",
@@ -182,6 +184,21 @@ var (
 		prometheus.CounterOpts{
 			Name: "statement_logger_overflow_total",
 			Help: "Total number of statement log items routed via the overflow buffer because the channel was full.",
+		},
+	)
+
+	// StatementLoggerMalformedTotal counts statement log items dropped by the
+	// committer because the number of partition-key values bound did not match
+	// the _logs INSERT arity (e.g. an item built with empty PartitionKeys.Values
+	// would bind too few values and gocql would reject it client-side with
+	// "expected N values got M"). Dropping such items prevents an error flood
+	// and the row-by-row fallback storm that previously OOM-killed the loader.
+	// Non-zero means an upstream generator emitted a statement without
+	// fully-populated partition-key values — investigate that path.
+	StatementLoggerMalformedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "statement_logger_malformed_total",
+			Help: "Total number of statement log items dropped by the committer due to a partition-key bind-arity mismatch.",
 		},
 	)
 
@@ -278,6 +295,7 @@ func init() {
 		StatementLoggerItems,
 		StatementLoggerOverflowItems,
 		StatementLoggerOverflowTotal,
+		StatementLoggerMalformedTotal,
 		DeletedPartitionsHeapEvictions,
 		DeletedPartitionsSampledOut,
 		StatementLoggerFlushes,

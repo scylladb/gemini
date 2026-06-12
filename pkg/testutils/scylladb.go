@@ -110,21 +110,31 @@ func ensureHostAIOCapacity(tb testing.TB) {
 
 // hostReachable reports whether a TCP connection to addr can be established
 // within a short timeout. Results are cached per address so the (possibly slow)
-// probe is paid at most once for a given host:port across the whole test run.
+// probe is normally paid at most once for a given host:port across the whole
+// test run.
+//
+// The network probe is performed WITHOUT holding reachabilityMu: dialing under
+// the lock would serialize every reachability check behind a single dial that
+// can take the full 3s timeout, stalling unrelated tests. The lock guards only
+// the cache lookup/update. Two goroutines racing on the same unseen address may
+// both dial once — harmless and far cheaper than serializing all probes.
 func hostReachable(addr string) bool {
 	reachabilityMu.Lock()
-	defer reachabilityMu.Unlock()
-
-	if reachable, ok := reachabilityCache[addr]; ok {
+	reachable, ok := reachabilityCache[addr]
+	reachabilityMu.Unlock()
+	if ok {
 		return reachable
 	}
 
 	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
-	reachable := err == nil
+	reachable = err == nil
 	if conn != nil {
 		_ = conn.Close()
 	}
+
+	reachabilityMu.Lock()
 	reachabilityCache[addr] = reachable
+	reachabilityMu.Unlock()
 
 	return reachable
 }
@@ -334,10 +344,10 @@ func installSignalCleanup() {
 		sig := <-ch
 		CloseScyllaPool()
 		signal.Stop(ch)
-		if s, ok := sig.(syscall.Signal); ok {
-			signal.Reset(s)
-			_ = syscall.Kill(os.Getpid(), s)
-		}
+		// Restore default handling and re-raise so the process exits with normal
+		// signal semantics. The re-raise is platform-specific (no Kill on
+		// Windows); see platform_{unix,windows}.go.
+		reRaiseSignal(sig)
 		os.Exit(1)
 	}()
 }

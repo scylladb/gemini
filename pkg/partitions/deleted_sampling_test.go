@@ -323,8 +323,12 @@ func TestSamplingBoundsHeapUnderSustainedOverloadIntegration(t *testing.T) {
 			"eviction should be a small minority of drops once the rate estimate has settled")
 
 		// 3. The heap stabilizes near the configured cap (not far below, not
-		//    pinned at the hard cap by constant eviction).
-		assert.InDelta(t, float64(heapCap), meanLen, float64(heapCap)*0.9,
+		//    pinned at the hard cap by constant eviction). The controller is
+		//    deterministic under the fake clock, so the steady-state mean sits
+		//    just under the cap (~1950 for cap 2000) with very low variance; a
+		//    ±30% band proves "hovers near the cap" without being flaky on the
+		//    residual admit() randomness.
+		assert.InDelta(t, float64(heapCap), meanLen, float64(heapCap)*0.3,
 			"steady-state heap length should hover near the cap")
 	})
 }

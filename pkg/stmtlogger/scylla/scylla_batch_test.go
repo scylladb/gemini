@@ -70,10 +70,40 @@ func TestCQLStatements_FillArgsAndArgsCap(t *testing.T) {
 	// fillArgs should append in proper order and preserve capacity
 	dst := make([]any, 0, c.argsCap())
 	item := makeItem(pks, map[string][]any{"pk0": {"k"}, "pk1": {1}}, stmtlogger.TypeTest, 0)
-	out := c.fillArgs(dst, item)
+	out, ok := c.fillArgs(dst, item)
+	require.True(t, ok)
 	require.Equal(t, c.argsCap(), cap(out))
 	// first come partition keys in order
 	require.GreaterOrEqual(t, len(out), 2)
 	assert.Equal(t, "k", out[0])
 	assert.Equal(t, 1, out[1])
+
+	// A malformed item (missing one partition-key column's values) must be
+	// reported so the committer can drop it instead of poisoning the batch.
+	bad := makeItem(pks, map[string][]any{"pk0": {"k"}}, stmtlogger.TypeTest, 1)
+	_, ok = c.fillArgs(dst, bad)
+	assert.False(t, ok, "item with missing partition-key values must be rejected")
+}
+
+// BenchmarkFillArgs measures the per-item committer binding cost. With the
+// pooled dst reused across iterations, the partition-key binding is
+// allocation-free (AppendCQLValues writes straight into dst); the remaining
+// allocations come from prepareValuesOptimized formatting the values column.
+func BenchmarkFillArgs(b *testing.B) {
+	pks := typedef.Columns{
+		{Name: "pk0", Type: typedef.TypeText},
+		{Name: "pk1", Type: typedef.TypeInt},
+	}
+	c := makeTestCQL(pks)
+	item := makeItem(pks, map[string][]any{"pk0": {"k"}, "pk1": {1}}, stmtlogger.TypeTest, 0)
+	dst := make([]any, 0, c.argsCap())
+
+	b.ReportAllocs()
+	for range b.N {
+		var ok bool
+		dst, ok = c.fillArgs(dst, item)
+		if !ok {
+			b.Fatal("unexpected malformed item")
+		}
+	}
 }

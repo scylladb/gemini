@@ -53,9 +53,11 @@ func TestReplaceDoesNotLeakUUIDToIdx(t *testing.T) {
 			replacePass = 5_000
 		)
 
-		// Use a bubble-internal context (NOT t.Context()): a goroutine blocked
-		// on a channel owned outside the bubble is never "durably blocked", so
-		// the fake clock would not advance.
+		// Derive from t.Context(), which is bubble-aware under synctest (its
+		// Done channel lives inside the bubble), so goroutines selecting on it
+		// still count as durably blocked and the fake clock advances. WithCancel
+		// adds an explicit handle to tear the workers down deterministically at
+		// the end of the test.
 		ctx, cancel := context.WithCancel(t.Context())
 
 		src, fn := distributions.New(distributions.Uniform, count, 1, 0, 0)
