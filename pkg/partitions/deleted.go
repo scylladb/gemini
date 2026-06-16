@@ -40,10 +40,15 @@ import (
 // The heap ensures we always process partitions in time order, making it efficient to check
 // if any partitions are ready for validation without scanning all entries.
 //
-// Eviction policy: when the heap exceeds maxHeapSize, entries with the *largest* readyAt
-// (i.e. the newest, furthest from their validation deadline) are discarded.  This preserves
-// entries that have nearly waited out their full bucket window — the exact opposite of what
-// would happen if we evicted the minimum.
+// Eviction policy: when the heap exceeds maxHeapSize, leaf entries (which carry a
+// large readyAt — newest, furthest from their validation deadline) are discarded
+// in O(1) via evictLeafInline. The root (soonest-ready) is never evicted, so we
+// always preserve the entries closest to their validation deadline — the exact
+// opposite of what would happen if we evicted the minimum. Eviction is only a
+// backstop to admission sampling (see rateEstimator/sampleRate), so evicting an
+// approximate-newest leaf instead of scanning for the exact maximum is a
+// deliberate trade that keeps the Delete hot path O(log n) under a long
+// residence window.
 type (
 	deletedPartition struct {
 		readyAt time.Time
@@ -289,67 +294,32 @@ func (h *deletedPartitionHeap) pushInline(dp deletedPartition) {
 	h.data[pos] = dp
 }
 
-// siftInline restores min-heap order at pos by first bubbling up, then down.
-// Use this after placing a replacement element at an arbitrary position.
+// evictLeafInline removes and returns the last element of the backing array in
+// O(1). That element is always a leaf (index h.len-1 >= h.len/2), so removing it
+// preserves the min-heap ordering with no sift, and it never touches the root —
+// the soonest-ready entry we most want to keep.
+//
+// It is the hard-cap eviction backstop. We deliberately evict "a recent leaf"
+// rather than scanning all leaves for the exact maximum readyAt: the previous
+// O(n) scan ran under d.mu on every admitted Delete once the heap reached its
+// cap, so for a long residence window (e.g. a single 1h bucket, where the heap
+// sits at its cap for the whole hour) it serialized all delete workers behind a
+// growing leaf scan and collapsed throughput. The semantic loss is negligible —
+// for a single bucket every entry's readyAt sits within one jitter window
+// (<=5s) of the others, and eviction is already a lossy backstop to admission
+// sampling — while the cost drops from O(n) to O(1).
 //
 //go:inline
-func (h *deletedPartitionHeap) siftInline(pos int) {
-	if pos >= h.len {
-		return
-	}
-
-	elem := h.data[pos]
-
-	// Bubble up
-	for pos > 0 {
-		parent := (pos - 1) >> 1
-		if !elem.readyAt.Before(h.data[parent].readyAt) {
-			break
-		}
-		h.data[pos] = h.data[parent]
-		pos = parent
-	}
-	h.data[pos] = elem
-
-	// Bubble down from the final bubble-up position
-	h.fixInline(pos)
-}
-
-// popMaxInline removes and returns the element with the largest readyAt value.
-// In a min-heap the maximum always lives in a leaf node (indices [len/2, len-1]).
-// This is the correct operation for eviction: we discard the newest entries
-// (furthest from their validation deadline) rather than the entries that are
-// soonest to be validated.
-//
-//go:inline
-func (h *deletedPartitionHeap) popMaxInline() (deletedPartition, bool) {
+func (h *deletedPartitionHeap) evictLeafInline() (deletedPartition, bool) {
 	if h.len == 0 {
 		return deletedPartition{}, false
 	}
 
-	// Scan leaf nodes to find the maximum.
-	maxIdx := h.len / 2
-	for i := maxIdx + 1; i < h.len; i++ {
-		if h.data[i].readyAt.After(h.data[maxIdx].readyAt) {
-			maxIdx = i
-		}
-	}
-
-	maxElem := h.data[maxIdx]
 	h.len--
-
-	if maxIdx == h.len {
-		// Max was the last element — just clear and return.
-		h.data[h.len] = deletedPartition{}
-		return maxElem, true
-	}
-
-	// Replace the gap with the last element and restore heap order.
-	h.data[maxIdx] = h.data[h.len]
+	leaf := h.data[h.len]
 	h.data[h.len] = deletedPartition{} // Clear for GC
-	h.siftInline(maxIdx)
 
-	return maxElem, true
+	return leaf, true
 }
 
 // popInline removes and returns the minimum element
@@ -663,10 +633,10 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	wasEmpty := d.heap.Len() == 0
 	d.heap.pushInline(dp)
 
-	// Evict oldest entries if the heap exceeds the configured cap.
-	// This bounds memory at the cost of skipping re-validation for the
-	// evicted (oldest) entries. With high DELETE throughput and long bucket
-	// durations, the heap can grow to millions of entries otherwise.
+	// Backstop eviction if the heap still exceeds the configured cap (admission
+	// sampling above is the primary bound). This drops approximate-newest leaf
+	// entries in O(1) each, skipping their re-validation, to keep memory bounded
+	// under high DELETE throughput and long bucket durations.
 	evicted := d.collectExcess()
 
 	// Update next ready time if this is the earliest or heap was empty
@@ -682,11 +652,11 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	d.deleted.Add(1)
 }
 
-// collectExcess pops the newest (largest readyAt) entries from the heap when
-// it exceeds maxHeapSize and returns them. Evicting the entries furthest from
-// their validation deadline is the correct policy: entries that have nearly
-// waited out their full bucket window are preserved, while freshly-added
-// entries with the longest remaining wait are discarded instead.
+// collectExcess removes leaf entries (approximate-newest; see evictLeafInline)
+// from the heap when it exceeds maxHeapSize and returns them. Evicting leaves
+// keeps the entries closest to their validation deadline (the root is never
+// touched) while staying O(1) per eviction, so this stays cheap even when the
+// heap sits at its cap for a long residence window.
 // The caller is responsible for invoking onDone on each returned entry AFTER
 // releasing d.mu.
 // MUST be called with d.mu held.
@@ -696,7 +666,7 @@ func (d *deletedPartitions) collectExcess() []deletedPartition {
 	}
 	var evicted []deletedPartition
 	for d.heap.Len() > d.maxHeapSize {
-		e, ok := d.heap.popMaxInline()
+		e, ok := d.heap.evictLeafInline()
 		if !ok {
 			break
 		}
@@ -791,7 +761,7 @@ func (d *deletedPartitions) DeleteBulk(keys []typedef.PartitionKeys) {
 		})
 	}
 
-	// Evict oldest entries if the heap exceeds the configured cap.
+	// Backstop eviction (admission sampling above is the primary bound).
 	evicted := d.collectExcess()
 
 	// Update next ready time if needed

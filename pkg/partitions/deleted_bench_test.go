@@ -16,6 +16,7 @@ package partitions
 
 import (
 	"container/heap"
+	"strconv"
 	"testing"
 	"time"
 
@@ -486,4 +487,28 @@ func BenchmarkConcurrentBulk(b *testing.B) {
 			}
 		})
 	})
+}
+
+// BenchmarkEvictAtCap guards the O(1) hard-cap eviction. It measures the
+// steady-state cost of one push followed by one backstop eviction while the
+// heap sits at its cap, across cap sizes. The ns/op must stay FLAT across cap:
+// the previous exact-max eviction scanned all leaves (O(n)) and this cost grew
+// linearly with the heap, collapsing Delete throughput under a long residence
+// window (e.g. a single 1h bucket). evictLeafInline drops it to O(1).
+func BenchmarkEvictAtCap(b *testing.B) {
+	for _, capSize := range []int{1_000, 10_000, 100_000} {
+		b.Run(strconv.Itoa(capSize), func(b *testing.B) {
+			h := &deletedPartitionHeap{data: make([]deletedPartition, capSize+8)}
+			base := time.Now()
+			for i := range capSize {
+				h.pushInline(deletedPartition{readyAt: base.Add(time.Duration(i) * time.Microsecond)})
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := range b.N {
+				h.pushInline(deletedPartition{readyAt: base.Add(time.Duration(capSize+i) * time.Microsecond)})
+				_, _ = h.evictLeafInline()
+			}
+		})
+	}
 }
