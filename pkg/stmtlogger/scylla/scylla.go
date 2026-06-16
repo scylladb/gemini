@@ -55,12 +55,13 @@ const (
 
 type (
 	Logger struct {
-		logger        *zap.Logger
-		channel       <-chan stmtlogger.Item
-		cqlStatements *cqlStatements
-		fetchHook     func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError) (cqlDataMap, error)
-		wg            sync.WaitGroup
-		curWorkers    atomic.Int32
+		logger            *zap.Logger
+		channel           <-chan stmtlogger.Item
+		cqlStatements     *cqlStatements
+		fetchHook         func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError) (cqlDataMap, error)
+		wg                sync.WaitGroup
+		curWorkers        atomic.Int32
+		malformedWarnOnce sync.Once
 	}
 
 	statementChData struct {
@@ -437,12 +438,33 @@ func (s *Logger) executeBatchWithFallback(ctx context.Context, batch *gocql.Batc
 		return
 	}
 
+	// If the batch failed because its deadline elapsed (or the ctx is otherwise
+	// already done) the downstream _logs cluster is stalled. The row-by-row
+	// fallback below would fire up to committerBatchSize individual queries on
+	// the SAME expired ctx — every one fails instantly, producing a burst of
+	// log spam, and when the cluster is merely slow (not fully stalled) those
+	// extra writes amplify load on the very cluster that is already behind.
+	// Skip the fallback in that case; the items are dropped (bounded loss) and
+	// the upstream overflow back-pressure handles the rest.
+	if errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+		s.logger.Error("statements batch insert timed out; skipping row-by-row fallback (downstream _logs cluster stalled)",
+			zap.Error(err),
+			zap.Int("batch_size", len(batch.Entries)),
+		)
+		return
+	}
+
 	s.logger.Error("failed to insert batch into statements table",
 		zap.Error(err),
 		zap.Int("batch_size", len(batch.Entries)),
 	)
 
 	for i := range count {
+		// Stop the moment the ctx expires mid-fallback — the remaining
+		// per-item queries would only pile more doomed work onto a slow cluster.
+		if ctx.Err() != nil {
+			return
+		}
 		if err = s.execQuery(ctx, s.cqlStatements.insertStmt, held[i]...); err != nil && !errors.Is(err, context.Canceled) {
 			s.logger.Error("failed to insert item after batch failure", zap.Error(err))
 		}
@@ -496,7 +518,15 @@ func (s *Logger) insertWorker() {
 			if it.StatementType.IsSchema() || it.StatementType.IsSelect() {
 				return
 			}
-			held[idx] = s.cqlStatements.fillArgs(held[idx], it)
+			args, valid := s.cqlStatements.fillArgs(held[idx], it)
+			held[idx] = args // retain any grown backing array for reuse
+			if !valid {
+				// Malformed item (partition-key bind-arity mismatch). Drop it
+				// instead of poisoning the batch — a single bad item would make
+				// gocql reject the whole batch client-side.
+				s.recordMalformed(it)
+				return
+			}
 			batch.Query(s.cqlStatements.insertStmt, held[idx]...)
 			idx++
 		}
@@ -549,8 +579,32 @@ func (s *Logger) insert(it stmtlogger.Item) {
 	}
 
 	// Build arguments and execute a single insert query.
-	args := s.cqlStatements.fillArgs(make([]any, 0, s.cqlStatements.argsCap()), it)
+	args, ok := s.cqlStatements.fillArgs(make([]any, 0, s.cqlStatements.argsCap()), it)
+	if !ok {
+		s.recordMalformed(it)
+		return
+	}
 	_ = s.execQuery(context.Background(), s.cqlStatements.insertStmt, args...)
+}
+
+// recordMalformed counts a dropped log item whose partition-key bind arity did
+// not match the _logs INSERT, and warns ONCE per process with the offending
+// statement so the buggy upstream generator can be found. With the per-partition
+// emission fix in pkg/store/observers.go this path should be unreachable; a
+// non-zero statement_logger_malformed_total (or this warning) means a generator
+// regressed and is emitting statements without fully-populated partition keys.
+// The warning is one-shot to avoid log flooding; the metric counts every drop.
+func (s *Logger) recordMalformed(it stmtlogger.Item) {
+	metrics.StatementLoggerMalformedTotal.Inc()
+	s.malformedWarnOnce.Do(func() {
+		s.logger.Warn(
+			"dropping statement log item: partition-key bind arity mismatch "+
+				"(an upstream generator emitted a statement without fully-populated "+
+				"partition keys); further drops counted by statement_logger_malformed_total",
+			zap.String("statement", it.Statement),
+			zap.String("statement_type", it.StatementType.String()),
+		)
+	})
 }
 
 func (s *Logger) openStatementFile(name string) (*bufio.Writer, func() error, error) {

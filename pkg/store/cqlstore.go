@@ -52,6 +52,11 @@ func applyLocalhostTranslator(cluster *gocql.ClusterConfig, logger *zap.Logger) 
 	cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, p int) (net.IP, int) {
 		return localhostIP, p
 	})
+	// The shard-aware port (19042) is published on a *different* host port than
+	// the one we connected through, so the translated address 127.0.0.1:19042 is
+	// unreachable. Disable shard-aware connections so gocql only uses the mapped
+	// CQL port.
+	cluster.DisableShardAwarePort = true
 }
 
 type cqlStore struct {
@@ -467,44 +472,15 @@ func CreateCluster(
 		}
 	}
 
-	// When connecting through a port-mapped proxy (e.g. Docker on macOS), the
-	// addresses advertised by peers in system.peers are the container-internal IPs
-	// which are unreachable from the host.  Install an AddressTranslator that
-	// redirects every discovered peer back to the first contact-point host on the
-	// configured port, and disable the shard-aware dialer to prevent extra
-	// connections to shard-specific ports on unreachable internal IPs.
-	// Only activated for non-default ports (port != 9042) to avoid silently
-	// breaking standard production deployments.  Matching logic lives in
-	// pkg/stmtlogger/scylla/helpers.go (newSession) and pkg/testutils/scylladb.go (createClusterConfig).
-	if config.Port > 0 && config.Port != 9042 && len(config.Hosts) > 0 {
-		contactIP := net.ParseIP(config.Hosts[0])
-		if contactIP == nil {
-			// config.Hosts[0] is a hostname rather than a literal IP address;
-			// resolve it so the AddressTranslator has a concrete IP to return.
-			var addrs []string
-			addrs, err = net.LookupHost(config.Hosts[0])
-			if err != nil || len(addrs) == 0 {
-				logger.Warn("address translation skipped: could not resolve contact point hostname",
-					zap.String("host", config.Hosts[0]),
-					zap.Error(err),
-				)
-			} else {
-				contactIP = net.ParseIP(addrs[0])
-			}
-		}
-		mappedPort := config.Port
-		if contactIP != nil {
-			logger.Warn("address translation active: all peer IPs will be rewritten to the first contact-point host",
-				zap.String("contact_ip", config.Hosts[0]),
-				zap.Int("port", mappedPort),
-				zap.String("cluster", string(config.Name)),
-			)
-			cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, _ int) (net.IP, int) {
-				return contactIP, mappedPort
-			})
-			cluster.DisableShardAwarePort = true
-		}
-	}
+	// NOTE: address translation is installed ONLY under the explicit DockerMode
+	// flag above (applyLocalhostTranslator). It is deliberately never inferred
+	// from the port or host values: a real multi-node cluster legitimately runs
+	// on a non-default CQL port, and rewriting every discovered peer onto a
+	// single contact point (plus disabling shard-aware routing) would silently
+	// break it. The Docker/testcontainer paths set DockerMode explicitly — see
+	// pkg/stmtlogger/scylla/helpers.go (newSession) and
+	// pkg/testutils/scylladb.go (createClusterConfig), which key off the same
+	// flag.
 
 	return cluster, nil
 }

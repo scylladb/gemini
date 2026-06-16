@@ -94,13 +94,25 @@ func (g *Generator) Delete(ctx context.Context) (*typedef.Stmt, error) {
 	case DeleteClusteringSubset:
 		return g.deleteClusteringSubset(ctx)
 	case DeleteMultiplePartitions:
+		// deleteMultiplePartitions is intentionally NOT used: it builds a
+		// per-column IN delete (pk1 IN (...) AND pk2 IN (...)), which CQL
+		// evaluates as the CARTESIAN PRODUCT of the values. For a composite
+		// partition key (the only case where getMultiplePartitionKeys returns
+		// >1) that tombstones up to MaxCartesianProductCount partition
+		// combinations per statement — almost all of which never existed — a
+		// tombstone storm that collapses SCT throughput. A tuple IN
+		// ((pk1,pk2,...) IN ((..),(..))) would delete only the real partitions
+		// but ScyllaDB rejects multi-column relations on partition keys
+		// ("Multi-column relations can only be applied to clustering columns").
+		// Until a safe multi-partition delete exists, fall back to a single
+		// whole-partition delete.
 		return g.deleteSinglePartition(ctx)
 	default:
 		panic("unknown delete statement type")
 	}
 }
 
-// nolint:unused
+//nolint:unused // kept for reference; see DeleteMultiplePartitions case above for why it is not called
 func (g *Generator) deleteMultiplePartitions(_ context.Context) (*typedef.Stmt, error) {
 	builder := qb.Delete(g.keyspaceAndTable)
 

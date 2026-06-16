@@ -135,6 +135,41 @@ func (c *ClusterObserver) incGoCQLQueryError(instance string, err error) {
 		Inc()
 }
 
+// logStatement emits one statement-log Item per partition key the statement
+// touches. Each emitted Item carries a single, fully-populated
+// typedef.PartitionKeys, so the committer always binds the exact number of
+// partition-key values the _logs INSERT expects. Multi-partition statements
+// therefore produce one _logs row per partition; statements with no partition
+// keys are not logged at all.
+//
+// Previously the observers attached data.Statement.PartitionKeys[0] only when
+// the statement touched exactly one partition and otherwise attached an empty
+// typedef.PartitionKeys{} (nil Values). That empty item bound zero partition-key
+// values against the N-column _logs INSERT, so gocql rejected every affected
+// batch client-side with "expected N values got M". Under a multi-partition
+// delete workload this recurred thousands of times, collapsing committer
+// throughput while statements kept enqueuing — and ultimately OOM-killed the
+// loader. Emitting one well-formed Item per partition removes that failure mode
+// at the source.
+//
+// NOTE: base.Values carries the full statement's bind values. For a genuine
+// multi-partition statement every emitted row would therefore repeat the whole
+// value list rather than that partition's slice. This is currently inert: the
+// only multi-partition statement types are SELECTs (never logged) and
+// DeleteMultiplePartitions (disabled — see pkg/statements/delete.go, which falls
+// back to a single-partition delete), so in practice every logged statement
+// touches exactly one partition. Revisit the per-row Values slicing here if
+// multi-partition mutations are ever re-enabled.
+func (c *ClusterObserver) logStatement(stmt *typedef.Stmt, base stmtlogger.Item) {
+	for i := range stmt.PartitionKeys {
+		item := base
+		item.PartitionKeys = stmt.PartitionKeys[i]
+		if err := c.logger.LogStmt(item); err != nil {
+			c.appLogger.Error("failed to log statement", zap.Error(err))
+		}
+	}
+}
+
 func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedBatch) {
 	data := MustGetContextData(ctx)
 	if data == nil {
@@ -157,9 +192,16 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 		}
 	}
 
+	// NOTE: this loops over batch.Statements AND logStatement loops over the
+	// statement's partition keys. gemini never builds multi-statement CQL
+	// batches (all mutations are single Query().Exec(), so this path sees
+	// len(batch.Statements)==1), which keeps the product to one row per
+	// partition. If multi-statement batches are ever introduced for a multi-PK
+	// data.Statement, this would emit len(batch.Statements)×len(PartitionKeys)
+	// rows — revisit the pairing of batch.Statements[i] with the per-PK loop.
 	for i, query := range batch.Statements {
 		if c.logger != nil && !data.Statement.QueryType.IsSelect() {
-			err := c.logger.LogStmt(stmtlogger.Item{
+			c.logStatement(data.Statement, stmtlogger.Item{
 				Error:         mo.Right[error, string](errStr),
 				Statement:     query,
 				Values:        mo.Left[[]any, []byte](slices.Clone(batch.Values[i])),
@@ -170,16 +212,7 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 				GeminiAttempt: data.GeminiAttempt,
 				Type:          c.clusterName,
 				StatementType: data.Statement.QueryType,
-				PartitionKeys: func() typedef.PartitionKeys {
-					if len(data.Statement.PartitionKeys) == 1 {
-						return data.Statement.PartitionKeys[0]
-					}
-					return typedef.PartitionKeys{}
-				}(),
 			})
-			if err != nil {
-				c.appLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("batch", batch))
-			}
 		}
 
 		c.goCQLBatchQueries.Get(instance, data.Statement.QueryType).Inc()
@@ -217,7 +250,7 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 			attempts = query.Metrics.Attempts
 		}
 
-		err := c.logger.LogStmt(stmtlogger.Item{
+		c.logStatement(data.Statement, stmtlogger.Item{
 			Error:         mo.Right[error, string](errStr),
 			Statement:     query.Statement,
 			Values:        mo.Left[[]any, []byte](slices.Clone(query.Values)),
@@ -228,16 +261,7 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 			GeminiAttempt: data.GeminiAttempt,
 			Type:          c.clusterName,
 			StatementType: data.Statement.QueryType,
-			PartitionKeys: func() typedef.PartitionKeys {
-				if len(data.Statement.PartitionKeys) == 1 {
-					return data.Statement.PartitionKeys[0]
-				}
-				return typedef.PartitionKeys{}
-			}(),
 		})
-		if err != nil {
-			c.appLogger.Error("failed to log query statement", zap.Error(err), zap.Any("query", query))
-		}
 	}
 
 	c.goCQLQueries.Get(instance, data.Statement.QueryType).Inc()

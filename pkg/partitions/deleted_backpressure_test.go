@@ -18,6 +18,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -173,7 +174,7 @@ func TestHeapMemoryManagement(t *testing.T) {
 		}
 
 		// Heap should have grown
-		assert.GreaterOrEqual(t, len(d.heap.data), count)
+		assert.GreaterOrEqual(t, d.totalRingCapForTest(), count)
 		assert.Equal(t, count, d.Len())
 	})
 
@@ -190,7 +191,7 @@ func TestHeapMemoryManagement(t *testing.T) {
 		}
 
 		// Capacity should have doubled
-		assert.GreaterOrEqual(t, len(d.heap.data), 2048)
+		assert.GreaterOrEqual(t, d.totalRingCapForTest(), 2048)
 	})
 }
 
@@ -223,31 +224,36 @@ func TestDeleteEdgeCases(t *testing.T) {
 	})
 
 	t.Run("context_cancellation_stops_processing", func(t *testing.T) {
-		t.Parallel()
+		// Runs in a testing/synctest bubble so the "let the processor run, then
+		// stop it" choreography is deterministic instead of relying on real
+		// sleeps. Uses a bubble-internal context so the background goroutine is
+		// durably blocked (a goroutine blocked on an out-of-bubble channel never
+		// is, and the fake clock would not advance).
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			buckets := []time.Duration{10 * time.Millisecond}
+			d := newDeleted(ctx, buckets, 0)
 
-		ctx, cancel := context.WithCancel(t.Context())
-		buckets := []time.Duration{10 * time.Millisecond}
-		d := newDeleted(ctx, buckets, 0)
+			// Add some items
+			for range 100 {
+				d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
+			}
 
-		// Add some items
-		for range 100 {
-			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
-		}
+			// Let the background processor run a few bucket cycles.
+			time.Sleep(50 * time.Millisecond)
+			synctest.Wait()
 
-		time.Sleep(50 * time.Millisecond)
+			// Cancel context and close; the background goroutine must observe
+			// the cancellation, drain, and close d.ch.
+			cancel()
+			d.Close()
+			synctest.Wait()
 
-		// Cancel context and close
-		cancel()
-		d.Close()
-
-		// Channel should be closed
-		time.Sleep(150 * time.Millisecond) // Wait for background to stop
-
-		select {
-		case <-d.ch:
-		default:
-			// Closed or empty
-		}
+			// Channel is now closed: a receive must not block and must report
+			// the closed state.
+			_, ok := <-d.ch
+			assert.False(t, ok, "channel should be closed after cancellation")
+		})
 	})
 
 	t.Run("nil_buckets_increments_counter_only", func(t *testing.T) {

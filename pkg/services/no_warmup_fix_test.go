@@ -17,6 +17,7 @@ package services
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -26,77 +27,87 @@ import (
 
 func TestWorkloadWithoutWarmupTimeout(t *testing.T) {
 	// Test that workloads without warmup don't stall indefinitely
-	// This simulates the scenario where no partitions are available initially
+	// This simulates the scenario where no partitions are available initially.
+	// Runs in testing/synctest bubbles so the fake clock makes the timing exact
+	// and the duration assertions deterministic. Contexts are bubble-internal so
+	// goroutines blocked on them remain durably blocked and the clock advances.
 
 	t.Run("context_cancellation_during_no_partitions", func(t *testing.T) {
-		// Create a context that will be cancelled after a short time
-		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-		defer cancel()
+		synctest.Test(t, func(t *testing.T) {
+			// Create a context that will be cancelled after a short time
+			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+			defer cancel()
 
-		stopFlag := stop.NewFlag("test")
+			stopFlag := stop.NewFlag("test")
 
-		// Simulate what happens in mutation/validation loops when ErrNoPartitionKeyValues occurs
-		start := time.Now()
+			// Simulate what happens in mutation/validation loops when ErrNoPartitionKeyValues occurs
+			start := time.Now()
 
-		// This loop simulates the fixed behavior
-		for !stopFlag.IsHardOrSoft() {
-			select {
-			case <-ctx.Done():
-				// Context was cancelled - this should happen within ~100ms
-				duration := time.Since(start)
-				assert.Less(t, duration, 200*time.Millisecond, "Should respond to context cancellation quickly")
-				return
-			default:
+			// This loop simulates the fixed behavior
+			for !stopFlag.IsHardOrSoft() {
+				select {
+				case <-ctx.Done():
+					// Context was cancelled - this should happen within ~100ms
+					duration := time.Since(start)
+					assert.Less(t, duration, 200*time.Millisecond, "Should respond to context cancellation quickly")
+					return
+				default:
+				}
+
+				// Simulate ErrNoPartitionKeyValues case with our fix
+				select {
+				case <-time.After(200 * time.Millisecond):
+					// This delay allows context cancellation to be processed
+					continue
+				case <-ctx.Done():
+					// Context was cancelled during delay - good!
+					duration := time.Since(start)
+					assert.Less(t, duration, 200*time.Millisecond, "Should respond to context cancellation during delay")
+					return
+				}
 			}
 
-			// Simulate ErrNoPartitionKeyValues case with our fix
-			select {
-			case <-time.After(200 * time.Millisecond):
-				// This delay allows context cancellation to be processed
-				continue
-			case <-ctx.Done():
-				// Context was cancelled during delay - good!
-				duration := time.Since(start)
-				assert.Less(t, duration, 200*time.Millisecond, "Should respond to context cancellation during delay")
-				return
-			}
-		}
-
-		t.Fatal("Loop should have been cancelled by context timeout")
+			t.Fatal("Loop should have been cancelled by context timeout")
+		})
 	})
 
 	t.Run("stop_flag_cancellation_during_no_partitions", func(t *testing.T) {
-		stopFlag := stop.NewFlag("test")
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 
-		// Set a timer to set the stop flag after a short time
-		go func() {
-			time.Sleep(150 * time.Millisecond)
-			stopFlag.SetSoft(true)
-		}()
+			stopFlag := stop.NewFlag("test")
 
-		start := time.Now()
+			// Set a timer to set the stop flag after a short time
+			go func() {
+				time.Sleep(150 * time.Millisecond)
+				stopFlag.SetSoft(true)
+			}()
 
-		// This loop simulates the fixed behavior
-		for !stopFlag.IsHardOrSoft() {
-			select {
-			case <-t.Context().Done():
-				return
-			default:
+			start := time.Now()
+
+			// This loop simulates the fixed behavior
+			for !stopFlag.IsHardOrSoft() {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				// Simulate ErrNoPartitionKeyValues case with our fix
+				select {
+				case <-time.After(200 * time.Millisecond):
+					continue
+				case <-ctx.Done():
+					return
+				}
 			}
 
-			// Simulate ErrNoPartitionKeyValues case with our fix
-			select {
-			case <-time.After(200 * time.Millisecond):
-				continue
-			case <-t.Context().Done():
-				return
-			}
-		}
-
-		duration := time.Since(start)
-		// Should exit when stop flag is set after ~150ms
-		assert.Greater(t, duration, 140*time.Millisecond, "Should run for about the expected time")
-		assert.Less(t, duration, 250*time.Millisecond, "Should not run much longer after stop flag is set")
+			duration := time.Since(start)
+			// Should exit when stop flag is set after ~150ms
+			assert.Greater(t, duration, 140*time.Millisecond, "Should run for about the expected time")
+			assert.Less(t, duration, 250*time.Millisecond, "Should not run much longer after stop flag is set")
+		})
 	})
 }
 
@@ -104,67 +115,71 @@ func TestBusyLoopPreventionFix(t *testing.T) {
 	// Test that demonstrates the difference between old buggy behavior and new fixed behavior
 
 	t.Run("old_behavior_simulation", func(t *testing.T) {
-		// This simulates the old buggy behavior (busy loop)
-		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-		defer cancel()
+		synctest.Test(t, func(t *testing.T) {
+			// This simulates the old buggy behavior (busy loop)
+			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+			defer cancel()
 
-		start := time.Now()
-		iterations := 0
+			start := time.Now()
+			iterations := 0
 
-		// Old buggy loop (immediate continue on ErrNoPartitionKeyValues)
-	loop:
-		for iterations < 100 { // Limit iterations to prevent infinite test
-			select {
-			case <-ctx.Done():
-				break loop
-			default:
+			// Old buggy loop (immediate continue on ErrNoPartitionKeyValues)
+		loop:
+			for iterations < 100 { // Limit iterations to prevent infinite test
+				select {
+				case <-ctx.Done():
+					break loop
+				default:
+				}
+
+				// Simulate ErrNoPartitionKeyValues - old behavior was immediate continue
+				iterations++
+				// No delay - this would cause busy waiting
 			}
 
-			// Simulate ErrNoPartitionKeyValues - old behavior was immediate continue
-			iterations++
-			// No delay - this would cause busy waiting
-		}
-
-		duration := time.Since(start)
-		// In the old behavior, this would complete many iterations very quickly
-		assert.Equal(t, 100, iterations, "Should complete many iterations in busy loop")
-		assert.Less(t, duration, 50*time.Millisecond, "Busy loop completes quickly but wastes CPU")
+			duration := time.Since(start)
+			// In the old behavior, this would complete many iterations very quickly
+			assert.Equal(t, 100, iterations, "Should complete many iterations in busy loop")
+			assert.Less(t, duration, 50*time.Millisecond, "Busy loop completes quickly but wastes CPU")
+		})
 	})
 
 	t.Run("new_behavior_simulation", func(t *testing.T) {
-		// This simulates the new fixed behavior (delayed retry)
-		ctx, cancel := context.WithTimeout(t.Context(), 350*time.Millisecond)
-		defer cancel()
+		synctest.Test(t, func(t *testing.T) {
+			// This simulates the new fixed behavior (delayed retry)
+			ctx, cancel := context.WithTimeout(t.Context(), 350*time.Millisecond)
+			defer cancel()
 
-		start := time.Now()
-		iterations := 0
+			start := time.Now()
+			iterations := 0
 
-		// New fixed loop (delayed retry on ErrNoPartitionKeyValues)
-	loop:
-		for {
-			select {
-			case <-ctx.Done():
-				break loop
-			default:
+			// New fixed loop (delayed retry on ErrNoPartitionKeyValues)
+		loop:
+			for {
+				select {
+				case <-ctx.Done():
+					break loop
+				default:
+				}
+
+				// Simulate ErrNoPartitionKeyValues - new behavior has delay
+				iterations++
+
+				// New behavior: delay with context cancellation support
+				select {
+				case <-time.After(200 * time.Millisecond):
+					// Continue after delay if not cancelled
+				case <-ctx.Done():
+					// Exit immediately if context is cancelled during delay
+					break loop
+				}
 			}
 
-			// Simulate ErrNoPartitionKeyValues - new behavior has delay
-			iterations++
-
-			// New behavior: delay with context cancellation support
-			select {
-			case <-time.After(200 * time.Millisecond):
-				// Continue after delay if not cancelled
-			case <-ctx.Done():
-				// Exit immediately if context is cancelled during delay
-				break loop
-			}
-		}
-
-		duration := time.Since(start)
-		// In the new behavior, with 200ms delays, we should get about 1-2 iterations in 350ms
-		assert.LessOrEqual(t, iterations, 3, "Should complete fewer iterations due to delays")
-		assert.Greater(t, duration, 300*time.Millisecond, "Should be cancelled by context timeout")
-		assert.Less(t, duration, 400*time.Millisecond, "Should respond to context cancellation reasonably quickly")
+			duration := time.Since(start)
+			// In the new behavior, with 200ms delays, we should get about 1-2 iterations in 350ms
+			assert.LessOrEqual(t, iterations, 3, "Should complete fewer iterations due to delays")
+			assert.Greater(t, duration, 300*time.Millisecond, "Should be cancelled by context timeout")
+			assert.Less(t, duration, 400*time.Millisecond, "Should respond to context cancellation reasonably quickly")
+		})
 	})
 }

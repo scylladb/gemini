@@ -221,6 +221,115 @@ func TestLogger_BlocksUntilReceiverReads(t *testing.T) {
 	require.NoError(t, l.Close())
 }
 
+// TestLogger_BackPressure_BlocksAndNeverDrops verifies the never-drop contract:
+// once the bounded channel AND the overflow ring are saturated, LogStmt blocks
+// the producer (rather than dropping), and every item is delivered intact once
+// the consumer catches up.
+//
+// It injects a tiny per-ring overflow cap so the back-pressure path is reached
+// with a handful of items instead of 131072.
+func TestLogger_BackPressure_BlocksAndNeverDrops(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan Item, 2) // small channel, no reader yet
+	dc := &dummyCloser{}
+	l, err := NewLogger(WithChannel(ch), WithLogger(dc, nil))
+	require.NoError(t, err)
+
+	// Shrink this logger's overflow ring so it saturates quickly. Set under
+	// overflowMu since the drainer goroutine reads the ring concurrently.
+	l.overflowMu.Lock()
+	l.overflow.maxItems = 4
+	l.overflowMu.Unlock()
+
+	const total = 50
+	sent := make(chan struct{})
+	go func() {
+		for range total {
+			_ = l.LogStmt(Item{StatementType: typedef.InsertStatementType})
+		}
+		close(sent)
+	}()
+
+	// Effective capacity is channel(2) + overflow(4) + ~1 in-flight in the
+	// drainer ≈ 7, far below total — so the producer MUST block.
+	select {
+	case <-sent:
+		t.Fatal("LogStmt did not block under back-pressure (items were dropped or buffer unbounded)")
+	case <-time.After(150 * time.Millisecond):
+		// expected: producer is blocked waiting for drain
+	}
+
+	// Drain the channel; the producer must unblock and deliver every item.
+	got := 0
+	deadline := time.After(5 * time.Second)
+	for got < total {
+		select {
+		case <-ch:
+			got++
+		case <-deadline:
+			t.Fatalf("only received %d/%d items — items were dropped", got, total)
+		}
+	}
+	require.Equal(t, total, got)
+
+	select {
+	case <-sent:
+	case <-time.After(2 * time.Second):
+		t.Fatal("producer did not finish after the consumer caught up")
+	}
+
+	require.NoError(t, l.Close())
+}
+
+// TestLogger_LogStmtRacesClose_NoPanic hammers LogStmt from many goroutines
+// while Close runs concurrently. It is the regression guard for the
+// send-on-closed-channel panic: producers must serialize against close(l.ch)
+// via sendMu, so this must never panic regardless of interleaving. Run it with
+// -race and a high count.
+func TestLogger_LogStmtRacesClose_NoPanic(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan Item, 8)
+	l, err := NewLogger(WithChannel(ch), WithLogger(&dummyCloser{}, nil))
+	require.NoError(t, err)
+
+	// Drain the channel concurrently so producers keep moving (and so the
+	// committer-side close ordering is exercised).
+	drained := make(chan struct{})
+	go func() {
+		got := 0
+		for range ch {
+			got++
+		}
+		_ = got
+		close(drained)
+	}()
+
+	const producers = 32
+	var wg sync.WaitGroup
+	wg.Add(producers)
+	for range producers {
+		go func() {
+			defer wg.Done()
+			for range 500 {
+				_ = l.LogStmt(Item{StatementType: typedef.InsertStatementType})
+			}
+		}()
+	}
+
+	// Close while producers are still firing — the dangerous interleaving.
+	time.Sleep(time.Millisecond)
+	require.NoError(t, l.Close())
+
+	wg.Wait()
+	select {
+	case <-drained:
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel was not closed/drained after Close")
+	}
+}
+
 func TestLogger_LogAfterClose_NoSend(t *testing.T) {
 	t.Parallel()
 

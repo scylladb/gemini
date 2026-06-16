@@ -73,23 +73,36 @@ type (
 		Recent  []string `json:"recent,omitempty"`
 	}
 
-	// Logger is a non-blocking statement logger. When the bounded channel is
-	// full, items spill into an overflow buffer. A background drainer pump
-	// moves overflow items into the channel as space opens. On Close(), any
-	// remaining overflow items are forwarded to the channel with a blocking
-	// send before the channel is closed, so no items are ever silently
-	// discarded (forensic record). LogStmt is always non-blocking (gocql
-	// observer goroutines call it synchronously).
+	// Logger is a statement logger that never drops items. When the bounded
+	// channel is full, items spill into a bounded overflow ring buffer (see
+	// overflow.go). A background drainer pump moves overflow items into the
+	// channel as space opens. When the overflow ring is ALSO at its cap, LogStmt
+	// BLOCKS (back-pressure) until the drainer frees a slot — it rate-limits the
+	// producers (gocql observer callbacks, and thus the mutation/validation
+	// workers) to the committer's drain rate rather than dropping anything or
+	// growing memory without bound. This is safe from a permanent stall because
+	// the committer always consumes from the channel (even a failed or
+	// timed-out batch removes its items), so a ring slot always eventually
+	// frees. On Close(), any remaining overflow items are forwarded to the
+	// channel (bounded by flushTotalTimeout) and any producer blocked on a full
+	// ring is woken via overflowCond and returns.
 	Logger struct {
-		closer      io.Closer
-		logger      *zap.Logger
-		ch          chan Item
-		done        chan struct{}
-		overflowSig chan struct{}
-		overflow    []Item
-		drainerWG   sync.WaitGroup
-		closeOnce   sync.Once
-		overflowMu  sync.Mutex
+		closer       io.Closer
+		logger       *zap.Logger
+		ch           chan Item
+		done         chan struct{}
+		overflowSig  chan struct{}
+		overflowCond *sync.Cond
+		overflow     overflowRing
+		drainerWG    sync.WaitGroup
+		closeOnce    sync.Once
+		overflowMu   sync.Mutex
+		// sendMu guards sends to l.ch against Close() closing it. Producers take
+		// the read lock for the duration of a non-blocking enqueue; Close takes
+		// the write lock before close(l.ch). This makes the logger self-defending
+		// against a "send on closed channel" panic if a LogStmt call ever races
+		// Close, instead of relying on callers to drain all producers first.
+		sendMu sync.RWMutex
 	}
 
 	options struct {
@@ -151,6 +164,7 @@ func NewLogger(opts ...Option) (*Logger, error) {
 		done:        make(chan struct{}),
 		overflowSig: make(chan struct{}, 1),
 	}
+	l.overflowCond = sync.NewCond(&l.overflowMu)
 
 	l.drainerWG.Add(1)
 	go l.drainOverflow()
@@ -170,32 +184,55 @@ func (l *Logger) LogStmt(item Item) error {
 		return nil
 	}
 
-	select {
-	case <-l.done:
-		// Logger already closed — discard quietly.
-		return nil
-	default:
-	}
-
 	// Step 1: try a non-blocking send into the bounded channel — fast path
-	// when the committer is keeping up.
-	select {
-	case l.ch <- item:
+	// when the committer is keeping up. enqueued/closed are decided under
+	// sendMu so this can never race Close() closing l.ch.
+	switch enqueued, closed := l.trySend(item); {
+	case enqueued:
 		metrics.StatementLoggerItems.Inc()
 		metrics.StatementLoggerEnqueuedTotal.Inc()
 		return nil
+	case closed:
+		// Logger already closed — discard quietly.
+		return nil
+	}
+
+	// Step 2: channel is full. Park the item in the bounded overflow ring. If
+	// the ring is also at its cap we BLOCK here until the drainer frees a slot —
+	// nothing is ever dropped; the producers (gocql observer callbacks, and so
+	// the mutation/validation workers) are simply rate-limited to the
+	// committer's drain rate. overflowCond.Wait atomically releases overflowMu
+	// while parked and re-acquires it on wake, so the Close() broadcast can
+	// never be missed. The committer always consumes from the channel (even a
+	// failed/timed-out batch removes its items), so a slot always eventually
+	// frees and this never deadlocks.
+	l.overflowMu.Lock()
+	for l.overflow.count >= l.overflow.limit() {
+		// Bail out promptly if we are shutting down.
+		select {
+		case <-l.done:
+			l.overflowMu.Unlock()
+			return nil
+		default:
+		}
+		// Ensure the drainer is awake to free a slot, then park.
+		l.signalDrainer()
+		l.overflowCond.Wait()
+	}
+	// Re-check shutdown before pushing. The loop body's done-check is skipped
+	// when the ring was never full, and a producer woken by the drainer exits
+	// the loop without re-checking; in either case Close() may have already run
+	// (drainer exited, l.ch closed). Pushing here would strand the item in the
+	// ring forever, so bail instead — shutdown is the one time a not-yet-queued
+	// item is allowed to be dropped.
+	select {
 	case <-l.done:
+		l.overflowMu.Unlock()
 		return nil
 	default:
 	}
-
-	// Step 2: channel is full. Park the item in the unbounded overflow
-	// buffer and wake the drainer. We MUST NOT block here: this code path
-	// runs from gocql observer callbacks, and blocking those freezes every
-	// mutation/validation worker.
-	l.overflowMu.Lock()
-	l.overflow = append(l.overflow, item)
-	depth := len(l.overflow)
+	l.overflow.push(item)
+	depth := l.overflow.count
 	l.overflowMu.Unlock()
 
 	metrics.StatementLoggerItems.Inc()
@@ -205,12 +242,45 @@ func (l *Logger) LogStmt(item Item) error {
 
 	// Best-effort wake of the drainer; the channel has capacity 1 so a
 	// pending signal is sufficient.
+	l.signalDrainer()
+
+	return nil
+}
+
+// trySend attempts a single non-blocking enqueue into l.ch, held under
+// sendMu.RLock so it cannot race Close()'s close(l.ch). It returns
+// (enqueued=true) when the item was accepted, (closed=true) when the logger is
+// shutting down (caller should stop), or both false when the channel is
+// momentarily full (caller falls through to the overflow ring). It never
+// blocks: the inner select has a default branch.
+func (l *Logger) trySend(item Item) (enqueued, closed bool) {
+	l.sendMu.RLock()
+	defer l.sendMu.RUnlock()
+
+	select {
+	case <-l.done:
+		return false, true
+	default:
+	}
+
+	select {
+	case l.ch <- item:
+		return true, false
+	case <-l.done:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// signalDrainer wakes the overflow drainer without blocking. It touches no
+// mutex-guarded state (overflowSig is an independent buffered channel), so it is
+// safe to call with or without overflowMu held.
+func (l *Logger) signalDrainer() {
 	select {
 	case l.overflowSig <- struct{}{}:
 	default:
 	}
-
-	return nil
 }
 
 // drainOverflow continuously moves items from the overflow buffer into the
@@ -256,31 +326,29 @@ func (l *Logger) drainOverflow() {
 func (l *Logger) drainOverflowStep() {
 	for {
 		l.overflowMu.Lock()
-		if len(l.overflow) == 0 {
-			l.overflowMu.Unlock()
+		next, ok := l.overflow.pop()
+		depth := l.overflow.count
+		if ok {
+			// We freed a ring slot — wake one producer that may be blocked in
+			// LogStmt waiting for space (back-pressure release).
+			l.overflowCond.Signal()
+		}
+		l.overflowMu.Unlock()
+		if !ok {
 			return
 		}
-		next := l.overflow[0]
-		l.overflowMu.Unlock()
 
 		select {
 		case l.ch <- next:
-			l.overflowMu.Lock()
-			// Pop front; reuse underlying array — when it grows
-			// large, replace it to release memory back to the
-			// allocator.
-			l.overflow = l.overflow[1:]
-			if cap(l.overflow) > 4096 && len(l.overflow) < cap(l.overflow)/4 {
-				compact := make([]Item, len(l.overflow))
-				copy(compact, l.overflow)
-				l.overflow = compact
-			}
-			depth := len(l.overflow)
-			l.overflowMu.Unlock()
 			metrics.StatementLoggerOverflowItems.Set(float64(depth))
 		case <-l.done:
 			// Shutdown fired while we were waiting for channel space.
-			// Stop here; flushRemainingOverflow will handle the rest.
+			// Return the item we popped to the front so it is not lost;
+			// flushRemainingOverflow will forward it. (Producers have
+			// already stopped pushing once l.done is closed.)
+			l.overflowMu.Lock()
+			l.overflow.pushFront(next)
+			l.overflowMu.Unlock()
 			return
 		}
 	}
@@ -311,15 +379,13 @@ func (l *Logger) flushRemainingOverflow() {
 
 	for {
 		l.overflowMu.Lock()
-		if len(l.overflow) == 0 {
+		next, ok := l.overflow.pop()
+		depth := l.overflow.count
+		l.overflowMu.Unlock()
+		if !ok {
 			metrics.StatementLoggerOverflowItems.Set(0)
-			l.overflowMu.Unlock()
 			return
 		}
-		next := l.overflow[0]
-		l.overflow = l.overflow[1:]
-		depth := len(l.overflow)
-		l.overflowMu.Unlock()
 
 		metrics.StatementLoggerOverflowItems.Set(float64(depth))
 
@@ -327,8 +393,8 @@ func (l *Logger) flushRemainingOverflow() {
 		case l.ch <- next:
 		case <-deadline.C:
 			l.overflowMu.Lock()
-			dropped := 1 + len(l.overflow)
-			l.overflow = l.overflow[:0]
+			dropped := 1 + l.overflow.count
+			l.overflow.reset()
 			l.overflowMu.Unlock()
 			metrics.StatementLoggerOverflowItems.Set(0)
 			l.logger.Warn("flushRemainingOverflow: downstream committer stalled, dropping remaining overflow items",
@@ -340,6 +406,14 @@ func (l *Logger) flushRemainingOverflow() {
 	}
 }
 
+// Close shuts the logger down and closes the inner committer. It is idempotent.
+//
+// Close is self-defending: it takes sendMu.Lock before closing l.ch, so a
+// LogStmt call that races Close can never send on a closed channel (it either
+// completes its enqueue first or observes l.done under sendMu and returns).
+// Callers therefore do NOT need to guarantee all producers have drained before
+// calling Close, though in gemini the store still closes its in-flight barrier
+// first as defense in depth.
 func (l *Logger) Close() error {
 	var innerErr error
 
@@ -350,15 +424,30 @@ func (l *Logger) Close() error {
 		// sends before it exits.
 		close(l.done)
 
+		// Wake any producer blocked on a full overflow ring so it observes
+		// l.done and returns instead of waiting forever. Acquiring overflowMu
+		// before broadcasting closes the lost-wakeup window: a producer either
+		// already holds the lock (and will see l.done on its next check) or is
+		// parked in Wait (and will be woken here).
+		l.overflowMu.Lock()
+		l.overflowCond.Broadcast()
+		l.overflowMu.Unlock()
+
 		// Wait for the drainer to finish draining all overflow.
 		// Only after this point is it safe to close l.ch, because the
 		// drainer is the sole remaining sender.
 		l.drainerWG.Wait()
 
-		// Close the data channel so downstream consumers see EOF.
+		// Close the data channel so downstream consumers see EOF. Taking
+		// sendMu.Lock first guarantees no producer is mid fast-path send: any
+		// trySend either finished (RUnlocked) or will observe l.done before it
+		// reaches the send. Producers parked in the overflow ring do NOT hold
+		// sendMu, so they cannot deadlock this — they were already woken above.
+		l.sendMu.Lock()
 		if l.ch != nil {
 			close(l.ch)
 		}
+		l.sendMu.Unlock()
 
 		if l.closer != nil {
 			innerErr = l.closer.Close()

@@ -292,8 +292,14 @@ Supports client-side timestamps (default) or server-side timestamps. Client-side
 
 ### Gotcha
 
-**`deepCopyValue` in cqlstore.go is critical** -- gocql reuses internal buffers, so byte slices
-and `big.Int`/`inf.Dec` values must be deep-copied before storing.
+**Per-row scan destinations in `load()` are load-bearing.** gocql reuses internal buffers when
+you scan multiple rows into the *same* destinations, which would alias byte slices and
+`big.Int`/`inf.Dec` values across rows. `load()`/`loadIter()` avoid this by calling
+`iter.RowData()` once **per row** so every row gets freshly-allocated scan destinations — no
+copying or reflection needed. This is sound only because `iter.RowData()` allocates fresh
+destinations on each call (true in gocql today); do not refactor `load()` to reuse a single
+`RowData` across rows without reintroducing a deep copy. (This replaces the old `deepCopyValue`
+helper, which no longer exists.)
 
 ---
 
