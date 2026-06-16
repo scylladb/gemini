@@ -2,7 +2,7 @@ module github.com/scylladb/gemini
 
 go 1.25.0
 
-replace github.com/gocql/gocql => github.com/scylladb/gocql v1.18.0
+replace github.com/gocql/gocql => github.com/scylladb/gocql v1.18.2
 
 exclude (
 	google.golang.org/genproto v0.0.0-20220519153652-3a47de7e79bd
