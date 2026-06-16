@@ -15,7 +15,6 @@
 package partitions
 
 import (
-	"container/heap"
 	"strconv"
 	"testing"
 	"time"
@@ -23,313 +22,62 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-// BenchmarkHeapOperations benchmarks the optimized heap vs standard library
-//
-//nolint:gocyclo
-func BenchmarkHeapOperations(b *testing.B) {
-	b.Run("pushInline", func(b *testing.B) {
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 1024),
-			len:  0,
+// BenchmarkWindowRing measures the core ring ops; all must be O(1), allocation
+// free in steady state, and flat across the live count.
+func BenchmarkWindowRing(b *testing.B) {
+	b.Run("pushBack_popFront", func(b *testing.B) {
+		var r ringBuf
+		// Pre-fill so we exercise wrap-around, not just growth.
+		for i := range int64(1024) {
+			r.pushBack(bucketEntry{readyAtNs: i})
 		}
-		now := time.Now()
-
-		b.ResetTimer()
-		for i := range b.N {
-			h.pushInline(deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-			if h.len >= 1000 {
-				h.len = 0 // Reset to avoid overflow
-			}
-		}
-	})
-
-	b.Run("stdlib_heap_push", func(b *testing.B) {
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 1024),
-			len:  0,
-		}
-		heap.Init(h)
-		now := time.Now()
-
-		b.ResetTimer()
-		for i := range b.N {
-			heap.Push(h, deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-			if h.len >= 1000 {
-				for h.len > 0 {
-					heap.Pop(h)
-				}
-			}
-		}
-	})
-
-	b.Run("popInline", func(b *testing.B) {
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 1024),
-			len:  0,
-		}
-		now := time.Now()
-
-		// Pre-fill
-		for i := range 500 {
-			h.pushInline(deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-		}
-
-		b.ResetTimer()
-		for range b.N {
-			if h.len == 0 {
-				// Refill
-				for i := range 500 {
-					h.pushInline(deletedPartition{
-						keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-						readyAt: now.Add(time.Duration(i) * time.Millisecond),
-					})
-				}
-			}
-			h.popInline()
-		}
-	})
-
-	b.Run("stdlib_heap_pop", func(b *testing.B) {
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 1024),
-			len:  0,
-		}
-		heap.Init(h)
-		now := time.Now()
-
-		// Pre-fill
-		for i := range 500 {
-			heap.Push(h, deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-		}
-
-		b.ResetTimer()
-		for range b.N {
-			if h.len == 0 {
-				// Refill
-				for i := range 500 {
-					heap.Push(h, deletedPartition{
-						keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-						readyAt: now.Add(time.Duration(i) * time.Millisecond),
-					})
-				}
-			}
-			heap.Pop(h)
-		}
-	})
-
-	b.Run("mixed_operations_inline", func(b *testing.B) {
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 1024),
-			len:  0,
-		}
-		now := time.Now()
-
-		b.ResetTimer()
-		for i := range b.N {
-			// Push 3, pop 1
-			h.pushInline(deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-			h.pushInline(deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i+1) * time.Millisecond),
-			})
-			h.pushInline(deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i+2) * time.Millisecond),
-			})
-			if h.len > 0 {
-				h.popInline()
-			}
-			if h.len >= 1000 {
-				h.len = 100 // Keep some items
-			}
-		}
-	})
-
-	b.Run("mixed_operations_stdlib", func(b *testing.B) {
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 1024),
-			len:  0,
-		}
-		heap.Init(h)
-		now := time.Now()
-
-		b.ResetTimer()
-		for i := range b.N {
-			// Push 3, pop 1
-			heap.Push(h, deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-			heap.Push(h, deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i+1) * time.Millisecond),
-			})
-			heap.Push(h, deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i+2) * time.Millisecond),
-			})
-			if h.len > 0 {
-				heap.Pop(h)
-			}
-			if h.len >= 1000 {
-				for h.len > 100 {
-					heap.Pop(h)
-				}
-			}
-		}
-	})
-
-	b.Run("fixInline", func(b *testing.B) {
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 1024),
-			len:  0,
-		}
-		now := time.Now()
-
-		// Pre-fill
-		for i := range 500 {
-			h.pushInline(deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-		}
-
-		b.ResetTimer()
-		for i := range b.N {
-			// Modify root and fix
-			h.data[0].readyAt = now.Add(time.Duration(i+1000) * time.Millisecond)
-			h.fixInline(0)
-		}
-	})
-
-	b.Run("stdlib_heap_fix", func(b *testing.B) {
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 1024),
-			len:  0,
-		}
-		heap.Init(h)
-		now := time.Now()
-
-		// Pre-fill
-		for i := range 500 {
-			heap.Push(h, deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-		}
-
-		b.ResetTimer()
-		for i := range b.N {
-			// Modify root and fix
-			h.data[0].readyAt = now.Add(time.Duration(i+1000) * time.Millisecond)
-			heap.Fix(h, 0)
-		}
-	})
-}
-
-// BenchmarkHeapGrowth benchmarks heap growth patterns
-func BenchmarkHeapGrowth(b *testing.B) {
-	b.Run("small_to_large", func(b *testing.B) {
-		now := time.Now()
-
-		b.ResetTimer()
-		for range b.N {
-			h := &deletedPartitionHeap{
-				data: make([]deletedPartition, 4),
-				len:  0,
-			}
-
-			for i := range 1000 {
-				h.pushInline(deletedPartition{
-					keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-					readyAt: now.Add(time.Duration(i) * time.Millisecond),
-				})
-			}
-		}
-	})
-
-	b.Run("preallocated", func(b *testing.B) {
-		now := time.Now()
-
-		b.ResetTimer()
-		for range b.N {
-			h := &deletedPartitionHeap{
-				data: make([]deletedPartition, 1024),
-				len:  0,
-			}
-
-			for i := range 1000 {
-				h.pushInline(deletedPartition{
-					keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-					readyAt: now.Add(time.Duration(i) * time.Millisecond),
-				})
-			}
-		}
-	})
-}
-
-// BenchmarkMemoryEfficiency tests memory allocations
-func BenchmarkMemoryEfficiency(b *testing.B) {
-	b.Run("pushInline_no_alloc", func(b *testing.B) {
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 10000),
-			len:  0,
-		}
-		now := time.Now()
-
-		b.ResetTimer()
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := range b.N {
-			h.pushInline(deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-			if h.len >= 9000 {
-				h.len = 0
-			}
+			r.pushBack(bucketEntry{readyAtNs: int64(i)})
+			_, _ = r.popFront()
 		}
 	})
 
-	b.Run("stdlib_push_with_alloc", func(b *testing.B) {
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 10000),
-			len:  0,
+	b.Run("pushBack_popBack", func(b *testing.B) {
+		var r ringBuf
+		for i := range int64(1024) {
+			r.pushBack(bucketEntry{readyAtNs: i})
 		}
-		heap.Init(h)
-		now := time.Now()
-
-		b.ResetTimer()
 		b.ReportAllocs()
+		b.ResetTimer()
 		for i := range b.N {
-			heap.Push(h, deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-			if h.len >= 9000 {
-				for h.len > 0 {
-					heap.Pop(h)
-				}
-			}
+			r.pushBack(bucketEntry{readyAtNs: int64(i)})
+			_, _ = r.popBack()
 		}
 	})
 }
 
-// BenchmarkBulkOperations tests the new bulk delete optimization
+// BenchmarkEvictAtCap guards the O(1) hard-cap eviction. It measures the
+// steady-state cost of one Delete (push) followed by one backstop eviction
+// while the tracker sits at its cap, across cap sizes. The ns/op must stay FLAT
+// across cap: the previous heap eviction scanned leaves (O(n)) and grew linearly
+// with the live count, collapsing Delete throughput under a long residence
+// window (e.g. a single 1h bucket). The per-bucket ring drops it to O(1).
+func BenchmarkEvictAtCap(b *testing.B) {
+	for _, capSize := range []int{1_000, 10_000, 100_000} {
+		b.Run(strconv.Itoa(capSize), func(b *testing.B) {
+			var r ringBuf
+			base := int64(0)
+			for i := range capSize {
+				r.pushBack(bucketEntry{readyAtNs: base + int64(i)})
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := range b.N {
+				r.pushBack(bucketEntry{readyAtNs: base + int64(capSize+i)})
+				_, _ = r.popBack()
+			}
+		})
+	}
+}
+
+// BenchmarkBulkOperations tests the bulk delete path.
 func BenchmarkBulkOperations(b *testing.B) {
 	b.Run("delete_single", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
@@ -389,21 +137,20 @@ func BenchmarkBulkOperations(b *testing.B) {
 	})
 }
 
-// BenchmarkFastPath tests the atomic fast-path optimization
+// BenchmarkFastPath tests the atomic fast-path optimization.
 func BenchmarkFastPath(b *testing.B) {
 	b.Run("fast_path_check", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
 		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
-		// Add one item with future ready time
 		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		time.Sleep(10 * time.Millisecond) // Let it settle
 
 		b.ResetTimer()
 		for range b.N {
 			// This should hit the fast path (no lock needed)
-			_ = d.nextReadyNs.Load()
+			_ = d.win.nextReadyNs()
 		}
 	})
 
@@ -412,7 +159,6 @@ func BenchmarkFastPath(b *testing.B) {
 		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
-		// Add items that won't be ready
 		for range 100 {
 			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		}
@@ -420,36 +166,12 @@ func BenchmarkFastPath(b *testing.B) {
 
 		b.ResetTimer()
 		for range b.N {
-			// Should hit fast path and return quickly
 			d.processReady()
 		}
 	})
 }
 
-// BenchmarkHeapShrinking tests the memory shrinking optimization
-func BenchmarkHeapShrinking(b *testing.B) {
-	b.Run("shrink_after_spike", func(b *testing.B) {
-		buckets := []time.Duration{1 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets, 0)
-		defer d.Close()
-
-		b.ResetTimer()
-		for range b.N {
-			// Simulate spike
-			for range 5000 {
-				d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
-			}
-
-			// Wait for processing
-			time.Sleep(100 * time.Millisecond)
-
-			// Trigger shrink check
-			d.heap.shrinkIfNeeded()
-		}
-	})
-}
-
-// BenchmarkUnixNanoComparison tests time comparison optimization
+// BenchmarkUnixNanoComparison tests time comparison optimization.
 func BenchmarkUnixNanoComparison(b *testing.B) {
 	now := time.Now()
 	future := now.Add(1 * time.Second)
@@ -469,7 +191,7 @@ func BenchmarkUnixNanoComparison(b *testing.B) {
 	})
 }
 
-// BenchmarkConcurrentBulk tests concurrent bulk operations
+// BenchmarkConcurrentBulk tests concurrent bulk operations.
 func BenchmarkConcurrentBulk(b *testing.B) {
 	b.Run("concurrent_bulk_delete", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
@@ -487,28 +209,4 @@ func BenchmarkConcurrentBulk(b *testing.B) {
 			}
 		})
 	})
-}
-
-// BenchmarkEvictAtCap guards the O(1) hard-cap eviction. It measures the
-// steady-state cost of one push followed by one backstop eviction while the
-// heap sits at its cap, across cap sizes. The ns/op must stay FLAT across cap:
-// the previous exact-max eviction scanned all leaves (O(n)) and this cost grew
-// linearly with the heap, collapsing Delete throughput under a long residence
-// window (e.g. a single 1h bucket). evictLeafInline drops it to O(1).
-func BenchmarkEvictAtCap(b *testing.B) {
-	for _, capSize := range []int{1_000, 10_000, 100_000} {
-		b.Run(strconv.Itoa(capSize), func(b *testing.B) {
-			h := &deletedPartitionHeap{data: make([]deletedPartition, capSize+8)}
-			base := time.Now()
-			for i := range capSize {
-				h.pushInline(deletedPartition{readyAt: base.Add(time.Duration(i) * time.Microsecond)})
-			}
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := range b.N {
-				h.pushInline(deletedPartition{readyAt: base.Add(time.Duration(capSize+i) * time.Microsecond)})
-				_, _ = h.evictLeafInline()
-			}
-		})
-	}
 }

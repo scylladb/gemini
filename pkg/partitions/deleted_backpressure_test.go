@@ -174,7 +174,7 @@ func TestHeapMemoryManagement(t *testing.T) {
 		}
 
 		// Heap should have grown
-		assert.GreaterOrEqual(t, len(d.heap.data), count)
+		assert.GreaterOrEqual(t, d.totalRingCapForTest(), count)
 		assert.Equal(t, count, d.Len())
 	})
 
@@ -191,7 +191,7 @@ func TestHeapMemoryManagement(t *testing.T) {
 		}
 
 		// Capacity should have doubled
-		assert.GreaterOrEqual(t, len(d.heap.data), 2048)
+		assert.GreaterOrEqual(t, d.totalRingCapForTest(), 2048)
 	})
 }
 

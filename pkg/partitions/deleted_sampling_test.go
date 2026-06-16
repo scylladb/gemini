@@ -87,7 +87,7 @@ func TestSampleRate(t *testing.T) {
 
 	newWithRate := func(maxHeap int, residenceSec, ratePerSec float64) *deletedPartitions {
 		d := &deletedPartitions{
-			maxHeapSize:  maxHeap,
+			win:          newWindow(nil, maxHeap, 0),
 			residenceSec: residenceSec,
 		}
 		d.rate.ratePerSecBits.Store(math.Float64bits(ratePerSec))

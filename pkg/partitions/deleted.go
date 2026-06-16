@@ -15,7 +15,6 @@
 package partitions
 
 import (
-	"container/heap"
 	"context"
 	"math"
 	"math/rand/v2"
@@ -27,44 +26,19 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-// deletedPartitions implements a time-bucket based tracking system for deleted partitions.
+// deletedPartitions tracks deleted partitions awaiting re-validation.
 //
-// Design:
-// - Uses a min-heap (priority queue) sorted by readyAt time for O(log n) insertion and O(1) peek
-// - Background goroutine continuously checks the heap and emits ready partitions to a channel
-// - Mutex protects the heap for concurrent access from Delete() and background processor
-// - Atomic counter tracks total number of deletions for statistics
-// - Memory optimized: pre-allocated backing array to minimize allocations
-// - Performance optimized: inlined heap operations, bit-shift indices, sync.Pool for partition objects
+// Storage and all locking live in the encapsulated window (one ringBuf per time
+// bucket, see window.go); deletedPartitions itself holds NO mutex over the
+// tracked entries — it only orchestrates admission sampling, the emit channel,
+// lifetime counters, and the background drainer goroutine, delegating every
+// storage operation to the window's methods.
 //
-// The heap ensures we always process partitions in time order, making it efficient to check
-// if any partitions are ready for validation without scanning all entries.
-//
-// Eviction policy: when the heap exceeds maxHeapSize, leaf entries (which carry a
-// large readyAt — newest, furthest from their validation deadline) are discarded
-// in O(1) via evictLeafInline. The root (soonest-ready) is never evicted, so we
-// always preserve the entries closest to their validation deadline — the exact
-// opposite of what would happen if we evicted the minimum. Eviction is only a
-// backstop to admission sampling (see rateEstimator/sampleRate), so evicting an
-// approximate-newest leaf instead of scanning for the exact maximum is a
-// deliberate trade that keeps the Delete hot path O(log n) under a long
-// residence window.
+// A freshly-deleted partition is admitted (subject to sampling) into bucket 0;
+// when its readyAt fires it is emitted to the channel and, if more buckets
+// remain, moved to the next bucket. Admission sampling (rateEstimator/sampleRate)
+// is the primary memory bound; the window's hard-cap eviction is only a backstop.
 type (
-	deletedPartition struct {
-		readyAt time.Time
-		onDone  func()
-		keys    typedef.PartitionKeys
-		counter int
-	}
-
-	// deletedPartitionHeap implements a min-heap based on readyAt time
-	// Memory optimized: uses a backing array to avoid per-push allocations
-	// Performance optimized: inlined operations, bit-shift arithmetic for indices
-	deletedPartitionHeap struct {
-		data []deletedPartition
-		len  int
-	}
-
 	// rateEstimator computes a smoothed estimate of how many partitions per
 	// second are being DELETED — i.e. the incoming delete rate, measured before
 	// admission sampling (observe() is called on every Delete/DeleteBulk, ahead
@@ -83,25 +57,19 @@ type (
 		ctx          context.Context
 		ch           chan typedef.PartitionKeys
 		cancel       context.CancelFunc
+		win          *window
 		buckets      []time.Duration
-		heap         deletedPartitionHeap
 		rate         rateEstimator
 		deleted      atomic.Uint64
 		evicted      atomic.Uint64
 		sampledOut   atomic.Uint64
-		nextReadyNs  atomic.Int64
-		maxHeapSize  int
 		residenceSec float64
 		batchSize    int
-		lastShrinkNs int64
-		mu           sync.RWMutex
 		closeOnce    sync.Once
 	}
 )
 
 const (
-	initialCapacity = 4096
-
 	// rateWindowNs is the length of the accounting window over which the
 	// incoming delete rate is measured before being folded into the EWMA.
 	rateWindowNs = int64(time.Second)
@@ -164,13 +132,6 @@ func newDeleted(base context.Context, timeBuckets []time.Duration, maxHeapSize i
 
 	ctx, cancel := context.WithCancel(base)
 
-	h := deletedPartitionHeap{
-		data: make([]deletedPartition, initialCapacity), // Pre-allocate to avoid early allocations
-		len:  0,
-	}
-
-	heap.Init(&h)
-
 	var ch chan typedef.PartitionKeys
 	if len(timeBuckets) > 0 {
 		ch = make(chan typedef.PartitionKeys, 50_000)
@@ -181,20 +142,17 @@ func newDeleted(base context.Context, timeBuckets []time.Duration, maxHeapSize i
 	}
 
 	d := &deletedPartitions{
-		heap:    h,
 		ch:      ch,
 		ctx:     ctx,
 		cancel:  cancel,
+		win:     newWindow(timeBuckets, maxHeapSize, time.Now().UnixNano()),
 		buckets: timeBuckets,
-		// Increase batch size so the emitter drains cohorts faster without tight loops
+		// Larger batch so the emitter drains cohorts faster without tight loops.
 		batchSize:    64,
-		maxHeapSize:  maxHeapSize,
 		residenceSec: residenceSeconds(timeBuckets),
-		lastShrinkNs: time.Now().UnixNano(),
 	}
 
 	s := true
-
 	if len(start) > 0 {
 		s = start[0]
 	}
@@ -207,219 +165,8 @@ func newDeleted(base context.Context, timeBuckets []time.Duration, maxHeapSize i
 	return d
 }
 
-// Heap interface implementation for deletedPartitionHeap
-func (h *deletedPartitionHeap) Len() int { return h.len }
-
-func (h *deletedPartitionHeap) Less(i, j int) bool {
-	return h.data[i].readyAt.Before(h.data[j].readyAt)
-}
-
-func (h *deletedPartitionHeap) Swap(i, j int) {
-	h.data[i], h.data[j] = h.data[j], h.data[i]
-}
-
-func (h *deletedPartitionHeap) Push(x any) {
-	// Grow capacity if needed - double the size to amortize allocations
-	if h.len >= len(h.data) {
-		newCap := len(h.data) * 2
-		if newCap == 0 {
-			newCap = 64 // Initial capacity
-		}
-		newData := make([]deletedPartition, newCap)
-		copy(newData, h.data[:h.len])
-		h.data = newData
-	}
-	h.data[h.len] = x.(deletedPartition)
-	h.len++
-}
-
-func (h *deletedPartitionHeap) Pop() any {
-	h.len--
-	item := h.data[h.len]
-	// Clear the popped element to allow GC
-	h.data[h.len] = deletedPartition{}
-	return item
-}
-
-// peek returns the minimum element without removing it
-//
-//go:inline
-func (h *deletedPartitionHeap) peek() *deletedPartition {
-	if h.len == 0 {
-		return nil
-	}
-	return &h.data[0]
-}
-
-// peekTimeNs returns the readyAt time of the root element as Unix nanoseconds
-// Returns 0 if heap is empty. Used for lock-free fast path checks.
-//
-//go:inline
-func (h *deletedPartitionHeap) peekTimeNs() int64 {
-	if h.len == 0 {
-		return 0
-	}
-	return h.data[0].readyAt.UnixNano()
-}
-
-// pushInline is a highly optimized heap insertion that avoids allocations
-// Uses bit-shift arithmetic for parent calculation: (pos-1)>>1 == (pos-1)/2
-//
-//go:inline
-func (h *deletedPartitionHeap) pushInline(dp deletedPartition) {
-	// Grow capacity if needed - use bit-shift for doubling
-	if h.len >= len(h.data) {
-		newCap := len(h.data) << 1 // Same as *2 but faster
-		if newCap == 0 {
-			newCap = 64
-		}
-		newData := make([]deletedPartition, newCap)
-		copy(newData, h.data[:h.len])
-		h.data = newData
-	}
-
-	// Add at end and bubble up
-	pos := h.len
-	h.len++
-
-	// Bubble up using bit-shift for parent: (pos-1)>>1 instead of (pos-1)/2
-	for pos > 0 {
-		parent := (pos - 1) >> 1
-		if !dp.readyAt.Before(h.data[parent].readyAt) {
-			break
-		}
-		h.data[pos] = h.data[parent]
-		pos = parent
-	}
-	h.data[pos] = dp
-}
-
-// evictLeafInline removes and returns the last element of the backing array in
-// O(1). That element is always a leaf (index h.len-1 >= h.len/2), so removing it
-// preserves the min-heap ordering with no sift, and it never touches the root —
-// the soonest-ready entry we most want to keep.
-//
-// It is the hard-cap eviction backstop. We deliberately evict "a recent leaf"
-// rather than scanning all leaves for the exact maximum readyAt: the previous
-// O(n) scan ran under d.mu on every admitted Delete once the heap reached its
-// cap, so for a long residence window (e.g. a single 1h bucket, where the heap
-// sits at its cap for the whole hour) it serialized all delete workers behind a
-// growing leaf scan and collapsed throughput. The semantic loss is negligible —
-// for a single bucket every entry's readyAt sits within one jitter window
-// (<=5s) of the others, and eviction is already a lossy backstop to admission
-// sampling — while the cost drops from O(n) to O(1).
-//
-//go:inline
-func (h *deletedPartitionHeap) evictLeafInline() (deletedPartition, bool) {
-	if h.len == 0 {
-		return deletedPartition{}, false
-	}
-
-	h.len--
-	leaf := h.data[h.len]
-	h.data[h.len] = deletedPartition{} // Clear for GC
-
-	return leaf, true
-}
-
-// popInline removes and returns the minimum element
-// Uses bit-shift arithmetic for child calculations: pos<<1+1 == pos*2+1
-//
-//go:inline
-func (h *deletedPartitionHeap) popInline() (deletedPartition, bool) {
-	if h.len == 0 {
-		return deletedPartition{}, false
-	}
-
-	minElem := h.data[0]
-	h.len--
-
-	if h.len == 0 {
-		h.data[0] = deletedPartition{}
-		return minElem, true
-	}
-
-	// Move last element to root and bubble down
-	last := h.data[h.len]
-	h.data[h.len] = deletedPartition{} // Clear for GC
-
-	pos := 0
-	for {
-		left := (pos << 1) + 1 // Same as pos*2+1 but faster
-		if left >= h.len {
-			break
-		}
-
-		// Find smaller child using bit-shift
-		right := left + 1
-		smallest := left
-		if right < h.len && h.data[right].readyAt.Before(h.data[left].readyAt) {
-			smallest = right
-		}
-
-		// Check if we need to continue
-		if !h.data[smallest].readyAt.Before(last.readyAt) {
-			break
-		}
-
-		h.data[pos] = h.data[smallest]
-		pos = smallest
-	}
-	h.data[pos] = last
-
-	return minElem, true
-}
-
-// fixInline repairs the heap after modifying the root element
-// Uses bit-shift arithmetic for efficient child index calculation
-//
-//go:inline
-func (h *deletedPartitionHeap) fixInline(pos int) {
-	if pos >= h.len {
-		return
-	}
-
-	elem := h.data[pos]
-
-	// Bubble down
-	for {
-		left := (pos << 1) + 1
-		if left >= h.len {
-			break
-		}
-
-		right := left + 1
-		smallest := left
-		if right < h.len && h.data[right].readyAt.Before(h.data[left].readyAt) {
-			smallest = right
-		}
-
-		if !h.data[smallest].readyAt.Before(elem.readyAt) {
-			break
-		}
-
-		h.data[pos] = h.data[smallest]
-		pos = smallest
-	}
-	h.data[pos] = elem
-}
-
-// shrinkIfNeeded reduces the backing array size if utilization is very low
-// This prevents memory bloat after temporary spikes
-//
-//go:inline
-func (h *deletedPartitionHeap) shrinkIfNeeded() {
-	if h.len < cap(h.data)/4 {
-		// Shrink to 2x current size (maintain some headroom)
-		newCap := max(h.len*2, 1024)
-		newData := make([]deletedPartition, newCap)
-		copy(newData, h.data[:h.len])
-		h.data = newData
-	}
-}
-
-// start processes deleted partitions and sends them to the channel when ready
-// Optimized with adaptive check intervals based on next ready time
+// start processes deleted partitions and sends them to the channel when ready.
+// Adaptive check interval based on the next ready time.
 func (d *deletedPartitions) start(checkInterval time.Duration) {
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
@@ -439,95 +186,45 @@ func (d *deletedPartitions) start(checkInterval time.Duration) {
 	}
 }
 
-// processReady checks for partitions that are ready for validation and sends them to the channel
-// Optimized with:
-// - Batch processing to reduce lock overhead
-// - Fast UnixNano time comparisons
-// - Periodic heap shrinking to reduce memory
+// trySend performs a non-blocking send of keys to the emit channel.
+func (d *deletedPartitions) trySend(keys typedef.PartitionKeys) bool {
+	select {
+	case d.ch <- keys:
+		return true
+	default:
+		return false
+	}
+}
+
+// processReady drains entries whose readyAt has passed to the channel. It uses
+// the window's lock-free next-ready snapshot for the fast path and delegates all
+// storage work to the window.
 func (d *deletedPartitions) processReady() time.Duration {
 	nowNs := time.Now().UnixNano()
-	now := time.Unix(0, nowNs)
 
-	// Fast path: check if anything is ready without locking
-	if nextNs := d.nextReadyNs.Load(); nextNs > 0 && nowNs < nextNs {
-		// Nothing ready yet, return wait time
+	// Fast path: nothing ready yet, return the wait without touching the window
+	// lock.
+	if nextNs := d.win.nextReadyNs(); nextNs > 0 && nowNs < nextNs {
 		return time.Duration(nextNs - nowNs)
 	}
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	// Check for heap shrinking every 60 seconds
-	if nowNs-d.lastShrinkNs > int64(60*time.Second) {
-		d.heap.shrinkIfNeeded()
-		d.lastShrinkNs = nowNs
-	}
-
-	processed := 0
-	for d.heap.Len() > 0 && processed < d.batchSize {
-		earliest := d.heap.peek()
-
-		// Use UnixNano for faster comparison
-		if nowNs < earliest.readyAt.UnixNano() {
-			// Update next ready time atomically for fast path
-			d.nextReadyNs.Store(earliest.readyAt.UnixNano())
-			return earliest.readyAt.Sub(now)
-		}
-
-		select {
-		case d.ch <- earliest.keys:
-			processed++
-
-			if earliest.counter >= len(d.buckets) {
-				// Final emission done; remove and release original keys once
-				_, _ = d.heap.popInline()
-				if earliest.onDone != nil {
-					earliest.onDone()
-				}
-				continue
-			}
-
-			// Re-schedule with jitter to prevent cohort alignment ("thundering herd")
-			next := d.buckets[earliest.counter]
-			earliest.readyAt = now.Add(next).Add(jitterDuration(next))
-			earliest.counter++
-
-			d.heap.fixInline(0)
-
-		case <-d.ctx.Done():
-			d.nextReadyNs.Store(0)
-			return 0
-		default:
-			// Channel full, try again later
-			if d.heap.Len() > 0 {
-				d.nextReadyNs.Store(d.heap.data[0].readyAt.UnixNano())
-			}
-			return 10 * time.Millisecond
+	onDones, wait := d.win.drainReady(nowNs, d.batchSize, d.trySend)
+	// Run final-release callbacks outside the window lock.
+	for _, done := range onDones {
+		if done != nil {
+			done()
 		}
 	}
-
-	// Update next ready time or clear it
-	if d.heap.Len() > 0 {
-		next := d.heap.data[0].readyAt
-		d.nextReadyNs.Store(next.UnixNano())
-		// If the next item is already ready (<= now), keep draining aggressively
-		if !next.After(now) {
-			return time.Millisecond
-		}
-		return next.Sub(now)
-	}
-
-	d.nextReadyNs.Store(0)
-	return 0
+	return wait
 }
 
 // residenceSeconds returns the time, in seconds, a partition is expected to
-// occupy the heap: the SUM of every bucket delay. A deleted partition is
-// re-scheduled through each bucket in turn before it is finally evicted, so it
-// stays in the heap for the total of all bucket durations — not just the
-// largest one. Using only the max would under-estimate residence for
-// multi-bucket configs, under-sample, and let the heap rely on hard eviction.
-// Returns 0 when no buckets are configured.
+// occupy the tracker: the SUM of every bucket delay. A deleted partition is
+// re-scheduled through each bucket in turn before it is finally removed, so it
+// stays tracked for the total of all bucket durations — not just the largest
+// one. Using only the max would under-estimate residence for multi-bucket
+// configs, under-sample, and lean on hard eviction. Returns 0 when no buckets
+// are configured.
 func residenceSeconds(buckets []time.Duration) float64 {
 	var total time.Duration
 	for _, b := range buckets {
@@ -537,12 +234,12 @@ func residenceSeconds(buckets []time.Duration) float64 {
 }
 
 // sampleRate returns the probability in (0, 1] with which a freshly-deleted
-// partition should be admitted into the heap. The goal is to keep the
-// steady-state heap size near maxHeapSize: over one residence window the
+// partition should be admitted into the tracker. The goal is to keep the
+// steady-state live count near maxHeapSize: over one residence window the
 // tracker admits roughly admissionRate * residenceSeconds partitions, so
-// admitting a maxHeapSize/(admissionRate*residenceSeconds) fraction leaves
-// about maxHeapSize entries once partitions start aging out. residenceSeconds
-// is the SUM of all bucket delays (a partition passes through every bucket).
+// admitting a maxHeapSize/(admissionRate*residenceSeconds) fraction leaves about
+// maxHeapSize entries once partitions start aging out. residenceSeconds is the
+// SUM of all bucket delays (a partition passes through every bucket).
 //
 // Example: at 2000 deletes/s, a single 1h bucket (3600s total residence) and a
 // 1M cap, sampleRate = 1e6 / (2000*3600) ≈ 0.139 (≈14%).
@@ -551,7 +248,7 @@ func residenceSeconds(buckets []time.Duration) float64 {
 // when the admission rate is not yet known, or when the projected inflow is
 // already within the cap.
 func (d *deletedPartitions) sampleRate() float64 {
-	if d.maxHeapSize <= 0 || d.residenceSec <= 0 {
+	if d.win.maxItems <= 0 || d.residenceSec <= 0 {
 		return 1.0
 	}
 
@@ -561,15 +258,15 @@ func (d *deletedPartitions) sampleRate() float64 {
 	}
 
 	expected := rate * d.residenceSec
-	if expected <= float64(d.maxHeapSize) {
+	if expected <= float64(d.win.maxItems) {
 		return 1.0
 	}
 
-	return float64(d.maxHeapSize) / expected
+	return float64(d.win.maxItems) / expected
 }
 
-// admit reports whether a single partition should be kept given a sampling
-// rate previously computed by sampleRate. A rate >= 1.0 always admits.
+// admit reports whether a single partition should be kept given a sampling rate
+// previously computed by sampleRate. A rate >= 1.0 always admits.
 //
 //go:inline
 func admit(rate float64) bool {
@@ -588,13 +285,9 @@ func (d *deletedPartitions) dropSampled(keys typedef.PartitionKeys) {
 	d.deleted.Add(1)
 }
 
-// Delete adds a deleted partition to the tracking system
-// Optimized with:
-// - Minimal lock time
-// - Atomic update of next ready time
-// - Pre-computed readyAt time
+// Delete adds a deleted partition to the tracking system.
 func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
-	// If no buckets configured, just count the deletion
+	// If no buckets configured, just count the deletion.
 	if len(d.buckets) == 0 {
 		d.deleted.Add(1)
 		if keys.Release != nil {
@@ -604,95 +297,32 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	}
 
 	now := time.Now()
+	nowNs := now.UnixNano()
 
-	// Measure the admission rate and sample before touching the heap so that
-	// under high DELETE throughput we never let the heap balloon past its cap.
-	d.rate.observe(1, now.UnixNano())
+	// Measure the admission rate and sample before touching the window so that
+	// under high DELETE throughput we never let the tracker balloon past its cap.
+	d.rate.observe(1, nowNs)
 	if rate := d.sampleRate(); !admit(rate) {
 		d.dropSampled(keys)
 		return
 	}
 
-	keys.DeletedAtNS = uint64(now.UnixNano())
-	// Apply jitter to avoid aligning many items on the exact same boundary
-	readyAt := now.Add(d.buckets[0]).Add(jitterDuration(d.buckets[0]))
-	readyAtNs := readyAt.UnixNano()
+	keys.DeletedAtNS = uint64(nowNs)
+	readyAtNs := nowNs + int64(d.buckets[0]) + int64(jitterDuration(d.buckets[0]))
 
-	dp := deletedPartition{
-		keys:    keys,
-		counter: 1, // Start at 1 since we've already used buckets[0]
-		readyAt: readyAt,
-	}
+	// Defer release until the final pop; prevent double-release.
+	onDone := keys.Release
+	keys.Release = nil
 
-	d.mu.Lock()
+	evicted := d.win.push(bucketEntry{onDone: onDone, keys: keys, readyAtNs: readyAtNs, bucket: 0})
 
-	// Prevent consumers from releasing multiple times; we'll release on final pop
-	dp.onDone = dp.keys.Release
-	dp.keys.Release = nil
-
-	wasEmpty := d.heap.Len() == 0
-	d.heap.pushInline(dp)
-
-	// Backstop eviction if the heap still exceeds the configured cap (admission
-	// sampling above is the primary bound). This drops approximate-newest leaf
-	// entries in O(1) each, skipping their re-validation, to keep memory bounded
-	// under high DELETE throughput and long bucket durations.
-	evicted := d.collectExcess()
-
-	// Update next ready time if this is the earliest or heap was empty
-	if wasEmpty || readyAtNs < d.nextReadyNs.Load() {
-		d.nextReadyNs.Store(readyAtNs)
-	}
-	d.mu.Unlock()
-
-	// Run onDone callbacks outside the lock to avoid holding d.mu while
-	// invoking partition cleanup (which may acquire other locks).
+	// Run onDone callbacks outside the window lock.
 	d.runEvicted(evicted)
 
 	d.deleted.Add(1)
 }
 
-// collectExcess removes leaf entries (approximate-newest; see evictLeafInline)
-// from the heap when it exceeds maxHeapSize and returns them. Evicting leaves
-// keeps the entries closest to their validation deadline (the root is never
-// touched) while staying O(1) per eviction, so this stays cheap even when the
-// heap sits at its cap for a long residence window.
-// The caller is responsible for invoking onDone on each returned entry AFTER
-// releasing d.mu.
-// MUST be called with d.mu held.
-func (d *deletedPartitions) collectExcess() []deletedPartition {
-	if d.maxHeapSize <= 0 {
-		return nil
-	}
-	var evicted []deletedPartition
-	for d.heap.Len() > d.maxHeapSize {
-		e, ok := d.heap.evictLeafInline()
-		if !ok {
-			break
-		}
-		evicted = append(evicted, e)
-	}
-	return evicted
-}
-
-// runEvicted invokes onDone callbacks for evicted entries and updates metrics.
-// MUST be called WITHOUT d.mu held.
-func (d *deletedPartitions) runEvicted(evicted []deletedPartition) {
-	if len(evicted) == 0 {
-		return
-	}
-	for i := range evicted {
-		if evicted[i].onDone != nil {
-			evicted[i].onDone()
-		}
-	}
-	n := uint64(len(evicted))
-	d.evicted.Add(n)
-	metrics.DeletedPartitionsHeapEvictions.Add(float64(n))
-}
-
-// DeleteBulk adds multiple deleted partitions in a single lock acquisition
-// This is more efficient than calling Delete multiple times when you have many items
+// DeleteBulk adds multiple deleted partitions under a single window operation.
 func (d *deletedPartitions) DeleteBulk(keys []typedef.PartitionKeys) {
 	if len(keys) == 0 {
 		return
@@ -710,10 +340,11 @@ func (d *deletedPartitions) DeleteBulk(keys []typedef.PartitionKeys) {
 	}
 
 	now := time.Now()
+	nowNs := now.UnixNano()
 
 	// Measure the admission rate over the whole batch, then sample per-key so
 	// the kept fraction matches the configured cap under high throughput.
-	d.rate.observe(int64(len(keys)), now.UnixNano())
+	d.rate.observe(int64(len(keys)), nowNs)
 	if rate := d.sampleRate(); rate < 1.0 {
 		kept := keys[:0]
 		var dropped int
@@ -738,42 +369,37 @@ func (d *deletedPartitions) DeleteBulk(keys []typedef.PartitionKeys) {
 		}
 	}
 
-	// Apply the same jitter policy for bulk scheduling
-	readyAt := now.Add(d.buckets[0]).Add(jitterDuration(d.buckets[0]))
-	readyAtNs := readyAt.UnixNano()
+	readyAtNs := nowNs + int64(d.buckets[0]) + int64(jitterDuration(d.buckets[0]))
+	deletedAtNS := uint64(nowNs)
 
-	d.mu.Lock()
-
-	wasEmpty := d.heap.Len() == 0
-	minReadyNs := readyAtNs
-
-	deletedAtNS := uint64(now.UnixNano())
+	entries := make([]bucketEntry, len(keys))
 	for i := range keys {
 		keys[i].DeletedAtNS = deletedAtNS
-		// wrap each to defer release until final
 		onDone := keys[i].Release
 		keys[i].Release = nil
-		d.heap.pushInline(deletedPartition{
-			keys:    keys[i],
-			onDone:  onDone,
-			counter: 1,
-			readyAt: readyAt,
-		})
+		entries[i] = bucketEntry{onDone: onDone, keys: keys[i], readyAtNs: readyAtNs, bucket: 0}
 	}
 
-	// Backstop eviction (admission sampling above is the primary bound).
-	evicted := d.collectExcess()
-
-	// Update next ready time if needed
-	if wasEmpty || minReadyNs < d.nextReadyNs.Load() {
-		d.nextReadyNs.Store(minReadyNs)
-	}
-	d.mu.Unlock()
-
-	// Run onDone callbacks outside the lock.
+	evicted := d.win.pushBulk(entries)
 	d.runEvicted(evicted)
 
 	d.deleted.Add(uint64(len(keys)))
+}
+
+// runEvicted invokes onDone callbacks for entries evicted by the hard cap and
+// updates metrics. MUST be called WITHOUT any window lock held.
+func (d *deletedPartitions) runEvicted(evicted []bucketEntry) {
+	if len(evicted) == 0 {
+		return
+	}
+	for i := range evicted {
+		if evicted[i].onDone != nil {
+			evicted[i].onDone()
+		}
+	}
+	n := uint64(len(evicted))
+	d.evicted.Add(n)
+	metrics.DeletedPartitionsHeapEvictions.Add(float64(n))
 }
 
 // jitterDuration adds a bounded random delay to the given bucket duration to
@@ -801,14 +427,12 @@ func jitterDuration(d time.Duration) time.Duration {
 	return time.Duration(n)
 }
 
-// Close stops the background processor
+// Close stops the background processor.
 func (d *deletedPartitions) Close() {
 	d.cancel()
 }
 
-// Len returns the number of partitions waiting for validation
+// Len returns the number of partitions waiting for validation.
 func (d *deletedPartitions) Len() int {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.heap.Len()
+	return d.win.len()
 }

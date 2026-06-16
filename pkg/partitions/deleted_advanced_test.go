@@ -86,7 +86,7 @@ func TestDeleteBulk(t *testing.T) {
 
 			// Check that nextReadyNs is set
 			time.Sleep(10 * time.Millisecond)
-			nextNs := d.nextReadyNs.Load()
+			nextNs := d.win.nextReadyNs()
 			assert.Greater(t, nextNs, int64(0))
 		})
 	})
@@ -112,13 +112,11 @@ func TestDeleteBulk(t *testing.T) {
 			assert.LessOrEqual(t, ns, after, "batch[%d].DeletedAtNS should be ≤ after", i)
 		}
 
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		require.Equal(t, 5, d.heap.Len())
-		for i := range d.heap.Len() {
-			ns := int64(d.heap.data[i].keys.DeletedAtNS)
-			assert.Greater(t, ns, before, "heap[%d].keys.DeletedAtNS should be ≥ before", i)
-			assert.LessOrEqual(t, ns, after, "heap[%d].keys.DeletedAtNS should be ≤ after", i)
+		require.Equal(t, 5, d.Len())
+		for i, e := range d.entriesForTest() {
+			ns := int64(e.keys.DeletedAtNS)
+			assert.Greater(t, ns, before, "entry[%d].keys.DeletedAtNS should be ≥ before", i)
+			assert.LessOrEqual(t, ns, after, "entry[%d].keys.DeletedAtNS should be ≤ after", i)
 		}
 	})
 }
@@ -133,10 +131,10 @@ func TestDelete_DeletedAtNS(t *testing.T) {
 	d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 	after := time.Now().UnixNano()
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	require.Equal(t, 1, d.heap.Len())
-	ns := int64(d.heap.data[0].keys.DeletedAtNS)
+	require.Equal(t, 1, d.Len())
+	e, ok := d.peekSoonestForTest()
+	require.True(t, ok)
+	ns := int64(e.keys.DeletedAtNS)
 	assert.Greater(t, ns, before, "DeletedAtNS should be ≥ before Delete call")
 	assert.LessOrEqual(t, ns, after, "DeletedAtNS should be ≤ after Delete call")
 }
@@ -169,99 +167,20 @@ func TestFastPathOptimization(t *testing.T) {
 			d := newDeleted(t.Context(), buckets, 0)
 			defer d.Close()
 
-			before := d.nextReadyNs.Load()
+			before := d.win.nextReadyNs()
 			assert.Equal(t, int64(0), before)
 
 			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 			time.Sleep(5 * time.Millisecond)
 
-			after := d.nextReadyNs.Load()
+			after := d.win.nextReadyNs()
 			assert.Greater(t, after, int64(0))
 		})
 	})
 }
 
-// TestHeapShrinking tests the memory shrinking functionality
-func TestHeapShrinking(t *testing.T) {
-	t.Parallel()
-
-	t.Run("shrink_after_spike", func(t *testing.T) {
-		t.Parallel()
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 4),
-			len:  0,
-		}
-
-		now := time.Now()
-
-		// Grow to large size
-		for i := range 5000 {
-			h.pushInline(deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-		}
-
-		largeCap := len(h.data)
-		assert.GreaterOrEqual(t, largeCap, 5000)
-
-		// Remove most items
-		for range 4900 {
-			h.popInline()
-		}
-
-		assert.Equal(t, 100, h.len)
-
-		// Trigger shrink
-		h.shrinkIfNeeded()
-
-		newCap := len(h.data)
-		assert.Less(t, newCap, largeCap)
-		assert.GreaterOrEqual(t, newCap, h.len)
-		t.Logf("Shrunk from %d to %d (len=%d)", largeCap, newCap, h.len)
-	})
-
-	t.Run("no_shrink_when_not_needed", func(t *testing.T) {
-		t.Parallel()
-
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 1024),
-			len:  0,
-		}
-
-		now := time.Now()
-
-		// Add moderate number of items
-		for i := range 512 {
-			h.pushInline(deletedPartition{
-				keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-		}
-
-		capBefore := len(h.data)
-		h.shrinkIfNeeded()
-		capAfter := len(h.data)
-
-		// Should not shrink (utilization is 50%)
-		assert.Equal(t, capBefore, capAfter)
-	})
-
-	t.Run("min_capacity_respected", func(t *testing.T) {
-		t.Parallel()
-
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 4096),
-			len:  10,
-		}
-
-		h.shrinkIfNeeded()
-
-		// Should shrink but not below minimum of 1024
-		assert.GreaterOrEqual(t, len(h.data), 1024)
-		assert.Less(t, len(h.data), 4096)
-	})
-}
+// Ring growth/shrink mechanics are covered by TestRingBuf_GrowAndShrink in
+// window_test.go.
 
 // TestBatchProcessing tests batch processing optimization
 func TestBatchProcessing(t *testing.T) {
@@ -285,22 +204,16 @@ func TestBatchProcessing(t *testing.T) {
 			// Advance past the bucket delay so every queued item is ready.
 			time.Sleep(10 * time.Millisecond)
 
-			heapLen := func() int {
-				d.mu.Lock()
-				defer d.mu.Unlock()
-				return d.heap.Len()
-			}
-
 			// One processing cycle must emit at most batchSize items, leaving the
 			// remainder queued — this is the batching guarantee.
 			d.processReady()
-			assert.Equal(t, items-d.batchSize, heapLen(),
+			assert.Equal(t, items-d.batchSize, d.Len(),
 				"one processReady cycle should process exactly batchSize (%d) of the %d ready items",
 				d.batchSize, items)
 
 			// A second cycle drains what is left (fewer than batchSize remain).
 			d.processReady()
-			assert.Equal(t, 0, heapLen(), "second cycle should drain the remaining items")
+			assert.Equal(t, 0, d.Len(), "second cycle should drain the remaining items")
 		})
 	})
 }
@@ -320,29 +233,6 @@ func TestUnixNanoComparison(t *testing.T) {
 
 		assert.False(t, future.Before(now))
 		assert.False(t, future.UnixNano() < now.UnixNano())
-	})
-
-	t.Run("peekTimeNs", func(t *testing.T) {
-		t.Parallel()
-
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 64),
-			len:  0,
-		}
-
-		// Empty heap
-		assert.Equal(t, int64(0), h.peekTimeNs())
-
-		// Add item
-		now := time.Now()
-		h.pushInline(deletedPartition{
-			keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-			readyAt: now,
-		})
-
-		// Should return Unix nano time
-		ns := h.peekTimeNs()
-		assert.Equal(t, now.UnixNano(), ns)
 	})
 }
 

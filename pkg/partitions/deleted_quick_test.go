@@ -37,22 +37,20 @@ func TestDeletedQuickCheck(t *testing.T) {
 
 	t.Log("Deleted partition, checking heap state...")
 
-	// Check heap immediately
-	d.mu.Lock()
-	heapLen := d.heap.Len()
+	// Check tracker state immediately
+	heapLen := d.Len()
 	if heapLen > 0 {
-		earliest := d.heap.data[0]
-		now := time.Now()
-		t.Logf("After delete: heap has %d items", heapLen)
-		t.Logf("  earliest.readyAt: %v", earliest.readyAt)
-		t.Logf("  now: %v", now)
-		t.Logf("  now.Before(readyAt): %v", now.Before(earliest.readyAt))
-		t.Logf("  time until ready: %v", earliest.readyAt.Sub(now))
-		t.Logf("  counter: %d", earliest.counter)
+		earliest, _ := d.peekSoonestForTest()
+		nowNs := time.Now().UnixNano()
+		t.Logf("After delete: tracker has %d items", heapLen)
+		t.Logf("  earliest.readyAtNs: %d", earliest.readyAtNs)
+		t.Logf("  nowNs: %d", nowNs)
+		t.Logf("  now < readyAt: %v", nowNs < earliest.readyAtNs)
+		t.Logf("  time until ready: %v", time.Duration(earliest.readyAtNs-nowNs))
+		t.Logf("  bucket: %d", earliest.bucket)
 	} else {
-		t.Fatal("Heap is empty after delete!")
+		t.Fatal("Tracker is empty after delete!")
 	}
-	d.mu.Unlock()
 
 	t.Log("Waiting for partition to be ready...")
 
@@ -63,18 +61,16 @@ func TestDeletedQuickCheck(t *testing.T) {
 		}
 		t.Log("✓ Successfully received partition")
 	case <-time.After(300 * time.Millisecond):
-		// Check heap state
-		d.mu.Lock()
-		heapLen = d.heap.Len()
+		// Check tracker state
+		heapLen = d.Len()
 		if heapLen > 0 {
-			earliest := d.heap.data[0]
-			now := time.Now()
-			t.Logf("After timeout: heap still has %d items", heapLen)
-			t.Logf("  earliest.readyAt: %v", earliest.readyAt)
-			t.Logf("  now: %v", now)
-			t.Logf("  now.Before(readyAt): %v", now.Before(earliest.readyAt))
+			earliest, _ := d.peekSoonestForTest()
+			nowNs := time.Now().UnixNano()
+			t.Logf("After timeout: tracker still has %d items", heapLen)
+			t.Logf("  earliest.readyAtNs: %d", earliest.readyAtNs)
+			t.Logf("  nowNs: %d", nowNs)
+			t.Logf("  now < readyAt: %v", nowNs < earliest.readyAtNs)
 		}
-		d.mu.Unlock()
 		t.Fatal("Timeout waiting for partition")
 	}
 }
