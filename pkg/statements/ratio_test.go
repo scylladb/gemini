@@ -99,7 +99,7 @@ func TestStatementRatioControllerValidation(t *testing.T) {
 						RegularInsertRatio: 0.8,
 						JSONInsertRatio:    0.2,
 					},
-					DeleteSubtypeRatios: DeleteRatios{
+					DeleteSubtypeRatios: TargetedRatios{
 						WholePartitionRatio:     0.25,
 						SingleRowRatio:          0.25,
 						ClusteringSubsetRatio:   0.25,
@@ -129,7 +129,7 @@ func TestStatementRatioControllerValidation(t *testing.T) {
 						RegularInsertRatio: 0.9,
 						JSONInsertRatio:    0.2, // Sum = 1.1
 					},
-					DeleteSubtypeRatios: DeleteRatios{
+					DeleteSubtypeRatios: TargetedRatios{
 						WholePartitionRatio:     0.25,
 						SingleRowRatio:          0.25,
 						ClusteringSubsetRatio:   0.25,
@@ -177,7 +177,7 @@ func TestStatementTypeDistribution(t *testing.T) {
 				RegularInsertRatio: 0.8,
 				JSONInsertRatio:    0.2,
 			},
-			DeleteSubtypeRatios: DeleteRatios{
+			DeleteSubtypeRatios: TargetedRatios{
 				WholePartitionRatio:     0.25,
 				SingleRowRatio:          0.25,
 				ClusteringSubsetRatio:   0.25,
@@ -279,7 +279,7 @@ func TestDeleteSubtypeDistribution(t *testing.T) {
 	counts := make(map[int]int)
 
 	for range samples {
-		subtype := controller.GetDeleteSubtype()
+		subtype := controller.GetTargetedSubtype()
 		counts[subtype]++
 	}
 
@@ -287,10 +287,10 @@ func TestDeleteSubtypeDistribution(t *testing.T) {
 	tolerance := 0.05
 	deleteRatios := ratios.MutationRatios.DeleteSubtypeRatios
 	expectedCounts := map[int]int{
-		DeleteWholePartition:     int(deleteRatios.WholePartitionRatio * float64(samples)),
-		DeleteSingleRow:          int(deleteRatios.SingleRowRatio * float64(samples)),
-		DeleteClusteringSubset:   int(deleteRatios.ClusteringSubsetRatio * float64(samples)),
-		DeleteMultiplePartitions: int(deleteRatios.MultiplePartitionsRatio * float64(samples)),
+		TargetedWholePartition:     int(deleteRatios.WholePartitionRatio * float64(samples)),
+		TargetedSingleRow:          int(deleteRatios.SingleRowRatio * float64(samples)),
+		TargetedClusteringSubset:   int(deleteRatios.ClusteringSubsetRatio * float64(samples)),
+		TargetedMultiplePartitions: int(deleteRatios.MultiplePartitionsRatio * float64(samples)),
 	}
 
 	for deleteType, expectedCount := range expectedCounts {
@@ -323,7 +323,7 @@ func TestUpdateRatios(t *testing.T) {
 				RegularInsertRatio: 0.9,
 				JSONInsertRatio:    0.1,
 			},
-			DeleteSubtypeRatios: DeleteRatios{
+			DeleteSubtypeRatios: TargetedRatios{
 				WholePartitionRatio:     0.4,
 				SingleRowRatio:          0.3,
 				ClusteringSubsetRatio:   0.2,

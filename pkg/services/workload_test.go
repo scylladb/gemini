@@ -343,7 +343,7 @@ func defaultStatementRatios() statements.Ratios {
 				RegularInsertRatio: 0.9,
 				JSONInsertRatio:    0.1,
 			},
-			DeleteSubtypeRatios: statements.DeleteRatios{
+			DeleteSubtypeRatios: statements.TargetedRatios{
 				WholePartitionRatio:     0.4,
 				SingleRowRatio:          0.3,
 				ClusteringSubsetRatio:   0.2,
@@ -526,7 +526,7 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 					RegularInsertRatio: 1.0,
 					JSONInsertRatio:    0.0,
 				},
-				DeleteSubtypeRatios: statements.DeleteRatios{
+				DeleteSubtypeRatios: statements.TargetedRatios{
 					WholePartitionRatio:     0.5,
 					SingleRowRatio:          0.5,
 					ClusteringSubsetRatio:   0.0,
@@ -706,7 +706,7 @@ func TestWorkloadDeleteHeavy(t *testing.T) {
 					RegularInsertRatio: 1.0,
 					JSONInsertRatio:    0.0,
 				},
-				DeleteSubtypeRatios: statements.DeleteRatios{
+				DeleteSubtypeRatios: statements.TargetedRatios{
 					WholePartitionRatio:     0.3,
 					SingleRowRatio:          0.4,
 					ClusteringSubsetRatio:   0.2,

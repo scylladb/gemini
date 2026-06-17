@@ -44,16 +44,16 @@ const (
 )
 
 type Jobs struct {
-	store               store.Store
-	schema              *typedef.Schema
-	status              *status.GlobalStatus
-	logger              *zap.Logger
-	random              *rand.ChaCha8
-	ratioController     *statements.RatioController
-	name                string
-	mutationConcurrency int
-	readConcurrency     int
-	targetedDeleteRatio float64
+	store                store.Store
+	schema               *typedef.Schema
+	status               *status.GlobalStatus
+	logger               *zap.Logger
+	random               *rand.ChaCha8
+	ratioController      *statements.RatioController
+	name                 string
+	mutationConcurrency  int
+	readConcurrency      int
+	targetedConsumeRatio float64
 }
 
 // ErrNoStatement is returned when no statement can be generated at this moment
@@ -128,15 +128,15 @@ func New(
 	)
 
 	return &Jobs{
-		schema:              schema,
-		store:               st,
-		status:              globalStatus,
-		logger:              logger,
-		random:              src,
-		readConcurrency:     readConcurrency,
-		mutationConcurrency: mutationConcurrency,
-		ratioController:     ratioController,
-		targetedDeleteRatio: ratios.TargetedDeleteRatio(),
+		schema:               schema,
+		store:                st,
+		status:               globalStatus,
+		logger:               logger,
+		random:               src,
+		readConcurrency:      readConcurrency,
+		mutationConcurrency:  mutationConcurrency,
+		ratioController:      ratioController,
+		targetedConsumeRatio: ratios.TargetedConsumeRatio(),
 	}
 }
 
@@ -286,7 +286,7 @@ func (j *Jobs) Run(
 						stopFlag,
 						j.store,
 						newSrc,
-						j.targetedDeleteRatio,
+						j.targetedConsumeRatio,
 					)
 
 					workerID := i
