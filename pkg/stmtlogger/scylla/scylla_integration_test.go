@@ -696,17 +696,22 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 		{Name: "pk0", Type: typedef.TypeText},
 	}
 
+	schema := &typedef.Schema{
+		Keyspace: typedef.Keyspace{Name: testKS},
+		Tables: []*typedef.Table{
+			{Name: testTable, PartitionKeys: partitionKeys},
+		},
+	}
+
 	// Create logger
 	scyllaLogger, err := New(
-		testKS,
-		testTable,
+		schema,
 		func() (*gocql.Session, error) { return containers.Oracle, nil },
 		func() (*gocql.Session, error) { return containers.Test, nil },
 		containers.TestHosts,
 		containers.TestPort(),
 		containers.DockerMode,
 		"", "",
-		partitionKeys,
 		replication.NewSimpleStrategy(),
 		itemCh,
 		oracleFile,

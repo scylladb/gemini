@@ -18,11 +18,38 @@ package utils
 import (
 	"encoding/hex"
 	"math"
+	"strings"
 	"sync"
 	"unsafe"
 
 	"github.com/shirou/gopsutil/v4/mem"
 )
+
+// KeyspaceTableFromQuery extracts the "keyspace.table" target of a
+// machine-generated mutation (INSERT INTO <kt> ..., UPDATE <kt> SET ...,
+// DELETE FROM <kt> WHERE ...). Returns "" when it cannot be determined.
+//
+// The store and statement logger are constructed once but shared across every
+// table in the schema, so any per-table logic (compensation targeting, _logs
+// routing) must derive the table from the statement's own query — the only
+// thing that identifies which table it hit.
+func KeyspaceTableFromQuery(query string) string {
+	fields := strings.Fields(query)
+	for i, f := range fields {
+		switch strings.ToUpper(f) {
+		case "INTO", "UPDATE", "FROM":
+			if i+1 < len(fields) {
+				kt := fields[i+1]
+				// INSERT renders the table glued to its column list: "ks.t(c0,..".
+				if p := strings.IndexByte(kt, '('); p >= 0 {
+					kt = kt[:p]
+				}
+				return kt
+			}
+		}
+	}
+	return ""
+}
 
 const (
 	uint64Size = int(unsafe.Sizeof(uint64(0)))

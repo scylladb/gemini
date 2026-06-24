@@ -15,11 +15,9 @@
 package scylla
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/gocql/gocql"
 	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,16 +26,11 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-// helper to build minimal cqlStatements with hooks for testing
+// helper to build minimal cqlStatements for testing
 func makeTestCQL(partitionKeys typedef.Columns) *cqlStatements {
 	return &cqlStatements{
 		insertStmt:    "INSERT INTO ks.tbl(...) VALUES (...)",
 		partitionKeys: partitionKeys,
-		newBatch: func(_ context.Context) *gocql.Batch {
-			b := &gocql.Batch{Type: gocql.UnloggedBatch}
-			return b
-		},
-		// execBatch and execQuery will be overridden per test when needed
 	}
 }
 

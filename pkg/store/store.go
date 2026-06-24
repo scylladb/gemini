@@ -169,8 +169,7 @@ func New(
 			statementLogger, err = stmtlogger.NewLogger(
 				stmtlogger.WithChannel(ch),
 				stmtlogger.WithLogger(scylla.New(
-					keyspace,
-					table,
+					schema,
 					oracleStoreImpl.getSession,
 					testStore.getSession,
 					cfg.OracleClusterConfig.Hosts,
@@ -178,7 +177,6 @@ func New(
 					cfg.OracleClusterConfig.DockerMode,
 					cfg.OracleClusterConfig.Username,
 					cfg.OracleClusterConfig.Password,
-					partitionKeyColumns,
 					cfg.OracleClusterConfig.Replication,
 					ch,
 					cfg.OracleStatementFile,
@@ -256,31 +254,6 @@ func (ds delegatingStore) getLogger() *zap.Logger {
 	return zap.NewNop()
 }
 
-// keyspaceTableFromQuery extracts the "keyspace.table" target of a machine-
-// generated mutation (INSERT INTO <kt> ..., UPDATE <kt> SET ..., DELETE FROM
-// <kt> WHERE ...). Returns "" when it cannot be determined.
-//
-// The store is shared across every table in the schema, so compensation cannot
-// assume a single table — it must target whichever table the timed-out mutation
-// actually hit, which only the statement's own query identifies.
-func keyspaceTableFromQuery(query string) string {
-	fields := strings.Fields(query)
-	for i, f := range fields {
-		switch strings.ToUpper(f) {
-		case "INTO", "UPDATE", "FROM":
-			if i+1 < len(fields) {
-				kt := fields[i+1]
-				// INSERT renders the table glued to its column list: "ks.t(c0,..".
-				if p := strings.IndexByte(kt, '('); p >= 0 {
-					kt = kt[:p]
-				}
-				return kt
-			}
-		}
-	}
-	return ""
-}
-
 // buildPartitionDeleteStmt constructs a DELETE that removes the entire partition
 // identified by keys from keyspaceAndTable.
 //
@@ -348,7 +321,7 @@ func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt) bool {
 
 	// Target the table the timed-out mutation actually hit, not the store's
 	// fixed table[0]. Best-effort: if it can't be determined, skip.
-	keyspaceAndTable := keyspaceTableFromQuery(stmt.Query)
+	keyspaceAndTable := utils.KeyspaceTableFromQuery(stmt.Query)
 	if keyspaceAndTable == "" {
 		return true
 	}

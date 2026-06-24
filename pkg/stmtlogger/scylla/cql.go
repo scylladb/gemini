@@ -40,9 +40,6 @@ type cqlStatements struct {
 	session                 *gocql.Session
 	oracleSession           func() (*gocql.Session, error)
 	testSession             func() (*gocql.Session, error)
-	newBatch                func(ctx context.Context) *gocql.Batch
-	execBatch               func(ctx context.Context, batch *gocql.Batch) error
-	execQuery               func(ctx context.Context, stmt string, args ...any) error
 	mutationFragmentsSelect string
 	oracleSelect            string
 	testSelect              string
@@ -79,6 +76,11 @@ const (
 
 var additionalColumnsArr = strings.Split(additionalColumns, ",")
 
+// newStatements creates the _logs keyspace (idempotently) and the table, then
+// builds the per-table cqlStatements. It is the self-contained entry point for
+// callers that set up a single table in isolation (e.g. tests). New uses
+// newTableStatements directly after creating the shared keyspace once, to avoid
+// re-issuing the keyspace DDL for every table in a multi-table schema.
 func newStatements(
 	session *gocql.Session,
 	oracleSession, testSession func() (*gocql.Session, error),
@@ -87,11 +89,26 @@ func newStatements(
 	partitionKeys typedef.Columns,
 	replication replication.Replication,
 ) (*cqlStatements, error) {
-	createKeyspace, createTable := buildCreateTableQuery(keyspace, table, partitionKeys, replication)
-
-	if err := session.Query(createKeyspace).Exec(); err != nil {
+	if err := session.Query(buildCreateKeyspaceQuery(keyspace, replication)).Exec(); err != nil {
 		return nil, err
 	}
+
+	return newTableStatements(session, oracleSession, testSession,
+		keyspace, table, originalKeyspace, originalTable, partitionKeys, replication)
+}
+
+// newTableStatements creates the per-table _logs table and builds its
+// cqlStatements. The _logs keyspace must already exist (created by New once, or
+// by newStatements for single-table callers).
+func newTableStatements(
+	session *gocql.Session,
+	oracleSession, testSession func() (*gocql.Session, error),
+	keyspace, table string,
+	originalKeyspace, originalTable string,
+	partitionKeys typedef.Columns,
+	replication replication.Replication,
+) (*cqlStatements, error) {
+	_, createTable := buildCreateTableQuery(keyspace, table, partitionKeys, replication)
 
 	if err := session.Query(createTable).Exec(); err != nil {
 		return nil, err
@@ -147,17 +164,6 @@ func newStatements(
 			},
 		},
 		partitionKeys: partitionKeys,
-		newBatch: func(ctx context.Context) *gocql.Batch {
-			return session.BatchWithContext(ctx, gocql.UnloggedBatch)
-		},
-		execBatch: func(_ context.Context, batch *gocql.Batch) error {
-			return session.ExecuteBatch(batch)
-		},
-		execQuery: func(ctx context.Context, stmt string, args ...any) error {
-			q := session.QueryWithContext(ctx, stmt, args...)
-			defer q.Release()
-			return q.Exec()
-		},
 	}, nil
 }
 
@@ -394,16 +400,23 @@ func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *job
 	}
 }
 
+// buildCreateKeyspaceQuery builds the CQL that creates the shared _logs keyspace.
+// New creates it once up front; the per-table newTableStatements calls then only
+// create their own tables, so the keyspace DDL is not re-issued per table.
+func buildCreateKeyspaceQuery(keyspace string, replication replication.Replication) string {
+	return fmt.Sprintf(
+		"CREATE KEYSPACE IF NOT EXISTS %s WITH replication=%s AND durable_writes = true;",
+		keyspace, replication.ToCQL(),
+	)
+}
+
 func buildCreateTableQuery(
 	keyspace string,
 	table string,
 	partitionKeys typedef.Columns,
 	replication replication.Replication,
 ) (string, string) {
-	createKeyspace := fmt.Sprintf(
-		"CREATE KEYSPACE IF NOT EXISTS %s WITH replication=%s AND durable_writes = true;",
-		keyspace, replication.ToCQL(),
-	)
+	createKeyspace := buildCreateKeyspaceQuery(keyspace, replication)
 
 	var builder bytes.Buffer
 
