@@ -17,6 +17,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -136,6 +137,8 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		PartitionKeys: []typedef.PartitionKeys{
 			{Values: vals},
 		},
+		// Compensation derives the target table from the statement's query.
+		Query: "INSERT INTO ks.t(pk) VALUES (?)",
 	}
 
 	makeDS := func(testStore, oracleStore storeLoader) delegatingStore {
@@ -209,7 +212,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 			keyspaceAndTable:    "ks.t",
 		}
 		ok := ds.compensateAsymmetricWrite(stmt)
-		// buildPartitionDeleteStmt returns nil → delete is skipped, ok stays true.
+		// Empty partitionKeyColumns → compensation early-returns before any delete.
 		assert.True(t, ok)
 		assert.Equal(t, int64(0), ts.muCalls.Load())
 	})
@@ -222,6 +225,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 				{Values: vals},
 				{Values: vals2},
 			},
+			Query: "INSERT INTO ks.t(pk) VALUES (?)",
 		}
 		ts := &compensateStore{}
 		os := &compensateStore{}
@@ -231,6 +235,54 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		assert.Equal(t, int64(2), ts.muCalls.Load())
 		assert.Equal(t, int64(2), os.muCalls.Load())
 	})
+}
+
+func TestKeyspaceTableFromQuery(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"INSERT INTO ks1.table2(pk0,pk1) VALUES (?,?)":           "ks1.table2",
+		"INSERT INTO ks1.table2 (pk0) VALUES (?)":                "ks1.table2",
+		"UPDATE ks1.table3 SET col0=? WHERE pk0=? AND pk1=?":     "ks1.table3",
+		"DELETE FROM ks1.table1 WHERE pk0=? AND pk1=? AND pk2=?": "ks1.table1",
+		"DELETE col0 FROM ks1.t WHERE pk0=?":                     "ks1.t",
+		"garbage without a table":                                "",
+		"":                                                       "",
+	}
+	for query, want := range cases {
+		assert.Equalf(t, want, keyspaceTableFromQuery(query), "query: %q", query)
+	}
+}
+
+// TestBuildPartitionDeleteStmt_ArityFollowsStmtNotStore guards the multi-table
+// regression: the store is bound to one table's partition-key schema, but the
+// compensation delete must follow the *statement's* own partition key columns
+// (and target the statement's table), so the bind arity always matches even when
+// the timed-out mutation belongs to a different, narrower table.
+func TestBuildPartitionDeleteStmt_ArityFollowsStmtNotStore(t *testing.T) {
+	t.Parallel()
+
+	// Store schema: a 7-column partition key (mimics table[0]).
+	wide := make(typedef.Columns, 7)
+	for i := range wide {
+		wide[i] = typedef.ColumnDef{Name: "wpk" + string(rune('0'+i)), Type: typedef.TypeInt}
+	}
+	ds := delegatingStore{partitionKeyColumns: wide, keyspaceAndTable: "ks.table0"}
+
+	// Statement from a different, 4-column table.
+	keys := &typedef.PartitionKeys{
+		Values: typedef.NewValuesFromMap(map[string][]any{
+			"pk0": {int32(1)}, "pk1": {int32(2)}, "pk2": {int32(3)}, "pk3": {int32(4)},
+		}),
+	}
+
+	del := ds.buildPartitionDeleteStmt(keys, "ks.table9")
+	if assert.NotNil(t, del) {
+		assert.Equal(t, 4, len(del.Values), "bind values must match the statement's PK column count, not the store's")
+		assert.Equal(t, 4, strings.Count(del.Query, "=?"), "marker count must match value count")
+		assert.Contains(t, del.Query, "ks.table9", "must target the statement's table, not the store's table0")
+		assert.NotContains(t, del.Query, "table0")
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -256,28 +256,64 @@ func (ds delegatingStore) getLogger() *zap.Logger {
 	return zap.NewNop()
 }
 
-// buildPartitionDeleteStmt constructs a DELETE statement that removes the entire
-// partition identified by keys from the table.  Returns nil if the store has no
-// partition-key schema (e.g. unit tests that construct delegatingStore directly).
-func (ds delegatingStore) buildPartitionDeleteStmt(keys *typedef.PartitionKeys) *typedef.Stmt {
-	if keys == nil || len(ds.partitionKeyColumns) == 0 || ds.keyspaceAndTable == "" {
+// keyspaceTableFromQuery extracts the "keyspace.table" target of a machine-
+// generated mutation (INSERT INTO <kt> ..., UPDATE <kt> SET ..., DELETE FROM
+// <kt> WHERE ...). Returns "" when it cannot be determined.
+//
+// The store is shared across every table in the schema, so compensation cannot
+// assume a single table — it must target whichever table the timed-out mutation
+// actually hit, which only the statement's own query identifies.
+func keyspaceTableFromQuery(query string) string {
+	fields := strings.Fields(query)
+	for i, f := range fields {
+		switch strings.ToUpper(f) {
+		case "INTO", "UPDATE", "FROM":
+			if i+1 < len(fields) {
+				kt := fields[i+1]
+				// INSERT renders the table glued to its column list: "ks.t(c0,..".
+				if p := strings.IndexByte(kt, '('); p >= 0 {
+					kt = kt[:p]
+				}
+				return kt
+			}
+		}
+	}
+	return ""
+}
+
+// buildPartitionDeleteStmt constructs a DELETE that removes the entire partition
+// identified by keys from keyspaceAndTable.
+//
+// Both the WHERE columns and the bind values come from keys.Values (the
+// statement's own partition-key map), so the bind arity always matches —
+// regardless of how many partition-key columns the table has. Earlier this used
+// the store's fixed table[0] schema, which mis-bound (and targeted the wrong
+// table) whenever a mutation on any other table timed out. Returns nil when the
+// keyspace.table or partition-key values are unavailable.
+func (ds delegatingStore) buildPartitionDeleteStmt(keys *typedef.PartitionKeys, keyspaceAndTable string) *typedef.Stmt {
+	if keys == nil || keys.Values == nil || keyspaceAndTable == "" {
+		return nil
+	}
+
+	pkNames := keys.Values.Keys() // sorted → stable query string (prepared once)
+	if len(pkNames) == 0 {
 		return nil
 	}
 
 	// Build: DELETE FROM keyspace.table WHERE pk1=? AND pk2=? ...
 	var sb strings.Builder
 	sb.WriteString("DELETE FROM ")
-	sb.WriteString(ds.keyspaceAndTable)
+	sb.WriteString(keyspaceAndTable)
 	sb.WriteString(" WHERE ")
 
-	values := make([]any, 0, ds.partitionKeyColumns.LenValues())
-	for i, pk := range ds.partitionKeyColumns {
+	values := make([]any, 0, len(pkNames))
+	for i, name := range pkNames {
 		if i > 0 {
 			sb.WriteString(" AND ")
 		}
-		sb.WriteString(pk.Name)
+		sb.WriteString(name)
 		sb.WriteString("=?")
-		values = append(values, keys.Values.Get(pk.Name)...)
+		values = append(values, keys.Values.Get(name)...)
 	}
 
 	return &typedef.Stmt{
@@ -310,6 +346,13 @@ func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt) bool {
 		return true
 	}
 
+	// Target the table the timed-out mutation actually hit, not the store's
+	// fixed table[0]. Best-effort: if it can't be determined, skip.
+	keyspaceAndTable := keyspaceTableFromQuery(stmt.Query)
+	if keyspaceAndTable == "" {
+		return true
+	}
+
 	compCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -317,7 +360,7 @@ func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt) bool {
 	ok := true
 
 	for i := range stmt.PartitionKeys {
-		deleteStmt := ds.buildPartitionDeleteStmt(&stmt.PartitionKeys[i])
+		deleteStmt := ds.buildPartitionDeleteStmt(&stmt.PartitionKeys[i], keyspaceAndTable)
 		if deleteStmt == nil {
 			continue
 		}
