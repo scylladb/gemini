@@ -41,10 +41,16 @@ type (
 	Type string
 
 	Item struct {
-		Start          Time                     `json:"s"`
-		Error          mo.Either[error, string] `json:"e,omitempty"`
-		Type           Type                     `json:"-"`
-		Statement      string                   `json:"q"`
+		Start     Time                     `json:"s"`
+		Error     mo.Either[error, string] `json:"e,omitempty"`
+		Type      Type                     `json:"-"`
+		Statement string                   `json:"q"`
+		// Table is the source "keyspace.table" the statement targeted. The
+		// statement logger is shared across every table in the schema, so the
+		// committer uses this to route each item to its own table's _logs table
+		// (whose partition-key columns match the item's PartitionKeys). Without
+		// it, items from any table but Tables[0] would mis-bind and be dropped.
+		Table          string                   `json:"-"`
 		Host           string                   `json:"h"`
 		Values         mo.Either[[]any, []byte] `json:"v"`
 		RecentSuccess  []uint64                 `json:"rs,omitempty"`

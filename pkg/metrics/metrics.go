@@ -231,6 +231,21 @@ var (
 		[]string{"sink"},
 	)
 
+	// TrackedRowSchemaMismatch counts targeted mutations (single-row UPDATE,
+	// single-row / clustering-prefix DELETE) that popped a tracked row whose
+	// flat key-value slices were too short to satisfy the table schema, forcing
+	// a fallback (whole-partition mutation or random-row update) and discarding
+	// the popped row. Under normal operation this stays at zero; a sustained
+	// non-zero rate signals a schema/tracking skew in the row sampler worth
+	// investigating, rather than the row tracker silently draining.
+	TrackedRowSchemaMismatch = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tracked_row_schema_mismatch_total",
+			Help: "Targeted mutations that fell back because a popped tracked row did not match the table schema.",
+		},
+		[]string{"keyspace", "table", "mutation"},
+	)
+
 	StatementErrorLastTS = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "stmt_error_last_timestamp_seconds",
@@ -299,6 +314,7 @@ func init() {
 		DeletedPartitionsHeapEvictions,
 		DeletedPartitionsSampledOut,
 		StatementLoggerFlushes,
+		TrackedRowSchemaMismatch,
 		StatementErrorLastTS,
 		WorkersCurrent,
 		ValidationRowsDeduplicated,

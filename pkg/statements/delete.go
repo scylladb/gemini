@@ -19,31 +19,45 @@ import (
 
 	"github.com/scylladb/gocqlx/v3/qb"
 
+	"github.com/scylladb/gemini/pkg/partitions"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-// pkValuesFromTracked reconstructs a *typedef.Values map from the flat
-// PartitionValues slice stored in a TrackedRow. This is needed so that the
-// statement logger (which calls PartitionKeys.Values.ToCQLValues) receives
-// the correct number of bind values for the batch INSERT into the statements
-// table — a nil Values causes "expected N values got 9" errors there.
+// appendTrackedKeys appends the equality bind values for a targeted mutation
+// against trackedRow to dst: every partition-key value followed by the first nCK
+// clustering-key values (nCK == len(ClusteringKeys) for a single-row target, a
+// smaller nCK for a clustering-prefix target). It also returns a *typedef.Values
+// of just the partition-key values, which the statement logger binds into the
+// _logs INSERT (a nil Values there fails with a bind-arity mismatch).
 //
-// The function mirrors the loop already used to build the DELETE bind slice:
-// it walks the table's PartitionKeys in order and slices off LenValue() values
-// for each column, building the column-name → values map.
-// Returns nil when the flat slice is too short (caller should fall back).
-func pkValuesFromTracked(partitionKeys typedef.Columns, flatValues []any) *typedef.Values {
-	m := make(map[string][]any, len(partitionKeys))
+// ok is false when trackedRow is too short for the schema; the caller should
+// fall back. Lengths are validated before any append, so on ok=false dst is
+// returned unchanged and is safe to reuse.
+//
+// Shared by single-row UPDATE, single-row DELETE, and clustering-prefix DELETE.
+func (g *Generator) appendTrackedKeys(dst []any, trackedRow partitions.TrackedRow, nCK int) ([]any, *typedef.Values, bool) {
+	pkLen := g.table.PartitionKeys.LenValues()
+	if len(trackedRow.PartitionValues) < pkLen {
+		return dst, nil, false
+	}
+	ckLen := g.table.ClusteringKeys[:nCK].LenValues()
+	if len(trackedRow.ClusteringValues) < ckLen {
+		return dst, nil, false
+	}
+
+	dst = append(dst, trackedRow.PartitionValues[:pkLen]...)
+	dst = append(dst, trackedRow.ClusteringValues[:ckLen]...)
+
+	// Partition-key Values for the logger; the slices alias trackedRow, no copy.
+	m := make(map[string][]any, len(g.table.PartitionKeys))
 	idx := 0
-	for _, pk := range partitionKeys {
+	for _, pk := range g.table.PartitionKeys {
 		lenVal := pk.Type.LenValue()
-		if idx+lenVal > len(flatValues) {
-			return nil
-		}
-		m[pk.Name] = flatValues[idx : idx+lenVal]
+		m[pk.Name] = trackedRow.PartitionValues[idx : idx+lenVal]
 		idx += lenVal
 	}
-	return typedef.NewValuesFromMap(m)
+
+	return dst, typedef.NewValuesFromMap(m), true
 }
 
 func (g *Generator) buildCachedDeleteQueries() {
@@ -86,14 +100,14 @@ func (g *Generator) buildCachedDeleteQueries() {
 }
 
 func (g *Generator) Delete(ctx context.Context) (*typedef.Stmt, error) {
-	switch g.ratioController.GetDeleteSubtype() {
-	case DeleteWholePartition:
+	switch g.ratioController.GetTargetedSubtype() {
+	case TargetedWholePartition:
 		return g.deleteSinglePartition(ctx)
-	case DeleteSingleRow:
+	case TargetedSingleRow:
 		return g.deleteSingleRow(ctx)
-	case DeleteClusteringSubset:
+	case TargetedClusteringSubset:
 		return g.deleteClusteringSubset(ctx)
-	case DeleteMultiplePartitions:
+	case TargetedMultiplePartitions:
 		// deleteMultiplePartitions is intentionally NOT used: it builds a
 		// per-column IN delete (pk1 IN (...) AND pk2 IN (...)), which CQL
 		// evaluates as the CARTESIAN PRODUCT of the values. For a composite
@@ -112,7 +126,7 @@ func (g *Generator) Delete(ctx context.Context) (*typedef.Stmt, error) {
 	}
 }
 
-//nolint:unused // kept for reference; see DeleteMultiplePartitions case above for why it is not called
+//nolint:unused // kept for reference; see TargetedMultiplePartitions case above for why it is not called
 func (g *Generator) deleteMultiplePartitions(_ context.Context) (*typedef.Stmt, error) {
 	builder := qb.Delete(g.keyspaceAndTable)
 
@@ -169,44 +183,16 @@ func (g *Generator) deleteSingleRow(ctx context.Context) (*typedef.Stmt, error) 
 		return g.deleteSinglePartition(ctx)
 	}
 
+	// Single-row delete binds every partition key AND every clustering key.
 	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues())
-
-	// Add partition key conditions using the flat PartitionValues slice.
-	pkValIdx := 0
-	for _, pk := range g.table.PartitionKeys {
-		lenVal := pk.Type.LenValue()
-		if pkValIdx+lenVal > len(trackedRow.PartitionValues) {
-			return g.deleteSinglePartition(ctx)
-		}
-		values = append(values, trackedRow.PartitionValues[pkValIdx:pkValIdx+lenVal]...)
-		pkValIdx += lenVal
-	}
-
-	// Add ALL clustering key conditions (single row).
-	ckValIdx := 0
-	for _, ck := range g.table.ClusteringKeys {
-		lenVal := ck.Type.LenValue()
-		if ckValIdx+lenVal > len(trackedRow.ClusteringValues) {
-			return g.deleteSinglePartition(ctx)
-		}
-		values = append(values, trackedRow.ClusteringValues[ckValIdx:ckValIdx+lenVal]...)
-		ckValIdx += lenVal
-	}
-
-	// Reconstruct the Values map so the statement logger can bind the correct
-	// number of partition-key values in its batch INSERT.
-	pkVals := pkValuesFromTracked(g.table.PartitionKeys, trackedRow.PartitionValues)
-	if pkVals == nil {
+	values, pkVals, ok := g.appendTrackedKeys(values, trackedRow, len(g.table.ClusteringKeys))
+	if !ok {
+		g.trackedMisses.DeleteSingleRow++
 		return g.deleteSinglePartition(ctx)
 	}
 
-	stmtPK := typedef.PartitionKeys{
-		ID:     trackedRow.PartitionID,
-		Values: pkVals,
-	}
-
 	return &typedef.Stmt{
-		PartitionKeys: []typedef.PartitionKeys{stmtPK},
+		PartitionKeys: []typedef.PartitionKeys{{ID: trackedRow.PartitionID, Values: pkVals}},
 		Values:        values,
 		QueryType:     typedef.DeleteSingleRowType,
 		Query:         g.deleteSingleRowQuery,
@@ -229,47 +215,19 @@ func (g *Generator) deleteClusteringSubset(ctx context.Context) (*typedef.Stmt, 
 		return g.deleteSinglePartition(ctx)
 	}
 
-	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues())
-
-	// Add partition key equality conditions.
-	pkValIdx := 0
-	for _, pk := range g.table.PartitionKeys {
-		lenVal := pk.Type.LenValue()
-		if pkValIdx+lenVal > len(trackedRow.PartitionValues) {
-			return g.deleteSinglePartition(ctx)
-		}
-		values = append(values, trackedRow.PartitionValues[pkValIdx:pkValIdx+lenVal]...)
-		pkValIdx += lenVal
-	}
-
 	// Pick n in [1, numCKs-1]: n equality-bound CK columns, leaving at least one
 	// unbound so this is a cluster (prefix) delete rather than a single-row delete.
 	n := 1 + g.random.IntN(numCKs-1)
 
-	ckValIdx := 0
-	for _, ck := range g.table.ClusteringKeys[:n] {
-		lenVal := ck.Type.LenValue()
-		if ckValIdx+lenVal > len(trackedRow.ClusteringValues) {
-			return g.deleteSinglePartition(ctx)
-		}
-		values = append(values, trackedRow.ClusteringValues[ckValIdx:ckValIdx+lenVal]...)
-		ckValIdx += lenVal
-	}
-
-	// Reconstruct the Values map so the statement logger can bind the correct
-	// number of partition-key values in its batch INSERT.
-	pkVals := pkValuesFromTracked(g.table.PartitionKeys, trackedRow.PartitionValues)
-	if pkVals == nil {
+	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues())
+	values, pkVals, ok := g.appendTrackedKeys(values, trackedRow, n)
+	if !ok {
+		g.trackedMisses.DeleteClusteringSubset++
 		return g.deleteSinglePartition(ctx)
 	}
 
-	stmtPK := typedef.PartitionKeys{
-		ID:     trackedRow.PartitionID,
-		Values: pkVals,
-	}
-
 	return &typedef.Stmt{
-		PartitionKeys: []typedef.PartitionKeys{stmtPK},
+		PartitionKeys: []typedef.PartitionKeys{{ID: trackedRow.PartitionID, Values: pkVals}},
 		Values:        values,
 		QueryType:     typedef.DeleteClusteringSubsetType,
 		Query:         g.deleteClusteringSubsetQueries[n],

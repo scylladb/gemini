@@ -87,6 +87,8 @@ func NewMutation(
 
 func (m *Mutation) run(ctx context.Context) error {
 	mutateStmt, err := m.statement.MutateStatement(ctx, m.delete)
+	// Drain whatever tracked-row fallbacks the generator recorded into the metric.
+	m.recordTrackedMisses()
 	if err != nil {
 		return err
 	}
@@ -246,6 +248,28 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 func (m *Mutation) Name() string {
 	return "mutation_" + m.table.Name
+}
+
+// recordTrackedMisses drains the statement generator's tracked-row
+// schema-mismatch fallback counts and adds them to the
+// tracked_row_schema_mismatch_total metric, labelled by mutation kind. Kept at
+// the jobs layer so pkg/statements has no metrics dependency.
+func (m *Mutation) recordTrackedMisses() {
+	c := m.statement.DrainTrackedMisses()
+	if c == (statements.TrackedMissCounts{}) {
+		return
+	}
+
+	keyspace := m.schema.Keyspace.Name
+	if c.Update > 0 {
+		metrics.TrackedRowSchemaMismatch.WithLabelValues(keyspace, m.table.Name, "update").Add(float64(c.Update))
+	}
+	if c.DeleteSingleRow > 0 {
+		metrics.TrackedRowSchemaMismatch.WithLabelValues(keyspace, m.table.Name, "delete_single_row").Add(float64(c.DeleteSingleRow))
+	}
+	if c.DeleteClusteringSubset > 0 {
+		metrics.TrackedRowSchemaMismatch.WithLabelValues(keyspace, m.table.Name, "delete_clustering_subset").Add(float64(c.DeleteClusteringSubset))
+	}
 }
 
 // nolint

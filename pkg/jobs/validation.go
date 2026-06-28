@@ -63,7 +63,7 @@ func NewValidation(
 	stopFlag *stop.Flag,
 	store store.Store,
 	seed [32]byte,
-	targetedDeleteRatio float64,
+	targetedConsumeRatio float64,
 ) *Validation {
 	maxAttempts := schema.Config.AsyncObjectStabilizationAttempts
 	delay := schema.Config.AsyncObjectStabilizationDelay
@@ -89,11 +89,11 @@ func NewValidation(
 		schema.Config.UseLWT,
 	)
 
-	// Compute sample rate based on the effective targeted delete ratio.
-	// When targeted deletes are disabled, we don't sample at all.
-	// At the default config (targetedDeleteRatio=0.03) this gives ~10%.
-	// Scales linearly up to 50% for heavy delete workloads.
-	sampleRate := min(0.50, targetedDeleteRatio*3.5)
+	// Compute sample rate based on the effective tracked-row consume ratio
+	// (targeted deletes + single-row updates). When nothing consumes tracked
+	// rows, we don't sample at all. Scales linearly, capped at 50% for heavy
+	// delete/update workloads.
+	sampleRate := min(0.50, targetedConsumeRatio*3.5)
 	maxSamplesPerRun := max(1, min(10, int(30*sampleRate)))
 
 	return &Validation{

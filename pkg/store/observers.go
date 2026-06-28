@@ -30,6 +30,7 @@ import (
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type observerInitializer[T any] func(host string, ty typedef.StatementType) T
@@ -161,6 +162,12 @@ func (c *ClusterObserver) incGoCQLQueryError(instance string, err error) {
 // touches exactly one partition. Revisit the per-row Values slicing here if
 // multi-partition mutations are ever re-enabled.
 func (c *ClusterObserver) logStatement(stmt *typedef.Stmt, base stmtlogger.Item) {
+	// Tag every emitted item with the source "keyspace.table" so the statement
+	// logger can route it to that table's own _logs table. The store is shared
+	// across all tables, so this is derived from the statement's own query (the
+	// same approach the asymmetric-write compensation uses). Parsed once here
+	// rather than per-partition or per-item in the committer hot path.
+	base.Table = utils.KeyspaceTableFromQuery(stmt.Query)
 	for i := range stmt.PartitionKeys {
 		item := base
 		item.PartitionKeys = stmt.PartitionKeys[i]

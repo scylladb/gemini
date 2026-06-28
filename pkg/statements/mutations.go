@@ -46,18 +46,10 @@ func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) (*
 
 		return g.Insert(ctx)
 	case StatementTypeUpdate:
-		if g.table.IsCounterTable() {
-			return g.Update(ctx)
-		}
-
-		// TODO(CodeLieutenant): Update statement support expected in v2.1.0
-		//       Falling back to Insert for now, until everything else is stable
-
-		if g.ratioController.GetInsertSubtype() == InsertJSONStatement {
-			return g.InsertJSON(ctx)
-		}
-
-		return g.Insert(ctx)
+		// Single-row UPDATE: prefers a real tracked row, falls back to a
+		// random-key upsert. Handles counter tables transparently (their SET
+		// uses the col = col + 1 increment form).
+		return g.Update(ctx)
 	case StatementTypeDelete:
 		return g.Delete(ctx)
 	default:

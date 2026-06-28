@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -36,6 +35,7 @@ import (
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 const (
@@ -55,9 +55,16 @@ const (
 
 type (
 	Logger struct {
-		logger            *zap.Logger
-		channel           <-chan stmtlogger.Item
-		cqlStatements     *cqlStatements
+		logger  *zap.Logger
+		channel <-chan stmtlogger.Item
+		session *gocql.Session
+		// statements holds one *cqlStatements per source table, keyed by
+		// "keyspace.table". The logger is shared across every table in the
+		// schema, so each item is routed to its own table's _logs table whose
+		// partition-key columns match the item's PartitionKeys. Using a single
+		// fixed table's columns (the old behavior) mis-bound and dropped every
+		// statement from tables other than Tables[0].
+		statements        map[string]*cqlStatements
 		fetchHook         func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError) (cqlDataMap, error)
 		wg                sync.WaitGroup
 		curWorkers        atomic.Int32
@@ -90,14 +97,12 @@ type (
 )
 
 func New(
-	originalKeyspace string,
-	originalTable string,
+	schema *typedef.Schema,
 	oracleSession, testSession func() (*gocql.Session, error),
 	hosts []string,
 	port int,
 	dockerMode bool,
 	username, password string,
-	partitionKeys typedef.Columns,
 	repl replication.Replication,
 	ch <-chan stmtlogger.Item,
 	oracleStatementsFile string,
@@ -105,34 +110,53 @@ func New(
 	e <-chan *joberror.JobError,
 	l *zap.Logger,
 ) (*Logger, error) {
+	originalKeyspace := schema.Keyspace.Name
+	keyspace := GetScyllaStatementLogsKeyspace(originalKeyspace)
+
 	l.Debug("creating scylla logger",
 		zap.String("keyspace", originalKeyspace),
-		zap.String("table", originalTable),
+		zap.Int("tables", len(schema.Tables)),
 	)
-
-	keyspace := GetScyllaStatementLogsKeyspace(originalKeyspace)
-	table := GetScyllaStatementLogsTable(originalTable)
-
-	createKeyspace, createTable := buildCreateTableQuery(keyspace, table, partitionKeys, repl)
 
 	session, err := newSession(hosts, port, dockerMode, username, password, l)
 	if err != nil {
 		return nil, err
 	}
 
+	// Drop and recreate the shared _logs keyspace once for a clean slate; the
+	// per-table loop below only creates each table, not the keyspace.
 	l.Debug("dropping existing statement logs keyspace", zap.String("keyspace", keyspace))
 	if err = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec(); err != nil {
 		return nil, err
 	}
 
 	l.Debug("creating statement logs keyspace", zap.String("keyspace", keyspace))
-	if err = session.Query(createKeyspace).Exec(); err != nil {
+	if err = session.Query(buildCreateKeyspaceQuery(keyspace, repl)).Exec(); err != nil {
 		return nil, err
 	}
 
-	l.Debug("creating statement logs table", zap.String("table", table))
-	if err = session.Query(createTable).Exec(); err != nil {
-		return nil, err
+	// Build one _logs table + cqlStatements per source table. Binding each
+	// item's partition keys against its own table's columns is what keeps
+	// statements from tables other than Tables[0] from being mis-bound and
+	// dropped (statement_logger_malformed_total).
+	statements := make(map[string]*cqlStatements, len(schema.Tables))
+	for _, sourceTable := range schema.Tables {
+		l.Debug("creating statement logs table",
+			zap.String("source_table", sourceTable.Name),
+			zap.String("table", GetScyllaStatementLogsTable(sourceTable.Name)),
+		)
+
+		//nolint:govet
+		cqlStmts, err := newTableStatements(session, oracleSession, testSession,
+			keyspace, GetScyllaStatementLogsTable(sourceTable.Name),
+			originalKeyspace,
+			sourceTable.Name,
+			sourceTable.PartitionKeys, repl)
+		if err != nil {
+			return nil, err
+		}
+
+		statements[originalKeyspace+"."+sourceTable.Name] = cqlStmts
 	}
 
 	l.Debug("waiting for schema agreement")
@@ -141,19 +165,11 @@ func New(
 	}
 	l.Debug("schema agreement reached")
 
-	cqlStmts, err := newStatements(session, oracleSession, testSession,
-		keyspace, table,
-		originalKeyspace,
-		originalTable,
-		partitionKeys, repl)
-	if err != nil {
-		return nil, err
-	}
-
 	logger := &Logger{
-		channel:       ch,
-		logger:        l,
-		cqlStatements: cqlStmts,
+		channel:    ch,
+		logger:     l,
+		session:    session,
+		statements: statements,
 	}
 
 	// Start a fixed-size worker pool to insert statement logs into Scylla.
@@ -344,8 +360,14 @@ func (s *Logger) poolCallback(ctx context.Context, ty stmtlogger.Type, jobError 
 	)
 	if s.fetchHook != nil {
 		data, err = s.fetchHook(ctx, ty, jobError)
+	} else if cql := s.statementsForQuery(jobError.Query); cql != nil {
+		data, err = cql.Fetch(ctx, ty, jobError)
 	} else {
-		data, err = s.cqlStatements.Fetch(ctx, ty, jobError)
+		s.logger.Error("no statement logs table for job error; cannot fetch failed statements",
+			zap.String("query", jobError.Query),
+			zap.String("job_error_hash", jobError.HashHex()),
+		)
+		return statementChData{}
 	}
 	if err != nil {
 		s.logger.Error("failed to fetch failed statements",
@@ -397,37 +419,82 @@ func (s *Logger) fetchErrors(items chan<- statementChData, ch <-chan *joberror.J
 	}
 }
 
-// makeBatch creates a new gocql batch using test hooks when provided.
+// statementsFor routes an item to the _logs statements for the table it came
+// from. Returns nil when the item carries no/unknown table identity (the
+// committer drops and counts such items).
+func (s *Logger) statementsFor(it stmtlogger.Item) *cqlStatements {
+	if s.statements == nil {
+		return nil
+	}
+	return s.statements[it.Table]
+}
+
+// statementsForQuery routes a job error to the _logs statements for the table
+// its query targets. Returns nil when the table cannot be determined.
+func (s *Logger) statementsForQuery(query string) *cqlStatements {
+	if s.statements == nil {
+		return nil
+	}
+	return s.statements[utils.KeyspaceTableFromQuery(query)]
+}
+
+// maxArgsCap returns the largest per-table insert arity so committer buffers are
+// sized to fit any table's bind values without re-growing.
+func (s *Logger) maxArgsCap() int {
+	maxCap := len(additionalColumnsArr)
+	for _, c := range s.statements {
+		if n := c.argsCap(); n > maxCap {
+			maxCap = n
+		}
+	}
+	return maxCap
+}
+
+// bind routes it to its table's _logs statements and binds its arguments into
+// dst. It returns (cql, args, true) when the item is ready to enqueue. It
+// returns false when the item must be skipped: schema and SELECT statements are
+// skipped silently, while unknown-table or partition-key bind-arity mismatches
+// are additionally counted as malformed (and warned once) before being dropped.
+func (s *Logger) bind(it stmtlogger.Item, dst []any) (*cqlStatements, []any, bool) {
+	if it.StatementType.IsSchema() || it.StatementType.IsSelect() {
+		return nil, dst[:0], false
+	}
+
+	cql := s.statementsFor(it)
+	if cql == nil {
+		s.recordMalformed(it)
+		return nil, dst[:0], false
+	}
+
+	args, ok := cql.fillArgs(dst, it)
+	if !ok {
+		s.recordMalformed(it)
+		return nil, dst[:0], false
+	}
+
+	return cql, args, true
+}
+
+// makeBatch creates a new gocql batch on the shared _logs session.
 func (s *Logger) makeBatch(ctx context.Context) *gocql.Batch {
-	if s.cqlStatements.newBatch != nil {
-		return s.cqlStatements.newBatch(ctx)
-	}
-
-	return s.cqlStatements.session.BatchWithContext(ctx, gocql.UnloggedBatch)
+	return s.session.BatchWithContext(ctx, gocql.UnloggedBatch)
 }
 
-// execBatch executes the provided batch using test hooks when provided.
-func (s *Logger) execBatch(ctx context.Context, batch *gocql.Batch) error {
-	if s.cqlStatements.execBatch != nil {
-		return s.cqlStatements.execBatch(ctx, batch)
-	}
-	return s.cqlStatements.session.ExecuteBatch(batch)
+// execBatch executes the provided batch on the shared _logs session.
+func (s *Logger) execBatch(_ context.Context, batch *gocql.Batch) error {
+	return s.session.ExecuteBatch(batch)
 }
 
-// execQuery executes a single statement using test hooks when provided.
+// execQuery executes a single statement on the shared _logs session.
 func (s *Logger) execQuery(ctx context.Context, stmt string, args ...any) error {
-	if s.cqlStatements.execQuery != nil {
-		return s.cqlStatements.execQuery(ctx, stmt, args...)
-	}
-
-	q := s.cqlStatements.session.QueryWithContext(ctx, stmt, args...)
+	q := s.session.QueryWithContext(ctx, stmt, args...)
 	defer q.Release()
 	return q.Exec()
 }
 
 // executeBatchWithFallback tries to execute the batch and, in case of failure,
 // falls back to executing individual queries to reduce data loss.
-func (s *Logger) executeBatchWithFallback(ctx context.Context, batch *gocql.Batch, held [][]any, count int) {
+func (s *Logger) executeBatchWithFallback(ctx context.Context, batch *gocql.Batch, held [][]any, heldInsert []string, count int) {
 	if len(batch.Entries) == 0 {
 		return
 	}
@@ -465,7 +532,7 @@ func (s *Logger) executeBatchWithFallback(ctx context.Context, batch *gocql.Batc
 		if ctx.Err() != nil {
 			return
 		}
-		if err = s.execQuery(ctx, s.cqlStatements.insertStmt, held[i]...); err != nil && !errors.Is(err, context.Canceled) {
+		if err = s.execQuery(ctx, heldInsert[i], held[i]...); err != nil && !errors.Is(err, context.Canceled) {
 			s.logger.Error("failed to insert item after batch failure", zap.Error(err))
 		}
 	}
@@ -489,8 +556,11 @@ func (s *Logger) insertWorker() {
 	parentCtx := context.Background()
 
 	s.logger.Debug("committer worker started")
-	argsCap := s.cqlStatements.argsCap()
+	argsCap := s.maxArgsCap()
 	held := make([][]any, committerBatchSize)
+	// heldInsert[i] records which per-table _logs INSERT held[i] was bound for,
+	// so the row-by-row fallback re-executes each row against the right table.
+	heldInsert := make([]string, committerBatchSize)
 	for i := range held {
 		held[i] = make([]any, 0, argsCap)
 	}
@@ -515,19 +585,17 @@ func (s *Logger) insertWorker() {
 			// decrement queue metric on consumption regardless of schema
 			metrics.StatementLoggerItems.Dec()
 			metrics.StatementLoggerDequeuedTotal.Inc()
-			if it.StatementType.IsSchema() || it.StatementType.IsSelect() {
-				return
-			}
-			args, valid := s.cqlStatements.fillArgs(held[idx], it)
+			// Route the item to its own table's _logs statements and bind its
+			// args. bind() drops (and counts) schema/select, unknown-table, and
+			// arity-mismatched items instead of poisoning the batch — a single
+			// bad item would make gocql reject the whole batch client-side.
+			cql, args, valid := s.bind(it, held[idx])
 			held[idx] = args // retain any grown backing array for reuse
 			if !valid {
-				// Malformed item (partition-key bind-arity mismatch). Drop it
-				// instead of poisoning the batch — a single bad item would make
-				// gocql reject the whole batch client-side.
-				s.recordMalformed(it)
 				return
 			}
-			batch.Query(s.cqlStatements.insertStmt, held[idx]...)
+			heldInsert[idx] = cql.insertStmt
+			batch.Query(cql.insertStmt, held[idx]...)
 			idx++
 		}
 
@@ -551,7 +619,7 @@ func (s *Logger) insertWorker() {
 			}
 		}
 		// Execute current batch with fallback
-		s.executeBatchWithFallback(ctx, batch, held, idx)
+		s.executeBatchWithFallback(ctx, batch, held, heldInsert, idx)
 		cancel()
 		idx = 0
 		if exiting {
@@ -568,23 +636,14 @@ func (s *Logger) insert(it stmtlogger.Item) {
 	metrics.StatementLoggerItems.Dec()
 	metrics.StatementLoggerDequeuedTotal.Inc()
 
-	// Ignore schema and select statements
-	if it.StatementType.IsSchema() || it.StatementType.IsSelect() {
-		return
-	}
-
-	// If cqlStatements is not initialized (as in some unit tests), do nothing.
-	if s == nil || s.cqlStatements == nil {
-		return
-	}
-
-	// Build arguments and execute a single insert query.
-	args, ok := s.cqlStatements.fillArgs(make([]any, 0, s.cqlStatements.argsCap()), it)
+	// Route to the item's table statements and bind its args. bind() skips
+	// schema/select silently and drops (counts) unknown-table/arity-mismatch
+	// items. Safe even when statements is nil (as in some unit tests).
+	cql, args, ok := s.bind(it, make([]any, 0, s.maxArgsCap()))
 	if !ok {
-		s.recordMalformed(it)
 		return
 	}
-	_ = s.execQuery(context.Background(), s.cqlStatements.insertStmt, args...)
+	_ = s.execQuery(context.Background(), cql.insertStmt, args...)
 }
 
 // recordMalformed counts a dropped log item whose partition-key bind arity did
@@ -614,9 +673,14 @@ func (s *Logger) openStatementFile(name string) (*bufio.Writer, func() error, er
 		return nil, nil, errors.Wrapf(err, "failed to create directory for statements file '%q'", name)
 	}
 
-	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, statementFilePerm|fs.ModeExclusive)
+	// NOTE: the perm argument must be a plain Unix permission. fs.ModeExclusive
+	// (bit 1<<29) is NOT a permission bit; passing it here is a no-op on native
+	// Linux/APFS (the kernel masks it) but makes some overlay/FUSE-backed mounts
+	// — e.g. Docker Desktop bind mounts on macOS — reject the open with ENOENT,
+	// which then panics the flusher and crashes the whole run. Use 0o644 only.
+	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, statementFilePerm)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to open test statements file '%q'", name)
+		return nil, nil, errors.Wrapf(err, "failed to open statements file '%q'", name)
 	}
 
 	buffered := bufio.NewWriterSize(file, statementFileBufferSize)

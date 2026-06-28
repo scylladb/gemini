@@ -38,12 +38,17 @@ const (
 	SelectStatementsCount
 )
 
+// Targeted mutation subtypes. These describe how a mutation (DELETE or
+// single-row UPDATE) selects the rows it affects: a whole partition, a single
+// row, a clustering prefix, or multiple partitions. The targeting machinery is
+// shared between delete and update generation — hence the neutral "Targeted"
+// naming rather than "Delete".
 const (
-	DeleteWholePartition = iota
-	DeleteSingleRow
-	DeleteClusteringSubset
-	DeleteMultiplePartitions
-	DeleteStatementCount
+	TargetedWholePartition = iota
+	TargetedSingleRow
+	TargetedClusteringSubset
+	TargetedMultiplePartitions
+	TargetedStatementCount
 )
 
 const (
@@ -71,6 +76,8 @@ type Generator struct {
 	deleteSingleRowQuery          string
 	selectColumns                 []string
 	deleteClusteringSubsetQueries []string
+	updateVariants                []updateVariant
+	trackedMisses                 TrackedMissCounts
 	useLWT                        bool
 }
 
@@ -95,6 +102,7 @@ func New(
 		selectColumns:    table.SelectColumnNames(),
 	}
 	g.buildCachedDeleteQueries()
+	g.buildCachedUpdateQueries()
 	return g
 }
 
@@ -105,16 +113,40 @@ func (g *Generator) MarkInvalid(keys *typedef.PartitionKeys) bool {
 	return g.generator.MarkInvalid(keys)
 }
 
-// TrackRow stores a row observed during validation for later deletion.
+// TrackRow stores a row observed during validation for later targeted
+// mutation (single-row delete or single-row update).
 // Delegates directly to the underlying partitions.Interface.
 func (g *Generator) TrackRow(row partitions.TrackedRow) {
 	g.generator.TrackRow(row)
 }
 
-// PopTrackedRow retrieves a previously tracked row for deletion.
+// PopTrackedRow retrieves a previously tracked row for a targeted mutation.
 // Delegates directly to the underlying partitions.Interface.
 func (g *Generator) PopTrackedRow() (partitions.TrackedRow, bool) {
 	return g.generator.PopTrackedRow()
+}
+
+// TrackedMissCounts holds the number of targeted-mutation fallbacks caused by a
+// popped tracked row whose flat key-value slices were too short for the table
+// schema, broken down by mutation kind. The statement layer only accumulates
+// these (it stays free of any metrics dependency); the jobs layer drains them
+// and translates them into the tracked_row_schema_mismatch_total metric.
+type TrackedMissCounts struct {
+	Update                 uint64
+	DeleteSingleRow        uint64
+	DeleteClusteringSubset uint64
+}
+
+// DrainTrackedMisses returns the tracked-row schema-mismatch counts accumulated
+// since the previous call and resets them to zero.
+//
+// Not safe for concurrent use: each Generator is owned by a single worker
+// goroutine, which is also the only caller of this method (and of the
+// Update/Delete methods that increment the counters).
+func (g *Generator) DrainTrackedMisses() TrackedMissCounts {
+	c := g.trackedMisses
+	g.trackedMisses = TrackedMissCounts{}
+	return c
 }
 
 func (g *Generator) getMultiplePartitionKeys() int {

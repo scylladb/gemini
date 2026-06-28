@@ -236,3 +236,20 @@ func BenchmarkRandString(b *testing.B) {
 		}
 	})
 }
+
+func TestKeyspaceTableFromQuery(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"INSERT INTO ks1.table2(pk0,pk1) VALUES (?,?)":           "ks1.table2",
+		"INSERT INTO ks1.table2 (pk0) VALUES (?)":                "ks1.table2",
+		"UPDATE ks1.table3 SET col0=? WHERE pk0=? AND pk1=?":     "ks1.table3",
+		"DELETE FROM ks1.table1 WHERE pk0=? AND pk1=? AND pk2=?": "ks1.table1",
+		"DELETE col0 FROM ks1.t WHERE pk0=?":                     "ks1.t",
+		"garbage without a table":                                "",
+		"":                                                       "",
+	}
+	for query, want := range cases {
+		assert.Equalf(t, want, utils.KeyspaceTableFromQuery(query), "query: %q", query)
+	}
+}

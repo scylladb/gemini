@@ -413,8 +413,16 @@ func createSchemaConfig(datasetSize string, logger *zap.Logger) typedef.SchemaCo
 			AsyncObjectStabilizationDelay:    defaultConfig.AsyncObjectStabilizationDelay,
 			MinBlobLength:                    10,
 			MinStringLength:                  10,
-			DeleteBuckets:                    defaultConfig.DeleteBuckets,
-			RowTrackerCapacity:               defaultConfig.RowTrackerCapacity,
+			// Partition-key value ranges must be set too: leaving them zero makes
+			// partition-key string/blob generation call rand.IntN(0), which panics
+			// ("invalid argument to IntN") at partition fill — crashing every
+			// --dataset-size=small run. Inherit the (flag-backed) defaults.
+			MinPKStringLength:  defaultConfig.MinPKStringLength,
+			MaxPKStringLength:  defaultConfig.MaxPKStringLength,
+			MinPKBlobLength:    defaultConfig.MinPKBlobLength,
+			MaxPKBlobLength:    defaultConfig.MaxPKBlobLength,
+			DeleteBuckets:      defaultConfig.DeleteBuckets,
+			RowTrackerCapacity: defaultConfig.RowTrackerCapacity,
 		}
 	default:
 		return defaultConfig

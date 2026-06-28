@@ -92,7 +92,8 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 		config.StatementRatios = statements.DefaultStatementRatios()
 	}
 
-	// Auto-size row tracker capacity based on deletion ratios.
+	// Auto-size row tracker capacity based on mutation ratios (targeted
+	// deletes + single-row updates that consume tracked rows).
 	// If the user set an explicit positive value, treat it as the maximum cap:
 	// auto-sizing still runs but is clamped to that value. -1 means fully
 	// auto (no user-supplied cap). 0 disables tracking entirely.
@@ -104,9 +105,9 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 			schema.Config.RowTrackerCapacity = min(auto, userCap)
 			if schema.Config.RowTrackerCapacity == 0 {
 				logger.Warn("row tracker disabled despite explicit --row-tracker-capacity: "+
-					"targeted-delete ratio is ~0, so auto-sizing computed 0",
+					"tracked-row consume ratio is ~0, so auto-sizing computed 0",
 					zap.Int("requested_capacity", userCap),
-					zap.Float64("targeted_delete_ratio", config.StatementRatios.TargetedDeleteRatio()),
+					zap.Float64("targeted_consume_ratio", config.StatementRatios.TargetedConsumeRatio()),
 				)
 			}
 		} else {
