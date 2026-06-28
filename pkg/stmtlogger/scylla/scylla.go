@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -674,9 +673,14 @@ func (s *Logger) openStatementFile(name string) (*bufio.Writer, func() error, er
 		return nil, nil, errors.Wrapf(err, "failed to create directory for statements file '%q'", name)
 	}
 
-	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, statementFilePerm|fs.ModeExclusive)
+	// NOTE: the perm argument must be a plain Unix permission. fs.ModeExclusive
+	// (bit 1<<29) is NOT a permission bit; passing it here is a no-op on native
+	// Linux/APFS (the kernel masks it) but makes some overlay/FUSE-backed mounts
+	// — e.g. Docker Desktop bind mounts on macOS — reject the open with ENOENT,
+	// which then panics the flusher and crashes the whole run. Use 0o644 only.
+	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, statementFilePerm)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to open test statements file '%q'", name)
+		return nil, nil, errors.Wrapf(err, "failed to open statements file '%q'", name)
 	}
 
 	buffered := bufio.NewWriterSize(file, statementFileBufferSize)
