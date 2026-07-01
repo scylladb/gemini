@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stmtlogger/scylla"
@@ -846,6 +847,25 @@ func (ds delegatingStore) checkOnceInternal(
 	// Compare results normally; if both sides are empty this will succeed with count 0.
 	result := CompareCollectedRows(table, testRows, oracleRows)
 	compErr := result.ToError()
+
+	// Dedup count is retry-invariant: duplicate list elements are a permanent
+	// artifact of the stored data, so the same duplicates would be re-observed
+	// (and re-counted) on every retry. Only report it on the first attempt.
+	if attempt == 0 {
+		metrics.ValidationRowsDeduplicated.Add(float64(result.DeduplicatedCount))
+	}
+
+	// Match/missing/different are retry-VARIANT by design — retries exist
+	// precisely so a transient mismatch (e.g. replication lag) can converge,
+	// and each attempt's outcome is real, distinct signal. Report every
+	// attempt, so a converged retry's matches are counted alongside the
+	// earlier attempt's transient mismatch instead of only recording the
+	// first (possibly transient) attempt and losing the eventual match.
+	metrics.ValidationRowsMatched.Add(float64(result.MatchCount))
+	metrics.ValidationRowsMissingInTest.Add(float64(len(result.OracleOnlyRows)))
+	metrics.ValidationRowsMissingInOracle.Add(float64(len(result.TestOnlyRows)))
+	metrics.ValidationRowsDifferent.Add(float64(len(result.DifferentRows)))
+
 	if compErr == nil {
 		// No differences found
 		return result.MatchCount, testRows, nil

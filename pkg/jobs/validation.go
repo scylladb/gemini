@@ -37,6 +37,10 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
+// retryQueueSaturationBackoff bounds how long Do waits before re-checking a
+// saturated retry queue, so soft-stop is still noticed promptly.
+const retryQueueSaturationBackoff = 50 * time.Millisecond
+
 type Validation struct {
 	generator        partitions.Interface
 	store            store.Store
@@ -562,6 +566,23 @@ func (v *Validation) Do(ctx context.Context) error {
 			}
 
 		default:
+			if rq.Saturated() {
+				// Backpressure: stop generating new work while the retry
+				// queue is saturated so a sustained cluster fault can't pin
+				// an unbounded number of partition keys or delay soft-stop
+				// behind a backlog of doomed retries. Wait briefly for the
+				// queue to drain instead of busy-looping.
+				timer := utils.GetTimer(retryQueueSaturationBackoff)
+				select {
+				case <-ctx.Done():
+					utils.PutTimer(timer)
+					return nil
+				case <-timer.C:
+					utils.PutTimer(timer)
+				}
+				continue
+			}
+
 			if err := v.handleNewWork(ctx, &executionTime, validatedRowsMetric, rq); err != nil {
 				return err
 			}

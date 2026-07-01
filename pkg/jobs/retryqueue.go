@@ -1,4 +1,4 @@
-// Copyright 2025 ScyllaDB
+// Copyright 2026 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,13 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
+
+// maxPendingRetries caps how many statements a single validation worker's
+// retryQueue holds before backpressure kicks in. Without a cap, a sustained
+// cluster fault causes every new SELECT to fail and schedule another retry,
+// pinning an unbounded number of partition keys and delaying soft-stop until
+// the whole backlog drains.
+const maxPendingRetries = 1024
 
 // pendingRetry holds a validation statement waiting for its backoff timer to fire.
 type pendingRetry struct {
@@ -49,9 +56,10 @@ func newRetryQueue(maxAttempts int, maxDelay, minDelay time.Duration) *retryQueu
 }
 
 // Schedule adds a failed statement to the retry queue with a backoff timer.
-// Returns false if the statement has exhausted all retry attempts.
+// Returns false if the statement has exhausted all retry attempts, or if the
+// queue has reached its pending-retry cap (see maxPendingRetries).
 func (q *retryQueue) Schedule(stmt *typedef.Stmt, attempt int) bool {
-	if attempt+1 >= q.maxAttempts {
+	if attempt+1 >= q.maxAttempts || len(q.items) >= maxPendingRetries {
 		return false
 	}
 
@@ -102,6 +110,12 @@ func (q *retryQueue) Take(idx int) pendingRetry {
 // Len returns the number of pending retries.
 func (q *retryQueue) Len() int {
 	return len(q.items)
+}
+
+// Saturated reports whether the queue has reached its pending-retry cap.
+// Callers should stop generating new work until it drains.
+func (q *retryQueue) Saturated() bool {
+	return q.Len() >= maxPendingRetries
 }
 
 // Drain cancels all pending timers and releases all statements using the

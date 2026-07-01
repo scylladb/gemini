@@ -76,7 +76,16 @@ func (t *stmtTracker) Track(query string) bool {
 	if !exists {
 		count := t.uniqueCount.Add(1)
 		t.uniqueGauge.Set(float64(count))
-		t.ratioGauge.Set(float64(count) / float64(t.maxPrepared))
+
+		// uniqueCount only grows (no eviction), while gocql's actual prepared
+		// statement cache is LRU-bounded at maxPrepared. Once tracked queries
+		// exceed that bound, gocql is already evicting to stay at capacity,
+		// so the ratio is genuinely 1.0 (saturated) — report it as such
+		// instead of an ever-climbing, misleading value.
+		if t.maxPrepared > 0 {
+			t.ratioGauge.Set(min(float64(count)/float64(t.maxPrepared), 1.0))
+		}
+
 		t.newStmtCount.Inc()
 	}
 
