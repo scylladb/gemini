@@ -29,7 +29,6 @@ import (
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
 
-	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -44,8 +43,9 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 
 	// Deduplicate list values on both sides. Duplicate list items can appear
 	// on either cluster when inserts are retried (non-idempotent list appends).
-	deduplicateListValues(table, testRows)
-	deduplicateListValues(table, oracleRows)
+	// The count is reported by the caller (once per logical validation, not
+	// per retry attempt) to avoid inflating the metric.
+	result.DeduplicatedCount = deduplicateListValues(table, testRows) + deduplicateListValues(table, oracleRows)
 
 	// Sort both sides (stable) to aid deterministic behavior when rendering diffs.
 	// We sort by partition keys first, then clustering keys to ensure stable
@@ -80,7 +80,8 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 	// Fast-path: if rows are value-equal after sort, all match.
 	// rowsEqual avoids reflect.DeepEqual which allocates by walking map[string]int.
 	if rowsEqual(testRows, oracleRows) {
-		return ComparisonResult{Table: table, MatchCount: len(testRows)}
+		result.MatchCount = len(testRows)
+		return result
 	}
 
 	// If row counts differ, report only set differences and keep MatchCount = 0.
@@ -411,26 +412,33 @@ func diffRows(table *typedef.Table, oracleRow, testRow Row) string {
 	return b.String()
 }
 
-func deduplicateListValues(table *typedef.Table, rows Rows) {
+// deduplicateListValues removes duplicate list elements in-place and returns
+// the total number of elements removed. It does not update any metric itself
+// so the caller can decide whether this is worth reporting (e.g. skip on
+// retry attempts to avoid inflating the count for the same underlying rows).
+func deduplicateListValues(table *typedef.Table, rows Rows) int {
 	if table == nil || len(rows) == 0 {
-		return
+		return 0
 	}
 
 	listCols := table.ListColumns()
 	if len(listCols) == 0 {
-		return
+		return 0
 	}
 
+	var removed int
 	for _, row := range rows {
 		for i := range listCols {
 			val := row.Get(listCols[i].Name)
 			newVal, before, after := deduplicateSlice(val)
 			if after != before {
 				row.Set(listCols[i].Name, newVal)
-				metrics.ValidationRowsDeduplicated.Add(float64(before - after))
+				removed += before - after
 			}
 		}
 	}
+
+	return removed
 }
 
 //nolint:gocyclo,cyclop

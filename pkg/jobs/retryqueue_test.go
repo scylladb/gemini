@@ -1,4 +1,4 @@
-// Copyright 2025 ScyllaDB
+// Copyright 2026 ScyllaDB
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,28 +55,48 @@ func TestRetryQueue_Len(t *testing.T) {
 	require.Equal(t, 2, q.Len())
 }
 
-func TestRetryQueue_Schedule_ReturnsFalseWhenExhausted(t *testing.T) {
+func TestRetryQueue_Schedule_ExhaustedWhenAttemptsUsedUp(t *testing.T) {
 	t.Parallel()
 
 	maxAttempts := 3
 	q := newRetryQueue(maxAttempts, time.Second, time.Millisecond)
 	stmt := makeRetryStmt("SELECT exhausted")
 
-	// attempt + 1 >= maxAttempts → returns false
-	ok := q.Schedule(stmt, maxAttempts-1) // attempt=2, 2+1=3 >= 3 → false
-	require.False(t, ok)
+	// attempt + 1 >= maxAttempts → scheduleExhausted
+	outcome := q.Schedule(stmt, maxAttempts-1) // attempt=2, 2+1=3 >= 3
+	require.Equal(t, scheduleExhausted, outcome)
 	require.Equal(t, 0, q.Len(), "exhausted schedule should not enqueue")
 }
 
-func TestRetryQueue_Schedule_ReturnsTrueWhenNotExhausted(t *testing.T) {
+func TestRetryQueue_Schedule_AcceptedWhenNotExhausted(t *testing.T) {
 	t.Parallel()
 
 	q := newRetryQueue(5, time.Second, time.Millisecond)
 	stmt := makeRetryStmt("SELECT ok")
 
-	ok := q.Schedule(stmt, 0)
-	require.True(t, ok)
+	outcome := q.Schedule(stmt, 0)
+	require.Equal(t, scheduleAccepted, outcome)
 	require.Equal(t, 1, q.Len())
+}
+
+func TestRetryQueue_Schedule_SaturatedAtCap(t *testing.T) {
+	t.Parallel()
+
+	// maxAttempts high enough that exhaustion never triggers; fill to the cap.
+	q := newRetryQueue(1_000_000, 10*time.Second, time.Second)
+	for range maxPendingRetries {
+		require.Equal(t, scheduleAccepted, q.Schedule(makeRetryStmt("SELECT fill"), 0))
+	}
+	require.Equal(t, maxPendingRetries, q.Len())
+	require.True(t, q.Saturated())
+
+	// The next schedule must be reported as saturation (backpressure), NOT as
+	// attempt-exhaustion, and must not enqueue.
+	outcome := q.Schedule(makeRetryStmt("SELECT overflow"), 0)
+	require.Equal(t, scheduleSaturated, outcome)
+	require.Equal(t, maxPendingRetries, q.Len())
+
+	q.Drain(nil)
 }
 
 func TestRetryQueue_Ready_EmptyQueueReturnsMinusOne(t *testing.T) {

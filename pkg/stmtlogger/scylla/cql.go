@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -473,7 +474,7 @@ func formatValueFast(val any) string {
 	}
 	switch v := val.(type) {
 	case string:
-		return `"` + v + `"`
+		return strconv.Quote(v)
 	case []byte:
 		return "0x" + hex.EncodeToString(v)
 	case bool:

@@ -85,10 +85,18 @@ type (
 	// when readers load the pointer) is the only ordering needed, so reads of
 	// values/id require no per-partition lock. refCount stays atomic because it
 	// is mutated in place across the partition's lifetime.
+	//
+	// retired is set (once, via fill/Replace) when this *Partition is evicted
+	// from its slot. Its validation/uuid mappings are removed only when the last
+	// outstanding reference is released AND retired is set, so a live partition
+	// whose refCount merely cycles to zero between borrows never loses its
+	// validation data, while a replaced partition is reliably cleaned up exactly
+	// once (regardless of which borrow happens to release last).
 	Partition struct {
 		values   []any
 		id       uuid.UUID
 		refCount atomic.Int32
+		retired  atomic.Bool
 	}
 
 	partitions struct {
@@ -113,6 +121,11 @@ type (
 		invalidCount  atomic.Uint64
 		maxInvalid    uint64
 		validationMu  sync.RWMutex
+		// invalidMu serializes mutations of the invalid bookkeeping
+		// (invalidByIdx + invalidCount) between MarkInvalid and the clear paths
+		// in fill/Replace. Reads (pickValidIdx/IsInvalid/Stats) stay lock-free on
+		// the atomic count and sync.Map; only the rare write paths take this lock.
+		invalidMu sync.Mutex
 	}
 
 	Stats struct {
@@ -180,81 +193,52 @@ func (p *Partitions) partition(idx uint64) *Partition {
 	return part
 }
 
-func (p *Partitions) valuesNoLock(part *Partition) typedef.PartitionKeys {
-	// part.values is immutable for the lifetime of this *Partition, so the
-	// returned Values may share capped sub-slices of it without copying.
+// newKeys takes one reference on part and returns partition keys whose Release
+// drops that reference exactly once (guarded by a per-borrow sync.Once). The
+// UUID's validation/idx mappings are removed only when the final reference is
+// released AND the partition has been retired (evicted from its slot). A live
+// partition whose refCount transiently reaches zero between borrows keeps its
+// validation data; a retired partition is cleaned up exactly once, by whichever
+// borrow releases last.
+func (p *Partitions) newKeys(part *Partition) typedef.PartitionKeys {
 	part.refCount.Add(1)
+	id := part.id
+	var once sync.Once
 	return typedef.PartitionKeys{
 		Values: typedef.NewPartitionValues(p.table.PartitionKeys, part.values),
-		ID:     part.id,
+		ID:     id,
 		Release: func() {
-			if part.refCount.Add(-1) == 0 {
-				p.deleteValidation(part.id, true)
-			}
+			once.Do(func() {
+				if part.refCount.Add(-1) == 0 && part.retired.Load() {
+					p.deleteValidation(id)
+				}
+			})
 		},
 	}
 }
 
-// deleteValidation removes the validation metadata for a partition UUID.
-// When retired is true (i.e. the partition slot was replaced via Replace and
-// the deleted-partitions heap has fully drained), the UUID→idx mapping is also
-// removed. For live partitions whose refCount merely drops to zero between
-// uses, only the validationMap entry is removed — the uuidToIdx entry MUST
-// stay so that MarkInvalid can still locate the slot.
-func (p *Partitions) deleteValidation(id uuid.UUID, retired bool) {
+// deleteValidation removes both the validation metadata and the UUID→idx
+// mapping for a partition UUID. It is called only when a retired partition's
+// last reference is released, so no validator can still be holding this UUID.
+// Without this cleanup the maps grow unbounded — every production DELETE would
+// leak one entry forever (root cause of the 2026-04-30 partitions memory
+// growth).
+func (p *Partitions) deleteValidation(id uuid.UUID) {
 	p.validationMu.Lock()
 	delete(p.validationMap, id)
-	if retired {
-		// Safe to remove: the partition has been replaced and the deleted-
-		// partitions heap has finished emitting every bucket. No validator
-		// can still be holding a reference to this UUID. Without this delete
-		// the map grows unbounded — every production DELETE leaks one entry
-		// forever (root cause of the 2026-04-30 partitions memory growth).
-		delete(p.uuidToIdx, id)
-	}
+	delete(p.uuidToIdx, id)
 	p.validationMu.Unlock()
 }
 
 func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
-	part := p.partition(idx)
 	// values/id are immutable for the lifetime of this *Partition (see the
 	// Partition doc comment), so they can be read without a per-partition lock
 	// and the returned Values may share capped sub-slices of part.values.
-	id := part.id
-
-	part.refCount.Add(1)
-	var once sync.Once
-	return typedef.PartitionKeys{
-		Values: typedef.NewPartitionValues(p.table.PartitionKeys, part.values),
-		ID:     id,
-		Release: func() {
-			once.Do(func() {
-				if part.refCount.Add(-1) == 0 {
-					p.deleteValidation(id, false)
-				}
-			})
-		},
-	}
+	return p.newKeys(p.partition(idx))
 }
 
 func (p *Partitions) valuesCopy(idx uint64) typedef.PartitionKeys {
-	part := p.partition(idx)
-	// values/id are immutable for the lifetime of this *Partition.
-	id := part.id
-
-	part.refCount.Add(1)
-	var once sync.Once
-	return typedef.PartitionKeys{
-		Values: typedef.NewPartitionValues(p.table.PartitionKeys, part.values),
-		ID:     id,
-		Release: func() {
-			once.Do(func() {
-				if part.refCount.Add(-1) == 0 {
-					p.deleteValidation(id, false)
-				}
-			})
-		},
-	}
+	return p.newKeys(p.partition(idx))
 }
 
 func (p *Partitions) fill(idx uint64) {
@@ -284,15 +268,20 @@ func (p *Partitions) fill(idx uint64) {
 	}
 	p.uuidToIdx[id] = idx
 	// Retire the old UUID from the slot mapping now that a new partition owns it.
-	// fill() is only called when the slot has no live references (initial
-	// population or ReplaceWithoutOld), so we can safely clean both maps
-	// here — there is no Release closure pending to fire deleteValidation
-	// for us.
+	// fill() hands out no Release closure for the old partition, so it cleans
+	// both maps here directly (rather than deferring to a reference release).
 	if oldPart != nil && oldPart.id != (uuid.UUID{}) {
 		delete(p.uuidToIdx, oldPart.id)
 		delete(p.validationMap, oldPart.id)
 	}
 	p.validationMu.Unlock()
+
+	// Mark the evicted partition retired so any borrow still outstanding on it
+	// (e.g. a concurrent ReplaceWithoutOld racing a Get) cleans up on release
+	// instead of resurrecting stale mappings.
+	if oldPart != nil {
+		oldPart.retired.Store(true)
+	}
 
 	p.parts.mu.Lock()
 	p.parts.parts[idx] = &Partition{
@@ -303,9 +292,17 @@ func (p *Partitions) fill(idx uint64) {
 
 	// If this slot was previously marked invalid, clear it so the new partition
 	// is visible to Next()/ReplaceNext() again.
+	p.clearInvalid(idx)
+}
+
+// clearInvalid removes idx from the invalid set (if present) and decrements the
+// invalid counter, serialized against MarkInvalid via invalidMu.
+func (p *Partitions) clearInvalid(idx uint64) {
+	p.invalidMu.Lock()
 	if _, wasInvalid := p.invalidByIdx.LoadAndDelete(idx); wasInvalid {
 		p.invalidCount.Add(^uint64(0)) // atomic decrement
 	}
+	p.invalidMu.Unlock()
 }
 
 func (p *Partitions) Stats() Stats {
@@ -439,31 +436,28 @@ func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
 	p.parts.parts[idx] = &Partition{values: values, id: id}
 	p.parts.mu.Unlock()
 
-	// uuidToIdx[oldPart.id] stays in place until the deleted-partitions
-	// heap finishes emitting every bucket and invokes onDone, which fires
-	// the Release closure → deleteValidation(oldPart.id) → removes both
-	// validationMap and uuidToIdx entries. Removing it earlier would
-	// break MarkInvalid for validators still holding the old UUID; not
-	// removing it at all (the previous behavior) leaked one entry per
-	// production DELETE forever — see deleteValidation comments.
+	// Mark the evicted partition retired. Its validationMap/uuidToIdx entries
+	// are removed only when its last reference is released — the caller's
+	// returned keys AND, when present, the deleted-partitions heap's reference.
+	// The heap releases its reference through the validator's Release closure,
+	// which runs only after re-validation completes, so MarkInvalid can still
+	// locate the UUID while a divergence on the deleted partition is being
+	// reported. Not marking it at all (the pre-refCount behavior) leaked one
+	// entry per production DELETE forever — see deleteValidation.
+	oldPart.retired.Store(true)
 
 	// If the slot was previously marked invalid, clear it so the new partition
 	// is visible to Next()/ReplaceNext() again.
-	if _, wasInvalid := p.invalidByIdx.LoadAndDelete(idx); wasInvalid {
-		p.invalidCount.Add(^uint64(0)) // atomic decrement
-	}
+	p.clearInvalid(idx)
 
-	oldKeys := p.valuesNoLock(oldPart)
+	oldKeys := p.newKeys(oldPart)
 
 	if p.deleted != nil {
-		// Take a second reference on behalf of the deleted-partition heap.
-		// valuesNoLock already incremented refCount by 1 for the caller;
-		// we bump it again so both the caller's Release and the heap's
-		// onDone share the same closure safely: refCount reaches 0 — and
-		// uuidToIdx is retired — only when the last holder releases,
-		// preventing premature removal while heap buckets are still pending.
-		oldPart.refCount.Add(1)
-		p.deleted.Delete(oldKeys)
+		// Take a second, independent reference on behalf of the deleted-
+		// partition heap. Each reference has its own Release/sync.Once, so the
+		// caller's release and the heap's release both count down refCount and
+		// the UUID is retired only once the last of the two fires.
+		p.deleted.Delete(p.newKeys(oldPart))
 	}
 
 	// Purge any tracked rows that belong to the old partition so that
@@ -568,15 +562,23 @@ func (p *Partitions) ValidationStats(id uuid.UUID) (first, last, failure uint64,
 	return first, last, failure, recent, successCount
 }
 
-// MarkInvalid permanently marks the partition identified by keys as invalid.
+// MarkInvalid reports whether the caller is the first to observe a divergence
+// for the partition identified by keys, and — when that partition still occupies
+// its slot — permanently marks the slot invalid so it is skipped by future
+// selection.
 //
-// The operation is non-blocking and idempotent: the first goroutine to call it
-// for a given partition index atomically claims the slot and returns true.
-// Every subsequent call for the same slot returns false immediately.
+// It returns true when the caller should report the divergence:
+//   - the slot still holds this partition and this is the first mark for it
+//     (the slot is added to the invalid set and counts toward maxInvalid), or
+//   - the slot has already been replaced by a fresh, valid partition (e.g. a
+//     deleted partition being re-validated). In that case the divergence is
+//     still real and must be reported, but the reused slot is deliberately NOT
+//     marked or counted — marking it would skip a valid partition and inflate
+//     the invalid budget (the freshly-replaced-slot race).
 //
-// If maxInvalid is configured and the limit has already been reached the call
-// also returns false and the partition is NOT marked (the caller should treat
-// this situation as a hard stop trigger — too many bad partitions).
+// It returns false when there is nothing to report: the UUID is no longer
+// tracked, the slot is already marked invalid, or the maxInvalid limit has been
+// reached (the caller should treat the limit case as a hard-stop trigger).
 func (p *Partitions) MarkInvalid(keys *typedef.PartitionKeys) bool {
 	if keys == nil {
 		return false
@@ -587,31 +589,38 @@ func (p *Partitions) MarkInvalid(keys *typedef.PartitionKeys) bool {
 	idx, ok := p.uuidToIdx[keys.ID]
 	p.validationMu.RUnlock()
 	if !ok {
-		// UUID not tracked (partition slot was replaced) — nothing to mark.
+		// UUID no longer tracked (slot replaced and fully retired) — nothing to
+		// report.
 		return false
 	}
 
-	// Reserve a slot in the counter first using a CAS loop. This avoids the
-	// TOCTOU window where multiple goroutines each increment past maxInvalid
-	// and then all roll back, leaving zero slots marked.
-	for {
-		cur := p.invalidCount.Load()
-		if p.maxInvalid > 0 && cur >= p.maxInvalid {
-			return false
-		}
-		if p.invalidCount.CompareAndSwap(cur, cur+1) {
-			break
-		}
+	// Serialize the whole mark against the fill/Replace clear paths so the
+	// counter update and the map claim happen atomically relative to a
+	// concurrent replacement. Without this, the counter and the map are updated
+	// in opposite orders by the two sides and a freshly-replaced valid slot can
+	// end up marked invalid with an inflated count.
+	p.invalidMu.Lock()
+	defer p.invalidMu.Unlock()
+
+	// The slot may have been replaced (via Replace/fill) since our uuidToIdx
+	// lookup — or, for a deleted partition, was replaced by design. If it no
+	// longer holds THIS UUID, the current occupant is a fresh, valid partition:
+	// report the divergence (return true) but do NOT mark or count the reused
+	// slot. This both keeps deleted-partition divergences reportable and avoids
+	// flagging a valid replacement.
+	if p.partition(idx).id != keys.ID {
+		return true
 	}
 
-	// Counter slot reserved. Now atomically claim the map entry.
-	// LoadOrStore returns (existing, true) if already present.
-	_, alreadyInvalid := p.invalidByIdx.LoadOrStore(idx, struct{}{})
-	if alreadyInvalid {
-		// Another goroutine beat us to this slot — release our counter reservation.
-		p.invalidCount.Add(^uint64(0)) // atomic decrement
+	if p.maxInvalid > 0 && p.invalidCount.Load() >= p.maxInvalid {
 		return false
 	}
+
+	// Claim the map entry. LoadOrStore returns (existing, true) if already present.
+	if _, alreadyInvalid := p.invalidByIdx.LoadOrStore(idx, struct{}{}); alreadyInvalid {
+		return false
+	}
+	p.invalidCount.Add(1)
 
 	return true
 }

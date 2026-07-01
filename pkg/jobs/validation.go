@@ -37,6 +37,10 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
+// retryQueueSaturationBackoff bounds how long Do waits before re-checking a
+// saturated retry queue, so soft-stop is still noticed promptly.
+const retryQueueSaturationBackoff = 50 * time.Millisecond
+
 type Validation struct {
 	generator        partitions.Interface
 	store            store.Store
@@ -73,7 +77,11 @@ func NewValidation(
 		maxAttempts = 10
 	}
 
-	if delay <= 100*time.Millisecond {
+	// Only fall back to the default when the delay is unset (<= 0). A previous
+	// guard forced anything <= 100ms up to 2s, silently discarding legitimate
+	// sub-100ms tuning (e.g. --async-objects-stabilization-backoff=50ms) and
+	// contradicting the store's own 25ms default. Honor any positive value.
+	if delay <= 0 {
 		delay = 2 * time.Second
 	}
 
@@ -562,6 +570,23 @@ func (v *Validation) Do(ctx context.Context) error {
 			}
 
 		default:
+			if rq.Saturated() {
+				// Backpressure: stop generating new work while the retry
+				// queue is saturated so a sustained cluster fault can't pin
+				// an unbounded number of partition keys or delay soft-stop
+				// behind a backlog of doomed retries. Wait briefly for the
+				// queue to drain instead of busy-looping.
+				timer := utils.GetTimer(retryQueueSaturationBackoff)
+				select {
+				case <-ctx.Done():
+					utils.PutTimer(timer)
+					return nil
+				case <-timer.C:
+					utils.PutTimer(timer)
+				}
+				continue
+			}
+
 			if err := v.handleNewWork(ctx, &executionTime, validatedRowsMetric, rq); err != nil {
 				return err
 			}
@@ -656,9 +681,20 @@ func (v *Validation) handleRunResult(result runResult, rq *retryQueue) error {
 	}
 
 	// Try to schedule a retry.
-	if rq.Schedule(result.stmt, result.attempt) {
+	switch rq.Schedule(result.stmt, result.attempt) {
+	case scheduleAccepted:
 		// Stmt ownership transferred to the retry queue — do NOT release keys.
 		return nil
+	case scheduleSaturated:
+		// Backpressure dropped this retry: release the keys but do NOT report a
+		// validation failure — a full queue is not a data discrepancy. (Do()
+		// gates new work on Saturated(), so this is normally unreachable; kept
+		// safe for any future caller that schedules without that pre-check.)
+		metrics.ValidationRetriesDropped.Inc()
+		releaseKeys(result.stmt)
+		return nil
+	case scheduleExhausted:
+		// Fall through to final-failure handling below.
 	}
 
 	// All retries exhausted — treat as final failure.

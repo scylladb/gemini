@@ -423,6 +423,13 @@ var (
 		},
 	)
 
+	ValidationRetriesDropped = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "validation_retries_dropped_total",
+			Help: "Total validation retries dropped because the retry queue was saturated (backpressure); not counted as validation failures.",
+		},
+	)
+
 	// --- Context cancellation / timeout tracking ---
 
 	ContextCancellations = prometheus.NewCounterVec(
@@ -568,6 +575,7 @@ func init() {
 		ValidationRetriesScheduled,
 		ValidationRetriesExhausted,
 		ValidationRetriesPending,
+		ValidationRetriesDropped,
 		ContextCancellations,
 		WorkerStopEvents,
 		StatementsGenerated,

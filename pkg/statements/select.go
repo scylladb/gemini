@@ -191,9 +191,17 @@ func (g *Generator) genMultiplePartitionClusteringRangeQuery(ctx context.Context
 	}
 
 	numQueryPKs := g.getMultiplePartitionKeys()
-	combined := typedef.NewPartitionValues(g.table.PartitionKeys, trackedRow.PartitionValues)
+	trackedKeys := typedef.NewPartitionValues(g.table.PartitionKeys, trackedRow.PartitionValues)
 	pks := make([]typedef.PartitionKeys, 0, numQueryPKs)
-	pks = append(pks, typedef.PartitionKeys{ID: trackedRow.PartitionID, Values: combined})
+	pks = append(pks, typedef.PartitionKeys{ID: trackedRow.PartitionID, Values: trackedKeys})
+
+	// combined is a distinct Values used only to build the IN-tuple bind values.
+	// It must NOT alias pks[0].Values (the tracked partition's own keys): merging
+	// the other partitions into a shared Values would overwrite pks[0] with the
+	// union of every queried partition, corrupting row-tracker sampling and any
+	// DELETE/SELECT later derived from pks[0]. Mirror genSelectMultiplePartitionQuery.
+	combined := typedef.NewValues(g.table.PartitionKeys.Len())
+	combined.Merge(trackedKeys)
 
 	for range numQueryPKs - 1 {
 		pk := g.generator.Next()
