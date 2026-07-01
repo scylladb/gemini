@@ -68,10 +68,12 @@ func BenchmarkInsertWide(b *testing.B) {
 	g := New("ks", parts, table, rng, vc, rc, false)
 	ctx := b.Context()
 
+	var stmt *typedef.Stmt
+
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		stmt, err := g.Insert(ctx)
+		stmt, err = g.Insert(ctx)
 		if err != nil {
 			b.Fatal(err)
 		}

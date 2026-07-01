@@ -65,24 +65,25 @@ const (
 const MutationStatementsCount = 3
 
 type Generator struct {
-	generator                     partitions.Interface
-	random                        utils.Random
-	table                         *typedef.Table
-	valueRangeConfig              *typedef.ValueRangeConfig
-	ratioController               *RatioController
-	keyspace                      string
-	keyspaceAndTable              string
-	deleteWholePartitionQuery     string
-	deleteSingleRowQuery          string
-	insertQuery                   string
-	insertQueryLWT                string
-	insertJSONQuery               string
-	selectSinglePartitionQuery    string
-	selectColumns                 []string
-	deleteClusteringSubsetQueries []string
-	updateVariants                []updateVariant
-	trackedMisses                 TrackedMissCounts
-	useLWT                        bool
+	generator                      partitions.Interface
+	random                         utils.Random
+	table                          *typedef.Table
+	valueRangeConfig               *typedef.ValueRangeConfig
+	ratioController                *RatioController
+	keyspace                       string
+	keyspaceAndTable               string
+	deleteWholePartitionQuery      string
+	deleteSingleRowQuery           string
+	insertQuery                    string
+	insertQueryLWT                 string
+	insertJSONQuery                string
+	selectSinglePartitionQuery     string
+	selectMultiplePartitionQueries []string
+	selectColumns                  []string
+	deleteClusteringSubsetQueries  []string
+	updateVariants                 []updateVariant
+	trackedMisses                  TrackedMissCounts
+	useLWT                         bool
 }
 
 func New(
