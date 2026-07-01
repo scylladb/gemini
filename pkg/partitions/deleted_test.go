@@ -15,10 +15,10 @@
 package partitions
 
 import (
-	"container/heap"
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -26,174 +26,6 @@ import (
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
-
-// TestDeletedPartitionHeap tests the heap implementation directly
-func TestDeletedPartitionHeap(t *testing.T) {
-	t.Parallel()
-
-	t.Run("heap_initialization", func(t *testing.T) {
-		t.Parallel()
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 64),
-			len:  0,
-		}
-		heap.Init(h)
-		assert.Equal(t, 0, h.Len())
-	})
-
-	t.Run("heap_push_pop", func(t *testing.T) {
-		t.Parallel()
-
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 64),
-			len:  0,
-		}
-		heap.Init(h)
-
-		now := time.Now()
-		keys1 := typedef.PartitionKeys{Values: typedef.NewValues(1)}
-		keys2 := typedef.PartitionKeys{Values: typedef.NewValues(1)}
-		keys3 := typedef.PartitionKeys{Values: typedef.NewValues(1)}
-
-		// Push in non-chronological order
-		heap.Push(h, deletedPartition{keys: keys2, readyAt: now.Add(2 * time.Second)})
-		heap.Push(h, deletedPartition{keys: keys1, readyAt: now.Add(1 * time.Second)})
-		heap.Push(h, deletedPartition{keys: keys3, readyAt: now.Add(3 * time.Second)})
-
-		assert.Equal(t, 3, h.Len())
-
-		// Pop should return items in chronological order
-		item1 := heap.Pop(h).(deletedPartition)
-		assert.Equal(t, keys1, item1.keys)
-
-		item2 := heap.Pop(h).(deletedPartition)
-		assert.Equal(t, keys2, item2.keys)
-
-		item3 := heap.Pop(h).(deletedPartition)
-		assert.Equal(t, keys3, item3.keys)
-
-		assert.Equal(t, 0, h.Len())
-	})
-
-	t.Run("heap_peek_without_pop", func(t *testing.T) {
-		t.Parallel()
-
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 64),
-			len:  0,
-		}
-		heap.Init(h)
-
-		now := time.Now()
-		keys1 := typedef.PartitionKeys{Values: typedef.NewValues(1)}
-
-		heap.Push(h, deletedPartition{keys: keys1, readyAt: now.Add(1 * time.Second)})
-
-		// Peek at the top without popping
-		top := h.data[0]
-		assert.Equal(t, keys1, top.keys)
-		assert.Equal(t, 1, h.Len()) // Still has 1 element
-	})
-
-	t.Run("heap_maintains_order_with_many_items", func(t *testing.T) {
-		t.Parallel()
-
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 64),
-			len:  0,
-		}
-		heap.Init(h)
-
-		now := time.Now()
-		const count = 100
-
-		// Push items in random order
-		for i := range count {
-			keys := typedef.PartitionKeys{Values: typedef.NewValues(1)}
-			heap.Push(h, deletedPartition{
-				keys:    keys,
-				readyAt: now.Add(time.Duration(count-i) * time.Millisecond),
-			})
-		}
-
-		assert.Equal(t, count, h.Len())
-
-		// Pop all and verify order
-		var lastTime time.Time
-		for range count {
-			item := heap.Pop(h).(deletedPartition)
-			if !lastTime.IsZero() {
-				assert.True(t, item.readyAt.After(lastTime) || item.readyAt.Equal(lastTime),
-					"Heap order violated: %v should be >= %v", item.readyAt, lastTime)
-			}
-			lastTime = item.readyAt
-		}
-	})
-
-	t.Run("optimized_push_maintains_order", func(t *testing.T) {
-		t.Parallel()
-
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 64),
-			len:  0,
-		}
-
-		now := time.Now()
-		const count = 100
-
-		// Use optimized push method
-		for i := range count {
-			keys := typedef.PartitionKeys{Values: typedef.NewValues(1)}
-			h.pushInline(deletedPartition{
-				keys:    keys,
-				readyAt: now.Add(time.Duration(count-i) * time.Millisecond),
-			})
-		}
-
-		assert.Equal(t, count, h.Len())
-
-		// Pop all and verify order
-		var lastTime time.Time
-		for range count {
-			item := heap.Pop(h).(deletedPartition)
-			if !lastTime.IsZero() {
-				assert.True(t, item.readyAt.After(lastTime) || item.readyAt.Equal(lastTime),
-					"Heap order violated: %v should be >= %v", item.readyAt, lastTime)
-			}
-			lastTime = item.readyAt
-		}
-	})
-
-	t.Run("heap_grows_capacity_efficiently", func(t *testing.T) {
-		t.Parallel()
-
-		h := &deletedPartitionHeap{
-			data: make([]deletedPartition, 4), // Small initial capacity
-			len:  0,
-		}
-
-		now := time.Now()
-		const count = 100
-
-		// Push many items to trigger growth
-		for i := range count {
-			keys := typedef.PartitionKeys{Values: typedef.NewValues(1)}
-			h.pushInline(deletedPartition{
-				keys:    keys,
-				readyAt: now.Add(time.Duration(i) * time.Millisecond),
-			})
-		}
-
-		assert.Equal(t, count, h.Len())
-		assert.GreaterOrEqual(t, len(h.data), count, "Backing array should have grown")
-
-		// Verify heap property maintained
-		for i := range count - 1 {
-			assert.True(t, !h.data[i+1].readyAt.Before(h.data[i].readyAt) || i >= h.len,
-				"Heap property should be maintained after growth")
-		}
-	})
-}
 
 // TestDeletedPartitionsBasic tests basic functionality
 func TestDeletedPartitionsBasic(t *testing.T) {
@@ -203,7 +35,7 @@ func TestDeletedPartitionsBasic(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{100 * time.Millisecond, 200 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		require.NotNil(t, d)
 		assert.Equal(t, 0, d.Len())
 		d.Close()
@@ -213,7 +45,7 @@ func TestDeletedPartitionsBasic(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -227,7 +59,7 @@ func TestDeletedPartitionsBasic(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		const count = 10
@@ -246,68 +78,75 @@ func TestDeletedPartitionsTimeBuckets(t *testing.T) {
 	t.Parallel()
 
 	t.Run("single_bucket_ready_after_delay", func(t *testing.T) {
-		t.Parallel()
-		delay := 50 * time.Millisecond
-		buckets := []time.Duration{delay}
-		d := newDeleted(t.Context(), buckets)
-		defer d.Close()
+		// synctest bubble: the fake clock makes "not ready before the delay,
+		// ready after" deterministic and instant. A bubble-internal context
+		// keeps the background goroutine durably blocked so the clock advances.
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 
-		values := typedef.NewValues(1)
-		d.Delete(typedef.PartitionKeys{Values: values})
+			delay := 50 * time.Millisecond
+			d := newDeleted(ctx, []time.Duration{delay}, 0)
 
-		// Should not be ready immediately
-		select {
-		case <-d.ch:
-			t.Fatal("Partition should not be ready immediately")
-		case <-time.After(10 * time.Millisecond):
-			// Expected
-		}
+			values := typedef.NewValues(1)
+			d.Delete(typedef.PartitionKeys{Values: values})
 
-		// Should be ready after delay
-		select {
-		case received := <-d.ch:
-			assert.Equal(t, values, received.Values)
-		case <-time.After(delay + 100*time.Millisecond):
-			t.Fatal("Partition should be ready after delay")
-		}
-	})
+			// Should not be ready immediately
+			select {
+			case <-d.ch:
+				t.Fatal("Partition should not be ready immediately")
+			case <-time.After(10 * time.Millisecond):
+				// Expected
+			}
 
-	t.Run("multiple_buckets_revalidation", func(t *testing.T) {
-		t.Parallel()
-
-		buckets := []time.Duration{
-			50 * time.Millisecond,
-			50 * time.Millisecond,
-			50 * time.Millisecond,
-		}
-		d := newDeleted(t.Context(), buckets)
-		defer d.Close()
-
-		values := typedef.NewValues(1)
-		d.Delete(typedef.PartitionKeys{Values: values})
-
-		// Should receive the partition multiple times (once per bucket + repeated last bucket)
-		receivedCount := 0
-		timeout := time.After(500 * time.Millisecond)
-
-		for receivedCount < len(buckets) {
+			// Should be ready after delay
 			select {
 			case received := <-d.ch:
 				assert.Equal(t, values, received.Values)
-				receivedCount++
-			case <-timeout:
-				t.Fatalf("Expected %d revalidations, got %d", len(buckets), receivedCount)
+			case <-time.After(delay + 100*time.Millisecond):
+				t.Fatal("Partition should be ready after delay")
 			}
-		}
+		})
+	})
 
-		assert.GreaterOrEqual(t, receivedCount, len(buckets))
+	t.Run("multiple_buckets_revalidation", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			buckets := []time.Duration{
+				50 * time.Millisecond,
+				50 * time.Millisecond,
+				50 * time.Millisecond,
+			}
+			d := newDeleted(ctx, buckets, 0)
+
+			values := typedef.NewValues(1)
+			d.Delete(typedef.PartitionKeys{Values: values})
+
+			// Should receive the partition multiple times (once per bucket + repeated last bucket)
+			receivedCount := 0
+			timeout := time.After(500 * time.Millisecond)
+
+			for receivedCount < len(buckets) {
+				select {
+				case received := <-d.ch:
+					assert.Equal(t, values, received.Values)
+					receivedCount++
+				case <-timeout:
+					t.Fatalf("Expected %d revalidations, got %d", len(buckets), receivedCount)
+				}
+			}
+
+			assert.GreaterOrEqual(t, receivedCount, len(buckets))
+		})
 	})
 
 	t.Run("buckets_maintain_order", func(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{30 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Delete partitions in specific order
@@ -342,253 +181,255 @@ func TestDeletedPartitionsTimeBuckets(t *testing.T) {
 
 // TestDeletedPartitionsConcurrency tests concurrent access
 func TestDeletedPartitionsConcurrency(t *testing.T) {
-	t.Parallel()
-
 	t.Run("concurrent_deletes", func(t *testing.T) {
-		t.Parallel()
-		buckets := []time.Duration{50 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
-		defer d.Close()
+		// synctest bubble: no fake time elapses during the synchronous deletes,
+		// so the 50ms-bucket processor never fires mid-test — the Len()==count
+		// assertion is deterministic instead of racing the background processor.
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{50 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		const goroutines = 10
-		const deletesPerGoroutine = 20
-		const totalDeletes = goroutines * deletesPerGoroutine
+			const goroutines = 10
+			const deletesPerGoroutine = 20
+			const totalDeletes = goroutines * deletesPerGoroutine
 
-		var wg sync.WaitGroup
-		wg.Add(goroutines)
+			var wg sync.WaitGroup
+			wg.Add(goroutines)
 
-		for range goroutines {
-			go func() {
-				defer wg.Done()
-				for range deletesPerGoroutine {
-					values := typedef.NewValues(1)
-					d.Delete(typedef.PartitionKeys{Values: values})
-				}
-			}()
-		}
+			for range goroutines {
+				go func() {
+					defer wg.Done()
+					for range deletesPerGoroutine {
+						values := typedef.NewValues(1)
+						d.Delete(typedef.PartitionKeys{Values: values})
+					}
+				}()
+			}
 
-		wg.Wait()
+			wg.Wait()
 
-		assert.Equal(t, uint64(totalDeletes), d.deleted.Load())
-		assert.Equal(t, totalDeletes, d.Len())
+			assert.Equal(t, uint64(totalDeletes), d.deleted.Load())
+			assert.Equal(t, totalDeletes, d.Len())
+		})
 	})
 
 	t.Run("concurrent_delete_and_read", func(t *testing.T) {
-		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{10 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		buckets := []time.Duration{10 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
-		defer d.Close()
+			const writers = 5
+			const readers = 3
+			const deletesPerWriter = 10
 
-		const writers = 5
-		const readers = 3
-		const deletesPerWriter = 10
+			var wg sync.WaitGroup
+			wg.Add(writers + readers)
 
-		var wg sync.WaitGroup
-		wg.Add(writers + readers)
-
-		// Writers
-		for range writers {
-			go func() {
-				defer wg.Done()
-				for range deletesPerWriter {
-					values := typedef.NewValues(1)
-					d.Delete(typedef.PartitionKeys{Values: values})
-					time.Sleep(2 * time.Millisecond)
-				}
-			}()
-		}
-
-		// Readers
-		readCount := make([]int, readers)
-		for i := range readers {
-			go func(idx int) {
-				defer wg.Done()
-				timeout := time.After(500 * time.Millisecond)
-				for {
-					select {
-					case <-d.ch:
-						readCount[idx]++
-					case <-timeout:
-						return
+			// Writers
+			for range writers {
+				go func() {
+					defer wg.Done()
+					for range deletesPerWriter {
+						values := typedef.NewValues(1)
+						d.Delete(typedef.PartitionKeys{Values: values})
+						time.Sleep(2 * time.Millisecond)
 					}
-				}
-			}(i)
-		}
+				}()
+			}
 
-		wg.Wait()
+			// Readers
+			readCount := make([]int, readers)
+			for i := range readers {
+				go func(idx int) {
+					defer wg.Done()
+					timeout := time.After(500 * time.Millisecond)
+					for {
+						select {
+						case <-d.ch:
+							readCount[idx]++
+						case <-timeout:
+							return
+						}
+					}
+				}(i)
+			}
 
-		totalRead := 0
-		for _, count := range readCount {
-			totalRead += count
-		}
+			wg.Wait()
 
-		// Should have read at least some partitions
-		assert.Greater(t, totalRead, 0)
+			totalRead := 0
+			for _, count := range readCount {
+				totalRead += count
+			}
+
+			// Should have read at least some partitions
+			assert.Greater(t, totalRead, 0)
+		})
 	})
 
 	t.Run("concurrent_len_and_delete", func(t *testing.T) {
-		t.Parallel()
-		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
-		defer d.Close()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{100 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		var wg sync.WaitGroup
-		wg.Add(2)
+			var wg sync.WaitGroup
+			wg.Add(2)
 
-		// Writer
-		go func() {
-			defer wg.Done()
-			for range 100 {
-				values := typedef.NewValues(1)
-				d.Delete(typedef.PartitionKeys{Values: values})
-				time.Sleep(1 * time.Millisecond)
-			}
-		}()
+			// Writer
+			go func() {
+				defer wg.Done()
+				for range 100 {
+					values := typedef.NewValues(1)
+					d.Delete(typedef.PartitionKeys{Values: values})
+					time.Sleep(1 * time.Millisecond)
+				}
+			}()
 
-		// Len checker
-		go func() {
-			defer wg.Done()
-			for range 100 {
-				_ = d.Len()
-				time.Sleep(1 * time.Millisecond)
-			}
-		}()
+			// Len checker
+			go func() {
+				defer wg.Done()
+				for range 100 {
+					_ = d.Len()
+					time.Sleep(1 * time.Millisecond)
+				}
+			}()
 
-		wg.Wait()
+			wg.Wait()
+		})
 	})
 }
 
 // TestDeletedPartitionsBackgroundProcessor tests the background processing
 func TestDeletedPartitionsBackgroundProcessor(t *testing.T) {
-	t.Parallel()
-
 	t.Run("processes_ready_partitions", func(t *testing.T) {
-		t.Parallel()
-		buckets := []time.Duration{50 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
-		defer d.Close()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{50 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		values := typedef.NewValues(1)
-		d.Delete(typedef.PartitionKeys{Values: values})
+			values := typedef.NewValues(1)
+			d.Delete(typedef.PartitionKeys{Values: values})
 
-		// Wait for processing
-		select {
-		case received := <-d.ch:
-			assert.Equal(t, values, received.Values)
-		case <-time.After(200 * time.Millisecond):
-			t.Fatal("Timeout waiting for background processor")
-		}
+			// Wait for processing
+			select {
+			case received := <-d.ch:
+				assert.Equal(t, values, received.Values)
+			case <-time.After(200 * time.Millisecond):
+				t.Fatal("Timeout waiting for background processor")
+			}
+		})
 	})
 
 	t.Run("does_not_process_unready_partitions", func(t *testing.T) {
-		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{1 * time.Second} // Long delay
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		buckets := []time.Duration{1 * time.Second} // Long delay
-		d := newDeleted(t.Context(), buckets)
-		defer d.Close()
+			values := typedef.NewValues(1)
+			d.Delete(typedef.PartitionKeys{Values: values})
 
-		values := typedef.NewValues(1)
-		d.Delete(typedef.PartitionKeys{Values: values})
+			// Should not be ready quickly
+			select {
+			case <-d.ch:
+				t.Fatal("Should not receive unready partition")
+			case <-time.After(100 * time.Millisecond):
+				// Expected
+			}
 
-		// Should not be ready quickly
-		select {
-		case <-d.ch:
-			t.Fatal("Should not receive unready partition")
-		case <-time.After(100 * time.Millisecond):
-			// Expected
-		}
-
-		assert.Equal(t, 1, d.Len())
+			assert.Equal(t, 1, d.Len())
+		})
 	})
 
 	t.Run("stops_on_context_cancel", func(t *testing.T) {
-		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			buckets := []time.Duration{10 * time.Millisecond}
+			d := newDeleted(ctx, buckets, 0)
 
-		ctx, cancel := context.WithCancel(t.Context())
-		buckets := []time.Duration{10 * time.Millisecond}
-		d := newDeleted(ctx, buckets)
+			values := typedef.NewValues(1)
+			d.Delete(typedef.PartitionKeys{Values: values})
 
-		values := typedef.NewValues(1)
-		d.Delete(typedef.PartitionKeys{Values: values})
+			// Cancel context
+			cancel()
 
-		// Cancel context
-		cancel()
-
-		// Channel should eventually close
-		timeout := time.After(500 * time.Millisecond)
-		for {
-			select {
-			case _, ok := <-d.ch:
-				if !ok {
-					// Channel closed as expected
-					return
+			// Channel should eventually close
+			timeout := time.After(500 * time.Millisecond)
+			for {
+				select {
+				case _, ok := <-d.ch:
+					if !ok {
+						// Channel closed as expected
+						return
+					}
+				case <-timeout:
+					t.Fatal("Channel should close after context cancel")
 				}
-			case <-timeout:
-				t.Fatal("Channel should close after context cancel")
 			}
-		}
+		})
 	})
 
 	t.Run("close_stops_background", func(t *testing.T) {
-		t.Parallel()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{10 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
 
-		buckets := []time.Duration{10 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+			d.Close()
 
-		d.Close()
-
-		// Channel should close
-		timeout := time.After(500 * time.Millisecond)
-		for {
-			select {
-			case _, ok := <-d.ch:
-				if !ok {
-					// Channel closed as expected
-					return
+			// Channel should close
+			timeout := time.After(500 * time.Millisecond)
+			for {
+				select {
+				case _, ok := <-d.ch:
+					if !ok {
+						// Channel closed as expected
+						return
+					}
+				case <-timeout:
+					t.Fatal("Channel should close after Close()")
 				}
-			case <-timeout:
-				t.Fatal("Channel should close after Close()")
 			}
-		}
+		})
 	})
 }
 
 // TestDeletedPartitionsChannelBehavior tests channel overflow scenarios
 func TestDeletedPartitionsChannelBehavior(t *testing.T) {
-	t.Parallel()
-
 	t.Run("channel_full_requeues", func(t *testing.T) {
-		t.Parallel()
-		buckets := []time.Duration{10 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
-		defer d.Close()
+		synctest.Test(t, func(t *testing.T) {
+			buckets := []time.Duration{10 * time.Millisecond}
+			d := newDeleted(t.Context(), buckets, 0)
+			defer d.Close()
 
-		// Fill channel to capacity (buffer is 100)
-		for range 150 {
-			values := typedef.NewValues(1)
-			d.Delete(typedef.PartitionKeys{Values: values})
-		}
-
-		// Wait for processing
-		time.Sleep(100 * time.Millisecond)
-
-		// Should still have items in heap (some requeued when channel was full)
-		assert.Greater(t, d.Len(), 0)
-
-		// Drain channel
-		drained := 0
-		timeout := time.After(500 * time.Millisecond)
-		for {
-			select {
-			case <-d.ch:
-				drained++
-			case <-timeout:
-				// Done draining
-				t.Logf("Drained %d items from channel", drained)
-				return
+			// Fill channel to capacity (buffer is 100)
+			for range 150 {
+				values := typedef.NewValues(1)
+				d.Delete(typedef.PartitionKeys{Values: values})
 			}
-		}
+
+			// Wait for processing
+			time.Sleep(100 * time.Millisecond)
+			synctest.Wait()
+
+			// Should still have items in heap (some requeued when channel was full)
+			assert.Greater(t, d.Len(), 0)
+
+			// Drain channel
+			drained := 0
+			timeout := time.After(500 * time.Millisecond)
+			for {
+				select {
+				case <-d.ch:
+					drained++
+				case <-timeout:
+					// Done draining
+					t.Logf("Drained %d items from channel", drained)
+					return
+				}
+			}
+		})
 	})
 }
 
@@ -599,7 +440,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 	t.Run("empty_buckets", func(t *testing.T) {
 		t.Parallel()
 		buckets := []time.Duration{}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		// Should handle empty buckets gracefully (will panic on access)
@@ -628,7 +469,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		}()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(nil, buckets) // nolint:staticcheck
+		d := newDeleted(nil, buckets, 0) // nolint:staticcheck
 		defer d.Close()
 	})
 
@@ -636,7 +477,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{0}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -655,7 +496,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{24 * time.Hour}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -676,7 +517,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		buckets := []time.Duration{20 * time.Millisecond, 20 * time.Millisecond}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		values := typedef.NewValues(1)
@@ -713,7 +554,7 @@ func TestDeletedPartitionsIntegration(t *testing.T) {
 			200 * time.Millisecond,
 			300 * time.Millisecond,
 		}
-		d := newDeleted(t.Context(), buckets)
+		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
 		const totalDeletes = 50
@@ -766,7 +607,7 @@ func sumMapValues(m map[*typedef.Values]int) int {
 func BenchmarkDeletedPartitions(b *testing.B) {
 	b.Run("delete", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		b.ResetTimer()
@@ -778,7 +619,7 @@ func BenchmarkDeletedPartitions(b *testing.B) {
 
 	b.Run("delete_and_receive", func(b *testing.B) {
 		buckets := []time.Duration{1 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		// Consumer goroutine
@@ -798,7 +639,7 @@ func BenchmarkDeletedPartitions(b *testing.B) {
 
 	b.Run("concurrent_deletes", func(b *testing.B) {
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(b.Context(), buckets)
+		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
 		b.ResetTimer()

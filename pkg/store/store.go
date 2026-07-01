@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,25 +28,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/joberror"
-	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stmtlogger/scylla"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
-
-type rowsTagged struct {
-	err    error
-	rows   Rows
-	oracle bool
-}
-
-var rowsTaggedChPool = sync.Pool{
-	New: func() any {
-		return make(chan rowsTagged, 2)
-	},
-}
 
 type loader interface {
 	load(context.Context, *typedef.Stmt) (Rows, error)
@@ -69,11 +57,16 @@ type Store interface {
 
 	Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
 	Mutate(context.Context, *typedef.Stmt) error
-	Check(context.Context, *typedef.Table, *typedef.Stmt, int) (int, error)
-	// CheckOnce performs a single validation attempt without retries.
-	// Returns the number of matched rows and a ValidationError on mismatch,
-	// or nil on success. Callers manage retry scheduling externally.
-	CheckOnce(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, attempt int) (int, error)
+	// Check validates a statement against both stores, retrying internally. It
+	// returns the number of matched rows, the raw test-store rows (used by the
+	// validation layer to sample rows for the row tracker without issuing a
+	// second SELECT), and any error.
+	Check(context.Context, *typedef.Table, *typedef.Stmt, int) (int, Rows, error)
+	// CheckOnce performs a single validation attempt without retries. It returns
+	// the number of matched rows, the raw test-store rows (for row-tracker
+	// sampling), and a ValidationError on mismatch (nil on success). Callers
+	// manage retry scheduling externally (e.g. the validation retry queue).
+	CheckOnce(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, attempt int) (int, Rows, error)
 }
 
 type (
@@ -89,6 +82,7 @@ type (
 		Port                    int
 		RequestTimeout          time.Duration
 		ConnectTimeout          time.Duration
+		DockerMode              bool
 		UseServerSideTimestamps bool
 	}
 	Config struct {
@@ -175,20 +169,19 @@ func New(
 		if cfg.OracleStatementFile != "" && cfg.TestStatementFile != "" {
 			logger.Debug("creating statement logger with oracle cluster")
 
-			ch := make(chan stmtlogger.Item, 131_072)
+			ch := make(chan stmtlogger.Item, 50_000)
 
 			statementLogger, err = stmtlogger.NewLogger(
 				stmtlogger.WithChannel(ch),
 				stmtlogger.WithLogger(scylla.New(
-					keyspace,
-					table,
+					schema,
 					oracleStoreImpl.getSession,
 					testStore.getSession,
 					cfg.OracleClusterConfig.Hosts,
 					cfg.OracleClusterConfig.Port,
+					cfg.OracleClusterConfig.DockerMode,
 					cfg.OracleClusterConfig.Username,
 					cfg.OracleClusterConfig.Password,
-					partitionKeyColumns,
 					cfg.OracleClusterConfig.Replication,
 					ch,
 					cfg.OracleStatementFile,
@@ -221,6 +214,7 @@ func New(
 	}
 
 	ds := &delegatingStore{
+		inflight:             new(sync.WaitGroup),
 		testStore:            testStore,
 		oracleStore:          oracleStore,
 		logger:               logger.Named("delegating_store"),
@@ -231,6 +225,8 @@ func New(
 		validationRetries:    cfg.AsyncObjectStabilizationAttempts,
 		validationRetrySleep: cfg.AsyncObjectStabilizationDelay,
 		minimumDelay:         cfg.MinimumDelay,
+		partitionKeyColumns:  partitionKeyColumns,
+		keyspaceAndTable:     keyspace + "." + table,
 	}
 
 	logger.Debug("store created successfully")
@@ -242,11 +238,14 @@ type delegatingStore struct {
 	testStore            storeLoader
 	logger               *zap.Logger
 	statementLogger      *stmtlogger.Logger
-	mutationRetrySleep   time.Duration
+	inflight             *sync.WaitGroup
+	keyspaceAndTable     string
+	partitionKeyColumns  typedef.Columns
 	mutationRetries      int
-	validationRetrySleep time.Duration
 	minimumDelay         time.Duration
 	validationRetries    int
+	validationRetrySleep time.Duration
+	mutationRetrySleep   time.Duration
 	serverSideTimestamps bool
 }
 
@@ -260,10 +259,132 @@ func (ds delegatingStore) getLogger() *zap.Logger {
 	return zap.NewNop()
 }
 
+// buildPartitionDeleteStmt constructs a DELETE that removes the entire partition
+// identified by keys from keyspaceAndTable.
+//
+// Both the WHERE columns and the bind values come from keys.Values (the
+// statement's own partition-key map), so the bind arity always matches —
+// regardless of how many partition-key columns the table has. Earlier this used
+// the store's fixed table[0] schema, which mis-bound (and targeted the wrong
+// table) whenever a mutation on any other table timed out. Returns nil when the
+// keyspace.table or partition-key values are unavailable.
+func (ds delegatingStore) buildPartitionDeleteStmt(keys *typedef.PartitionKeys, keyspaceAndTable string) *typedef.Stmt {
+	if keys == nil || keys.Values == nil || keyspaceAndTable == "" {
+		return nil
+	}
+
+	pkNames := keys.Values.Keys() // sorted → stable query string (prepared once)
+	if len(pkNames) == 0 {
+		return nil
+	}
+
+	// Build: DELETE FROM keyspace.table WHERE pk1=? AND pk2=? ...
+	var sb strings.Builder
+	sb.WriteString("DELETE FROM ")
+	sb.WriteString(keyspaceAndTable)
+	sb.WriteString(" WHERE ")
+
+	values := make([]any, 0, len(pkNames))
+	for i, name := range pkNames {
+		if i > 0 {
+			sb.WriteString(" AND ")
+		}
+		sb.WriteString(name)
+		sb.WriteString("=?")
+		values = append(values, keys.Values.Get(name)...)
+	}
+
+	return &typedef.Stmt{
+		PartitionKeys: []typedef.PartitionKeys{*keys},
+		Values:        values,
+		QueryType:     typedef.DeleteWholePartitionType,
+		Query:         sb.String(),
+	}
+}
+
+// compensateAsymmetricWrite performs best-effort compensating DELETEs on both
+// stores to restore symmetry after a timeout-induced asymmetric commit.
+//
+// When a CQL write times out (gocql returns context.DeadlineExceeded), the
+// server may have committed the write even though the client did not receive an
+// acknowledgment.  If one store committed and the other did not, the two clusters
+// diverge.  Deleting from both stores makes them deterministically empty for the
+// affected partition, eliminating the divergence regardless of which (if any)
+// store actually committed.
+//
+// A fresh background context with a 15 s deadline is used because the original
+// request context has already expired — we intentionally do NOT propagate a
+// cancelled/timed-out context here.  This means the compensation is not
+// sensitive to global shutdown signals; callers that need cancellation should
+// ensure the process exits promptly (e.g. via the watchdog).
+// Errors are logged but not returned; this is a best-effort operation.
+// Returns true if all deletes completed without error.
+func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt) bool {
+	if len(stmt.PartitionKeys) == 0 || len(ds.partitionKeyColumns) == 0 {
+		return true
+	}
+
+	// Target the table the timed-out mutation actually hit, not the store's
+	// fixed table[0]. Best-effort: if it can't be determined, skip.
+	keyspaceAndTable := utils.KeyspaceTableFromQuery(stmt.Query)
+	if keyspaceAndTable == "" {
+		return true
+	}
+
+	compCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	ts := mo.None[time.Time]()
+	ok := true
+
+	for i := range stmt.PartitionKeys {
+		deleteStmt := ds.buildPartitionDeleteStmt(&stmt.PartitionKeys[i], keyspaceAndTable)
+		if deleteStmt == nil {
+			continue
+		}
+
+		if err := ds.testStore.mutate(compCtx, deleteStmt, ts); err != nil {
+			ds.getLogger().Error("compensating delete on test store failed — partition may be asymmetric",
+				zap.String("partition", stmt.PartitionKeys[i].ID.String()),
+				zap.Error(err))
+			ok = false
+		}
+
+		if ds.oracleStore != nil {
+			if err := ds.oracleStore.mutate(compCtx, deleteStmt, ts); err != nil {
+				ds.getLogger().Error("compensating delete on oracle store failed — partition may be asymmetric",
+					zap.String("partition", stmt.PartitionKeys[i].ID.String()),
+					zap.Error(err))
+				ok = false
+			}
+		}
+	}
+
+	return ok
+}
+
+// isOnlyTimeoutFailure reports whether all non-nil errors in result are
+// context.DeadlineExceeded (CQL request timeouts), and at least one store had
+// such a timeout.  This distinguishes transient timeouts from hard failures
+// (e.g. serialisation errors, network errors) that should propagate to the
+// caller as write errors.
+//
+// Assumption: individual store errors are plain values, not errors.Join
+// composites.  delegatingStore stores one error per store; the only joined
+// errors appear in the finalErr that is passed to MutationError.Finalize,
+// which is never inspected by this function.
+func isOnlyTimeoutFailure(result mutationResult) bool {
+	testTimeout := result.testErr == nil || errors.Is(result.testErr, context.DeadlineExceeded)
+	oracleTimeout := result.oracleErr == nil || errors.Is(result.oracleErr, context.DeadlineExceeded)
+	atLeastOne := errors.Is(result.testErr, context.DeadlineExceeded) || errors.Is(result.oracleErr, context.DeadlineExceeded)
+	return testTimeout && oracleTimeout && atLeastOne
+}
+
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef.Stmt) error {
-	cd := AcquireContextData(stmt, 0)
-	ctx = WithContextData(ctx, cd)
-	defer ReleaseContextData(cd)
+	ctx = WithContextData(ctx, &ContextData{
+		GeminiAttempt: 0,
+		Statement:     stmt,
+	})
 
 	ts := mo.None[time.Time]()
 
@@ -309,12 +430,6 @@ type mutationChanRes struct {
 	oracle bool
 }
 
-var mutationChPool = sync.Pool{
-	New: func() any {
-		return make(chan mutationChanRes, 2)
-	},
-}
-
 // executeParallelMutations executes mutations on stores that need to be retried
 func (ds delegatingStore) executeParallelMutations(
 	ctx context.Context,
@@ -326,51 +441,46 @@ func (ds delegatingStore) executeParallelMutations(
 	result := mutationResult{}
 
 	// Update context with attempt number
-	ctxData := AcquireContextData(stmt, attempt)
+	ctxData := &ContextData{
+		GeminiAttempt: attempt,
+		Statement:     stmt,
+		Timestamp:     time.Now().UTC(),
+	}
 	doCtx := WithContextData(ctx, ctxData)
 
-	// Use a pooled channel for both mutations
-	ch := mutationChPool.Get().(chan mutationChanRes)
-
-	// wg tracks goroutines so we can wait for them to fully finish before
-	// releasing ctxData. The observer (ClusterObserver.ObserveQuery) runs
-	// inside the goroutine and reads ctxData.Statement; releasing it early
-	// causes a data race.
-	var wg sync.WaitGroup
+	// Use a single channel for both mutations.
+	// Capacity = 2 guarantees that goroutine sends are always non-blocking,
+	// even when the receiver has already returned due to context cancellation.
+	// This is the key invariant that allows waitForMutationResults to drain
+	// all goroutines after ctx fires without the risk of a blocked send.
+	ch := make(chan mutationChanRes, 2)
 
 	expected := 0
 	if retryTest {
 		expected++
-		wg.Add(1)
+		ds.inflight.Add(1)
 		go func() {
-			defer wg.Done()
+			defer ds.inflight.Done()
 			err := ds.testStore.mutate(doCtx, stmt, timestamp)
-			select {
-			case ch <- mutationChanRes{oracle: false, err: err}:
-			case <-doCtx.Done():
-			}
+			// Unconditional send: the channel always has capacity so this
+			// never blocks.  Dropping the "case <-doCtx.Done()" branch
+			// means the goroutine always delivers its result, which lets
+			// waitForMutationResults drain it even after ctx is cancelled.
+			ch <- mutationChanRes{oracle: false, err: err}
 		}()
 	}
 	if retryOracle && ds.oracleStore != nil {
 		expected++
-		wg.Add(1)
+		ds.inflight.Add(1)
 		go func() {
-			defer wg.Done()
+			defer ds.inflight.Done()
 			err := ds.oracleStore.mutate(doCtx, stmt, timestamp)
-			select {
-			case ch <- mutationChanRes{oracle: true, err: err}:
-			case <-doCtx.Done():
-			}
+			ch <- mutationChanRes{oracle: true, err: err}
 		}()
 	}
 
-	// Wait for results; on context cancellation waitForMutationResults returns
-	// early, but the goroutines may still be running. We must wait for them to
-	// complete before releasing ctxData to avoid a data race in ObserveQuery.
+	// Wait for results
 	ds.waitForMutationResults(doCtx, ch, &result, retryTest, retryOracle, expected)
-	wg.Wait()
-	mutationChPool.Put(ch)
-	ReleaseContextData(ctxData)
 
 	return result
 }
@@ -397,6 +507,38 @@ func (ds delegatingStore) waitForMutationResults(ctx context.Context, ch chan mu
 			}
 			if expectOracle && !result.oracleDone {
 				result.oracleErr = ctx.Err()
+			}
+			// Drain the remaining goroutines before returning.
+			//
+			// executeParallelMutations guarantees that every spawned goroutine
+			// sends exactly one result to ch (unconditional send, channel
+			// capacity == number of goroutines).  Draining here ensures that
+			// goroutines are never left running after this function returns —
+			// which would otherwise cause them to use a CQL session that has
+			// already been closed by delegatingStore.Close(), producing
+			// "use of closed network connection (potentially executed: true)"
+			// errors and silent data divergence between oracle and test.
+			//
+			// Capture the actual goroutine result instead of discarding it:
+			// the CQL response may have arrived just after ctx.Done() fired
+			// (e.g. the server committed the write but the ACK raced with the
+			// context deadline).  Using the real error lets the caller detect
+			// asymmetric commits (one store succeeded, the other timed out)
+			// rather than treating both as symmetric failures.
+			for received < expected {
+				r := <-ch
+				received++
+				if r.oracle {
+					if expectOracle && !result.oracleDone {
+						result.oracleDone = true
+						result.oracleErr = r.err
+					}
+				} else {
+					if expectTest && !result.testDone {
+						result.testDone = true
+						result.testErr = r.err
+					}
+				}
 			}
 			return
 		}
@@ -496,13 +638,18 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		if attemptResult.oracleDone {
 			cumulativeResult.oracleDone = true
 			cumulativeResult.oracleErr = attemptResult.oracleErr
-			mutationErr.SetStoreSuccess(TypeOracle, attemptResult.oracleErr == nil)
+			// Only record oracle success when oracle is actually configured.
+			// When oracleStore is nil the "done" signal is synthetic (expectOracle=false),
+			// so OracleStoreSuccess would be a meaningless true and would mask the
+			// asymmetric-timeout check in mutation.run().
+			if ds.oracleStore != nil {
+				mutationErr.SetStoreSuccess(TypeOracle, attemptResult.oracleErr == nil)
+			}
 		}
 
 		// Check if we succeeded
 		if !ds.shouldRetryMutations(cumulativeResult) {
 			if attempt > 0 {
-				metrics.MutationRetriesTotal.WithLabelValues("success").Add(float64(attempt))
 				// Log which systems succeeded after retries
 				successfulStores := make([]string, 0, 2)
 				if cumulativeResult.testDone && cumulativeResult.testErr == nil {
@@ -539,7 +686,24 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 					return nil
 				}
 
-				return pkgerrors.Wrap(ctx.Err(), "mutation cancelled during retry delay")
+				// Context expired during the backoff delay between retries.
+				// The stores may be asymmetric at this point (e.g. the previous
+				// attempt committed on test but timed out on oracle).
+				mutationErr.Finalize(pkgerrors.Wrap(ctx.Err(), "mutation cancelled during retry delay"))
+
+				// If the only failures are CQL timeouts, attempt a compensating
+				// DELETE on both stores so the partition is deterministically
+				// empty for the upcoming validation phase.  On success, return
+				// nil so the partition is NOT marked invalid.
+				if isOnlyTimeoutFailure(cumulativeResult) && ds.compensateAsymmetricWrite(stmt) {
+					return nil
+				}
+
+				// Compensation not applicable or failed — return the
+				// MutationError so mutation.run() can inspect
+				// TestStoreSuccess / OracleStoreSuccess and mark the affected
+				// partitions invalid, preventing a false divergence report.
+				return mutationErr
 			}
 		}
 	}
@@ -557,7 +721,15 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	}
 
 	mutationErr.Finalize(finalErr)
-	metrics.MutationRetriesTotal.WithLabelValues("exhausted").Inc()
+
+	// If all remaining failures are CQL timeouts, the servers may have
+	// committed on one side but not the other.  Issue a compensating DELETE
+	// on both stores so the partition is deterministically empty before the
+	// validation phase starts.  On success return nil so the partition is not
+	// marked invalid.
+	if isOnlyTimeoutFailure(cumulativeResult) && ds.compensateAsymmetricWrite(stmt) {
+		return nil
+	}
 
 	ds.getLogger().Error("mutation failed after all retry attempts",
 		zap.Int("total_attempts", maxAttempts),
@@ -570,43 +742,50 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 }
 
 // checkOnceInternal performs a single validation attempt. On success it returns
-// the matched row count and nil error. On failure it returns the validation
-// error with comparison results attached (when applicable).
+// the matched row count, the raw test-store rows (used by the validation layer
+// to sample rows for the row tracker without a second SELECT), and a nil error.
+// On failure it returns the validation error with comparison results attached
+// (when applicable).
 //
+//nolint:gocyclo
 //nolint:gocyclo
 func (ds delegatingStore) checkOnceInternal(
 	ctx context.Context,
 	table *typedef.Table,
 	stmt *typedef.Stmt,
 	attempt int,
-) (int, error) {
-	cd := AcquireContextData(stmt, attempt)
-	doCtx := WithContextData(ctx, cd)
+) (int, Rows, error) {
+	doCtx := WithContextData(ctx, &ContextData{
+		GeminiAttempt: attempt,
+		Statement:     stmt,
+		Timestamp:     time.Now().UTC(),
+	})
 
 	// If there is no oracle, just count test rows
 	if ds.oracleStore == nil {
 		testRows, testErr := ds.testStore.load(doCtx, stmt)
-		ReleaseContextData(cd)
 		if testErr != nil {
 			validationErr := NewValidationError("validation", stmt)
 			validationErr.AddAttempt(testErr)
 			validationErr.Finalize(testErr)
-			return 0, validationErr
+			return 0, nil, validationErr
 		}
-		return len(testRows), nil
+		return len(testRows), testRows, nil
 	}
 
-	// Run iterators in parallel using a pooled channel (size 2)
-	ch := rowsTaggedChPool.Get().(chan rowsTagged)
+	// Run iterators in parallel using a single channel (size 2).
+	// Goroutines are tracked by ds.inflight so Close() can wait for them.
+	type rowsTagged struct {
+		err    error
+		rows   Rows
+		oracle bool
+	}
 
-	// wg tracks goroutines so we can wait for them to fully finish before
-	// releasing cd. The observer (ClusterObserver.ObserveQuery) runs inside
-	// the goroutine and reads cd.Statement; releasing it early causes a race.
-	var wg sync.WaitGroup
-	wg.Add(2)
+	ch := make(chan rowsTagged, 2)
 
+	ds.inflight.Add(2)
 	go func() {
-		defer wg.Done()
+		defer ds.inflight.Done()
 		rows, err := ds.testStore.load(doCtx, stmt)
 		select {
 		case ch <- rowsTagged{oracle: false, rows: rows, err: err}:
@@ -615,7 +794,7 @@ func (ds delegatingStore) checkOnceInternal(
 	}()
 
 	go func() {
-		defer wg.Done()
+		defer ds.inflight.Done()
 		rows, err := ds.oracleStore.load(doCtx, stmt)
 		select {
 		case ch <- rowsTagged{oracle: true, rows: rows, err: err}:
@@ -636,16 +815,9 @@ func (ds delegatingStore) checkOnceInternal(
 			}
 			received++
 		case <-doCtx.Done():
-			wg.Wait()
-			rowsTaggedChPool.Put(ch)
-			ReleaseContextData(cd)
-			metrics.ContextCancellations.WithLabelValues("load", "deadline").Inc()
-			return 0, doCtx.Err()
+			return 0, nil, doCtx.Err()
 		}
 	}
-	wg.Wait()
-	rowsTaggedChPool.Put(ch)
-	ReleaseContextData(cd)
 
 	// Extract results
 	testRows, oracleRows := tRes.rows, oRes.rows
@@ -668,7 +840,7 @@ func (ds delegatingStore) checkOnceInternal(
 			lastErr = oracleErr
 		}
 		validationErr.Finalize(lastErr)
-		return 0, validationErr
+		return 0, nil, validationErr
 	}
 
 	// Compare results normally; if both sides are empty this will succeed with count 0.
@@ -676,7 +848,7 @@ func (ds delegatingStore) checkOnceInternal(
 	compErr := result.ToError()
 	if compErr == nil {
 		// No differences found
-		return result.MatchCount, nil
+		return result.MatchCount, testRows, nil
 	}
 
 	// Found differences, record them and store the comparison results
@@ -690,7 +862,7 @@ func (ds delegatingStore) checkOnceInternal(
 	}
 	validationErr.Finalize(compErr)
 
-	return 0, validationErr
+	return 0, nil, validationErr
 }
 
 func (ds delegatingStore) CheckOnce(
@@ -698,7 +870,7 @@ func (ds delegatingStore) CheckOnce(
 	table *typedef.Table,
 	stmt *typedef.Stmt,
 	attempt int,
-) (int, error) {
+) (int, Rows, error) {
 	return ds.checkOnceInternal(ctx, table, stmt, attempt)
 }
 
@@ -707,46 +879,63 @@ func (ds delegatingStore) Check(
 	table *typedef.Table,
 	stmt *typedef.Stmt,
 	_ int,
-) (int, error) {
+) (int, Rows, error) {
 	maxAttempts := ds.validationRetries
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}
 
+	var lastErr error
 	for attempt := range maxAttempts {
-		count, err := ds.checkOnceInternal(ctx, table, stmt, attempt)
+		count, testRows, err := ds.checkOnceInternal(ctx, table, stmt, attempt)
 		if err == nil {
-			return count, nil
+			return count, testRows, nil
 		}
 
+		// Context cancellation/deadline is terminal — do not retry.
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return 0, err
+			return 0, nil, err
 		}
+		lastErr = err
 
-		// Last attempt — return the error as-is (already finalized by checkOnceInternal)
-		if attempt >= maxAttempts-1 {
-			return 0, err
-		}
-
-		delay := utils.Backoff(utils.ExponentialBackoffStrategy, attempt, ds.validationRetrySleep, 100*time.Millisecond)
-		timer := utils.GetTimer(delay)
-		select {
-		case <-timer.C:
-			utils.PutTimer(timer)
-		case <-ctx.Done():
-			utils.PutTimer(timer)
-			if errors.Is(ctx.Err(), context.Canceled) {
-				return 0, context.Canceled
+		if attempt < maxAttempts-1 {
+			delay := utils.Backoff(utils.LinearBackoffStrategy, attempt, ds.validationRetrySleep, ds.minimumDelay)
+			timer := utils.GetTimer(delay)
+			select {
+			case <-timer.C:
+				utils.PutTimer(timer)
+				// continue to next attempt
+			case <-ctx.Done():
+				utils.PutTimer(timer)
+				if errors.Is(ctx.Err(), context.Canceled) {
+					return 0, nil, context.Canceled
+				}
+				return 0, nil, pkgerrors.Wrap(ctx.Err(), "validation cancelled during retry delay")
 			}
-			return 0, pkgerrors.Wrap(ctx.Err(), "validation cancelled during retry delay")
 		}
 	}
 
-	return 0, nil
+	// All attempts failed — return the error from the final attempt
+	// (already finalized by checkOnceInternal).
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return 0, nil, context.Canceled
+	}
+
+	return 0, nil, lastErr
 }
 
 func (ds delegatingStore) Close() error {
 	ds.getLogger().Info("closing store")
+
+	// Drain all goroutines spawned by executeParallelMutations before closing
+	// the CQL sessions. If waitForMutationResults returned early (context
+	// cancelled), those goroutines are still in-flight. Closing sessions while
+	// they are running causes "use of closed network connection (potentially
+	// executed: true)" errors and undetected data divergence between oracle
+	// and test.
+	if ds.inflight != nil {
+		ds.inflight.Wait()
+	}
 
 	var err error
 	if ds.statementLogger != nil {

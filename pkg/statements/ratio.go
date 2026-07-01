@@ -19,7 +19,6 @@ import (
 	"math"
 	"slices"
 
-	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
@@ -68,8 +67,9 @@ type MutationRatios struct {
 	// Insert subtype ratios (within insert statements)
 	InsertSubtypeRatios InsertRatios `json:"insert_subtypes"`
 
-	// Delete subtype ratios (within delete statements)
-	DeleteSubtypeRatios DeleteRatios `json:"delete_subtypes"`
+	// Targeted subtype ratios (within delete statements). The JSON key remains
+	// "delete_subtypes" for backward compatibility with existing config files.
+	DeleteSubtypeRatios TargetedRatios `json:"delete_subtypes"`
 }
 
 // ValidationRatios defines the distribution ratios for validation operations
@@ -84,11 +84,13 @@ type InsertRatios struct {
 	JSONInsertRatio    float64 `json:"json_insert"`
 }
 
-// DeleteRatios defines ratios for different delete statement types
-type DeleteRatios struct {
+// TargetedRatios defines ratios for the targeted mutation subtypes (whole
+// partition, single row, clustering subset, multiple partitions). These govern
+// DELETE subtype selection and, for single-row, also drive UPDATE targeting.
+type TargetedRatios struct {
 	WholePartitionRatio     float64 `json:"whole_partition"`
 	SingleRowRatio          float64 `json:"single_row"`
-	SingleColumnRatio       float64 `json:"single_column"`
+	ClusteringSubsetRatio   float64 `json:"clustering_subset"`
 	MultiplePartitionsRatio float64 `json:"multiple_partitions"`
 }
 
@@ -105,17 +107,17 @@ type SelectRatios struct {
 func DefaultStatementRatios() Ratios {
 	return Ratios{
 		MutationRatios: MutationRatios{
-			InsertRatio: 0.75,
-			UpdateRatio: 0.2,
+			InsertRatio: 0.70,
+			UpdateRatio: 0.25,
 			DeleteRatio: 0.05,
 			InsertSubtypeRatios: InsertRatios{
 				RegularInsertRatio: 0.9,
 				JSONInsertRatio:    0.1,
 			},
-			DeleteSubtypeRatios: DeleteRatios{
-				WholePartitionRatio:     0.4,
+			DeleteSubtypeRatios: TargetedRatios{
+				WholePartitionRatio:     0.3,
 				SingleRowRatio:          0.3,
-				SingleColumnRatio:       0.2,
+				ClusteringSubsetRatio:   0.3,
 				MultiplePartitionsRatio: 0.1,
 			},
 		},
@@ -137,7 +139,7 @@ type RatioController struct {
 	mutationCDF [MutationStatementsCount]float64
 	insertCDF   [InsertStatementCount]float64
 	updateCDF   [UpdateStatementCount]float64
-	deleteCDF   [DeleteStatementCount]float64
+	targetedCDF [TargetedStatementCount]float64
 	selectCDF   [SelectStatementsCount]float64
 }
 
@@ -152,30 +154,7 @@ func NewRatioController(ratios Ratios, random utils.Random) (*RatioController, e
 	}
 
 	controller.buildCDFs(ratios)
-	controller.publishConfiguredRatios(ratios)
 	return controller, nil
-}
-
-// publishConfiguredRatios exports the configured ratios as Prometheus gauges so they
-// are visible in dashboards alongside the actual observed ratios.
-func (c *RatioController) publishConfiguredRatios(ratios Ratios) {
-	m := ratios.MutationRatios
-	metrics.StatementRatioConfigured.WithLabelValues("mutation", "insert").Set(m.InsertRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("mutation", "update").Set(m.UpdateRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("mutation", "delete").Set(m.DeleteRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("mutation_insert", "regular").Set(m.InsertSubtypeRatios.RegularInsertRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("mutation_insert", "json").Set(m.InsertSubtypeRatios.JSONInsertRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("mutation_delete", "whole_partition").Set(m.DeleteSubtypeRatios.WholePartitionRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("mutation_delete", "single_row").Set(m.DeleteSubtypeRatios.SingleRowRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("mutation_delete", "single_column").Set(m.DeleteSubtypeRatios.SingleColumnRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("mutation_delete", "multiple_partitions").Set(m.DeleteSubtypeRatios.MultiplePartitionsRatio)
-
-	s := ratios.ValidationRatios.SelectSubtypeRatios
-	metrics.StatementRatioConfigured.WithLabelValues("select", "single_partition").Set(s.SinglePartitionRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("select", "multiple_partition").Set(s.MultiplePartitionRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("select", "clustering_range").Set(s.ClusteringRangeRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("select", "multi_partition_clustering_range").Set(s.MultiplePartitionClusteringRangeRatio)
-	metrics.StatementRatioConfigured.WithLabelValues("select", "single_index").Set(s.SingleIndexRatio)
 }
 
 // validate checks if the ratios are valid (sum to 1.0 with some tolerance)
@@ -198,7 +177,7 @@ func (c *RatioController) validate(ratios Ratios) error {
 		// Check delete subtype ratios
 		deleteSum := ratios.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio +
 			ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio +
-			ratios.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio +
+			ratios.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio +
 			ratios.MutationRatios.DeleteSubtypeRatios.MultiplePartitionsRatio
 		if math.Abs(deleteSum-1.0) > tolerance {
 			return fmt.Errorf("delete subtype ratios sum to %.3f, expected 1.0", deleteSum)
@@ -236,14 +215,14 @@ func (c *RatioController) buildCDFs(ratios Ratios) {
 	// Update subtypes CDF (currently only one type)
 	c.updateCDF = [UpdateStatementCount]float64{1.0}
 
-	// Delete subtypes CDF
-	c.deleteCDF = [DeleteStatementCount]float64{
+	// Targeted (delete/update) subtypes CDF
+	c.targetedCDF = [TargetedStatementCount]float64{
 		ratios.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio,
 		ratios.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio +
 			ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio,
 		ratios.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio +
 			ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio +
-			ratios.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio,
+			ratios.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio,
 		1.0, // All delete types
 	}
 
@@ -292,17 +271,20 @@ func (c *RatioController) GetInsertSubtype() int {
 	return InsertStatements
 }
 
-// GetDeleteSubtype returns the delete subtype based on configured ratios
-func (c *RatioController) GetDeleteSubtype() int {
+// GetTargetedSubtype returns the targeted mutation subtype (whole partition,
+// single row, clustering subset, multiple partitions) based on configured
+// ratios. Used by DELETE generation; UPDATE generation always targets a single
+// row directly and does not call this.
+func (c *RatioController) GetTargetedSubtype() int {
 	r := c.random.Float64()
 
-	for i, cdf := range c.deleteCDF {
+	for i, cdf := range c.targetedCDF {
 		if r <= cdf {
-			return i // DeleteWholePartition, DeleteSingleRow, DeleteSingleColumn, DeleteMultiplePartitions
+			return i // TargetedWholePartition, TargetedSingleRow, TargetedClusteringSubset, TargetedMultiplePartitions
 		}
 	}
 
-	return DeleteWholePartition
+	return TargetedWholePartition
 }
 
 // GetSelectSubtype returns the select subtype based on configured ratios
@@ -355,7 +337,7 @@ func (c Ratios) GetStatementInfo() map[string]any {
 		"delete_subtypes": map[string]float64{
 			"whole_partition":     c.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio,
 			"single_row":          c.MutationRatios.DeleteSubtypeRatios.SingleRowRatio,
-			"single_column":       c.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio,
+			"clustering_subset":   c.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio,
 			"multiple_partitions": c.MutationRatios.DeleteSubtypeRatios.MultiplePartitionsRatio,
 		},
 		"select_subtypes": map[string]float64{
@@ -366,4 +348,67 @@ func (c Ratios) GetStatementInfo() map[string]any {
 			"single_index":                        selectRatios.SingleIndexRatio,
 		},
 	}
+}
+
+// rowTrackerCapacityScale is the linear scaling factor used to convert the
+// effective tracked-row consume ratio into a row tracker capacity.
+// Calibration: at the default config (deleteRatio=0.05, targeted subtypes=0.6),
+// the delete contribution is 0.03 → capacity = 0.03 * 33333 ≈ 1000.
+const (
+	rowTrackerCapacityScale = 33333
+	rowTrackerCapacityMin   = 100
+	rowTrackerCapacityMax   = 100_000
+
+	// updateConsumeWeight scales down UPDATE's contribution to the consume ratio.
+	// A single-row UPDATE is an opportunistic consumer: it pops a tracked row
+	// when available and otherwise falls back to a random-key upsert, so it does
+	// not need a tracker sized to its full ratio. The light weight keeps a modest
+	// pool — enough that updates still hit real rows, notably when deletes are
+	// disabled — without oversizing the tracker or the validation sample rate.
+	//
+	// Note: with deletes disabled this puts the tracker's enable threshold at
+	// UpdateRatio >= 0.01 (below that, effective < 0.001 and tracking is off, so
+	// updates run purely as random-key upserts).
+	updateConsumeWeight = 0.1
+	// updateConsumeCap bounds the update contribution so a very high update ratio
+	// cannot, on its own, drive the tracker capacity and sample rate up.
+	updateConsumeCap = 0.03
+)
+
+// TargetedConsumeRatio returns the effective probability that a mutation
+// consumes a row from the row tracker, summed over the two consumers:
+//   - targeted deletes (single-row or cluster): deleteRatio * (singleRow + cluster),
+//     full weight — a targeted delete with no tracked row produces nothing.
+//   - single-row updates: weighted down (updateConsumeWeight, capped by
+//     updateConsumeCap) because they fall back to a random-key upsert when the
+//     tracker is empty.
+//
+// It drives both the row tracker capacity and the validation sample rate.
+func (c Ratios) TargetedConsumeRatio() float64 {
+	var ratio float64
+
+	if dr := c.MutationRatios.DeleteRatio; dr >= 0.001 {
+		targeted := c.MutationRatios.DeleteSubtypeRatios.SingleRowRatio +
+			c.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio
+		ratio += dr * targeted
+	}
+
+	ratio += min(c.MutationRatios.UpdateRatio*updateConsumeWeight, updateConsumeCap)
+
+	return ratio
+}
+
+// ComputeRowTrackerCapacity returns the recommended row tracker capacity based
+// on the configured mutation ratios. Returns 0 when no mutation consumes
+// tracked rows, scaling up to a maximum of rowTrackerCapacityMax for heavy
+// delete/update workloads.
+func (c Ratios) ComputeRowTrackerCapacity() int {
+	effective := c.TargetedConsumeRatio()
+	if effective < 0.001 {
+		return 0
+	}
+
+	capacity := int(effective * rowTrackerCapacityScale)
+
+	return max(rowTrackerCapacityMin, min(rowTrackerCapacityMax, capacity))
 }

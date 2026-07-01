@@ -157,12 +157,24 @@ func (st SimpleType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any
 	return out
 }
 
+// randSpan guards the bound passed to rand.IntN, which panics on a non-positive
+// argument. A misconfigured RangeConfig (e.g. a preset that left a max length at
+// zero) would otherwise crash the whole process during partition fill. When the
+// max is already positive this returns it unchanged, so value generation — and
+// the random stream it consumes — is identical for every valid configuration.
+func randSpan(maxLen int) int {
+	if maxLen < 1 {
+		return 1
+	}
+	return maxLen
+}
+
 func (st SimpleType) genValue(r utils.Random, p RangeConfig) any {
 	switch st {
 	case TypeBlob:
-		return utils.RandomBytes(r, r.IntN(p.GetMaxStringLength())+p.GetMinStringLength())
+		return utils.RandomBytes(r, r.IntN(randSpan(p.GetMaxStringLength()))+p.GetMinStringLength())
 	case TypeAscii, TypeText, TypeVarchar:
-		return utils.RandString(r, r.IntN(p.GetMaxStringLength())+p.GetMinStringLength(), false)
+		return utils.RandString(r, r.IntN(randSpan(p.GetMaxStringLength()))+p.GetMinStringLength(), false)
 	case TypeBigint:
 		return r.Int64()
 	case TypeBoolean:

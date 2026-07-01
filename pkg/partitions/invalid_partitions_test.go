@@ -190,11 +190,9 @@ func TestMarkInvalid_SkippedInNext(t *testing.T) {
 		require.NotNil(t, key)
 
 		// Resolve the index from the UUID.
-		idxVal, ok := parts.uuidToIdx.Load(key.ID)
-		var idx uint64
-		if ok {
-			idx = idxVal.(uint64)
-		}
+		parts.validationMu.RLock()
+		idx, ok := parts.uuidToIdx[key.ID]
+		parts.validationMu.RUnlock()
 
 		if ok {
 			assert.False(t, parts.IsInvalid(idx),

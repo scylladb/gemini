@@ -16,7 +16,6 @@ package store
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -30,27 +29,6 @@ type ContextData struct {
 	Statement     *typedef.Stmt
 	Timestamp     time.Time
 	GeminiAttempt int
-}
-
-var contextDataPool = sync.Pool{
-	New: func() any {
-		return &ContextData{}
-	},
-}
-
-// AcquireContextData gets a ContextData from the pool and initializes it.
-func AcquireContextData(stmt *typedef.Stmt, attempt int) *ContextData {
-	cd := contextDataPool.Get().(*ContextData)
-	cd.Statement = stmt
-	cd.Timestamp = time.Now().UTC()
-	cd.GeminiAttempt = attempt
-	return cd
-}
-
-// ReleaseContextData returns a ContextData to the pool.
-func ReleaseContextData(cd *ContextData) {
-	cd.Statement = nil
-	contextDataPool.Put(cd)
 }
 
 func WithContextData(ctx context.Context, data *ContextData) context.Context {

@@ -21,10 +21,11 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-// TestHeapMemoryEfficiency validates that the optimized heap uses less memory
-func TestHeapMemoryEfficiency(t *testing.T) {
+// TestRingMemoryEfficiency validates that the per-bucket rings do not
+// over-allocate: total backing capacity is bounded by ~2x the live count.
+func TestRingMemoryEfficiency(t *testing.T) {
 	buckets := []time.Duration{100 * time.Millisecond}
-	d := newDeleted(t.Context(), buckets)
+	d := newDeleted(t.Context(), buckets, 0)
 	defer d.Close()
 
 	// Add many items
@@ -33,15 +34,11 @@ func TestHeapMemoryEfficiency(t *testing.T) {
 		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 	}
 
-	// Check that we didn't allocate excessively
-	// With pre-allocation, we should have grown the backing array only a few times
-	// Initial: 1024, then doubles: 2048, 4096, 8192, 16384
-	d.mu.Lock()
-	capacity := len(d.heap.data)
-	length := d.heap.len
-	d.mu.Unlock()
+	// The ring grows by doubling, so capacity is the next power-of-two ≥ count.
+	capacity := d.totalRingCapForTest()
+	length := d.Len()
 
-	t.Logf("Heap length: %d, capacity: %d, utilization: %.2f%%",
+	t.Logf("Ring length: %d, capacity: %d, utilization: %.2f%%",
 		length, capacity, float64(length)/float64(capacity)*100)
 
 	// Verify capacity is reasonable (should have doubled from initial 1024)
@@ -55,38 +52,5 @@ func TestHeapMemoryEfficiency(t *testing.T) {
 	}
 }
 
-// TestHeapGrowthPattern validates exponential growth
-func TestHeapGrowthPattern(t *testing.T) {
-	t.Parallel()
-
-	h := &deletedPartitionHeap{
-		data: make([]deletedPartition, 4), // Start small
-		len:  0,
-	}
-
-	capacities := []int{len(h.data)}
-
-	// Add items and track capacity changes
-	for i := range 100 {
-		h.pushInline(deletedPartition{
-			keys:    typedef.PartitionKeys{Values: typedef.NewValues(1)},
-			readyAt: time.Now().Add(time.Duration(i) * time.Millisecond),
-		})
-
-		if len(h.data) != capacities[len(capacities)-1] {
-			capacities = append(capacities, len(h.data))
-			t.Logf("Capacity grew to %d after %d insertions", len(h.data), i+1)
-		}
-	}
-
-	t.Logf("Capacity growth pattern: %v", capacities)
-
-	// Verify exponential growth (each capacity should be ~2x previous)
-	for i := 1; i < len(capacities); i++ {
-		ratio := float64(capacities[i]) / float64(capacities[i-1])
-		if ratio < 1.5 || ratio > 2.5 {
-			t.Errorf("Growth ratio %.2f is not close to 2.0 (from %d to %d)",
-				ratio, capacities[i-1], capacities[i])
-		}
-	}
-}
+// Ring exponential growth/shrink is covered by TestRingBuf_GrowAndShrink in
+// window_test.go.

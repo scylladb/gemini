@@ -106,6 +106,20 @@ func (m *mockPartitions) InvalidCount() uint64 {
 	return m.invalidCount.Load()
 }
 
+func (m *mockPartitions) TrackRow(_ partitions.TrackedRow) {}
+
+func (m *mockPartitions) PopTrackedRow() (partitions.TrackedRow, bool) {
+	return partitions.TrackedRow{}, false
+}
+
+func (m *mockPartitions) TrackedRowCount() uint64 {
+	return 0
+}
+
+func (m *mockPartitions) RowTrackerFillRatio() float64 {
+	return 0
+}
+
 func (m *mockPartitions) Len() uint64 {
 	return m.count.Load()
 }

@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"math/big"
 	"net"
 	"os"
 	"path/filepath"
@@ -33,7 +32,6 @@ import (
 	"github.com/samber/mo"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
-	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
@@ -41,12 +39,30 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
+// applyLocalhostTranslator installs an AddressTranslator on cluster that
+// rewrites every peer IP to 127.0.0.1, preserving the port.  This is the
+// Docker/testcontainer workaround: when a node advertises its internal
+// container IP as rpc_address, gocql would otherwise try to reconnect to an
+// IP that is unreachable from the host.  A warning is logged because silently
+// rerouting all traffic to a single address would cause very confusing
+// behaviour in production.
+func applyLocalhostTranslator(cluster *gocql.ClusterConfig, logger *zap.Logger) {
+	logger.Warn("DockerMode is enabled: all discovered peer addresses will be translated to 127.0.0.1; do NOT enable this in production")
+	localhostIP := net.ParseIP("127.0.0.1")
+	cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, p int) (net.IP, int) {
+		return localhostIP, p
+	})
+	// The shard-aware port (19042) is published on a *different* host port than
+	// the one we connected through, so the translated address 127.0.0.1:19042 is
+	// unreachable. Disable shard-aware connections so gocql only uses the mapped
+	// CQL port.
+	cluster.DisableShardAwarePort = true
+}
+
 type cqlStore struct {
 	cqlRequestsMetric         [typedef.StatementTypeCount]prometheus.Counter
 	cqlErrorRequestsMetric    [typedef.StatementTypeCount]prometheus.Counter
 	cqlTimeoutsRequestsMetric [typedef.StatementTypeCount]prometheus.Counter
-	rowsReturnedMetric        prometheus.Counter
-	rowsPerQueryMetric        prometheus.Observer
 	stmtTracker               *stmtTracker
 	cluster                   *gocql.ClusterConfig
 	session                   *gocql.Session
@@ -78,9 +94,6 @@ func newCQLStoreWithSession(
 		store.cqlErrorRequestsMetric[i] = metrics.CQLErrorRequests.WithLabelValues(system, i.String())
 		store.cqlTimeoutsRequestsMetric[i] = metrics.CQLQueryTimeouts.WithLabelValues(system, i.String())
 	}
-
-	store.rowsReturnedMetric = metrics.CQLRowsReturned.WithLabelValues(system)
-	store.rowsPerQueryMetric = metrics.CQLRowsPerQuery.WithLabelValues(system)
 
 	logger.Info("cql store created", zap.String("system", system))
 	return store
@@ -207,7 +220,6 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 
 	if errors.Is(mutateErr, context.Canceled) {
 		c.logger.Debug("mutation cancelled", zap.String("system", c.system))
-		metrics.ContextCancellations.WithLabelValues("mutation", "cancelled").Inc()
 		return context.Canceled
 	}
 
@@ -217,7 +229,6 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 			zap.String("query_type", stmt.QueryType.String()),
 		)
 		c.cqlTimeoutsRequestsMetric[stmt.QueryType].Inc()
-		metrics.ContextCancellations.WithLabelValues("mutation", "deadline").Inc()
 		return mutateErr // Return timeout error so delegating store can retry
 	}
 
@@ -259,21 +270,39 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	iter := query.Iter()
 
 	if iter.NumRows() == 0 {
-		c.rowsPerQueryMetric.Observe(0)
 		return nil, iter.Close()
 	}
 
 	// Pre-allocate rows slice
 	rows := make(Rows, 0, iter.NumRows())
 
-	rowData, err := iter.RowData()
+	// Fetch column names once — they never change across rows.
+	firstRowData, err := iter.RowData()
 	if err != nil {
 		return nil, err
 	}
+	columns := firstRowData.Columns
 
-	for iter.Scan(rowData.Values...) {
-		row := NewRow(rowData.Columns, rowData.Values)
-		rows = append(rows, row)
+	// Scan the first row into the already-allocated destinations.
+	if !iter.Scan(firstRowData.Values...) {
+		if err = iter.Close(); err != nil && !errors.Is(err, context.Canceled) {
+			c.logger.Error("error closing iterator", zap.String("system", c.system), zap.Error(err))
+		}
+		return rows, err
+	}
+	rows = append(rows, NewRow(columns, firstRowData.Values))
+
+	// Each subsequent row gets its own fresh RowData so scan destinations are
+	// never shared between rows — no copying or reflection required.
+	for {
+		rowData, rdErr := iter.RowData()
+		if rdErr != nil {
+			return rows, rdErr
+		}
+		if !iter.Scan(rowData.Values...) {
+			break
+		}
+		rows = append(rows, NewRow(columns, rowData.Values))
 	}
 
 	if err = iter.Close(); err != nil && !errors.Is(err, context.Canceled) {
@@ -282,10 +311,6 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 			zap.Error(err),
 		)
 	}
-
-	n := float64(len(rows))
-	c.rowsReturnedMetric.Add(n)
-	c.rowsPerQueryMetric.Observe(n)
 
 	return rows, err
 }
@@ -315,21 +340,34 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			}
 		}()
 
-		// Check if query returned any rows
 		if iter.NumRows() == 0 {
 			return
 		}
 
-		// Get column info once - order is guaranteed by the driver
-		rowData, err := iter.RowData()
-		if err != nil {
-			yield(Row{}, err)
+		// Fetch column names once — reused for every row.
+		firstRowData, rdErr := iter.RowData()
+		if rdErr != nil {
+			yield(Row{}, rdErr)
+			return
+		}
+		columns := firstRowData.Columns
+
+		// Scan the first row into the already-allocated destinations.
+		select {
+		case <-ctx.Done():
+			yield(Row{}, ctx.Err())
+			return
+		default:
+		}
+		if !iter.Scan(firstRowData.Values...) {
+			return
+		}
+		if !yield(NewRow(columns, firstRowData.Values), nil) {
 			return
 		}
 
-		var rowCount float64
+		// Each subsequent row gets its own fresh RowData.
 		for {
-			// Check for context cancellation
 			select {
 			case <-ctx.Done():
 				yield(Row{}, ctx.Err())
@@ -337,66 +375,18 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			default:
 			}
 
-			// Scan into slice - this is faster than MapScan
+			rowData, rowErr := iter.RowData()
+			if rowErr != nil {
+				yield(Row{}, rowErr)
+				return
+			}
 			if !iter.Scan(rowData.Values...) {
-				// No more rows
 				break
 			}
-
-			row := NewRow(rowData.Columns, rowData.Values)
-			rowCount++
-
-			// Yield the row
-			if !yield(row, nil) {
-				// Consumer stopped iteration
-				break
+			if !yield(NewRow(columns, rowData.Values), nil) {
+				return
 			}
 		}
-
-		c.rowsReturnedMetric.Add(rowCount)
-		c.rowsPerQueryMetric.Observe(rowCount)
-	}
-}
-
-// deepCopyValue creates a deep copy of a value to avoid pointer and slice reuse issues
-// This is necessary because gocql reuses internal buffers for efficiency
-func deepCopyValue(v any) any {
-	if v == nil {
-		return nil
-	}
-
-	switch val := v.(type) {
-	case []byte:
-		// Critical: Must copy byte slices as gocql reuses the buffer
-		if val == nil {
-			return nil
-		}
-		copied := make([]byte, len(val))
-		copy(copied, val)
-		return copied
-	case string, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
-		// Primitive types are safe to return directly
-		return v
-	case *big.Int:
-		if val == nil {
-			return nil
-		}
-		return new(big.Int).Set(val)
-	case *inf.Dec:
-		if val == nil {
-			return nil
-		}
-		// Create a new Dec from the string representation to ensure deep copy
-		copied := new(inf.Dec)
-		copied.SetString(val.String())
-		return copied
-	case time.Time:
-		// time.Time is a struct, so it's copied by value
-		return val
-	default:
-		// For other types (UUID, custom types), return as-is
-		// They should be safe as gocql creates new instances for them
-		return v
 	}
 }
 
@@ -451,10 +441,18 @@ func CreateCluster(
 		cluster.Port = config.Port
 	}
 
+	// DockerMode: translate every discovered peer address back to 127.0.0.1 so
+	// that gocql always dials through the host-mapped port instead of the
+	// internal Docker IP (which is unreachable from the host).
+	// This must only be enabled explicitly — never inferred from port/host values.
+	if config.DockerMode {
+		applyLocalhostTranslator(cluster, logger)
+	}
+
 	cluster.Timeout = config.RequestTimeout
 	cluster.ConnectTimeout = config.ConnectTimeout
 	cluster.MaxRoutingKeyInfo = 50_000
-	cluster.MaxPreparedStmts = 5_000
+	cluster.MaxPreparedStmts = 50_000
 	cluster.ReconnectInterval = config.ConnectTimeout
 	cluster.Events.DisableTopologyEvents = false
 	cluster.Events.DisableSchemaEvents = false
@@ -463,8 +461,8 @@ func CreateCluster(
 	cluster.DefaultIdempotence = false
 	cluster.RetryPolicy = &gocql.ExponentialBackoffRetryPolicy{
 		Min:        10 * time.Millisecond,
-		Max:        2 * time.Second,
-		NumRetries: 5,
+		Max:        10 * time.Second,
+		NumRetries: 10,
 	}
 	cluster.ReconnectionPolicy = &gocql.ExponentialReconnectionPolicy{
 		MaxRetries:      10,
@@ -482,44 +480,15 @@ func CreateCluster(
 		}
 	}
 
-	// When connecting through a port-mapped proxy (e.g. Docker on macOS), the
-	// addresses advertised by peers in system.peers are the container-internal IPs
-	// which are unreachable from the host.  Install an AddressTranslator that
-	// redirects every discovered peer back to the first contact-point host on the
-	// configured port, and disable the shard-aware dialer to prevent extra
-	// connections to shard-specific ports on unreachable internal IPs.
-	// Only activated for non-default ports (port != 9042) to avoid silently
-	// breaking standard production deployments.  Matching logic lives in
-	// pkg/stmtlogger/scylla/helpers.go (newSession) and pkg/testutils/scylladb.go (createClusterConfig).
-	if config.Port > 0 && config.Port != 9042 && len(config.Hosts) > 0 {
-		contactIP := net.ParseIP(config.Hosts[0])
-		if contactIP == nil {
-			// config.Hosts[0] is a hostname rather than a literal IP address;
-			// resolve it so the AddressTranslator has a concrete IP to return.
-			var addrs []string
-			addrs, err = net.LookupHost(config.Hosts[0])
-			if err != nil || len(addrs) == 0 {
-				logger.Warn("address translation skipped: could not resolve contact point hostname",
-					zap.String("host", config.Hosts[0]),
-					zap.Error(err),
-				)
-			} else {
-				contactIP = net.ParseIP(addrs[0])
-			}
-		}
-		mappedPort := config.Port
-		if contactIP != nil {
-			logger.Warn("address translation active: all peer IPs will be rewritten to the first contact-point host",
-				zap.String("contact_ip", config.Hosts[0]),
-				zap.Int("port", mappedPort),
-				zap.String("cluster", string(config.Name)),
-			)
-			cluster.AddressTranslator = gocql.AddressTranslatorFunc(func(_ net.IP, _ int) (net.IP, int) {
-				return contactIP, mappedPort
-			})
-			cluster.DisableShardAwarePort = true
-		}
-	}
+	// NOTE: address translation is installed ONLY under the explicit DockerMode
+	// flag above (applyLocalhostTranslator). It is deliberately never inferred
+	// from the port or host values: a real multi-node cluster legitimately runs
+	// on a non-default CQL port, and rewriting every discovered peer onto a
+	// single contact point (plus disabling shard-aware routing) would silently
+	// break it. The Docker/testcontainer paths set DockerMode explicitly — see
+	// pkg/stmtlogger/scylla/helpers.go (newSession) and
+	// pkg/testutils/scylladb.go (createClusterConfig), which key off the same
+	// flag.
 
 	return cluster, nil
 }

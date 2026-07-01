@@ -68,7 +68,7 @@ The configuration uses a hierarchical JSON structure with two main categories:
     "delete_subtypes": {
       "whole_partition": 0.4,
       "single_row": 0.3,
-      "single_column": 0.2,
+      "clustering_subset": 0.2,
       "multiple_partitions": 0.1
     }
   },
@@ -111,10 +111,12 @@ Fine-grained control over INSERT statement types:
 
 Fine-grained control over DELETE statement types:
 
-- **`whole_partition`**: DELETE entire partitions
-- **`single_row`**: DELETE single rows
-- **`single_column`**: DELETE specific columns
-- **`multiple_partitions`**: DELETE across multiple partitions
+- **`whole_partition`**: DELETE entire partitions (uses `ReplaceNext()` to recycle the partition)
+- **`single_row`**: DELETE a specific row identified by all partition + clustering keys (uses tracked rows from validation)
+- **`cluster`**: DELETE a range of rows sharing a clustering key prefix (uses tracked rows from validation)
+- **`multiple_partitions`**: DELETE across multiple partitions using IN clause
+
+The `single_row` and `cluster` subtypes consume rows from the row tracker (populated during validation). When no tracked rows are available, they fall back to random clustering key values. See [Targeted Deletions](targeted-deletions.md) for details.
 
 **Note**: These values must sum to 1.0
 
@@ -139,17 +141,17 @@ If no ratios are specified, Gemini uses this balanced default configuration:
 ```json
 {
   "mutation": {
-    "insert": 0.75,
-    "update": 0.20,
+    "insert": 0.70,
+    "update": 0.25,
     "delete": 0.05,
     "insert_subtypes": {
       "regular_insert": 0.9,
       "json_insert": 0.1
     },
     "delete_subtypes": {
-      "whole_partition": 0.4,
+      "whole_partition": 0.3,
       "single_row": 0.3,
-      "single_column": 0.2,
+      "clustering_subset": 0.3,
       "multiple_partitions": 0.1
     }
   },
@@ -255,8 +257,8 @@ cat > custom-ratios.json << EOF
     },
     "delete_subtypes": {
       "whole_partition": 0.5,
-      "single_row": 0.3,
-      "single_column": 0.1,
+      "single_row": 0.2,
+      "clustering_subset": 0.2,
       "multiple_partitions": 0.1
     }
   },

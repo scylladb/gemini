@@ -67,11 +67,15 @@ func TestNew_BasicConfiguration(t *testing.T) {
 	cfg := Config{
 		TestClusterConfig: ScyllaClusterConfig{
 			Hosts:               scyllaContainer.TestHosts,
+			Port:                scyllaContainer.TestCluster.Port,
+			DockerMode:          scyllaContainer.DockerMode,
 			Consistency:         "QUORUM",
 			HostSelectionPolicy: HostSelectionRoundRobin,
 		},
 		OracleClusterConfig: &ScyllaClusterConfig{
 			Hosts:               scyllaContainer.OracleHosts,
+			Port:                scyllaContainer.OracleCluster.Port,
+			DockerMode:          scyllaContainer.DockerMode,
 			Consistency:         "QUORUM",
 			HostSelectionPolicy: HostSelectionRoundRobin,
 		},
@@ -96,6 +100,9 @@ func TestNew_BasicConfiguration(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, store)
+
+	// Allow gocql's background connection pool fill to settle before closing.
+	time.Sleep(200 * time.Millisecond)
 
 	// Clean up
 	require.NoError(t, store.Close())
@@ -135,6 +142,8 @@ func TestNew_WithoutOracleCluster(t *testing.T) {
 	cfg := Config{
 		TestClusterConfig: ScyllaClusterConfig{
 			Hosts:               scyllaContainer.TestHosts,
+			Port:                scyllaContainer.TestCluster.Port,
+			DockerMode:          scyllaContainer.DockerMode,
 			Consistency:         "QUORUM",
 			HostSelectionPolicy: HostSelectionRoundRobin,
 		},
@@ -156,6 +165,9 @@ func TestNew_WithoutOracleCluster(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, store)
+
+	// Allow gocql's background connection pool fill to settle before closing.
+	time.Sleep(200 * time.Millisecond)
 
 	// Clean up
 	require.NoError(t, store.Close())
@@ -194,6 +206,8 @@ func TestNew_DefaultConfiguration(t *testing.T) {
 	cfg := Config{
 		TestClusterConfig: ScyllaClusterConfig{
 			Hosts:               scyllaContainer.TestHosts,
+			Port:                scyllaContainer.TestCluster.Port,
+			DockerMode:          scyllaContainer.DockerMode,
 			Consistency:         "QUORUM",
 			HostSelectionPolicy: HostSelectionRoundRobin,
 		},
@@ -228,6 +242,12 @@ func TestNew_DefaultConfiguration(t *testing.T) {
 	assert.Equal(t, 10, ds.validationRetries)
 	assert.Equal(t, 25*time.Millisecond, ds.validationRetrySleep)
 	assert.Equal(t, 25*time.Millisecond, ds.minimumDelay)
+
+	// Allow gocql's background connection pool fill goroutine to complete
+	// before closing. gocql starts pool filling asynchronously after
+	// CreateSession() returns; closing immediately can race with the fill
+	// goroutine's Size() read vs closeConns() write (known driver issue).
+	time.Sleep(200 * time.Millisecond)
 
 	require.NoError(t, store.Close())
 }

@@ -52,7 +52,7 @@ func newSyncU64set(limit int64) *syncU64set {
 		for range ticker.C {
 			if s.deleted.Load() >= limit {
 				s.lock.Lock()
-				s.values = maps.Clone(s.values)
+				s.values = maps.Clone(s.values) //nolint:govet // inline: type parameter inference not yet supported by inliner
 				s.lock.Unlock()
 			}
 		}

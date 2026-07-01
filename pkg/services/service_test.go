@@ -28,6 +28,12 @@ import (
 var (
 	NoopLogger   bool
 	LoggingLevel string
+
+	// afterTests, when set (by the testing-tagged build), runs after all tests
+	// complete — used to tear down the shared ScyllaDB node pool. It is a hook
+	// because pkg/testutils (and thus CloseScyllaPool) only exists under the
+	// `testing` build tag, while this TestMain compiles in every build.
+	afterTests func()
 )
 
 func TestMain(m *testing.M) {
@@ -36,7 +42,11 @@ func TestMain(m *testing.M) {
 	utils.PreallocateRandomString(rand.New(rand.NewPCG(1, 1)), 1<<20)
 
 	flag.Parse()
-	os.Exit(m.Run())
+	code := m.Run()
+	if afterTests != nil {
+		afterTests()
+	}
+	os.Exit(code)
 }
 
 func getLogger(tb testing.TB) *zap.Logger {

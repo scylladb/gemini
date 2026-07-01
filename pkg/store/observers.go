@@ -16,13 +16,13 @@ package store
 
 import (
 	"context"
-	"errors"
 	"net"
 	"slices"
 	"strconv"
 	"sync"
 
 	"github.com/gocql/gocql"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/mo"
 	"go.uber.org/zap"
@@ -30,6 +30,7 @@ import (
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type observerInitializer[T any] func(host string, ty typedef.StatementType) T
@@ -83,7 +84,6 @@ type ClusterObserver struct {
 	goCQLQueries      *observer[prometheus.Counter]
 	goCQLQueryTime    *observer[prometheus.Observer]
 	goCQLConnections  *observer[prometheus.Gauge]
-	hostStrings       sync.Map // *gocql.HostInfo → "host:port" string cache
 	clusterName       stmtlogger.Type
 }
 
@@ -127,17 +127,6 @@ func NewClusterObserver(
 	return c
 }
 
-// hostPort returns a cached "host:port" string for the given host info,
-// avoiding per-call net.JoinHostPort + strconv.Itoa allocations.
-func (c *ClusterObserver) hostPort(host *gocql.HostInfo) string {
-	if v, ok := c.hostStrings.Load(host); ok {
-		return v.(string)
-	}
-	s := net.JoinHostPort(host.ConnectAddress().String(), strconv.Itoa(host.Port()))
-	c.hostStrings.Store(host, s)
-	return s
-}
-
 func (c *ClusterObserver) incGoCQLQueryError(instance string, err error) {
 	if err == nil {
 		return
@@ -147,59 +136,45 @@ func (c *ClusterObserver) incGoCQLQueryError(instance string, err error) {
 		Inc()
 }
 
-// classifyError maps a gocql error to a short, low-cardinality category.
-func classifyError(err error) string {
-	if err == nil {
-		return ""
-	}
-
-	switch {
-	case errors.Is(err, gocql.ErrTimeoutNoResponse):
-		return "timeout_no_response"
-	case errors.Is(err, gocql.ErrTooManyTimeouts):
-		return "too_many_timeouts"
-	case errors.Is(err, gocql.ErrConnectionClosed):
-		return "connection_closed"
-	case errors.Is(err, gocql.ErrHostDown):
-		return "host_down"
-	case errors.Is(err, gocql.ErrNoConnections):
-		return "no_connections"
-	case errors.Is(err, gocql.ErrSessionClosed):
-		return "session_closed"
-	case errors.Is(err, gocql.ErrNoStreams):
-		return "no_streams"
-	}
-
-	// Check CQL protocol-level request errors
-	var reqErr gocql.RequestError
-	if errors.As(err, &reqErr) {
-		switch reqErr.Code() {
-		case gocql.ErrCodeReadTimeout:
-			return "read_timeout"
-		case gocql.ErrCodeWriteTimeout:
-			return "write_timeout"
-		case gocql.ErrCodeReadFailure:
-			return "read_failure"
-		case gocql.ErrCodeWriteFailure:
-			return "write_failure"
-		case gocql.ErrCodeUnavailable:
-			return "unavailable"
-		case gocql.ErrCodeOverloaded:
-			return "overloaded"
-		case gocql.ErrCodeSyntax:
-			return "syntax_error"
-		case gocql.ErrCodeInvalid:
-			return "invalid_query"
-		case gocql.ErrCodeUnprepared:
-			return "unprepared"
-		case gocql.ErrCodeServer:
-			return "server_error"
-		default:
-			return "request_error"
+// logStatement emits one statement-log Item per partition key the statement
+// touches. Each emitted Item carries a single, fully-populated
+// typedef.PartitionKeys, so the committer always binds the exact number of
+// partition-key values the _logs INSERT expects. Multi-partition statements
+// therefore produce one _logs row per partition; statements with no partition
+// keys are not logged at all.
+//
+// Previously the observers attached data.Statement.PartitionKeys[0] only when
+// the statement touched exactly one partition and otherwise attached an empty
+// typedef.PartitionKeys{} (nil Values). That empty item bound zero partition-key
+// values against the N-column _logs INSERT, so gocql rejected every affected
+// batch client-side with "expected N values got M". Under a multi-partition
+// delete workload this recurred thousands of times, collapsing committer
+// throughput while statements kept enqueuing — and ultimately OOM-killed the
+// loader. Emitting one well-formed Item per partition removes that failure mode
+// at the source.
+//
+// NOTE: base.Values carries the full statement's bind values. For a genuine
+// multi-partition statement every emitted row would therefore repeat the whole
+// value list rather than that partition's slice. This is currently inert: the
+// only multi-partition statement types are SELECTs (never logged) and
+// DeleteMultiplePartitions (disabled — see pkg/statements/delete.go, which falls
+// back to a single-partition delete), so in practice every logged statement
+// touches exactly one partition. Revisit the per-row Values slicing here if
+// multi-partition mutations are ever re-enabled.
+func (c *ClusterObserver) logStatement(stmt *typedef.Stmt, base stmtlogger.Item) {
+	// Tag every emitted item with the source "keyspace.table" so the statement
+	// logger can route it to that table's own _logs table. The store is shared
+	// across all tables, so this is derived from the statement's own query (the
+	// same approach the asymmetric-write compensation uses). Parsed once here
+	// rather than per-partition or per-item in the committer hot path.
+	base.Table = utils.KeyspaceTableFromQuery(stmt.Query)
+	for i := range stmt.PartitionKeys {
+		item := base
+		item.PartitionKeys = stmt.PartitionKeys[i]
+		if err := c.logger.LogStmt(item); err != nil {
+			c.appLogger.Error("failed to log statement", zap.Error(err))
 		}
 	}
-
-	return "other"
 }
 
 func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.ObservedBatch) {
@@ -207,35 +182,33 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 	if data == nil {
 		return
 	}
-	instance := c.hostPort(batch.Host)
+	instance := net.JoinHostPort(batch.Host.ConnectAddress().String(), strconv.Itoa(batch.Host.Port()))
 
 	var errStr string
 
-	cluster := string(c.clusterName)
 	if batch.Err != nil {
 		errStr = batch.Err.Error()
 		c.incGoCQLQueryError(instance, batch.Err)
-		metrics.GoCQLErrorsByType.WithLabelValues(cluster, classifyError(batch.Err)).Inc()
 
 		switch {
 		case errors.Is(batch.Err, gocql.ErrConnectionClosed) || errors.Is(batch.Err, gocql.ErrHostDown):
 			c.goCQLConnections.Get(instance, 0).Dec()
-			metrics.GoCQLHostState.WithLabelValues(cluster, instance).Set(0)
 		case errors.Is(batch.Err, gocql.ErrNoConnections):
 			c.goCQLConnections.Get(instance, 0).Set(0)
-			metrics.GoCQLHostState.WithLabelValues(cluster, instance).Set(0)
 		default:
 		}
 	}
 
+	// NOTE: this loops over batch.Statements AND logStatement loops over the
+	// statement's partition keys. gemini never builds multi-statement CQL
+	// batches (all mutations are single Query().Exec(), so this path sees
+	// len(batch.Statements)==1), which keeps the product to one row per
+	// partition. If multi-statement batches are ever introduced for a multi-PK
+	// data.Statement, this would emit len(batch.Statements)×len(PartitionKeys)
+	// rows — revisit the pairing of batch.Statements[i] with the per-PK loop.
 	for i, query := range batch.Statements {
 		if c.logger != nil && !data.Statement.QueryType.IsSelect() {
-			var pk typedef.PartitionKeys
-			if len(data.Statement.PartitionKeys) == 1 {
-				pk = data.Statement.PartitionKeys[0]
-			}
-
-			err := c.logger.LogStmt(stmtlogger.Item{
+			c.logStatement(data.Statement, stmtlogger.Item{
 				Error:         mo.Right[error, string](errStr),
 				Statement:     query,
 				Values:        mo.Left[[]any, []byte](slices.Clone(batch.Values[i])),
@@ -246,11 +219,7 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 				GeminiAttempt: data.GeminiAttempt,
 				Type:          c.clusterName,
 				StatementType: data.Statement.QueryType,
-				PartitionKeys: pk,
 			})
-			if err != nil {
-				c.appLogger.Error("failed to log batch statement", zap.Error(err), zap.Any("batch", batch))
-			}
 		}
 
 		c.goCQLBatchQueries.Get(instance, data.Statement.QueryType).Inc()
@@ -263,47 +232,23 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 		return
 	}
 
-	instance := c.hostPort(query.Host)
-	cluster := string(c.clusterName)
+	instance := net.JoinHostPort(query.Host.ConnectAddress().String(), strconv.Itoa(query.Host.Port()))
 
 	var errStr string
 	if query.Err != nil {
-		metrics.GoCQLQueryErrors.WithLabelValues(cluster, instance, query.Err.Error()).Inc()
+		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, query.Err.Error()).Inc()
 		errStr = query.Err.Error()
-
-		// Classified error tracking (low cardinality)
-		metrics.GoCQLErrorsByType.WithLabelValues(cluster, classifyError(query.Err)).Inc()
 
 		switch {
 		case errors.Is(query.Err, gocql.ErrConnectionClosed) || errors.Is(query.Err, gocql.ErrHostDown):
 			c.goCQLConnections.Get(instance, 0).Dec()
-			metrics.GoCQLHostState.WithLabelValues(cluster, instance).Set(0)
 		case errors.Is(query.Err, gocql.ErrNoConnections):
 			c.goCQLConnections.Get(instance, 0).Set(0)
-			metrics.GoCQLHostState.WithLabelValues(cluster, instance).Set(0)
 		default:
 		}
 	}
 
 	duration := query.End.Sub(query.Start)
-
-	// Track driver-level retry attempts
-	metrics.GoCQLRetryAttempts.WithLabelValues(cluster, data.Statement.QueryType.String()).Observe(float64(query.Attempt))
-
-	// Track latency by attempt number (first attempt vs retries)
-	attemptLabel := "0"
-	if query.Attempt > 0 {
-		attemptLabel = strconv.Itoa(query.Attempt)
-		if query.Attempt > 3 {
-			attemptLabel = "4+"
-		}
-	}
-	metrics.GoCQLQueryLatencyByAttempt.WithLabelValues(cluster, attemptLabel).Observe(float64(duration) / 1e3)
-
-	// Track rows observed at driver level (per page)
-	if data.Statement.QueryType.IsSelect() {
-		metrics.GoCQLQueryRowsObserved.WithLabelValues(cluster).Observe(float64(query.Rows))
-	}
 
 	if c.logger != nil && !data.Statement.QueryType.IsSelect() {
 		attempts := 0
@@ -312,12 +257,7 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 			attempts = query.Metrics.Attempts
 		}
 
-		var pk typedef.PartitionKeys
-		if len(data.Statement.PartitionKeys) == 1 {
-			pk = data.Statement.PartitionKeys[0]
-		}
-
-		err := c.logger.LogStmt(stmtlogger.Item{
+		c.logStatement(data.Statement, stmtlogger.Item{
 			Error:         mo.Right[error, string](errStr),
 			Statement:     query.Statement,
 			Values:        mo.Left[[]any, []byte](slices.Clone(query.Values)),
@@ -328,11 +268,7 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 			GeminiAttempt: data.GeminiAttempt,
 			Type:          c.clusterName,
 			StatementType: data.Statement.QueryType,
-			PartitionKeys: pk,
 		})
-		if err != nil {
-			c.appLogger.Error("failed to log query statement", zap.Error(err), zap.Any("query", query))
-		}
 	}
 
 	c.goCQLQueries.Get(instance, data.Statement.QueryType).Inc()
@@ -341,19 +277,19 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 
 func (c *ClusterObserver) ObserveConnect(connect gocql.ObservedConnect) {
 	instance := connect.Host.ConnectAddressAndPort()
-	cluster := string(c.clusterName)
 
 	if connect.Err != nil {
-		metrics.GoCQLConnectionsErrors.WithLabelValues(cluster, instance, connect.Err.Error()).Inc()
-		metrics.GoCQLErrorsByType.WithLabelValues(cluster, "connect_"+classifyError(connect.Err)).Inc()
-		metrics.GoCQLConnections.WithLabelValues(cluster, instance).Dec()
-		metrics.GoCQLHostState.WithLabelValues(cluster, instance).Set(0)
+		metrics.GoCQLConnectionsErrors.WithLabelValues(
+			string(c.clusterName),
+			instance,
+			connect.Err.Error(),
+		).Inc()
+		metrics.GoCQLConnections.WithLabelValues(string(c.clusterName), instance).Dec()
 		return
 	}
 
 	c.goCQLConnections.Get(instance, 0).Inc()
-	metrics.GoCQLHostState.WithLabelValues(cluster, instance).Set(1)
 	metrics.GoCQLConnectTime.
-		WithLabelValues(cluster, instance).
+		WithLabelValues(string(c.clusterName), instance).
 		Observe(float64(connect.End.Sub(connect.Start) / 1e3))
 }

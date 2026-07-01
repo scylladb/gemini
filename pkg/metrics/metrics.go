@@ -187,12 +187,87 @@ var (
 		},
 	)
 
+	// StatementLoggerOverflowItems tracks the number of items currently held
+	// in the producer-side overflow buffer. This grows when the downstream
+	// committer cannot keep up (e.g. Scylla logger cluster stalled by a
+	// nemesis) and drains back to zero once the committer recovers.
+	// Items are NEVER dropped — this gauge is what you watch to detect a
+	// stalled committer. The buffer is bounded: once it reaches its cap LogStmt
+	// blocks producers (back-pressure) rather than dropping or growing without
+	// limit, so this gauge plateaus at the cap instead of climbing toward OOM.
+	StatementLoggerOverflowItems = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "statement_logger_overflow_items",
+			Help: "Number of statement log items currently held in the producer-side overflow buffer.",
+		},
+	)
+
+	// StatementLoggerOverflowTotal counts every time LogStmt had to fall back
+	// to the overflow buffer because the bounded channel was full.
+	StatementLoggerOverflowTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "statement_logger_overflow_total",
+			Help: "Total number of statement log items routed via the overflow buffer because the channel was full.",
+		},
+	)
+
+	// StatementLoggerMalformedTotal counts statement log items dropped by the
+	// committer because the number of partition-key values bound did not match
+	// the _logs INSERT arity (e.g. an item built with empty PartitionKeys.Values
+	// would bind too few values and gocql would reject it client-side with
+	// "expected N values got M"). Dropping such items prevents an error flood
+	// and the row-by-row fallback storm that previously OOM-killed the loader.
+	// Non-zero means an upstream generator emitted a statement without
+	// fully-populated partition-key values — investigate that path.
+	StatementLoggerMalformedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "statement_logger_malformed_total",
+			Help: "Total number of statement log items dropped by the committer due to a partition-key bind-arity mismatch.",
+		},
+	)
+
+	// DeletedPartitionsHeapEvictions counts partitions evicted from the
+	// deleted-partitions heap because it exceeded its configured cap.
+	// Non-zero means re-validation of some old DELETEs was skipped.
+	DeletedPartitionsHeapEvictions = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "deleted_partitions_heap_evictions_total",
+			Help: "Total number of deleted-partition entries evicted from the heap due to size cap.",
+		},
+	)
+
+	// DeletedPartitionsSampledOut counts partitions that were dropped before
+	// entering the deleted-partitions heap by the admission sampler. Sampling
+	// keeps the steady-state heap size near its cap under high DELETE
+	// throughput, trading some re-validation coverage for bounded memory.
+	DeletedPartitionsSampledOut = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "deleted_partitions_sampled_out_total",
+			Help: "Total number of deleted-partition entries dropped before entering the heap by the admission sampler.",
+		},
+	)
+
 	StatementLoggerFlushes = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "statement_logger_flushes_total",
 			Help: "Number of flush operations performed by the statement logger per sink.",
 		},
 		[]string{"sink"},
+	)
+
+	// TrackedRowSchemaMismatch counts targeted mutations (single-row UPDATE,
+	// single-row / clustering-prefix DELETE) that popped a tracked row whose
+	// flat key-value slices were too short to satisfy the table schema, forcing
+	// a fallback (whole-partition mutation or random-row update) and discarding
+	// the popped row. Under normal operation this stays at zero; a sustained
+	// non-zero rate signals a schema/tracking skew in the row sampler worth
+	// investigating, rather than the row tracker silently draining.
+	TrackedRowSchemaMismatch = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tracked_row_schema_mismatch_total",
+			Help: "Targeted mutations that fell back because a popped tracked row did not match the table schema.",
+		},
+		[]string{"keyspace", "table", "mutation"},
 	)
 
 	StatementErrorLastTS = prometheus.NewGaugeVec(
@@ -465,7 +540,13 @@ func init() {
 		StatementLoggerDequeuedTotal,
 		StatementLoggerDropped,
 		StatementLoggerItems,
+		StatementLoggerOverflowItems,
+		StatementLoggerOverflowTotal,
+		StatementLoggerMalformedTotal,
+		DeletedPartitionsHeapEvictions,
+		DeletedPartitionsSampledOut,
 		StatementLoggerFlushes,
+		TrackedRowSchemaMismatch,
 		StatementErrorLastTS,
 		WorkersCurrent,
 		CQLPreparedStmtsUnique,

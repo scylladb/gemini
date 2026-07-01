@@ -59,6 +59,7 @@ var (
 	maxRetriesMutateSleep            time.Duration
 	maxErrorsToStore                 int
 	partitionCount                   uint64
+	maxDeletedHeapSize               int
 	partitionKeyDistribution         string
 	normalDistMean                   float64
 	normalDistSigma                  float64
@@ -94,6 +95,8 @@ var (
 	concurrency         int
 	mutationConcurrency int
 	readConcurrency     int
+
+	rowTrackerCapacity int
 
 	statementRatios string
 
@@ -198,6 +201,11 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		Uint64VarP(&partitionCount, "partition-count", "", 2_000_000, "Number of Scylla Partitions")
 	cmd.Flags().
+		IntVarP(&maxDeletedHeapSize, "max-deleted-heap-size", "", -1,
+			"Maximum number of entries in the deleted-partitions heap. "+
+				"-1 means unlimited (default, preserves old behaviour). "+
+				"Set to a positive value (e.g. partition-count * 5) to bound memory when DELETE throughput is high.")
+	cmd.Flags().
 		StringArrayVarP(&deletedPartitionsTimeBucket, "deleted-partitions-time-bucket", "", []string{"1m", "10m", "1h"}, "Time after to check if data resurrection has occurred for the deleted partitions")
 	cmd.Flags().
 		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform",
@@ -241,6 +249,12 @@ func setupFlags(cmd *cobra.Command) {
 		StringVarP(&oracleStatementLogFile, "oracle-statement-log-file", "", "", "File to write statements flow to")
 	cmd.Flags().
 		StringVarP(&statementLogFileCompression, "statement-log-file-compression", "", "none", "Compression algorithm to use for statement log files")
+	cmd.Flags().
+		IntVarP(&rowTrackerCapacity, "row-tracker-capacity", "", 100_000,
+			"Maximum capacity for the row tracker used by targeted delete operations. "+
+				"N > 0 (default 100000): auto-sized from deletion ratios, clamped to N. "+
+				"-1: fully auto-sized (no cap). "+
+				"0: disable row tracking.")
 	cmd.Flags().
 		StringVarP(&statementRatios, "statement-ratios", "", "", "Statement ratios configuration in JSON format (e.g., '{\"mutation_ratios\":{\"insert_ratio\":0.7,\"update_ratio\":0.2,\"delete_ratio\":0.1}}')")
 	cmd.Flags().

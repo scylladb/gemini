@@ -159,7 +159,7 @@ scylla-shutdown-cluster: stop-scylla-monitoring
 
 .PHONY: test
 test:
-	@go test -covermode=atomic -gcflags="-N -l" -tags testing -coverprofile=coverage.txt -timeout 5m -json -v ./... 2>&1 | go tool gotestfmt -showteststatus
+	@go test -race -covermode=atomic -gcflags="-N -l" -tags testing -coverprofile=coverage.txt -timeout 10m -json -v ./... 2>&1 | go tool gotestfmt -showteststatus
 
 PPROF_PORT ?= 6060
 PPROF_SECONDS ?= 60

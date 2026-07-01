@@ -27,69 +27,68 @@ import (
 func (g *Generator) Select(ctx context.Context) (*typedef.Stmt, error) {
 	switch n := g.ratioController.GetSelectSubtype(); n {
 	case SelectSinglePartitionQuery:
-		g.metricSelSingle.Inc()
 		return g.genSelectSinglePartitionQuery(ctx)
 	case SelectMultiplePartitionQuery:
-		g.metricSelMulti.Inc()
 		return g.genSelectMultiplePartitionQuery(ctx)
 	case SelectClusteringRangeQuery:
-		g.metricSelSingle.Inc()
 		return g.genSelectSinglePartitionQuery(ctx)
+		// TODO(CodeLieutenant): single partition clustering range queries
+		//    are doing **always** 0 returns, basically generated values for clustering keys
+		//    are always in the not found range.
+		// return g.genClusteringRangeQuery(ctx)
 	case SelectMultiplePartitionClusteringRangeQuery:
-		g.metricSelMulti.Inc()
 		return g.genSelectMultiplePartitionQuery(ctx)
+		// TODO(CodeLieutenant): multiple partition clustering range queries
+		//    are doing **always** 0 returns, basically generated values for clustering keys
+		//    are always in the not found range.
+		// return g.genMultiplePartitionClusteringRangeQuery(ctx)
 	case SelectSingleIndexQuery:
 		if len(g.table.Indexes) == 0 {
-			g.metricSelSingle.Inc()
 			return g.genSelectSinglePartitionQuery(ctx)
 		}
 
-		g.metricSelIndex.Inc()
 		return g.genSingleIndexQuery(), nil
 	default:
 		panic(fmt.Sprintf("unexpected case in GenCheckStmt, random value: %d", n))
 	}
 }
 
-func (g *Generator) genSelectSinglePartitionQuery(_ context.Context) (*typedef.Stmt, error) {
-	g.table.RLock()
-	defer g.table.RUnlock()
+// buildCachedSelectQueries pre-builds the static SELECT query strings. The
+// single-partition SELECT (equality on every partition key) is the most common
+// validation query and is identical for the immutable schema, so it is built
+// once here instead of via the qb builder on every validation.
+func (g *Generator) buildCachedSelectQueries() {
+	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
+	for _, pk := range g.table.PartitionKeys {
+		builder = builder.Where(qb.Eq(pk.Name))
+	}
+	g.selectSinglePartitionQuery, _ = builder.ToCql()
+}
 
-	partitionKeys := g.generator.Next()
+func (g *Generator) genSelectSinglePartitionQuery(_ context.Context) (*typedef.Stmt, error) {
+	pk := g.generator.Next()
 
 	return &typedef.Stmt{
 		QueryType:     typedef.SelectStatementType,
-		Query:         g.cachedSelectQuery,
-		PartitionKeys: []typedef.PartitionKeys{partitionKeys},
-		Values:        partitionKeys.Values.ToCQLValues(g.table.PartitionKeys),
+		Query:         g.selectSinglePartitionQuery,
+		PartitionKeys: []typedef.PartitionKeys{pk},
+		Values:        pk.Values.ToCQLValues(g.table.PartitionKeys),
 	}, nil
 }
 
-//nolint:unused
-func (g *Generator) buildSelectClusteringRange(builder *qb.SelectBuilder, values []any) []any {
-	if len(g.table.ClusteringKeys) == 0 {
-		return values
+func (g *Generator) getSelectSinglePartitionKeys(_ context.Context) (typedef.PartitionKeys, *qb.SelectBuilder, error) {
+	partitionKeys := g.generator.Next()
+
+	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
+	for _, pk := range g.table.PartitionKeys {
+		builder = builder.Where(qb.Eq(pk.Name))
 	}
 
-	values = slices.Grow(values, g.table.ClusteringKeys.LenValues())
-	maxClusteringKeys := g.getMultipleClusteringKeys()
-
-	for _, ck := range g.table.ClusteringKeys[:maxClusteringKeys-1] {
-		builder.Where(qb.Eq(ck.Name))
-		values = append(values, ck.Type.GenValue(g.random, g.valueRangeConfig)...)
-	}
-
-	ck := g.table.ClusteringKeys[maxClusteringKeys-1]
-	builder.Where(qb.Gt(ck.Name)).Where(qb.Lt(ck.Name))
-	values = append(values, ck.Type.GenValue(g.random, g.valueRangeConfig)...)
-	values = append(values, ck.Type.GenValue(g.random, g.valueRangeConfig)...)
-
-	return values
+	return partitionKeys, builder, nil
 }
 
-func (g *Generator) genSelectMultiplePartitionQuery(_ context.Context) (*typedef.Stmt, error) {
-	g.table.RLock()
-	defer g.table.RUnlock()
+func (g *Generator) buildSelectMultiPartitionsKey(_ context.Context) ([]typedef.PartitionKeys, *qb.SelectBuilder, *typedef.Values, error) {
+	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
 
 	numQueryPKs := g.getMultiplePartitionKeys()
 	pks := make([]typedef.PartitionKeys, 0, numQueryPKs)
@@ -101,15 +100,42 @@ func (g *Generator) genSelectMultiplePartitionQuery(_ context.Context) (*typedef
 		combined.Merge(pk.Values)
 	}
 
-	query := g.cachedMultiPartitionSelect[numQueryPKs]
-	if query == "" {
-		// Fallback for uncached sizes (shouldn't happen normally)
-		builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
-		for _, pk := range g.table.PartitionKeys {
-			builder.Where(qb.InTuple(pk.Name, numQueryPKs))
-		}
-		query, _ = builder.ToCql()
+	for _, pk := range g.table.PartitionKeys {
+		builder.Where(qb.InTuple(pk.Name, numQueryPKs))
 	}
+
+	return pks, builder, combined, nil
+}
+
+//nolint:unused
+func (g *Generator) buildSelectClusteringRange(builder *qb.SelectBuilder, values []any) []any {
+	if len(g.table.ClusteringKeys) == 0 {
+		return values
+	}
+
+	values = slices.Grow(values, g.table.ClusteringKeysLenValues())
+	maxClusteringKeys := g.getMultipleClusteringKeys()
+
+	for _, ck := range g.table.ClusteringKeys[:maxClusteringKeys-1] {
+		builder.Where(qb.Eq(ck.Name))
+		values = ck.Type.GenValueOut(values, g.random, g.valueRangeConfig)
+	}
+
+	ck := g.table.ClusteringKeys[maxClusteringKeys-1]
+	builder.Where(qb.Gt(ck.Name)).Where(qb.Lt(ck.Name))
+	values = ck.Type.GenValueOut(values, g.random, g.valueRangeConfig)
+	values = ck.Type.GenValueOut(values, g.random, g.valueRangeConfig)
+
+	return values
+}
+
+func (g *Generator) genSelectMultiplePartitionQuery(ctx context.Context) (*typedef.Stmt, error) {
+	pks, builder, combined, err := g.buildSelectMultiPartitionsKey(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
 		PartitionKeys: pks,
@@ -120,22 +146,39 @@ func (g *Generator) genSelectMultiplePartitionQuery(_ context.Context) (*typedef
 }
 
 //nolint:unused
-func (g *Generator) genClusteringRangeQuery(_ context.Context) (*typedef.Stmt, error) {
-	partitionKeys := g.generator.Next()
-
-	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
-	for _, pk := range g.table.PartitionKeys {
-		builder = builder.Where(qb.Eq(pk.Name))
+func (g *Generator) genClusteringRangeQuery(ctx context.Context) (*typedef.Stmt, error) {
+	pk, builder, err := g.getSelectSinglePartitionKeys(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	values := g.buildSelectClusteringRange(builder, partitionKeys.Values.ToCQLValues(g.table.PartitionKeys))
+	values := g.buildSelectClusteringRange(builder, pk.Values.ToCQLValues(g.table.PartitionKeys))
 
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		PartitionKeys: []typedef.PartitionKeys{partitionKeys},
+		PartitionKeys: []typedef.PartitionKeys{pk},
 		Values:        values,
 		QueryType:     typedef.SelectRangeStatementType,
+		Query:         query,
+	}, nil
+}
+
+//nolint:unused
+func (g *Generator) genMultiplePartitionClusteringRangeQuery(ctx context.Context) (*typedef.Stmt, error) {
+	pks, builder, combined, err := g.buildSelectMultiPartitionsKey(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	values := g.buildSelectClusteringRange(builder, combined.ToCQLValues(g.table.PartitionKeys))
+
+	query, _ := builder.ToCql()
+
+	return &typedef.Stmt{
+		QueryType:     typedef.SelectMultiPartitionRangeStatementType,
+		PartitionKeys: pks,
+		Values:        values,
 		Query:         query,
 	}, nil
 }
@@ -150,7 +193,7 @@ func (g *Generator) genSingleIndexQuery() *typedef.Stmt {
 
 	for _, idx := range g.table.Indexes[:idxCount] {
 		builder = builder.Where(qb.Eq(idx.ColumnName))
-		values = append(values, idx.Column.Type.GenValue(g.random, g.valueRangeConfig)...)
+		values = idx.Column.Type.GenValueOut(values, g.random, g.valueRangeConfig)
 	}
 
 	query, _ := builder.ToCql()

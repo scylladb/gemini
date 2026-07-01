@@ -27,7 +27,7 @@ import (
 	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/replication"
@@ -41,9 +41,9 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.TestContainers(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
-	session, err := newSession(containers.TestHosts, 0, "", "", logger)
+	session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -323,7 +323,7 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.TestContainers(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
 	// Create test keyspace and table in test/oracle sessions
 	testKS := testutils.GenerateUniqueKeyspaceName(t)
@@ -371,7 +371,7 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 	}
 
 	// Create statement logger
-	session, err := newSession(containers.TestHosts, 0, "", "", logger)
+	session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -608,7 +608,7 @@ func TestCQLStatements_Fetch_MultiPartition_Comprehensive(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.TestContainers(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
 	// Use shorter keyspace name to avoid 48 character limit
 	testKS := fmt.Sprintf("ks_mp_%d", time.Now().UnixNano()%1000000)
@@ -646,7 +646,7 @@ func TestCQLStatements_Fetch_MultiPartition_Comprehensive(t *testing.T) {
 		).Exec())
 	}
 
-	session, err := newSession(containers.TestHosts, 0, "", "", logger)
+	session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -764,9 +764,9 @@ func TestCQLStatements_Insert_ConcurrentWrites(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.TestContainers(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
-	session, err := newSession(containers.TestHosts, 0, "", "", logger)
+	session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -851,7 +851,7 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.TestContainers(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
 	testKS := testutils.GenerateUniqueKeyspaceName(t)
 	testTable := "error_test"
@@ -885,7 +885,7 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 		"error_key", "value",
 	).Exec())
 
-	session, err := newSession(containers.TestHosts, 0, "", "", logger)
+	session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 

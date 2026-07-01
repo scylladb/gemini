@@ -18,6 +18,10 @@ RUN apt-get update \
 
 FROM debian:13-slim AS base-production
 
+LABEL org.opencontainers.image.source="https://github.com/scylladb/gemini"
+LABEL org.opencontainers.image.title="gemini"
+LABEL com.scylladb.loader-type="gemini"
+
 WORKDIR /
 
 ENV DEBIAN_FRONTEND="noninteractive"

@@ -337,6 +337,88 @@ func TestClusterObserver_ObserveConnect_WithError(t *testing.T) {
 	obs.ObserveConnect(connect)
 }
 
+type nopCloser struct{}
+
+func (nopCloser) Close() error { return nil }
+
+func pkWith(col string, val any) typedef.PartitionKeys {
+	return typedef.PartitionKeys{
+		Values: typedef.NewValuesFromMap(map[string][]any{col: {val}}),
+	}
+}
+
+// TestClusterObserver_logStatement_PerPartition verifies that logStatement
+// emits exactly one well-formed log Item per partition key the statement
+// touches, and nothing for a statement with no partition keys. This is the
+// regression guard for the v2.4.0 "expected 13 values got 9" flood: the old
+// code attached an empty typedef.PartitionKeys{} (nil Values) whenever the
+// statement did not touch exactly one partition.
+func TestClusterObserver_logStatement_PerPartition(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		pks  []typedef.PartitionKeys
+		want int
+	}{
+		{name: "no partitions emits nothing", pks: nil, want: 0},
+		{name: "single partition emits one", pks: []typedef.PartitionKeys{pkWith("pk0", "a")}, want: 1},
+		{
+			name: "multi partition emits one per pk",
+			pks: []typedef.PartitionKeys{
+				pkWith("pk0", "a"), pkWith("pk0", "b"), pkWith("pk0", "c"),
+			},
+			want: 3,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ch := make(chan stmtlogger.Item, 8)
+			logger, err := stmtlogger.NewLogger(
+				stmtlogger.WithChannel(ch),
+				stmtlogger.WithLogger(nopCloser{}, nil),
+				stmtlogger.WithZapLogger(zap.NewNop()),
+			)
+			assert.NoError(t, err)
+			t.Cleanup(func() { _ = logger.Close() })
+
+			obs := NewClusterObserver(logger, zap.NewNop(), stmtlogger.TypeTest)
+
+			stmt := &typedef.Stmt{
+				PartitionKeys: tc.pks,
+				QueryType:     typedef.InsertStatementType,
+			}
+			obs.logStatement(stmt, stmtlogger.Item{
+				StatementType: typedef.InsertStatementType,
+				Statement:     "INSERT ...",
+			})
+
+			var got int
+			for i := range tc.pks {
+				select {
+				case item := <-ch:
+					got++
+					// Each emitted item must carry the matching, non-empty Values.
+					assert.Equal(t, tc.pks[i].Values, item.PartitionKeys.Values)
+				case <-time.After(time.Second):
+					t.Fatalf("timed out waiting for emitted item %d", i)
+				}
+			}
+			assert.Equal(t, tc.want, got)
+
+			// No extra items should have been emitted.
+			select {
+			case extra := <-ch:
+				t.Fatalf("unexpected extra emitted item: %+v", extra)
+			default:
+			}
+		})
+	}
+}
+
 func TestObserver_Concurrency(t *testing.T) {
 	t.Parallel()
 

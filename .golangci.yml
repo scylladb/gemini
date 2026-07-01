@@ -20,7 +20,7 @@ linters:
     - gocritic
     - gocyclo
     - goheader
-    - gomodguard
+    - gomodguard_v2
     - govet
     - ineffassign
     - lll

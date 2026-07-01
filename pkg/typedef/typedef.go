@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -25,7 +26,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/scylladb/gocqlx/v3/qb"
-	"golang.org/x/exp/maps"
 
 	"github.com/scylladb/gemini/pkg/replication"
 )
@@ -45,12 +45,14 @@ type (
 	}
 
 	PartitionRangeConfig struct {
-		DeleteBuckets   []time.Duration
-		MaxBlobLength   int
-		MinBlobLength   int
-		MaxStringLength int
-		MinStringLength int
-		UseLWT          bool
+		DeleteBuckets      []time.Duration
+		MaxDeletedHeapSize int
+		RowTrackerCapacity int
+		MaxBlobLength      int
+		MinBlobLength      int
+		MaxStringLength    int
+		MinStringLength    int
+		UseLWT             bool
 	}
 
 	ValueRangeConfig struct {
@@ -135,8 +137,8 @@ func (st StatementType) String() string {
 		return "SelectFromMaterializedViewStatement"
 	case DeleteSingleRowType:
 		return "DeleteSingleRow"
-	case DeleteSingleColumnType:
-		return "DeleteSingleColumn"
+	case DeleteClusteringSubsetType:
+		return "DeleteClusteringSubset"
 	case DeleteMultiplePartitionsType:
 		return "DeleteMultiplePartitions"
 	case DeleteWholePartitionType:
@@ -226,7 +228,7 @@ func (st StatementType) IsUpdate() bool {
 func (st StatementType) IsDelete() bool {
 	switch st {
 	case DeleteWholePartitionType, DeleteMultiplePartitionsType,
-		DeleteSingleColumnType, DeleteSingleRowType:
+		DeleteClusteringSubsetType, DeleteSingleRowType:
 		return true
 	default:
 		return false
@@ -259,7 +261,7 @@ func (st StatementType) OpType() OpType {
 	case UpdateStatementType:
 		return OpUpdate
 	case DeleteWholePartitionType, DeleteMultiplePartitionsType,
-		DeleteSingleColumnType, DeleteSingleRowType:
+		DeleteClusteringSubsetType, DeleteSingleRowType:
 		return OpDelete
 	case AlterColumnStatementType, DropColumnStatementType, AddColumnStatementType,
 		DropTableStatementType, CreateTableStatementType, DropTypeStatementType,
@@ -283,11 +285,32 @@ func (st StatementType) PossibleAsyncOperation() bool {
 	}
 }
 
-// Values holds partition key values as a map from column name to value slice.
-// It is safe for concurrent reads after initialization. Only Merge() and
-// UnmarshalJSON() mutate the map and must not be called concurrently with reads.
+// Values holds the bind values for a set of named columns. It uses parallel
+// name/value slices rather than a map: the column sets are tiny (a handful of
+// partition keys), so a linear scan beats map hashing while avoiding the map
+// allocation that dominated the partition hot path. names[i] owns vals[i].
+//
+// Values is NOT safe for concurrent mutation. By construction it never needs to
+// be: a Values is built (NewPartitionValues / NewValuesFromMap / Merge into a
+// goroutine-local target) and thereafter only read. The one Values that is
+// shared across goroutines — the old partition keys handed from Replace to the
+// deleted-partitions heap and later to a validation worker — is read-only on
+// every holder, and concurrent reads of immutable data need no lock. Do not
+// introduce a path that mutates (Merge/UnmarshalJSON) a Values after it has
+// escaped to another goroutine.
 type Values struct {
-	data map[string][]any
+	names []string
+	vals  [][]any
+}
+
+// index returns the position of name, or -1.
+func (v *Values) index(name string) int {
+	for i, n := range v.names {
+		if n == name {
+			return i
+		}
+	}
+	return -1
 }
 
 type ValidationData struct {
@@ -301,37 +324,62 @@ type ValidationData struct {
 
 func NewValues(initial int) *Values {
 	return &Values{
-		data: make(map[string][]any, initial),
+		names: make([]string, 0, initial),
+		vals:  make([][]any, 0, initial),
 	}
 }
 
 func NewValuesFromMap(m map[string][]any) *Values {
-	return &Values{
-		data: m,
+	v := &Values{
+		names: make([]string, 0, len(m)),
+		vals:  make([][]any, 0, len(m)),
 	}
+	for k, val := range m {
+		v.names = append(v.names, k)
+		v.vals = append(v.vals, val)
+	}
+	return v
+}
+
+// NewPartitionValues builds a Values directly from a contiguous flat value slice
+// and a column layout, skipping the intermediate map the partition hot path used
+// to allocate per Get. Columns are laid out consecutively in src in the same
+// order GenValueOut emits them, so each column's values are the next
+// col.Type.LenValue() entries — a capped sub-slice of src (no copy). src must
+// remain immutable for the lifetime of the returned Values; the cap forces any
+// later append (e.g. via Merge) to reallocate rather than clobber the shared
+// backing array.
+func NewPartitionValues(cols Columns, src []any) *Values {
+	names := make([]string, len(cols))
+	vals := make([][]any, len(cols))
+	off := 0
+	for i, col := range cols {
+		end := off + col.Type.LenValue()
+		names[i] = col.Name
+		vals[i] = src[off:end:end]
+		off = end
+	}
+	return &Values{names: names, vals: vals}
 }
 
 func (v *Values) Get(name string) []any {
-	if values, ok := v.data[name]; ok {
-		return values
+	if i := v.index(name); i >= 0 {
+		return v.vals[i]
 	}
 
 	return nil
 }
 
 func (v *Values) Keys() []string {
-	keys := make([]string, 0, len(v.data))
-
-	for k := range v.data {
-		keys = append(keys, k)
-	}
+	keys := make([]string, len(v.names))
+	copy(keys, v.names)
 
 	sort.Strings(keys)
 	return keys
 }
 
 func (v *Values) Len() int {
-	return len(v.data)
+	return len(v.names)
 }
 
 func (v *Values) ToCQLValues(pks Columns) []any {
@@ -339,26 +387,64 @@ func (v *Values) ToCQLValues(pks Columns) []any {
 		return []any{}
 	}
 
-	values := make([]any, 0, len(v.data)*len(v.data[pks[0].Name]))
+	n := 0
+	if len(pks) > 0 {
+		if i := v.index(pks[0].Name); i >= 0 {
+			n = len(v.names) * len(v.vals[i])
+		}
+	}
 
+	values := make([]any, 0, n)
 	for _, pk := range pks {
-		values = append(values, v.data[pk.Name]...)
+		if i := v.index(pk.Name); i >= 0 {
+			values = append(values, v.vals[i]...)
+		}
 	}
 
 	return values
 }
 
-// Merge copies all entries from values into v. Must not be called
-// concurrently with reads on v (call before sharing v across goroutines).
+// AppendCQLValues appends this Values' CQL bind values for the given partition
+// keys to dst (in pks order) and returns the extended slice. It is the
+// allocation-free counterpart to ToCQLValues: callers that already hold a
+// reusable/pooled buffer (e.g. the statement-logger committer) avoid the
+// throwaway intermediate slice ToCQLValues would otherwise allocate per call.
+func (v *Values) AppendCQLValues(dst []any, pks Columns) []any {
+	if v == nil {
+		return dst
+	}
+
+	for _, pk := range pks {
+		if i := v.index(pk.Name); i >= 0 {
+			dst = append(dst, v.vals[i]...)
+		}
+	}
+
+	return dst
+}
+
+// Merge appends every entry from values into v. v must be owned by the calling
+// goroutine (see the Values doc comment); neither v nor values may be mutated
+// concurrently.
 func (v *Values) Merge(values *Values) {
-	for k, value := range values.data {
-		v.data[k] = append(v.data[k], value...)
+	for i, name := range values.names {
+		if j := v.index(name); j >= 0 {
+			v.vals[j] = append(v.vals[j], values.vals[i]...)
+		} else {
+			v.names = append(v.names, name)
+			// Copy rather than alias the source slice, matching the previous
+			// map-based behaviour where a new key did append(nil, value...).
+			v.vals = append(v.vals, append([]any(nil), values.vals[i]...))
+		}
 	}
 }
 
 func (v *Values) ToMap() map[string][]any {
-	n := v.Copy()
-	return n.data
+	m := make(map[string][]any, len(v.names))
+	for i, name := range v.names {
+		m[name] = v.vals[i]
+	}
+	return m
 }
 
 func (v *Values) MemoryFootprint() uint64 {
@@ -370,7 +456,12 @@ func (v *Values) MarshalJSON() ([]byte, error) {
 		return []byte("null"), nil
 	}
 
-	return json.Marshal(v.data)
+	m := make(map[string][]any, len(v.names))
+	for i, name := range v.names {
+		m[name] = v.vals[i]
+	}
+
+	return json.Marshal(m)
 }
 
 func (v *Values) UnmarshalJSON(data []byte) error {
@@ -382,17 +473,18 @@ func (v *Values) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	if v.data == nil {
-		v.data = make(map[string][]any)
-	}
-
 	var m map[string][]any
 	if err := json.Unmarshal(data, &m); err != nil {
 		return fmt.Errorf("unmarshal values: %w", err)
 	}
 
 	for k, value := range m {
-		v.data[k] = value
+		if i := v.index(k); i >= 0 {
+			v.vals[i] = value
+		} else {
+			v.names = append(v.names, k)
+			v.vals = append(v.vals, value)
+		}
 	}
 
 	return nil
@@ -411,28 +503,25 @@ func (v *Values) Copy() *Values {
 		return nil
 	}
 
-	return &Values{data: maps.Clone(v.data)}
+	// Shallow clone: the name/value-header slices are copied, the inner []any
+	// backing arrays are shared (matching the previous maps.Clone behaviour).
+	return &Values{
+		names: slices.Clone(v.names),
+		vals:  slices.Clone(v.vals),
+	}
 }
 
 func (v *Values) Data() []any {
-	values := make([]any, 0, len(v.data))
-
-	keys := make([]string, 0, len(v.data))
-	for k := range v.data {
-		keys = append(keys, k)
+	// Emit values in column-name order for deterministic output.
+	order := make([]int, len(v.names))
+	for i := range order {
+		order[i] = i
 	}
+	sort.Slice(order, func(a, b int) bool { return v.names[order[a]] < v.names[order[b]] })
 
-	// Sort keys to ensure deterministic order
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[i] > keys[j] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
-
-	for _, k := range keys {
-		values = append(values, v.data[k]...)
+	values := make([]any, 0, len(v.names))
+	for _, i := range order {
+		values = append(values, v.vals[i]...)
 	}
 
 	return values

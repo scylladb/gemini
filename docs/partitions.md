@@ -583,6 +583,45 @@ func (d *deletedPartitions) Delete(values *typedef.Values) {
 - Validation lag can accumulate
 - But: worker threads never stall waiting for validation
 
+### Admission Sampling
+
+When a delete-heap cap is configured (`--max-deleted-heap-size > 0`), the tracker
+**samples partitions before they enter the heap** so the steady-state size stays
+near the cap instead of relying solely on eviction once the cap is breached.
+This bounds memory under very high DELETE throughput, where the heap could
+otherwise accumulate millions of entries within a single bucket window.
+
+> **What `maxHeapSize` counts:** it is a **number of deleted-partition entries**
+> (one entry per tracked deleted partition), *not* a byte size and not a number
+> of partition keys. `--max-deleted-heap-size 1000000` means "keep at most about
+> one million deleted partitions queued for re-validation".
+
+The sampling rate is derived from three quantities:
+
+| Input | Source |
+|---|---|
+| `maxHeapSize` | configured cap, in **entries** (`--max-deleted-heap-size`) |
+| `residenceSeconds` | **sum of all bucket delays** — a deleted partition passes through every bucket before it is finally evicted, so it stays in the heap for the total of all bucket durations |
+| admission rate | measured live via an EWMA of incoming deletes/second |
+
+```text
+expected   = admissionRate × residenceSeconds   // entries accumulated over one residence window
+sampleRate = maxHeapSize / expected              // capped at 1.0 (admit everything)
+```
+
+Each delete is admitted with probability `sampleRate`; rejected deletes are
+released immediately and counted in the `gemini_deleted_partitions_sampled_out_total`
+metric. The rate is **1.0 (no sampling)** when the cap is unlimited, when the
+admission rate is not yet known (startup), or when the projected inflow already
+fits within the cap.
+
+**Worked example**: at 2000 deletes/s with a single 1h bucket (3600s total
+residence) and a 1M-entry cap, `sampleRate = 1e6 / (2000 × 3600) ≈ 0.139` — about
+14% of deletes are tracked, leaving roughly 1M entries in the heap once
+partitions start aging out. With multiple buckets (e.g. `1m,10m,1h`) the
+residence window is their sum (≈71m), so the sampled fraction is correspondingly
+smaller.
+
 ---
 
 ## Performance Optimizations
@@ -1200,10 +1239,11 @@ The partitions system is a high-performance, thread-safe manager for partition k
 1. **Efficient Storage**: Flat array layout for cache efficiency
 2. **Flexible Access**: Multiple distribution patterns (uniform, zipfian, sequential)
 3. **Sophisticated Deletion Tracking**: Time-bucket based validation with min-heap
-4. **Lock-Free Fast Paths**: Atomic operations and lock-free checks
-5. **Memory Optimized**: Dynamic growth/shrinking, batch processing
-6. **No Backpressure**: Delete operations never block
-7. **Production Ready**: Extensive testing, benchmarking, and monitoring
+4. **Row Tracking**: Bounded ring buffer for targeted single-row and cluster deletions (see [Targeted Deletions](targeted-deletions.md))
+5. **Lock-Free Fast Paths**: Atomic operations and lock-free checks
+6. **Memory Optimized**: Dynamic growth/shrinking, batch processing
+7. **No Backpressure**: Delete operations never block
+8. **Production Ready**: Extensive testing, benchmarking, and monitoring
 
 The delete buckets system is particularly innovative, allowing validation of eventual consistency at multiple time intervals, ensuring that distributed database deletions propagate correctly across all replicas and survive compaction processes.
 

@@ -20,6 +20,8 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/partitions"
@@ -39,6 +41,7 @@ type Mutation struct {
 	status    *status.GlobalStatus
 	stopFlag  *stop.Flag
 	schema    *typedef.Schema
+	logger    *zap.Logger
 	delete    bool
 }
 
@@ -52,6 +55,7 @@ func NewMutation(
 	store store.Store,
 	del bool,
 	seed [32]byte,
+	logger *zap.Logger,
 ) *Mutation {
 	vc := schema.Config.GetValueRangeConfig()
 	statementGenerator := statements.New(
@@ -64,6 +68,10 @@ func NewMutation(
 		schema.Config.UseLWT,
 	)
 
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
 	return &Mutation{
 		schema:    schema,
 		table:     table,
@@ -73,11 +81,14 @@ func NewMutation(
 		stopFlag:  stopFlag,
 		store:     store,
 		delete:    del,
+		logger:    logger,
 	}
 }
 
 func (m *Mutation) run(ctx context.Context) error {
 	mutateStmt, err := m.statement.MutateStatement(ctx, m.delete)
+	// Drain whatever tracked-row fallbacks the generator recorded into the metric.
+	m.recordTrackedMisses()
 	if err != nil {
 		return err
 	}
@@ -106,14 +117,30 @@ func (m *Mutation) run(ctx context.Context) error {
 	// For context deadline expirations (CQL RequestTimeout or job shutdown), don't
 	// count as data errors. This covers both the raw error and MutationError whose
 	// FinalError is DeadlineExceeded (all retries timed out on a slow CI runner).
+	// Exception: if the stores ended up asymmetric (one committed, the other timed
+	// out on all retries), mark the affected partitions invalid so the validation
+	// phase skips them rather than reporting a false divergence.
+	// OracleStoreSuccess is only set true when an oracle is configured (see
+	// delegatingStore.Mutate), so this check is safe when oracleStore == nil.
 	if errors.Is(err, context.DeadlineExceeded) {
+		var mutErr *store.MutationError
+		if errors.As(err, &mutErr) && mutErr.OracleStoreSuccess != mutErr.TestStoreSuccess {
+			for i := range mutateStmt.PartitionKeys {
+				m.logger.Debug("marking partition invalid due to asymmetric write timeout",
+					zap.String("partition_id", mutateStmt.PartitionKeys[i].ID.String()),
+					zap.Bool("test_store_success", mutErr.TestStoreSuccess),
+					zap.Bool("oracle_store_success", mutErr.OracleStoreSuccess),
+				)
+				m.statement.MarkInvalid(&mutateStmt.PartitionKeys[i])
+			}
+		}
 		return nil
 	}
 
 	// If this is a comprehensive mutation error (all retries failed for a non-timeout
 	// reason), surface it as a write error.
-	var mutErr *store.MutationError
-	if errors.As(err, &mutErr) {
+	var mutationFailErr *store.MutationError
+	if errors.As(err, &mutationFailErr) {
 		je := &joberror.JobError{
 			Err:       err,
 			Timestamp: time.Now(),
@@ -185,7 +212,7 @@ func (m *Mutation) Do(ctx context.Context) error {
 			return nil
 		}
 
-		if errors.Is(err, ErrNoStatement) {
+		if errors.Is(err, ErrNoStatement) || errors.Is(err, statements.ErrNoTrackedRows) {
 			// No statement generated at this moment, back off briefly and retry
 			timer := utils.GetTimer(100 * time.Millisecond)
 			select {
@@ -206,8 +233,7 @@ func (m *Mutation) Do(ctx context.Context) error {
 				m.stopFlag.SetSoft(true)
 				return ErrMutationJobStopped
 			}
-			// Continue procesjobErr)
-			//			if m.status.HasReachedEsing; transient errors should not halt immediately
+			// Continue processing; transient errors should not halt immediately
 			continue
 		}
 
@@ -223,6 +249,28 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 func (m *Mutation) Name() string {
 	return "mutation_" + m.table.Name
+}
+
+// recordTrackedMisses drains the statement generator's tracked-row
+// schema-mismatch fallback counts and adds them to the
+// tracked_row_schema_mismatch_total metric, labelled by mutation kind. Kept at
+// the jobs layer so pkg/statements has no metrics dependency.
+func (m *Mutation) recordTrackedMisses() {
+	c := m.statement.DrainTrackedMisses()
+	if c == (statements.TrackedMissCounts{}) {
+		return
+	}
+
+	keyspace := m.schema.Keyspace.Name
+	if c.Update > 0 {
+		metrics.TrackedRowSchemaMismatch.WithLabelValues(keyspace, m.table.Name, "update").Add(float64(c.Update))
+	}
+	if c.DeleteSingleRow > 0 {
+		metrics.TrackedRowSchemaMismatch.WithLabelValues(keyspace, m.table.Name, "delete_single_row").Add(float64(c.DeleteSingleRow))
+	}
+	if c.DeleteClusteringSubset > 0 {
+		metrics.TrackedRowSchemaMismatch.WithLabelValues(keyspace, m.table.Name, "delete_clustering_subset").Add(float64(c.DeleteClusteringSubset))
+	}
 }
 
 // nolint

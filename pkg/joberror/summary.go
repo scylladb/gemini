@@ -397,7 +397,7 @@ func BuildCorruptionEntries(errors []JobError, testIdx, oracleIdx stmtIndex) []C
 			SuccessfulValidations:    successCount,
 			CorruptionDetectedAt:     e.Timestamp.UTC(),
 			DeletedAt:                deletedAt,
-			ErrorKind:                errorKindFromResults(e.Results),
+			ErrorKind:                errorKindFromJobError(e),
 			FailingQuery:             e.Query,
 			Message:                  e.Message,
 			TestCluster:              testStats,
@@ -586,6 +586,61 @@ func errorKindFromResults(r *ComparisonResults) string {
 	default:
 		return "unknown"
 	}
+}
+
+func errorKindFromJobError(e JobError) string {
+	if kind := errorKindFromResults(e.Results); kind != "unknown" {
+		return kind
+	}
+
+	return errorKindFromOperationError(e.Message, e.Err)
+}
+
+func errorKindFromOperationError(message string, err error) string {
+	var sb strings.Builder
+	if message != "" {
+		sb.WriteString(message)
+		sb.WriteByte('\n')
+	}
+	if err != nil {
+		sb.WriteString(err.Error())
+	}
+	text := strings.ToLower(sb.String())
+
+	if strings.Contains(text, "cl=quorum") &&
+		(strings.Contains(text, "received 0 responses") || strings.Contains(text, "not enough replicas") || strings.Contains(text, "unavailable")) {
+		return "quorum unavailable"
+	}
+
+	if strings.Contains(text, "received 0 responses") && strings.Contains(text, "cl=") {
+		return "consistency unavailable"
+	}
+
+	if strings.Contains(text, "unavailable") || strings.Contains(text, "not enough replicas") {
+		return "unavailable"
+	}
+
+	if strings.Contains(text, "read timeout") {
+		return "read timeout"
+	}
+
+	if strings.Contains(text, "write timeout") {
+		return "write timeout"
+	}
+
+	if strings.Contains(text, "timeout") || strings.Contains(text, "deadline exceeded") {
+		return "timeout"
+	}
+
+	if strings.Contains(text, "no host available") ||
+		strings.Contains(text, "no connections") ||
+		strings.Contains(text, "host down") ||
+		strings.Contains(text, "connection refused") ||
+		strings.Contains(text, "connection reset") {
+		return "connectivity failure"
+	}
+
+	return "unknown"
 }
 
 func mergeHosts(a, b []string) []string {

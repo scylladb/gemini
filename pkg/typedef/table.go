@@ -28,23 +28,25 @@ type ListColInfo struct {
 }
 
 type Table struct {
-	schema                  *Schema
-	Name                    string             `json:"name"`
-	PartitionKeys           Columns            `json:"partition_keys"`
-	ClusteringKeys          Columns            `json:"clustering_keys"`
-	Columns                 Columns            `json:"columns"`
-	Indexes                 []IndexDef         `json:"indexes,omitempty"`
-	MaterializedViews       []MaterializedView `json:"materialized_views,omitempty"`
-	KnownIssues             KnownIssues        `json:"known_issues"`
-	TableOptions            []string           `json:"table_options,omitempty"`
-	SortKeyNames            []string           `json:"-"`
-	listCols                []ListColInfo
-	PartitionKeysLenValues  int `json:"-"`
-	ClusteringKeysLenValues int `json:"-"`
-	ColumnsLenValues        int `json:"-"`
-	TotalLenValues          int `json:"-"`
-	mu                      sync.RWMutex
-	listColsOnce            sync.Once
+	schema            *Schema
+	KnownIssues       KnownIssues `json:"known_issues"`
+	Name              string      `json:"name"`
+	listCols          []ListColInfo
+	PartitionKeys     Columns            `json:"partition_keys"`
+	ClusteringKeys    Columns            `json:"clustering_keys"`
+	Columns           Columns            `json:"columns"`
+	Indexes           []IndexDef         `json:"indexes,omitempty"`
+	MaterializedViews []MaterializedView `json:"materialized_views,omitempty"`
+	TableOptions      []string           `json:"table_options,omitempty"`
+	// Cached bind-value counts for the key/column groups. Computed once in
+	// buildCache so the statement-generation hot path avoids re-summing
+	// Type.LenValue() across every column on every statement. The schema is
+	// immutable after construction, so these never go stale.
+	pkLenValues  int
+	ckLenValues  int
+	colLenValues int
+	mu           sync.RWMutex
+	cacheOnce    sync.Once
 }
 
 func (t *Table) SelectColumnNames() []string {
@@ -112,23 +114,14 @@ func (t *Table) SupportsChanges() bool {
 
 func (t *Table) Init(s *Schema) {
 	t.schema = s
-	t.listColsOnce.Do(t.buildListColCache)
-	t.PartitionKeysLenValues = t.PartitionKeys.LenValues()
-	t.ClusteringKeysLenValues = t.ClusteringKeys.LenValues()
-	t.ColumnsLenValues = t.Columns.LenValues()
-	t.TotalLenValues = t.PartitionKeysLenValues + t.ClusteringKeysLenValues + t.ColumnsLenValues
-
-	t.SortKeyNames = make([]string, 0, len(t.PartitionKeys)+len(t.ClusteringKeys))
-	for _, pk := range t.PartitionKeys {
-		t.SortKeyNames = append(t.SortKeyNames, pk.Name)
-	}
-	for _, ck := range t.ClusteringKeys {
-		t.SortKeyNames = append(t.SortKeyNames, ck.Name)
-	}
+	// Pre-warm the metadata cache while still single-threaded.
+	t.cacheOnce.Do(t.buildCache)
 }
 
-// buildListColCache scans columns once and caches list column metadata.
-func (t *Table) buildListColCache() {
+// buildCache scans columns once and caches metadata derived from the (immutable)
+// schema: the list-column info used for dedup and the per-group bind-value
+// counts used as slice-capacity hints in the statement hot path.
+func (t *Table) buildCache() {
 	t.listCols = nil
 	for _, col := range t.Columns {
 		if ct, ok := col.Type.(*Collection); ok && ct.ComplexType == TypeList {
@@ -138,15 +131,40 @@ func (t *Table) buildListColCache() {
 			})
 		}
 	}
+
+	t.pkLenValues = t.PartitionKeys.LenValues()
+	t.ckLenValues = t.ClusteringKeys.LenValues()
+	t.colLenValues = t.Columns.LenValues()
 }
 
 // ListColumns returns cached list column info. Returns nil if the table
 // has no list columns — callers can skip deduplication entirely.
-// Lazily builds the cache on first call if Init() wasn't called.
-// Safe for concurrent use via sync.Once.
+// Thread-safe: the cache is built at most once using sync.Once.
 func (t *Table) ListColumns() []ListColInfo {
-	t.listColsOnce.Do(t.buildListColCache)
+	t.cacheOnce.Do(t.buildCache)
 	return t.listCols
+}
+
+// PartitionKeysLenValues returns the cached total number of bind values across
+// all partition-key columns. Equivalent to t.PartitionKeys.LenValues() but
+// computed once. Safe whether or not Init was called (lazily built).
+func (t *Table) PartitionKeysLenValues() int {
+	t.cacheOnce.Do(t.buildCache)
+	return t.pkLenValues
+}
+
+// ClusteringKeysLenValues returns the cached total number of bind values across
+// all clustering-key columns.
+func (t *Table) ClusteringKeysLenValues() int {
+	t.cacheOnce.Do(t.buildCache)
+	return t.ckLenValues
+}
+
+// ColumnsLenValues returns the cached total number of bind values across all
+// non-key columns.
+func (t *Table) ColumnsLenValues() int {
+	t.cacheOnce.Do(t.buildCache)
+	return t.colLenValues
 }
 
 func (t *Table) ValidColumnsForDelete() Columns {

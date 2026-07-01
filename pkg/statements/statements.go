@@ -15,16 +15,19 @@
 package statements
 
 import (
+	"errors"
 	"math"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/scylladb/gocqlx/v3/qb"
-
-	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/partitions"
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
 )
+
+// ErrNoTrackedRows is returned by targeted delete generators (deleteSingleRow,
+// deleteClusteringSubset) when the row tracker is empty. Callers should treat this as a
+// transient "nothing to do" signal and skip the operation rather than falling
+// back to random data.
+var ErrNoTrackedRows = errors.New("no tracked rows available")
 
 const (
 	SelectSinglePartitionQuery int = iota
@@ -35,12 +38,17 @@ const (
 	SelectStatementsCount
 )
 
+// Targeted mutation subtypes. These describe how a mutation (DELETE or
+// single-row UPDATE) selects the rows it affects: a whole partition, a single
+// row, a clustering prefix, or multiple partitions. The targeting machinery is
+// shared between delete and update generation — hence the neutral "Targeted"
+// naming rather than "Delete".
 const (
-	DeleteWholePartition = iota
-	DeleteSingleRow
-	DeleteSingleColumn
-	DeleteMultiplePartitions
-	DeleteStatementCount
+	TargetedWholePartition = iota
+	TargetedSingleRow
+	TargetedClusteringSubset
+	TargetedMultiplePartitions
+	TargetedStatementCount
 )
 
 const (
@@ -57,31 +65,24 @@ const (
 const MutationStatementsCount = 3
 
 type Generator struct {
-	generator                  partitions.Interface
-	random                     utils.Random
-	metricSelIndex             prometheus.Counter
-	metricSelMulti             prometheus.Counter
-	metricSelSingle            prometheus.Counter
-	metricIntendedDelete       prometheus.Counter
-	metricIntendedUpdate       prometheus.Counter
-	metricIntendedInsert       prometheus.Counter
-	metricMutCounterUpd        prometheus.Counter
-	metricMutDelete            prometheus.Counter
-	metricMutInsertJSON        prometheus.Counter
-	metricMutInsert            prometheus.Counter
-	cachedMultiPartitionSelect map[int]string
-	cachedMultiPartitionDelete map[int]string
-	ratioController            *RatioController
-	valueRangeConfig           *typedef.ValueRangeConfig
-	table                      *typedef.Table
-	cachedDeleteQuery          string
-	cachedSelectQuery          string
-	cachedInsertJSONQuery      string
-	cachedInsertQuery          string
-	keyspaceAndTable           string
-	keyspace                   string
-	selectColumns              []string
-	useLWT                     bool
+	generator                     partitions.Interface
+	random                        utils.Random
+	table                         *typedef.Table
+	valueRangeConfig              *typedef.ValueRangeConfig
+	ratioController               *RatioController
+	keyspace                      string
+	keyspaceAndTable              string
+	deleteWholePartitionQuery     string
+	deleteSingleRowQuery          string
+	insertQuery                   string
+	insertQueryLWT                string
+	insertJSONQuery               string
+	selectSinglePartitionQuery    string
+	selectColumns                 []string
+	deleteClusteringSubsetQueries []string
+	updateVariants                []updateVariant
+	trackedMisses                 TrackedMissCounts
+	useLWT                        bool
 }
 
 func New(
@@ -104,87 +105,54 @@ func New(
 		ratioController:  ratioController,
 		selectColumns:    table.SelectColumnNames(),
 	}
-	g.buildCachedQueries()
-
-	// Pre-resolve Prometheus counters to avoid per-call WithLabelValues() lookups.
-	g.metricMutInsert = metrics.StatementsGenerated.WithLabelValues("mutation", "insert")
-	g.metricMutInsertJSON = metrics.StatementsGenerated.WithLabelValues("mutation", "insert_json")
-	g.metricMutDelete = metrics.StatementsGenerated.WithLabelValues("mutation", "delete")
-	g.metricMutCounterUpd = metrics.StatementsGenerated.WithLabelValues("mutation", "counter_update")
-	g.metricIntendedInsert = metrics.StatementsGenerated.WithLabelValues("intended", "insert")
-	g.metricIntendedUpdate = metrics.StatementsGenerated.WithLabelValues("intended", "update")
-	g.metricIntendedDelete = metrics.StatementsGenerated.WithLabelValues("intended", "delete")
-	g.metricSelSingle = metrics.StatementsGenerated.WithLabelValues("select", "single_partition")
-	g.metricSelMulti = metrics.StatementsGenerated.WithLabelValues("select", "multi_partition")
-	g.metricSelIndex = metrics.StatementsGenerated.WithLabelValues("select", "index")
-
+	g.buildCachedDeleteQueries()
+	g.buildCachedUpdateQueries()
+	g.buildCachedInsertQueries()
+	g.buildCachedSelectQueries()
 	return g
 }
 
-// buildCachedQueries pre-builds query strings that are identical for every
-// invocation with the same table schema. This avoids repeated bytes.Buffer
-// allocations and string building in the hot path.
-func (g *Generator) buildCachedQueries() {
-	// Cache INSERT query
-	builder := qb.Insert(g.keyspaceAndTable)
-	for _, pk := range g.table.PartitionKeys {
-		builder.Columns(pk.Name)
-	}
-	for _, ck := range g.table.ClusteringKeys {
-		builder.Columns(ck.Name)
-	}
-	for _, col := range g.table.Columns {
-		switch colType := col.Type.(type) {
-		case *typedef.TupleType:
-			builder.TupleColumn(col.Name, len(colType.ValueTypes))
-		default:
-			builder.Columns(col.Name)
-		}
-	}
-	g.cachedInsertQuery, _ = builder.ToCql()
+// MarkInvalid marks the partition identified by keys as permanently invalid so
+// that future Next() calls skip it and the validation phase does not SELECT it.
+// Delegates directly to the underlying partitions.Interface.
+func (g *Generator) MarkInvalid(keys *typedef.PartitionKeys) bool {
+	return g.generator.MarkInvalid(keys)
+}
 
-	// Cache INSERT JSON query
-	jsonBuilder := qb.Insert(g.keyspaceAndTable).Json()
-	g.cachedInsertJSONQuery, _ = jsonBuilder.ToCql()
+// TrackRow stores a row observed during validation for later targeted
+// mutation (single-row delete or single-row update).
+// Delegates directly to the underlying partitions.Interface.
+func (g *Generator) TrackRow(row partitions.TrackedRow) {
+	g.generator.TrackRow(row)
+}
 
-	// Cache single-partition SELECT query
-	selectBuilder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
-	for _, pk := range g.table.PartitionKeys {
-		selectBuilder = selectBuilder.Where(qb.Eq(pk.Name))
-	}
-	g.cachedSelectQuery, _ = selectBuilder.ToCql()
+// PopTrackedRow retrieves a previously tracked row for a targeted mutation.
+// Delegates directly to the underlying partitions.Interface.
+func (g *Generator) PopTrackedRow() (partitions.TrackedRow, bool) {
+	return g.generator.PopTrackedRow()
+}
 
-	// Cache single-partition DELETE query
-	deleteBuilder := qb.Delete(g.keyspaceAndTable)
-	for _, pk := range g.table.PartitionKeys {
-		deleteBuilder = deleteBuilder.Where(qb.Eq(pk.Name))
-	}
-	g.cachedDeleteQuery, _ = deleteBuilder.ToCql()
+// TrackedMissCounts holds the number of targeted-mutation fallbacks caused by a
+// popped tracked row whose flat key-value slices were too short for the table
+// schema, broken down by mutation kind. The statement layer only accumulates
+// these (it stays free of any metrics dependency); the jobs layer drains them
+// and translates them into the tracked_row_schema_mismatch_total metric.
+type TrackedMissCounts struct {
+	Update                 uint64
+	DeleteSingleRow        uint64
+	DeleteClusteringSubset uint64
+}
 
-	// Cache all multi-partition SELECT and DELETE variants.
-	// numQueryPKs ranges from 1 to max where i^pkLen < MaxCartesianProductCount.
-	pkLen := g.table.PartitionKeys.Len()
-	maxPKs := int(MaxCartesianProductCount) // upper bound, usually ~100
-	g.cachedMultiPartitionSelect = make(map[int]string, maxPKs)
-	g.cachedMultiPartitionDelete = make(map[int]string, maxPKs)
-
-	for n := 1; n <= maxPKs; n++ {
-		if math.Pow(float64(n), float64(pkLen)) >= MaxCartesianProductCount {
-			break
-		}
-
-		sb := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
-		for _, pk := range g.table.PartitionKeys {
-			sb.Where(qb.InTuple(pk.Name, n))
-		}
-		g.cachedMultiPartitionSelect[n], _ = sb.ToCql()
-
-		db := qb.Delete(g.keyspaceAndTable)
-		for _, pk := range g.table.PartitionKeys {
-			db.Where(qb.InTuple(pk.Name, n))
-		}
-		g.cachedMultiPartitionDelete[n], _ = db.ToCql()
-	}
+// DrainTrackedMisses returns the tracked-row schema-mismatch counts accumulated
+// since the previous call and resets them to zero.
+//
+// Not safe for concurrent use: each Generator is owned by a single worker
+// goroutine, which is also the only caller of this method (and of the
+// Update/Delete methods that increment the counters).
+func (g *Generator) DrainTrackedMisses() TrackedMissCounts {
+	c := g.trackedMisses
+	g.trackedMisses = TrackedMissCounts{}
+	return c
 }
 
 func (g *Generator) getMultiplePartitionKeys() int {

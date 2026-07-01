@@ -22,12 +22,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/store"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
 // mockStore is a simple mock implementation of store.Store for testing
 type mockStore struct {
-	checkFunc func(context.Context, *typedef.Table, *typedef.Stmt, int) (int, error)
+	checkFunc func(context.Context, *typedef.Table, *typedef.Stmt, int) (int, store.Rows, error)
 }
 
 func (m *mockStore) Create(context.Context, *typedef.Stmt, *typedef.Stmt) error {
@@ -38,14 +39,14 @@ func (m *mockStore) Mutate(context.Context, *typedef.Stmt) error {
 	return nil
 }
 
-func (m *mockStore) Check(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, expectedRows int) (int, error) {
+func (m *mockStore) Check(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, expectedRows int) (int, store.Rows, error) {
 	if m.checkFunc != nil {
 		return m.checkFunc(ctx, table, stmt, expectedRows)
 	}
-	return 0, nil
+	return 0, nil, nil
 }
 
-func (m *mockStore) CheckOnce(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, attempt int) (int, error) {
+func (m *mockStore) CheckOnce(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, attempt int) (int, store.Rows, error) {
 	return m.Check(ctx, table, stmt, attempt)
 }
 
@@ -142,9 +143,9 @@ func TestValidateDeletedPartition_Success(t *testing.T) {
 	}
 
 	mockSt := &mockStore{
-		checkFunc: func(_ context.Context, _ *typedef.Table, _ *typedef.Stmt, _ int) (int, error) {
+		checkFunc: func(_ context.Context, _ *typedef.Table, _ *typedef.Stmt, _ int) (int, store.Rows, error) {
 			// Simulate partition is deleted (0 rows returned)
-			return 0, nil
+			return 0, nil, nil
 		},
 	}
 
@@ -178,8 +179,8 @@ func TestValidateDeletedPartition_StoreError(t *testing.T) {
 	storeError := errors.New("connection timeout")
 
 	mockSt := &mockStore{
-		checkFunc: func(_ context.Context, _ *typedef.Table, _ *typedef.Stmt, _ int) (int, error) {
-			return 0, storeError
+		checkFunc: func(_ context.Context, _ *typedef.Table, _ *typedef.Stmt, _ int) (int, store.Rows, error) {
+			return 0, nil, storeError
 		},
 	}
 
@@ -217,8 +218,8 @@ func TestValidateDeletedPartition_ContextCanceled(t *testing.T) {
 	}
 
 	mockSt := &mockStore{
-		checkFunc: func(_ context.Context, _ *typedef.Table, _ *typedef.Stmt, _ int) (int, error) {
-			return 0, context.Canceled
+		checkFunc: func(_ context.Context, _ *typedef.Table, _ *typedef.Stmt, _ int) (int, store.Rows, error) {
+			return 0, nil, context.Canceled
 		},
 	}
 
@@ -252,8 +253,8 @@ func TestValidateDeletedPartition_ContextDeadlineExceeded(t *testing.T) {
 	}
 
 	mockSt := &mockStore{
-		checkFunc: func(_ context.Context, _ *typedef.Table, _ *typedef.Stmt, _ int) (int, error) {
-			return 0, context.DeadlineExceeded
+		checkFunc: func(_ context.Context, _ *typedef.Table, _ *typedef.Stmt, _ int) (int, store.Rows, error) {
+			return 0, nil, context.DeadlineExceeded
 		},
 	}
 
@@ -290,10 +291,10 @@ func TestValidateDeletedPartition_MultiplePartitionKeys(t *testing.T) {
 	var capturedStmt *typedef.Stmt
 
 	mockSt := &mockStore{
-		checkFunc: func(_ context.Context, _ *typedef.Table, stmt *typedef.Stmt, _ int) (int, error) {
+		checkFunc: func(_ context.Context, _ *typedef.Table, stmt *typedef.Stmt, _ int) (int, store.Rows, error) {
 			capturedStmt = stmt
 			// Partition is deleted (0 rows returned)
-			return 0, nil
+			return 0, nil, nil
 		},
 	}
 

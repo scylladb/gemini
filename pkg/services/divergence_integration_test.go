@@ -70,14 +70,14 @@ func testGeminiDetectsRowsMissingFromSUT(t *testing.T, containers *testutils.Scy
 	t.Helper()
 
 	const (
-		partitionCount = 100
+		partitionCount = 5000
 		seed           = 1001
-		totalDuration  = 1 * time.Minute
-		sabotageAfter  = 15 * time.Second
+		totalDuration  = 30 * time.Second
+		sabotageAfter  = 10 * time.Second
 	)
 
 	schema := divergenceSchema(t)
-	storeConfig := getStoreConfig(t, containers.TestHosts, containers.OracleHosts)
+	storeConfig := getStoreConfig(t, containers.TestHosts, containers.OracleHosts, containers.TestPort(), containers.OraclePort(), containers.DockerMode)
 	saboteur := newSaboteur(t, containers, schema)
 
 	w, runErr := runDivergenceWorkload(
@@ -111,14 +111,14 @@ func testGeminiDetectsExtraRowsInSUT(t *testing.T, containers *testutils.ScyllaC
 	t.Helper()
 
 	const (
-		partitionCount = 100
+		partitionCount = 5000
 		seed           = 1002
-		totalDuration  = 1 * time.Minute
-		sabotageAfter  = 15 * time.Second
+		totalDuration  = 30 * time.Second
+		sabotageAfter  = 10 * time.Second
 	)
 
 	schema := divergenceSchema(t)
-	storeConfig := getStoreConfig(t, containers.TestHosts, containers.OracleHosts)
+	storeConfig := getStoreConfig(t, containers.TestHosts, containers.OracleHosts, containers.TestPort(), containers.OraclePort(), containers.DockerMode)
 	saboteur := newSaboteur(t, containers, schema)
 
 	w, runErr := runDivergenceWorkload(
@@ -146,13 +146,13 @@ func testGeminiAcceptsIdenticalClusters(t *testing.T, containers *testutils.Scyl
 	t.Helper()
 
 	const (
-		partitionCount = 100
+		partitionCount = 5000
 		seed           = 1003
 		totalDuration  = 30 * time.Second
 	)
 
 	schema := divergenceSchema(t)
-	storeConfig := getStoreConfig(t, containers.TestHosts, containers.OracleHosts)
+	storeConfig := getStoreConfig(t, containers.TestHosts, containers.OracleHosts, containers.TestPort(), containers.OraclePort(), containers.DockerMode)
 
 	// No sabotage — both clusters stay in sync throughout.
 	w, runErr := runDivergenceWorkload(

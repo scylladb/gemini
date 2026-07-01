@@ -40,7 +40,7 @@ func TestDefaultStatementRatios(t *testing.T) {
 	// Test that delete subtype ratios sum to 1.0
 	deleteSum := ratios.MutationRatios.DeleteSubtypeRatios.WholePartitionRatio +
 		ratios.MutationRatios.DeleteSubtypeRatios.SingleRowRatio +
-		ratios.MutationRatios.DeleteSubtypeRatios.SingleColumnRatio +
+		ratios.MutationRatios.DeleteSubtypeRatios.ClusteringSubsetRatio +
 		ratios.MutationRatios.DeleteSubtypeRatios.MultiplePartitionsRatio
 	if math.Abs(deleteSum-1.0) > 0.001 {
 		t.Errorf("Delete subtype ratios sum to %.3f, expected 1.0", deleteSum)
@@ -99,10 +99,10 @@ func TestStatementRatioControllerValidation(t *testing.T) {
 						RegularInsertRatio: 0.8,
 						JSONInsertRatio:    0.2,
 					},
-					DeleteSubtypeRatios: DeleteRatios{
+					DeleteSubtypeRatios: TargetedRatios{
 						WholePartitionRatio:     0.25,
 						SingleRowRatio:          0.25,
-						SingleColumnRatio:       0.25,
+						ClusteringSubsetRatio:   0.25,
 						MultiplePartitionsRatio: 0.25,
 					},
 				},
@@ -129,10 +129,10 @@ func TestStatementRatioControllerValidation(t *testing.T) {
 						RegularInsertRatio: 0.9,
 						JSONInsertRatio:    0.2, // Sum = 1.1
 					},
-					DeleteSubtypeRatios: DeleteRatios{
+					DeleteSubtypeRatios: TargetedRatios{
 						WholePartitionRatio:     0.25,
 						SingleRowRatio:          0.25,
-						SingleColumnRatio:       0.25,
+						ClusteringSubsetRatio:   0.25,
 						MultiplePartitionsRatio: 0.25,
 					},
 				},
@@ -177,10 +177,10 @@ func TestStatementTypeDistribution(t *testing.T) {
 				RegularInsertRatio: 0.8,
 				JSONInsertRatio:    0.2,
 			},
-			DeleteSubtypeRatios: DeleteRatios{
+			DeleteSubtypeRatios: TargetedRatios{
 				WholePartitionRatio:     0.25,
 				SingleRowRatio:          0.25,
-				SingleColumnRatio:       0.25,
+				ClusteringSubsetRatio:   0.25,
 				MultiplePartitionsRatio: 0.25,
 			},
 		},
@@ -279,7 +279,7 @@ func TestDeleteSubtypeDistribution(t *testing.T) {
 	counts := make(map[int]int)
 
 	for range samples {
-		subtype := controller.GetDeleteSubtype()
+		subtype := controller.GetTargetedSubtype()
 		counts[subtype]++
 	}
 
@@ -287,10 +287,10 @@ func TestDeleteSubtypeDistribution(t *testing.T) {
 	tolerance := 0.05
 	deleteRatios := ratios.MutationRatios.DeleteSubtypeRatios
 	expectedCounts := map[int]int{
-		DeleteWholePartition:     int(deleteRatios.WholePartitionRatio * float64(samples)),
-		DeleteSingleRow:          int(deleteRatios.SingleRowRatio * float64(samples)),
-		DeleteSingleColumn:       int(deleteRatios.SingleColumnRatio * float64(samples)),
-		DeleteMultiplePartitions: int(deleteRatios.MultiplePartitionsRatio * float64(samples)),
+		TargetedWholePartition:     int(deleteRatios.WholePartitionRatio * float64(samples)),
+		TargetedSingleRow:          int(deleteRatios.SingleRowRatio * float64(samples)),
+		TargetedClusteringSubset:   int(deleteRatios.ClusteringSubsetRatio * float64(samples)),
+		TargetedMultiplePartitions: int(deleteRatios.MultiplePartitionsRatio * float64(samples)),
 	}
 
 	for deleteType, expectedCount := range expectedCounts {
@@ -323,10 +323,10 @@ func TestUpdateRatios(t *testing.T) {
 				RegularInsertRatio: 0.9,
 				JSONInsertRatio:    0.1,
 			},
-			DeleteSubtypeRatios: DeleteRatios{
+			DeleteSubtypeRatios: TargetedRatios{
 				WholePartitionRatio:     0.4,
 				SingleRowRatio:          0.3,
-				SingleColumnRatio:       0.2,
+				ClusteringSubsetRatio:   0.2,
 				MultiplePartitionsRatio: 0.1,
 			},
 		},

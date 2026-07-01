@@ -31,42 +31,58 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
+// buildCachedInsertQueries pre-builds the INSERT query strings. The column list
+// is fixed by the (immutable) schema, so the only variation is the optional LWT
+// "IF NOT EXISTS" suffix; both variants plus the JSON form are built once here
+// instead of reconstructing the query with the qb builder on every Insert.
+func (g *Generator) buildCachedInsertQueries() {
+	build := func(unique bool) string {
+		b := qb.Insert(g.keyspaceAndTable)
+		if unique {
+			b.Unique()
+		}
+		for _, pk := range g.table.PartitionKeys {
+			b.Columns(pk.Name)
+		}
+		for _, ck := range g.table.ClusteringKeys {
+			b.Columns(ck.Name)
+		}
+		for _, col := range g.table.Columns {
+			if tup, ok := col.Type.(*typedef.TupleType); ok {
+				b.TupleColumn(col.Name, len(tup.ValueTypes))
+			} else {
+				b.Columns(col.Name)
+			}
+		}
+		query, _ := b.ToCql()
+		return query
+	}
+
+	g.insertQuery = build(false)
+	if g.useLWT {
+		g.insertQueryLWT = build(true)
+	}
+	g.insertJSONQuery, _ = qb.Insert(g.keyspaceAndTable).Json().ToCql()
+}
+
 func (g *Generator) Insert(_ context.Context) (*typedef.Stmt, error) {
-	values := make([]any, 0, g.table.TotalLenValues)
+	query := g.insertQuery
+	if g.useLWT && g.random.Uint32()%10 == 0 {
+		query = g.insertQueryLWT
+	}
+
+	values := make([]any, 0, g.table.PartitionKeysLenValues()+g.table.ClusteringKeysLenValues()+g.table.ColumnsLenValues())
 
 	pks := g.generator.Next()
 
 	for _, pk := range g.table.PartitionKeys {
 		values = append(values, pks.Values.Get(pk.Name)...)
 	}
-
 	for _, ck := range g.table.ClusteringKeys {
 		values = ck.Type.GenValueOut(values, g.random, g.valueRangeConfig)
 	}
-
 	for _, col := range g.table.Columns {
 		values = col.Type.GenValueOut(values, g.random, g.valueRangeConfig)
-	}
-
-	query := g.cachedInsertQuery
-	if g.useLWT && g.random.Uint32()%10 == 0 {
-		// LWT variant needs IF NOT EXISTS — can't use cache, build fresh
-		builder := qb.Insert(g.keyspaceAndTable).Unique()
-		for _, pk := range g.table.PartitionKeys {
-			builder.Columns(pk.Name)
-		}
-		for _, ck := range g.table.ClusteringKeys {
-			builder.Columns(ck.Name)
-		}
-		for _, col := range g.table.Columns {
-			switch colType := col.Type.(type) {
-			case *typedef.TupleType:
-				builder.TupleColumn(col.Name, len(colType.ValueTypes))
-			default:
-				builder.Columns(col.Name)
-			}
-		}
-		query, _ = builder.ToCql()
 	}
 
 	return &typedef.Stmt{
@@ -83,7 +99,7 @@ func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 	}
 
 	pks := g.generator.Next()
-	values := make(map[string]any, g.table.TotalLenValues)
+	values := make(map[string]any, g.table.PartitionKeysLenValues()+g.table.ClusteringKeysLenValues()+g.table.ColumnsLenValues())
 
 	for _, pk := range g.table.PartitionKeys {
 		switch t := pk.Type.(type) {
@@ -110,7 +126,7 @@ func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 
 	return &typedef.Stmt{
 		PartitionKeys: []typedef.PartitionKeys{pks},
-		Query:         g.cachedInsertJSONQuery,
+		Query:         g.insertJSONQuery,
 		QueryType:     typedef.InsertJSONStatementType,
 		Values:        []any{utils.UnsafeString(jsonString)},
 	}, nil

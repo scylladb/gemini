@@ -30,7 +30,7 @@ import (
 	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/replication"
@@ -43,12 +43,12 @@ func TestNewSession_Integration(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.SingleScylla(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
 	t.Run("create session successfully", func(t *testing.T) {
 		t.Parallel()
 
-		session, err := newSession(containers.TestHosts, 0, "", "", logger)
+		session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 		require.NoError(t, err)
 		require.NotNil(t, session)
 		defer session.Close()
@@ -61,7 +61,7 @@ func TestNewSession_Integration(t *testing.T) {
 	t.Run("invalid host", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := newSession([]string{"invalid-host-12345.example.com"}, 0, "", "", logger)
+		_, err := newSession([]string{"invalid-host-12345.example.com"}, 0, false, "", "", logger)
 		assert.Error(t, err)
 	})
 }
@@ -70,9 +70,9 @@ func TestNewStatements_Integration(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.TestContainers(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
-	session, err := newSession(containers.TestHosts, 0, "", "", logger)
+	session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -136,9 +136,9 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.TestContainers(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
-	session, err := newSession(containers.TestHosts, 0, "", "", logger)
+	session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -246,9 +246,9 @@ func TestNewStatements_WithTupleType_Integration(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.TestContainers(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
-	session, err := newSession(containers.TestHosts, 0, "", "", logger)
+	session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
 	defer session.Close()
 
@@ -292,7 +292,7 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.TestContainers(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
 	// Create test keyspace and table in test/oracle sessions
 	testKS := testutils.GenerateUniqueKeyspaceName(t)
@@ -329,7 +329,7 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 	).Exec())
 
 	// Create statement logger
-	session, err := newSession(containers.TestHosts, 0, "", "", logger)
+	session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(session.Close)
 
@@ -448,7 +448,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.TestContainers(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
 	// Create test keyspace and table in test/oracle sessions
 	// Use short name to avoid 48 character limit
@@ -488,7 +488,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 	}
 
 	// Create statement logger
-	session, err := newSession(containers.TestHosts, 0, "", "", logger)
+	session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
 	defer session.Close()
 
@@ -658,7 +658,7 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 	t.Parallel()
 
 	containers := testutils.TestContainers(t)
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 
 	// Create test keyspace and table
 	testKS := testutils.GenerateUniqueKeyspaceName(t)
@@ -696,16 +696,22 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 		{Name: "pk0", Type: typedef.TypeText},
 	}
 
+	schema := &typedef.Schema{
+		Keyspace: typedef.Keyspace{Name: testKS},
+		Tables: []*typedef.Table{
+			{Name: testTable, PartitionKeys: partitionKeys},
+		},
+	}
+
 	// Create logger
 	scyllaLogger, err := New(
-		testKS,
-		testTable,
+		schema,
 		func() (*gocql.Session, error) { return containers.Oracle, nil },
 		func() (*gocql.Session, error) { return containers.Test, nil },
 		containers.TestHosts,
-		0,
+		containers.TestPort(),
+		containers.DockerMode,
 		"", "",
-		partitionKeys,
 		replication.NewSimpleStrategy(),
 		itemCh,
 		oracleFile,
@@ -723,7 +729,7 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 
 		// Cleanup logs keyspace
 		logsKS := GetScyllaStatementLogsKeyspace(testKS)
-		session, err := newSession(containers.TestHosts, 0, "", "", logger)
+		session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 		if err != nil {
 			t.Logf("cleanup: failed to create session for logs keyspace drop: %v", err)
 		} else if session != nil {
@@ -794,7 +800,7 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 func TestLogger_StatementFlusher_Integration(t *testing.T) {
 	t.Parallel()
 
-	logger := zaptest.NewLogger(t)
+	logger := zap.NewNop()
 	tmpDir := t.TempDir()
 
 	oracleFile := filepath.Join(tmpDir, "oracle.jsonl")
