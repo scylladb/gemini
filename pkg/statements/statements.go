@@ -167,7 +167,6 @@ func (g *Generator) getMultiplePartitionKeys() int {
 	return max(1, maximum)
 }
 
-//nolint:unused
 func (g *Generator) getMultipleClusteringKeys() int {
 	l := g.table.ClusteringKeys.Len()
 	if l == 0 {

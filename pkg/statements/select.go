@@ -17,7 +17,6 @@ package statements
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/scylladb/gocqlx/v3/qb"
 
@@ -31,17 +30,9 @@ func (g *Generator) Select(ctx context.Context) (*typedef.Stmt, error) {
 	case SelectMultiplePartitionQuery:
 		return g.genSelectMultiplePartitionQuery(ctx)
 	case SelectClusteringRangeQuery:
-		return g.genSelectSinglePartitionQuery(ctx)
-		// TODO(CodeLieutenant): single partition clustering range queries
-		//    are doing **always** 0 returns, basically generated values for clustering keys
-		//    are always in the not found range.
-		// return g.genClusteringRangeQuery(ctx)
+		return g.genClusteringRangeQuery(ctx)
 	case SelectMultiplePartitionClusteringRangeQuery:
-		return g.genSelectMultiplePartitionQuery(ctx)
-		// TODO(CodeLieutenant): multiple partition clustering range queries
-		//    are doing **always** 0 returns, basically generated values for clustering keys
-		//    are always in the not found range.
-		// return g.genMultiplePartitionClusteringRangeQuery(ctx)
+		return g.genMultiplePartitionClusteringRangeQuery(ctx)
 	case SelectSingleIndexQuery:
 		if len(g.table.Indexes) == 0 {
 			return g.genSelectSinglePartitionQuery(ctx)
@@ -109,28 +100,6 @@ func (g *Generator) selectMultiPartitionKeys() (int, []typedef.PartitionKeys, *t
 	return numQueryPKs, pks, combined
 }
 
-//nolint:unused
-func (g *Generator) buildSelectClusteringRange(builder *qb.SelectBuilder, values []any) []any {
-	if len(g.table.ClusteringKeys) == 0 {
-		return values
-	}
-
-	values = slices.Grow(values, g.table.ClusteringKeysLenValues())
-	maxClusteringKeys := g.getMultipleClusteringKeys()
-
-	for _, ck := range g.table.ClusteringKeys[:maxClusteringKeys-1] {
-		builder.Where(qb.Eq(ck.Name))
-		values = ck.Type.GenValueOut(values, g.random, g.valueRangeConfig)
-	}
-
-	ck := g.table.ClusteringKeys[maxClusteringKeys-1]
-	builder.Where(qb.Gt(ck.Name)).Where(qb.Lt(ck.Name))
-	values = ck.Type.GenValueOut(values, g.random, g.valueRangeConfig)
-	values = ck.Type.GenValueOut(values, g.random, g.valueRangeConfig)
-
-	return values
-}
-
 func (g *Generator) genSelectMultiplePartitionQuery(_ context.Context) (*typedef.Stmt, error) {
 	numQueryPKs, pks, combined := g.selectMultiPartitionKeys()
 
@@ -142,37 +111,111 @@ func (g *Generator) genSelectMultiplePartitionQuery(_ context.Context) (*typedef
 	}, nil
 }
 
-//nolint:unused
-func (g *Generator) genClusteringRangeQuery(_ context.Context) (*typedef.Stmt, error) {
-	pk := g.generator.Next()
-
-	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
-	for _, pkCol := range g.table.PartitionKeys {
-		builder = builder.Where(qb.Eq(pkCol.Name))
+// genClusteringRangeQuery selects a clustering-key range within a single
+// partition. It pops a real observed row from the row tracker (populated
+// during validation SELECTs, the same mechanism deleteSingleRow/deleteClusteringSubset
+// use) and brackets the range around that row's actual last-clustering-key
+// value with an inclusive Gte/Lte range, guaranteeing at least that row
+// matches. Bounds generated independently at random (the previous approach)
+// almost never overlap real data, so the query always returned 0 rows.
+//
+// Falls back to a plain single-partition SELECT when there is no clustering
+// key, no tracked row available, or the tracked row is too short for the
+// current schema (e.g. captured before a schema change).
+func (g *Generator) genClusteringRangeQuery(ctx context.Context) (*typedef.Stmt, error) {
+	if len(g.table.ClusteringKeys) == 0 {
+		return g.genSelectSinglePartitionQuery(ctx)
 	}
 
-	values := g.buildSelectClusteringRange(builder, pk.Values.ToCQLValues(g.table.PartitionKeys))
+	trackedRow, ok := g.generator.PopTrackedRow()
+	if !ok {
+		return g.genSelectSinglePartitionQuery(ctx)
+	}
+
+	maxClusteringKeys := g.getMultipleClusteringKeys()
+	ckLen := g.table.ClusteringKeys[:maxClusteringKeys].LenValues()
+	if len(trackedRow.ClusteringValues) < ckLen {
+		return g.genSelectSinglePartitionQuery(ctx)
+	}
+
+	values := make([]any, 0, g.table.PartitionKeysLenValues()+ckLen+1)
+	values, pkVals, ok := g.appendTrackedKeys(values, trackedRow, maxClusteringKeys-1)
+	if !ok {
+		return g.genSelectSinglePartitionQuery(ctx)
+	}
+
+	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
+	for _, pk := range g.table.PartitionKeys {
+		builder = builder.Where(qb.Eq(pk.Name))
+	}
+	for _, ck := range g.table.ClusteringKeys[:maxClusteringKeys-1] {
+		builder = builder.Where(qb.Eq(ck.Name))
+	}
+
+	rangedCK := g.table.ClusteringKeys[maxClusteringKeys-1]
+	builder = builder.Where(qb.GtOrEq(rangedCK.Name)).Where(qb.LtOrEq(rangedCK.Name))
+	rangedValue := trackedRow.ClusteringValues[ckLen-1]
+	values = append(values, rangedValue, rangedValue)
 
 	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
-		PartitionKeys: []typedef.PartitionKeys{pk},
+		PartitionKeys: []typedef.PartitionKeys{{ID: trackedRow.PartitionID, Values: pkVals}},
 		Values:        values,
 		QueryType:     typedef.SelectRangeStatementType,
 		Query:         query,
 	}, nil
 }
 
-//nolint:unused
-func (g *Generator) genMultiplePartitionClusteringRangeQuery(_ context.Context) (*typedef.Stmt, error) {
-	numQueryPKs, pks, combined := g.selectMultiPartitionKeys()
+// genMultiplePartitionClusteringRangeQuery is the multi-partition counterpart
+// of genClusteringRangeQuery: it IN-tuples the tracked row's own partition
+// together with numQueryPKs-1 additional random partitions, then brackets the
+// range around the tracked row's actual value as above. The tracked row's
+// partition is always included in the IN-tuple, so the range is guaranteed to
+// match at least that row regardless of what the other partitions contain.
+func (g *Generator) genMultiplePartitionClusteringRangeQuery(ctx context.Context) (*typedef.Stmt, error) {
+	if len(g.table.ClusteringKeys) == 0 {
+		return g.genSelectMultiplePartitionQuery(ctx)
+	}
+
+	trackedRow, ok := g.generator.PopTrackedRow()
+	if !ok {
+		return g.genSelectMultiplePartitionQuery(ctx)
+	}
+
+	maxClusteringKeys := g.getMultipleClusteringKeys()
+	pkLen := g.table.PartitionKeysLenValues()
+	ckLen := g.table.ClusteringKeys[:maxClusteringKeys].LenValues()
+	if len(trackedRow.PartitionValues) < pkLen || len(trackedRow.ClusteringValues) < ckLen {
+		return g.genSelectMultiplePartitionQuery(ctx)
+	}
+
+	numQueryPKs := g.getMultiplePartitionKeys()
+	combined := typedef.NewPartitionValues(g.table.PartitionKeys, trackedRow.PartitionValues)
+	pks := make([]typedef.PartitionKeys, 0, numQueryPKs)
+	pks = append(pks, typedef.PartitionKeys{ID: trackedRow.PartitionID, Values: combined})
+
+	for range numQueryPKs - 1 {
+		pk := g.generator.Next()
+		pks = append(pks, pk)
+		combined.Merge(pk.Values)
+	}
 
 	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
 	for _, pk := range g.table.PartitionKeys {
 		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
 	}
+	for _, ck := range g.table.ClusteringKeys[:maxClusteringKeys-1] {
+		builder = builder.Where(qb.Eq(ck.Name))
+	}
 
-	values := g.buildSelectClusteringRange(builder, combined.ToCQLValues(g.table.PartitionKeys))
+	rangedCK := g.table.ClusteringKeys[maxClusteringKeys-1]
+	builder = builder.Where(qb.GtOrEq(rangedCK.Name)).Where(qb.LtOrEq(rangedCK.Name))
+
+	values := combined.ToCQLValues(g.table.PartitionKeys)
+	values = append(values, trackedRow.ClusteringValues[:ckLen-1]...)
+	rangedValue := trackedRow.ClusteringValues[ckLen-1]
+	values = append(values, rangedValue, rangedValue)
 
 	query, _ := builder.ToCql()
 
