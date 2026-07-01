@@ -99,6 +99,75 @@ func TestInflightSharded(t *testing.T) {
 	}
 }
 
+func TestNew_ImplementsInFlight(t *testing.T) {
+	t.Parallel()
+	f := New()
+	if f == nil {
+		t.Fatal("New() returned nil")
+	}
+	// Verify basic add/has/delete via the interface
+	if !f.AddIfNotPresent(42) {
+		t.Error("New(): first AddIfNotPresent(42) should return true")
+	}
+	if !f.Has(42) {
+		t.Error("New(): Has(42) should return true after adding")
+	}
+	f.Delete(42)
+	if f.Has(42) {
+		t.Error("New(): Has(42) should return false after Delete")
+	}
+}
+
+func TestNewConcurrent_ImplementsInFlight(t *testing.T) {
+	t.Parallel()
+	f := NewConcurrent()
+	if f == nil {
+		t.Fatal("NewConcurrent() returned nil")
+	}
+	if !f.AddIfNotPresent(99) {
+		t.Error("NewConcurrent(): first AddIfNotPresent(99) should return true")
+	}
+	if !f.Has(99) {
+		t.Error("NewConcurrent(): Has(99) should return true after adding")
+	}
+	f.Delete(99)
+	if f.Has(99) {
+		t.Error("NewConcurrent(): Has(99) should return false after Delete")
+	}
+}
+
+func TestSyncU64set_Has(t *testing.T) {
+	t.Parallel()
+	s := newSyncU64set(shrinkInflightsLimit)
+
+	// Has on absent key
+	if s.Has(7) {
+		t.Error("Has(7) should be false on empty set")
+	}
+	// Add then Has
+	s.AddIfNotPresent(7)
+	if !s.Has(7) {
+		t.Error("Has(7) should be true after AddIfNotPresent")
+	}
+}
+
+func TestShardedSyncU64set_Has(t *testing.T) {
+	t.Parallel()
+	s := newShardedSyncU64set()
+
+	if s.Has(123) {
+		t.Error("Has(123) should be false on empty sharded set")
+	}
+	s.AddIfNotPresent(123)
+	if !s.Has(123) {
+		t.Error("Has(123) should be true after AddIfNotPresent")
+	}
+	s.Delete(123)
+	if s.Has(123) {
+		t.Error("Has(123) should be false after Delete")
+	}
+}
+
 func createQuickConfig() *quick.Config {
 	return &quick.Config{
 		MaxCount: 200000,

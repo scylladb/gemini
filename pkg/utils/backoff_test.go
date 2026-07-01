@@ -233,6 +233,97 @@ func TestExponentialBackoffCapped_OverflowProtection(t *testing.T) {
 	}
 }
 
+func TestLinearBackoff(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		attempt  int
+		delay    time.Duration
+		expected time.Duration
+	}{
+		{
+			name:     "attempt 0 returns zero",
+			attempt:  0,
+			delay:    100 * time.Millisecond,
+			expected: 0,
+		},
+		{
+			name:     "attempt 1 returns delay",
+			attempt:  1,
+			delay:    100 * time.Millisecond,
+			expected: 100 * time.Millisecond,
+		},
+		{
+			name:     "attempt 2 returns 2x delay",
+			attempt:  2,
+			delay:    100 * time.Millisecond,
+			expected: 200 * time.Millisecond,
+		},
+		{
+			name:     "attempt 5 returns 5x delay",
+			attempt:  5,
+			delay:    200 * time.Millisecond,
+			expected: 1000 * time.Millisecond,
+		},
+		{
+			name:     "negative attempt returns negative",
+			attempt:  -1,
+			delay:    100 * time.Millisecond,
+			expected: -100 * time.Millisecond,
+		},
+		{
+			name:     "zero delay always returns zero",
+			attempt:  10,
+			delay:    0,
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := LinearBackoff(tt.attempt, tt.delay)
+			if result != tt.expected {
+				t.Errorf("LinearBackoff(%d, %v) = %v, want %v",
+					tt.attempt, tt.delay, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestBackoff_Dispatcher(t *testing.T) {
+	t.Parallel()
+
+	t.Run("exponential strategy routes to ExponentialBackoff", func(t *testing.T) {
+		t.Parallel()
+		got := Backoff(ExponentialBackoffStrategy, 2, 5*time.Second, 100*time.Millisecond)
+		want := ExponentialBackoff(2, 5*time.Second, 100*time.Millisecond)
+		if got != want {
+			t.Errorf("Backoff(Exponential,...) = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("linear strategy routes to LinearBackoff (uses maxDelay as delay)", func(t *testing.T) {
+		t.Parallel()
+		got := Backoff(LinearBackoffStrategy, 3, 200*time.Millisecond, 0)
+		want := LinearBackoff(3, 200*time.Millisecond)
+		if got != want {
+			t.Errorf("Backoff(Linear,...) = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("unknown strategy panics", func(t *testing.T) {
+		t.Parallel()
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("Backoff with unknown strategy should panic")
+			}
+		}()
+		Backoff(BackoffStrategy(255), 1, time.Second, time.Millisecond)
+	})
+}
+
 func BenchmarkExponentialBackoffCapped(b *testing.B) {
 	minDelay := 10 * time.Millisecond
 	maxDelay := 5 * time.Second

@@ -137,7 +137,7 @@ func (g *Generator) appendUpdateSetValues(dst []any, variant updateVariant) []an
 		if _, ok := col.Type.(*typedef.CounterType); ok {
 			continue
 		}
-		dst = append(dst, col.Type.GenValue(g.random, g.valueRangeConfig)...)
+		dst = col.Type.GenValueOut(dst, g.random, g.valueRangeConfig)
 	}
 	return dst
 }
@@ -158,7 +158,7 @@ func (g *Generator) Update(ctx context.Context) (*typedef.Stmt, error) {
 	// One bind slice, sized for this variant's SET values + PK + CK; the tracked
 	// and random paths both append their key values into this same backing array.
 	values := make([]any, 0, variant.setValuesLen+
-		g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues())
+		g.table.PartitionKeysLenValues()+g.table.ClusteringKeysLenValues())
 	values = g.appendUpdateSetValues(values, variant)
 
 	if trackedRow, ok := g.generator.PopTrackedRow(); ok {
@@ -203,7 +203,7 @@ func (g *Generator) updateRandomRow(values []any, query string) *typedef.Stmt {
 		values = append(values, pks.Values.Get(pk.Name)...)
 	}
 	for _, ck := range g.table.ClusteringKeys {
-		values = append(values, ck.Type.GenValue(g.random, g.valueRangeConfig)...)
+		values = ck.Type.GenValueOut(values, g.random, g.valueRangeConfig)
 	}
 
 	return &typedef.Stmt{

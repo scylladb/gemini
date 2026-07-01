@@ -29,7 +29,6 @@ import (
 	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
 
-	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -44,24 +43,32 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 
 	// Deduplicate list values on both sides. Duplicate list items can appear
 	// on either cluster when inserts are retried (non-idempotent list appends).
-	deduplicateListValues(table, testRows)
-	deduplicateListValues(table, oracleRows)
+	// The count is reported by the caller (once per logical validation, not
+	// per retry attempt) to avoid inflating the metric.
+	result.DeduplicatedCount = deduplicateListValues(table, testRows) + deduplicateListValues(table, oracleRows)
 
 	// Sort both sides (stable) to aid deterministic behavior when rendering diffs.
 	// We sort by partition keys first, then clustering keys to ensure stable
 	// and consistent comparison regardless of the order returned by the database.
-	cmp := func(a, b Row) int {
-		for _, pk := range table.PartitionKeys {
-			if c := compareValues(a.Get(pk.Name), b.Get(pk.Name)); c != 0 {
-				return c
+	//
+	// In production every row from a given SELECT shares one column layout (gocql
+	// returns columns in a fixed order, and the layout map is cached and shared).
+	// When that holds we resolve the key-column indices once and let the
+	// comparator address row.values directly, skipping the column-name map hash
+	// that otherwise dominates the sort. If layouts are not uniform (e.g. rows
+	// assembled with per-row column orders) we fall back to name-based access,
+	// which is correct regardless of layout.
+	keyNames := keyColumnNames(table)
+	cmp := nameComparator(keyNames)
+	if refIdx, ok := uniformKeyIndices(keyNames, testRows, oracleRows); ok {
+		cmp = func(a, b Row) int {
+			for _, idx := range refIdx {
+				if c := compareValues(a.values[idx], b.values[idx]); c != 0 {
+					return c
+				}
 			}
+			return rowsCmp(a, b)
 		}
-		for _, ck := range table.ClusteringKeys {
-			if c := compareValues(a.Get(ck.Name), b.Get(ck.Name)); c != 0 {
-				return c
-			}
-		}
-		return rowsCmp(a, b)
 	}
 	if len(testRows) > 1 {
 		slices.SortStableFunc(testRows, cmp)
@@ -73,7 +80,8 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 	// Fast-path: if rows are value-equal after sort, all match.
 	// rowsEqual avoids reflect.DeepEqual which allocates by walking map[string]int.
 	if rowsEqual(testRows, oracleRows) {
-		return ComparisonResult{Table: table, MatchCount: len(testRows)}
+		result.MatchCount = len(testRows)
+		return result
 	}
 
 	// If row counts differ, report only set differences and keep MatchCount = 0.
@@ -116,6 +124,77 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 	}
 
 	return result
+}
+
+// keyColumnNames returns the partition-key names followed by the clustering-key
+// names — the columns the comparator sorts by, in order.
+func keyColumnNames(table *typedef.Table) []string {
+	names := make([]string, 0, len(table.PartitionKeys)+len(table.ClusteringKeys))
+	for _, pk := range table.PartitionKeys {
+		names = append(names, pk.Name)
+	}
+	for _, ck := range table.ClusteringKeys {
+		names = append(names, ck.Name)
+	}
+	return names
+}
+
+// uniformKeyIndices returns the value-slice indices of keyNames when every row
+// in both slices shares one column layout — the production case, where all rows
+// from a SELECT reference the same cached layout map (see getColumnIndex). It
+// detects this by comparing the layout map identity of every row against the
+// reference, which is an O(rows) pointer check rather than O(rows*keys) name
+// hashing. It returns ok=false when layouts differ (e.g. rows assembled with
+// per-row column orders) or a key column is absent, signalling the caller to
+// fall back to name-based access.
+func uniformKeyIndices(keyNames []string, testRows, oracleRows Rows) ([]int, bool) {
+	var ref Row
+	switch {
+	case len(testRows) > 0:
+		ref = testRows[0]
+	case len(oracleRows) > 0:
+		ref = oracleRows[0]
+	default:
+		return nil, false
+	}
+	if ref.columns == nil {
+		return nil, false
+	}
+
+	refIdx := make([]int, len(keyNames))
+	for k, name := range keyNames {
+		i, ok := ref.columns.byName[name]
+		if !ok {
+			return nil, false
+		}
+		refIdx[k] = i
+	}
+
+	// The cached layout is shared by pointer across all rows of a query, so a
+	// pointer comparison settles "same layout" without reflecting on the map.
+	for _, rows := range [2]Rows{testRows, oracleRows} {
+		for _, row := range rows {
+			if row.columns != ref.columns {
+				return nil, false
+			}
+		}
+	}
+
+	return refIdx, true
+}
+
+// nameComparator returns a row comparator that resolves key columns by name on
+// each access. Correct for any per-row column layout; used as the fallback when
+// layouts are not uniform.
+func nameComparator(keyNames []string) func(a, b Row) int {
+	return func(a, b Row) int {
+		for _, name := range keyNames {
+			if c := compareValues(a.Get(name), b.Get(name)); c != 0 {
+				return c
+			}
+		}
+		return rowsCmp(a, b)
+	}
 }
 
 // buildRowMap creates a map from pk string to Row for efficient lookup.
@@ -231,20 +310,25 @@ func rowKeyString(table *typedef.Table, row Row) string {
 func diffRows(table *typedef.Table, oracleRow, testRow Row) string {
 	// Build a sorted list of all column names present in either row.
 	// In the same-count path both rows always have the same schema, so
-	// iterating oracleRow.columns covers all shared keys.
-	nCols := len(oracleRow.columns)
+	// iterating oracleRow's columns covers all shared keys.
+	if oracleRow.columns == nil {
+		return ""
+	}
+	nCols := len(oracleRow.columns.byName)
 	if nCols == 0 {
 		return ""
 	}
 
 	keys := make([]string, 0, nCols)
-	for name := range oracleRow.columns {
+	for name := range oracleRow.columns.byName {
 		keys = append(keys, name)
 	}
 	// Add any columns present only in testRow (schema drift guard).
-	for name := range testRow.columns {
-		if _, ok := oracleRow.columns[name]; !ok {
-			keys = append(keys, name)
+	if testRow.columns != nil {
+		for name := range testRow.columns.byName {
+			if _, ok := oracleRow.columns.byName[name]; !ok {
+				keys = append(keys, name)
+			}
 		}
 	}
 	slices.Sort(keys)
@@ -328,26 +412,33 @@ func diffRows(table *typedef.Table, oracleRow, testRow Row) string {
 	return b.String()
 }
 
-func deduplicateListValues(table *typedef.Table, rows Rows) {
+// deduplicateListValues removes duplicate list elements in-place and returns
+// the total number of elements removed. It does not update any metric itself
+// so the caller can decide whether this is worth reporting (e.g. skip on
+// retry attempts to avoid inflating the count for the same underlying rows).
+func deduplicateListValues(table *typedef.Table, rows Rows) int {
 	if table == nil || len(rows) == 0 {
-		return
+		return 0
 	}
 
 	listCols := table.ListColumns()
 	if len(listCols) == 0 {
-		return
+		return 0
 	}
 
+	var removed int
 	for _, row := range rows {
 		for i := range listCols {
 			val := row.Get(listCols[i].Name)
 			newVal, before, after := deduplicateSlice(val)
 			if after != before {
 				row.Set(listCols[i].Name, newVal)
-				metrics.ValidationRowsDeduplicated.Add(float64(before - after))
+				removed += before - after
 			}
 		}
 	}
+
+	return removed
 }
 
 //nolint:gocyclo,cyclop

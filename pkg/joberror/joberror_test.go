@@ -16,6 +16,7 @@ package joberror
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -295,6 +296,155 @@ func TestErrorList_Error(t *testing.T) {
 
 	assert.NotEmpty(el.Error())
 	assert.Len(strings.Split(el.Error(), "\n"), 2)
+}
+
+func TestErrorList_Cap(t *testing.T) {
+	t.Parallel()
+
+	for _, limit := range []int{0, 1, 5, 100} {
+		el := NewErrorList(limit)
+		if el.Cap() != limit {
+			t.Errorf("Cap() = %d; want %d", el.Cap(), limit)
+		}
+	}
+}
+
+func TestErrorList_Len(t *testing.T) {
+	t.Parallel()
+
+	el := NewErrorList(10)
+	if el.Len() != 0 {
+		t.Errorf("Len() on empty list = %d; want 0", el.Len())
+	}
+
+	el.AddError(JobError{Timestamp: time.Now(), Message: "m1", StmtType: typedef.SelectStatementType})
+	if el.Len() != 1 {
+		t.Errorf("Len() after one AddError = %d; want 1", el.Len())
+	}
+
+	el.AddError(JobError{Timestamp: time.Now(), Message: "m2", StmtType: typedef.SelectStatementType})
+	if el.Len() != 2 {
+		t.Errorf("Len() after two AddError = %d; want 2", el.Len())
+	}
+}
+
+func TestErrorList_MarshalJSON(t *testing.T) {
+	t.Parallel()
+
+	el := NewErrorList(5)
+	ts := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+
+	el.AddError(JobError{
+		Timestamp: ts,
+		Message:   "marshal test",
+		Query:     "SELECT 1",
+		StmtType:  typedef.SelectStatementType,
+	})
+
+	data, err := el.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON() returned unexpected error: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("MarshalJSON() returned empty bytes")
+	}
+
+	// Must be a valid JSON array
+	var parsed []map[string]any
+	if unmarshalErr := json.Unmarshal(data, &parsed); unmarshalErr != nil {
+		t.Fatalf("MarshalJSON() produced invalid JSON: %v\ndata: %s", unmarshalErr, data)
+	}
+	if len(parsed) != 1 {
+		t.Errorf("MarshalJSON() encoded %d errors; want 1", len(parsed))
+	}
+}
+
+func TestErrorList_MarshalJSON_Empty(t *testing.T) {
+	t.Parallel()
+
+	el := NewErrorList(5)
+	data, err := el.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON() on empty list returned error: %v", err)
+	}
+	// An empty list marshals to "[]" or "null"
+	var parsed []any
+	if unmarshalErr := json.Unmarshal(data, &parsed); unmarshalErr != nil {
+		t.Fatalf("MarshalJSON() on empty list produced invalid JSON: %s", data)
+	}
+}
+
+func TestErrorList_GetChannel(t *testing.T) {
+	t.Parallel()
+
+	el := NewErrorList(5)
+	ch := el.GetChannel()
+	if ch == nil {
+		t.Fatal("GetChannel() returned nil; expected non-nil channel")
+	}
+
+	// AddError should send to the channel
+	go func() {
+		el.AddError(JobError{
+			Timestamp: time.Now(),
+			Message:   "channel test",
+			StmtType:  typedef.SelectStatementType,
+		})
+	}()
+
+	select {
+	case jerr := <-ch:
+		if jerr == nil {
+			t.Fatal("received nil from channel; want a *JobError")
+		}
+		if jerr.Message != "channel test" {
+			t.Errorf("received message %q; want %q", jerr.Message, "channel test")
+		}
+	case <-time.After(time.Second):
+		t.Error("timed out waiting for error on channel")
+	}
+}
+
+func TestErrorList_Close(t *testing.T) {
+	t.Parallel()
+
+	el := NewErrorList(5)
+	ch := el.GetChannel()
+	if ch == nil {
+		t.Fatal("GetChannel() returned nil before Close")
+	}
+
+	if err := el.Close(); err != nil {
+		t.Fatalf("Close() returned error: %v", err)
+	}
+
+	// Channel should be closed — receive should not block and should get zero value
+	select {
+	case _, ok := <-ch:
+		if ok {
+			t.Error("channel should be closed (ok=false) after Close()")
+		}
+	case <-time.After(time.Second):
+		t.Error("timed out reading from closed channel")
+	}
+
+	// GetChannel should return nil after close
+	if el.GetChannel() != nil {
+		t.Error("GetChannel() should return nil after Close()")
+	}
+}
+
+func TestErrorList_Close_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	el := NewErrorList(3)
+	if err := el.Close(); err != nil {
+		t.Fatalf("first Close() failed: %v", err)
+	}
+	// Second close should not panic (ch is nil)
+	if err := el.Close(); err != nil {
+		t.Fatalf("second Close() failed: %v", err)
+	}
 }
 
 func TestErrorList_ConcurrentAccess(t *testing.T) {

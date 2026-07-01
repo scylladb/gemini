@@ -78,11 +78,17 @@ type (
 		Close()
 	}
 
+	// Partition holds one partition slot's data. The values/id fields are
+	// immutable after construction: fill/Replace/Extend install a brand-new
+	// *Partition into the slot under partitions.mu rather than mutating an
+	// existing one. That pointer swap (and the synchronization on partitions.mu
+	// when readers load the pointer) is the only ordering needed, so reads of
+	// values/id require no per-partition lock. refCount stays atomic because it
+	// is mutated in place across the partition's lifetime.
 	Partition struct {
 		values   []any
 		id       uuid.UUID
 		refCount atomic.Int32
-		mu       sync.RWMutex
 	}
 
 	partitions struct {
@@ -127,7 +133,7 @@ func New(
 	config typedef.PartitionRangeConfig,
 	count, maxInvalid uint64,
 ) *Partitions {
-	partitionValuesLen := table.PartitionKeys.LenValues()
+	partitionValuesLen := table.PartitionKeysLenValues()
 
 	// Pre-allocate slice of partition pointers
 	parts := make([]*Partition, count)
@@ -175,16 +181,11 @@ func (p *Partitions) partition(idx uint64) *Partition {
 }
 
 func (p *Partitions) valuesNoLock(part *Partition) typedef.PartitionKeys {
-	out := make(map[string][]any, p.parts.partitionValuesLen)
-
-	for i, col := range p.table.PartitionKeys {
-		// Copy the slice to avoid data races when the underlying array is modified
-		out[col.Name] = append(out[col.Name], part.values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
-	}
-
+	// part.values is immutable for the lifetime of this *Partition, so the
+	// returned Values may share capped sub-slices of it without copying.
 	part.refCount.Add(1)
 	return typedef.PartitionKeys{
-		Values: typedef.NewValuesFromMap(out),
+		Values: typedef.NewPartitionValues(p.table.PartitionKeys, part.values),
 		ID:     part.id,
 		Release: func() {
 			if part.refCount.Add(-1) == 0 {
@@ -216,22 +217,15 @@ func (p *Partitions) deleteValidation(id uuid.UUID, retired bool) {
 
 func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
 	part := p.partition(idx)
-	part.mu.RLock()
-	// Copy the slice reference while holding the lock
-	values := part.values
+	// values/id are immutable for the lifetime of this *Partition (see the
+	// Partition doc comment), so they can be read without a per-partition lock
+	// and the returned Values may share capped sub-slices of part.values.
 	id := part.id
-	part.mu.RUnlock()
-
-	// Build the result outside the lock to minimize contention
-	out := make(map[string][]any, p.parts.partitionValuesLen)
-	for i, col := range p.table.PartitionKeys {
-		out[col.Name] = append(out[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
-	}
 
 	part.refCount.Add(1)
 	var once sync.Once
 	return typedef.PartitionKeys{
-		Values: typedef.NewValuesFromMap(out),
+		Values: typedef.NewPartitionValues(p.table.PartitionKeys, part.values),
 		ID:     id,
 		Release: func() {
 			once.Do(func() {
@@ -245,21 +239,13 @@ func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
 
 func (p *Partitions) valuesCopy(idx uint64) typedef.PartitionKeys {
 	part := p.partition(idx)
-	part.mu.RLock()
-	values := part.values
+	// values/id are immutable for the lifetime of this *Partition.
 	id := part.id
-	part.mu.RUnlock()
-
-	// Build result outside lock
-	m := make(map[string][]any, p.parts.partitionValuesLen)
-	for i, col := range p.table.PartitionKeys {
-		m[col.Name] = append(m[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
-	}
 
 	part.refCount.Add(1)
 	var once sync.Once
 	return typedef.PartitionKeys{
-		Values: typedef.NewValuesFromMap(m),
+		Values: typedef.NewPartitionValues(p.table.PartitionKeys, part.values),
 		ID:     id,
 		Release: func() {
 			once.Do(func() {
@@ -677,7 +663,7 @@ func (p *Partitions) RowTrackerFillRatio() float64 {
 }
 
 func generateValue(r utils.Random, table *typedef.Table, config typedef.RangeConfig) []any {
-	values := make([]any, 0, table.PartitionKeys.LenValues())
+	values := make([]any, 0, table.PartitionKeysLenValues())
 
 	for _, pk := range table.PartitionKeys {
 		values = pk.Type.GenValueOut(values, r, config)
@@ -689,13 +675,7 @@ func generateValue(r utils.Random, table *typedef.Table, config typedef.RangeCon
 func NewPartitionKeys(r utils.Random, table *typedef.Table, config typedef.RangeConfig) typedef.PartitionKeys {
 	values := generateValue(r, table, config)
 
-	m := make(map[string][]any, table.PartitionKeys.LenValues())
-
-	for i, col := range table.PartitionKeys {
-		m[col.Name] = append(m[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
-	}
-
 	return typedef.PartitionKeys{
-		Values: typedef.NewValuesFromMap(m),
+		Values: typedef.NewPartitionValues(table.PartitionKeys, values),
 	}
 }
