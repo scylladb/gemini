@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stmtlogger/scylla"
@@ -57,11 +58,16 @@ type Store interface {
 
 	Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
 	Mutate(context.Context, *typedef.Stmt) error
-	// Check validates a statement against both stores. It returns the number of
-	// matched rows, the raw test-store rows (used by the validation layer to
-	// sample rows for the row tracker without issuing a second SELECT), and any
-	// error.
+	// Check validates a statement against both stores, retrying internally. It
+	// returns the number of matched rows, the raw test-store rows (used by the
+	// validation layer to sample rows for the row tracker without issuing a
+	// second SELECT), and any error.
 	Check(context.Context, *typedef.Table, *typedef.Stmt, int) (int, Rows, error)
+	// CheckOnce performs a single validation attempt without retries. It returns
+	// the number of matched rows, the raw test-store rows (for row-tracker
+	// sampling), and a ValidationError on mismatch (nil on success). Callers
+	// manage retry scheduling externally (e.g. the validation retry queue).
+	CheckOnce(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, attempt int) (int, Rows, error)
 }
 
 type (
@@ -736,121 +742,181 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	return mutationErr
 }
 
+// checkOnceInternal performs a single validation attempt. On success it returns
+// the matched row count, the raw test-store rows (used by the validation layer
+// to sample rows for the row tracker without a second SELECT), and a nil error.
+// On failure it returns the validation error with comparison results attached
+// (when applicable).
+//
 //nolint:gocyclo
+//nolint:gocyclo
+func (ds delegatingStore) checkOnceInternal(
+	ctx context.Context,
+	table *typedef.Table,
+	stmt *typedef.Stmt,
+	attempt int,
+) (int, Rows, error) {
+	doCtx := WithContextData(ctx, &ContextData{
+		GeminiAttempt: attempt,
+		Statement:     stmt,
+		Timestamp:     time.Now().UTC(),
+	})
+
+	// If there is no oracle, just count test rows
+	if ds.oracleStore == nil {
+		testRows, testErr := ds.testStore.load(doCtx, stmt)
+		if testErr != nil {
+			validationErr := NewValidationError("validation", stmt)
+			validationErr.AddAttempt(testErr)
+			validationErr.Finalize(testErr)
+			return 0, nil, validationErr
+		}
+		return len(testRows), testRows, nil
+	}
+
+	// Run iterators in parallel using a single channel (size 2).
+	// Goroutines are tracked by ds.inflight so Close() can wait for them.
+	type rowsTagged struct {
+		err    error
+		rows   Rows
+		oracle bool
+	}
+
+	ch := make(chan rowsTagged, 2)
+
+	ds.inflight.Add(2)
+	go func() {
+		defer ds.inflight.Done()
+		rows, err := ds.testStore.load(doCtx, stmt)
+		select {
+		case ch <- rowsTagged{oracle: false, rows: rows, err: err}:
+		case <-doCtx.Done():
+		}
+	}()
+
+	go func() {
+		defer ds.inflight.Done()
+		rows, err := ds.oracleStore.load(doCtx, stmt)
+		select {
+		case ch <- rowsTagged{oracle: true, rows: rows, err: err}:
+		case <-doCtx.Done():
+		}
+	}()
+
+	var tRes, oRes rowsTagged
+	// Wait for both results or context cancellation
+	received := 0
+	for received < 2 {
+		select {
+		case r := <-ch:
+			if r.oracle {
+				oRes = r
+			} else {
+				tRes = r
+			}
+			received++
+		case <-doCtx.Done():
+			return 0, nil, doCtx.Err()
+		}
+	}
+
+	// Extract results
+	testRows, oracleRows := tRes.rows, oRes.rows
+	testErr, oracleErr := tRes.err, oRes.err
+
+	validationErr := NewValidationError("validation", stmt)
+
+	// Record any errors that occurred
+	if testErr != nil {
+		validationErr.AddAttempt(testErr)
+	}
+	if oracleErr != nil {
+		validationErr.AddAttempt(oracleErr)
+	}
+
+	// If either side had a load error, finalize and return
+	if testErr != nil || oracleErr != nil {
+		lastErr := testErr
+		if oracleErr != nil {
+			lastErr = oracleErr
+		}
+		validationErr.Finalize(lastErr)
+		return 0, nil, validationErr
+	}
+
+	// Compare results normally; if both sides are empty this will succeed with count 0.
+	result := CompareCollectedRows(table, testRows, oracleRows)
+	compErr := result.ToError()
+
+	// Dedup count is retry-invariant: duplicate list elements are a permanent
+	// artifact of the stored data, so the same duplicates would be re-observed
+	// (and re-counted) on every retry. Only report it on the first attempt.
+	if attempt == 0 {
+		metrics.ValidationRowsDeduplicated.Add(float64(result.DeduplicatedCount))
+	}
+
+	// Match/missing/different are retry-VARIANT by design — retries exist
+	// precisely so a transient mismatch (e.g. replication lag) can converge,
+	// and each attempt's outcome is real, distinct signal. Report every
+	// attempt, so a converged retry's matches are counted alongside the
+	// earlier attempt's transient mismatch instead of only recording the
+	// first (possibly transient) attempt and losing the eventual match.
+	metrics.ValidationRowsMatched.Add(float64(result.MatchCount))
+	metrics.ValidationRowsMissingInTest.Add(float64(len(result.OracleOnlyRows)))
+	metrics.ValidationRowsMissingInOracle.Add(float64(len(result.TestOnlyRows)))
+	metrics.ValidationRowsDifferent.Add(float64(len(result.DifferentRows)))
+
+	if compErr == nil {
+		// No differences found
+		return result.MatchCount, testRows, nil
+	}
+
+	// Found differences, record them and store the comparison results
+	validationErr.AddAttempt(compErr)
+	validationErr.ComparisonResults = &ComparisonResults{
+		TestRows:       testRows,
+		OracleRows:     oracleRows,
+		TestOnlyRows:   result.TestOnlyRows,
+		OracleOnlyRows: result.OracleOnlyRows,
+		DifferentRows:  result.DifferentRows,
+	}
+	validationErr.Finalize(compErr)
+
+	return 0, nil, validationErr
+}
+
+func (ds delegatingStore) CheckOnce(
+	ctx context.Context,
+	table *typedef.Table,
+	stmt *typedef.Stmt,
+	attempt int,
+) (int, Rows, error) {
+	return ds.checkOnceInternal(ctx, table, stmt, attempt)
+}
+
 func (ds delegatingStore) Check(
 	ctx context.Context,
 	table *typedef.Table,
 	stmt *typedef.Stmt,
 	_ int,
 ) (int, Rows, error) {
-	validationErr := NewValidationError("validation", stmt)
 	maxAttempts := ds.validationRetries
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}
+
 	var lastErr error
-
 	for attempt := range maxAttempts {
-		doCtx := WithContextData(ctx, &ContextData{
-			GeminiAttempt: attempt,
-			Statement:     stmt,
-			Timestamp:     time.Now().UTC(),
-		})
-
-		// If there is no oracle, just count test rows
-		if ds.oracleStore == nil {
-			testRows, testErr := ds.testStore.load(doCtx, stmt)
-
-			if testErr != nil {
-				validationErr.AddAttempt(testErr)
-				lastErr = testErr
-			} else {
-				return len(testRows), testRows, nil
-			}
-		} else {
-			// Run iterators in parallel using a single channel (size 2)
-			type rowsTagged struct {
-				err    error
-				rows   Rows
-				oracle bool
-			}
-
-			ch := make(chan rowsTagged, 2)
-
-			ds.inflight.Add(2)
-			go func() {
-				defer ds.inflight.Done()
-				rows, err := ds.testStore.load(doCtx, stmt)
-				select {
-				case ch <- rowsTagged{oracle: false, rows: rows, err: err}:
-				case <-doCtx.Done():
-				}
-			}()
-
-			go func() {
-				defer ds.inflight.Done()
-				rows, err := ds.oracleStore.load(doCtx, stmt)
-				select {
-				case ch <- rowsTagged{oracle: true, rows: rows, err: err}:
-				case <-doCtx.Done():
-				}
-			}()
-
-			var tRes, oRes rowsTagged
-			// Wait for both results or context cancellation
-			received := 0
-			for received < 2 {
-				select {
-				case r := <-ch:
-					if r.oracle {
-						oRes = r
-					} else {
-						tRes = r
-					}
-					received++
-				case <-doCtx.Done():
-					return 0, nil, doCtx.Err()
-				}
-			}
-
-			// Extract results
-			testRows, oracleRows := tRes.rows, oRes.rows
-			testErr, oracleErr := tRes.err, oRes.err
-
-			// Record any errors that occurred
-			if testErr != nil {
-				validationErr.AddAttempt(testErr)
-				lastErr = testErr
-			}
-			if oracleErr != nil {
-				validationErr.AddAttempt(oracleErr)
-				lastErr = oracleErr
-			}
-
-			// Check if comparison succeeded
-			if testErr == nil && oracleErr == nil {
-				// Compare results normally; if both sides are empty this will succeed with count 0.
-				result := CompareCollectedRows(table, testRows, oracleRows)
-				compErr := result.ToError()
-				if compErr == nil {
-					// No differences found
-					return result.MatchCount, testRows, nil
-				}
-
-				// Found differences, record them and store the comparison results
-				validationErr.AddAttempt(compErr)
-				lastErr = compErr
-
-				// Store all the comparison data for debugging
-				validationErr.ComparisonResults = &ComparisonResults{
-					TestRows:       testRows,
-					OracleRows:     oracleRows,
-					TestOnlyRows:   result.TestOnlyRows,
-					OracleOnlyRows: result.OracleOnlyRows,
-					DifferentRows:  result.DifferentRows,
-				}
-			}
+		count, testRows, err := ds.checkOnceInternal(ctx, table, stmt, attempt)
+		if err == nil {
+			return count, testRows, nil
 		}
+
+		// Context cancellation/deadline is terminal — do not retry.
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return 0, nil, err
+		}
+		lastErr = err
 
 		if attempt < maxAttempts-1 {
 			delay := utils.Backoff(utils.LinearBackoffStrategy, attempt, ds.validationRetrySleep, ds.minimumDelay)
@@ -869,19 +935,13 @@ func (ds delegatingStore) Check(
 		}
 	}
 
-	// All attempts failed
-	if validationErr.TotalAttempts.Load() == 0 {
-		return 0, nil, nil
-	}
-
+	// All attempts failed — return the error from the final attempt
+	// (already finalized by checkOnceInternal).
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return 0, nil, context.Canceled
 	}
 
-	// Finalize the validation error with summary
-	validationErr.Finalize(lastErr)
-
-	return 0, nil, validationErr
+	return 0, nil, lastErr
 }
 
 func (ds delegatingStore) Close() error {

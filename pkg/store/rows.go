@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -28,31 +29,65 @@ import (
 )
 
 type (
+	// columnIndex maps column names to their position in a Row's value slice.
+	// It is cached and shared *by pointer* across every row with the same column
+	// layout, so all rows from one query reference the same *columnIndex. That
+	// lets callers test layout identity with a pointer comparison (a == b)
+	// instead of reflecting on the underlying map — see uniformKeyIndices.
+	columnIndex struct {
+		byName map[string]int
+	}
+
 	// Row represents a database row with column values stored as a slice
-	// and a mapping from column names to indices for efficient access
+	// and a shared mapping from column names to indices for efficient access.
 	Row struct {
-		columns map[string]int
+		columns *columnIndex
 		values  []any
 	}
 
 	Rows []Row
 )
 
-// NewRow creates a new Row with the given column names and values
-func NewRow(columnNames []string, values []any) Row {
-	columns := make(map[string]int, len(columnNames))
-	for i, name := range columnNames {
-		columns[name] = i
+// columnIndexCache caches the column-name→index mapping for a given set
+// of columns. Since gocql always returns the same column order for a
+// given query, we build the layout once and share it (by pointer) across
+// all rows from the same iterator.
+var columnIndexCache sync.Map // key: joined column names, value: *columnIndex
+
+func getColumnIndex(columnNames []string) *columnIndex {
+	// Build a cache key from column names. Using a simple join since
+	// column names don't contain null bytes.
+	key := strings.Join(columnNames, "\x00")
+
+	if cached, ok := columnIndexCache.Load(key); ok {
+		return cached.(*columnIndex)
 	}
+
+	byName := make(map[string]int, len(columnNames))
+	for i, name := range columnNames {
+		byName[name] = i
+	}
+	// LoadOrStore so concurrent first-builders converge on a single shared pointer.
+	actual, _ := columnIndexCache.LoadOrStore(key, &columnIndex{byName: byName})
+	return actual.(*columnIndex)
+}
+
+// NewRow creates a new Row with the given column names and values.
+// The column-name→index layout is cached and shared across rows with the
+// same column layout, eliminating per-row map allocation.
+func NewRow(columnNames []string, values []any) Row {
 	return Row{
 		values:  values,
-		columns: columns,
+		columns: getColumnIndex(columnNames),
 	}
 }
 
 // Get returns the value for the given column name
 func (r Row) Get(columnName string) any {
-	if idx, ok := r.columns[columnName]; ok {
+	if r.columns == nil {
+		return nil
+	}
+	if idx, ok := r.columns.byName[columnName]; ok {
 		return r.values[idx]
 	}
 	return nil
@@ -61,13 +96,19 @@ func (r Row) Get(columnName string) any {
 // hasColumn reports whether the row has a column with the given name.
 // Unlike Get, it distinguishes "column absent" from "column present with nil value".
 func (r Row) hasColumn(columnName string) bool {
-	_, ok := r.columns[columnName]
+	if r.columns == nil {
+		return false
+	}
+	_, ok := r.columns.byName[columnName]
 	return ok
 }
 
 // Set sets the value for the given column name
 func (r Row) Set(columnName string, value any) {
-	if idx, ok := r.columns[columnName]; ok {
+	if r.columns == nil {
+		return
+	}
+	if idx, ok := r.columns.byName[columnName]; ok {
 		r.values[idx] = value
 	}
 }
@@ -93,10 +134,13 @@ func (r Rows) Less(i, j int) bool {
 // This custom marshaler converts the internal representation into a
 // map[columnName]value so logs and errors include meaningful row content.
 func (r Row) MarshalJSON() ([]byte, error) {
+	if r.columns == nil {
+		return json.Marshal(map[string]any{})
+	}
 	// Build a temporary map to serialize column values by name.
 	// Pre-size the map for efficiency.
-	out := make(map[string]any, len(r.columns))
-	for name, idx := range r.columns {
+	out := make(map[string]any, len(r.columns.byName))
+	for name, idx := range r.columns.byName {
 		// Guard against out-of-range indexes in case of malformed rows
 		if idx >= 0 && idx < len(r.values) {
 			out[name] = r.values[idx]

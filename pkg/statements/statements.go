@@ -65,20 +65,25 @@ const (
 const MutationStatementsCount = 3
 
 type Generator struct {
-	generator                     partitions.Interface
-	random                        utils.Random
-	table                         *typedef.Table
-	valueRangeConfig              *typedef.ValueRangeConfig
-	ratioController               *RatioController
-	keyspace                      string
-	keyspaceAndTable              string
-	deleteWholePartitionQuery     string
-	deleteSingleRowQuery          string
-	selectColumns                 []string
-	deleteClusteringSubsetQueries []string
-	updateVariants                []updateVariant
-	trackedMisses                 TrackedMissCounts
-	useLWT                        bool
+	generator                      partitions.Interface
+	random                         utils.Random
+	table                          *typedef.Table
+	valueRangeConfig               *typedef.ValueRangeConfig
+	ratioController                *RatioController
+	keyspace                       string
+	keyspaceAndTable               string
+	deleteWholePartitionQuery      string
+	deleteSingleRowQuery           string
+	insertQuery                    string
+	insertQueryLWT                 string
+	insertJSONQuery                string
+	selectSinglePartitionQuery     string
+	selectMultiplePartitionQueries []string
+	selectColumns                  []string
+	deleteClusteringSubsetQueries  []string
+	updateVariants                 []updateVariant
+	trackedMisses                  TrackedMissCounts
+	useLWT                         bool
 }
 
 func New(
@@ -103,6 +108,8 @@ func New(
 	}
 	g.buildCachedDeleteQueries()
 	g.buildCachedUpdateQueries()
+	g.buildCachedInsertQueries()
+	g.buildCachedSelectQueries()
 	return g
 }
 
@@ -160,7 +167,6 @@ func (g *Generator) getMultiplePartitionKeys() int {
 	return max(1, maximum)
 }
 
-//nolint:unused
 func (g *Generator) getMultipleClusteringKeys() int {
 	l := g.table.ClusteringKeys.Len()
 	if l == 0 {

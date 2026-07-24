@@ -63,6 +63,7 @@ type cqlStore struct {
 	cqlRequestsMetric         [typedef.StatementTypeCount]prometheus.Counter
 	cqlErrorRequestsMetric    [typedef.StatementTypeCount]prometheus.Counter
 	cqlTimeoutsRequestsMetric [typedef.StatementTypeCount]prometheus.Counter
+	stmtTracker               *stmtTracker
 	cluster                   *gocql.ClusterConfig
 	session                   *gocql.Session
 	tracingDir                string
@@ -80,11 +81,12 @@ func newCQLStoreWithSession(
 	logger.Info("creating cql store with session", zap.String("system", system))
 
 	store := &cqlStore{
-		cluster:    cluster,
-		schema:     schema,
-		logger:     logger,
-		system:     system,
-		tracingDir: tracingDir,
+		cluster:     cluster,
+		schema:      schema,
+		logger:      logger,
+		system:      system,
+		tracingDir:  tracingDir,
+		stmtTracker: newStmtTracker(system, cluster.MaxPreparedStmts),
 	}
 
 	for i := range typedef.StatementTypeCount {
@@ -196,6 +198,8 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 		return err
 	}
 
+	c.stmtTracker.Track(stmt.Query)
+
 	query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 	defer query.Release()
 
@@ -254,6 +258,8 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	c.stmtTracker.Track(stmt.Query)
 
 	query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 	defer func() {
@@ -317,6 +323,8 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			yield(Row{}, errors.New("failed to get cql session"))
 			return
 		}
+
+		c.stmtTracker.Track(stmt.Query)
 
 		query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 		defer query.Release()
