@@ -15,6 +15,7 @@
 package statements
 
 import (
+	"errors"
 	"math"
 	"math/rand/v2"
 	"testing"
@@ -206,7 +207,10 @@ func TestStatementTypeDistribution(t *testing.T) {
 	counts := make(map[StatementType]int)
 
 	for range samples {
-		stmtType := controller.GetMutationStatementType()
+		stmtType, sErr := controller.GetMutationStatementType()
+		if sErr != nil {
+			t.Fatalf("GetMutationStatementType: %v", sErr)
+		}
 		counts[stmtType]++
 	}
 
@@ -226,6 +230,124 @@ func TestStatementTypeDistribution(t *testing.T) {
 				stmtType, expectedCount, actualCount, diff*100)
 		}
 	}
+}
+
+// TestGetMutationStatementTypeFiltering verifies that filtering a mutation type
+// redistributes its probability mass PROPORTIONALLY across the surviving types
+// instead of dumping it onto insert. This is the warmup / no-delete path
+// (generateDelete == false filters StatementTypeDelete).
+func TestGetMutationStatementTypeFiltering(t *testing.T) {
+	t.Parallel()
+
+	newController := func(t *testing.T, insert, update, del float64) *RatioController {
+		t.Helper()
+		ratios := DefaultStatementRatios()
+		ratios.MutationRatios.InsertRatio = insert
+		ratios.MutationRatios.UpdateRatio = update
+		ratios.MutationRatios.DeleteRatio = del
+		c, err := NewRatioController(ratios, rand.New(rand.NewChaCha8([32]byte{})))
+		if err != nil {
+			t.Fatalf("NewRatioController: %v", err)
+		}
+		return c
+	}
+
+	const (
+		samples   = 100000
+		tolerance = 0.03 // relative
+	)
+
+	sample := func(t *testing.T, c *RatioController, filter ...StatementType) map[StatementType]int {
+		t.Helper()
+		counts := make(map[StatementType]int)
+		for range samples {
+			ty, err := c.GetMutationStatementType(filter...)
+			if err != nil {
+				t.Fatalf("GetMutationStatementType: %v", err)
+			}
+			counts[ty]++
+		}
+		return counts
+	}
+
+	assertFraction := func(t *testing.T, counts map[StatementType]int, ty StatementType, want float64) {
+		t.Helper()
+		got := float64(counts[ty]) / float64(samples)
+		if math.Abs(got-want) > tolerance {
+			t.Errorf("%s fraction: got %.3f, want ~%.3f", ty, got, want)
+		}
+	}
+
+	t.Run("filtering deletes gives updates their proportional share", func(t *testing.T) {
+		t.Parallel()
+		// Insert:Update:Delete = 0.2:0.3:0.5. With deletes filtered the freed 0.5
+		// must split proportionally: Insert 0.2/0.5=0.4, Update 0.3/0.5=0.6.
+		// The old fallback-to-insert behavior produced Insert≈0.7, Update≈0.3.
+		counts := sample(t, newController(t, 0.2, 0.3, 0.5), StatementTypeDelete)
+		if counts[StatementTypeDelete] != 0 {
+			t.Errorf("expected zero deletes when filtered, got %d", counts[StatementTypeDelete])
+		}
+		assertFraction(t, counts, StatementTypeInsert, 0.4)
+		assertFraction(t, counts, StatementTypeUpdate, 0.6)
+	})
+
+	t.Run("filtering deletes never fabricates inserts when InsertRatio is zero", func(t *testing.T) {
+		t.Parallel()
+		// Insert=0, Update=0.5, Delete=0.5. Filtering deletes must yield ONLY
+		// updates. The old code returned insert (via fallback) ~50% of the time.
+		counts := sample(t, newController(t, 0.0, 0.5, 0.5), StatementTypeDelete)
+		if counts[StatementTypeInsert] != 0 {
+			t.Errorf("expected zero inserts when InsertRatio==0, got %d", counts[StatementTypeInsert])
+		}
+		if counts[StatementTypeDelete] != 0 {
+			t.Errorf("expected zero deletes when filtered, got %d", counts[StatementTypeDelete])
+		}
+		assertFraction(t, counts, StatementTypeUpdate, 1.0)
+	})
+
+	t.Run("no filter preserves configured ratios", func(t *testing.T) {
+		t.Parallel()
+		counts := sample(t, newController(t, 0.2, 0.3, 0.5))
+		assertFraction(t, counts, StatementTypeInsert, 0.2)
+		assertFraction(t, counts, StatementTypeUpdate, 0.3)
+		assertFraction(t, counts, StatementTypeDelete, 0.5)
+	})
+
+	t.Run("filtering every type reports no candidates instead of returning one", func(t *testing.T) {
+		t.Parallel()
+		// Returning any type here would hand back a statement the caller
+		// explicitly excluded — the exact failure the filter exists to prevent.
+		c := newController(t, 0.2, 0.3, 0.5)
+		_, err := c.GetMutationStatementType(StatementTypeInsert, StatementTypeUpdate, StatementTypeDelete)
+		if !errors.Is(err, ErrNoMutationCandidates) {
+			t.Errorf("all-filtered: got err %v, want ErrNoMutationCandidates", err)
+		}
+	})
+
+	t.Run("filtering leaves only zero-weight types reports no candidates", func(t *testing.T) {
+		t.Parallel()
+		// Insert=0, Update=0.5, Delete=0.5. Filtering update+delete leaves only
+		// insert, which carries no probability mass — there is nothing to pick.
+		c := newController(t, 0.0, 0.5, 0.5)
+		_, err := c.GetMutationStatementType(StatementTypeUpdate, StatementTypeDelete)
+		if !errors.Is(err, ErrNoMutationCandidates) {
+			t.Errorf("zero-weight survivor: got err %v, want ErrNoMutationCandidates", err)
+		}
+	})
+
+	t.Run("delete-only ratios during warmup report no candidates", func(t *testing.T) {
+		t.Parallel()
+		// The production repro: Insert=0, Update=0, Delete=1 passes validation
+		// (the three sum to 1.0; there is no per-type floor), and the only caller
+		// filters DELETE whenever generateDelete is false. Every surviving type
+		// then has zero weight. Returning insert here would generate INSERTs on a
+		// table configured to produce none.
+		c := newController(t, 0.0, 0.0, 1.0)
+		got, err := c.GetMutationStatementType(StatementTypeDelete)
+		if !errors.Is(err, ErrNoMutationCandidates) {
+			t.Errorf("delete-only + filtered delete: got (%s, %v), want ErrNoMutationCandidates", got, err)
+		}
+	})
 }
 
 func TestInsertSubtypeDistribution(t *testing.T) {

@@ -115,14 +115,21 @@ func TestIsOnlyTimeoutFailure(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // compensateStore is a fakeStore that counts mutate calls and can be made to fail.
+// It also records the ctx and timestamp of the last mutate so tests can assert
+// that compensation attaches ContextData (for statement logging) and threads the
+// caller's write timestamp through.
 type compensateStore struct {
-	muErr error
+	muErr   error
+	lastCtx atomic.Pointer[context.Context]
+	lastTS  atomic.Pointer[mo.Option[time.Time]]
 	fakeStore
 	muCalls atomic.Int64
 }
 
-func (c *compensateStore) mutate(_ context.Context, _ *typedef.Stmt, _ mo.Option[time.Time]) error {
+func (c *compensateStore) mutate(ctx context.Context, _ *typedef.Stmt, ts mo.Option[time.Time]) error {
 	c.muCalls.Add(1)
+	c.lastCtx.Store(&ctx)
+	c.lastTS.Store(&ts)
 	return c.muErr
 }
 
@@ -132,6 +139,9 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 	// Build a minimal Stmt with one partition key and real column metadata so
 	// buildPartitionDeleteStmt can produce a valid DELETE.
 	pkCol := typedef.ColumnDef{Name: "pk", Type: typedef.TypeInt}
+	// A fixed client-side write timestamp threaded through compensation; the
+	// compensating DELETE must reuse it so both clusters share one cutoff.
+	writeTS := mo.Some(time.Unix(1_700_000_000, 0).UTC())
 	vals := typedef.NewValuesFromMap(map[string][]any{"pk": {1}})
 	stmt := &typedef.Stmt{
 		PartitionKeys: []typedef.PartitionKeys{
@@ -157,10 +167,33 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		ts := &compensateStore{}
 		os := &compensateStore{}
 		ds := makeDS(ts, os)
-		ok := ds.compensateAsymmetricWrite(stmt)
+		ok := ds.compensateAsymmetricWrite(stmt, writeTS)
 		assert.True(t, ok)
 		assert.Equal(t, int64(1), ts.muCalls.Load())
 		assert.Equal(t, int64(1), os.muCalls.Load())
+
+		// The caller's write timestamp is threaded through to both stores so the
+		// compensating DELETE lands in the same timestamp domain as the writes.
+		require.NotNil(t, ts.lastTS.Load())
+		assert.Equal(t, writeTS, *ts.lastTS.Load())
+		assert.Equal(t, writeTS, *os.lastTS.Load())
+
+		// ContextData is attached so the gocql observers log the compensating
+		// delete instead of silently skipping it (nil ContextData).
+		require.NotNil(t, ts.lastCtx.Load())
+		data := MustGetContextData(*ts.lastCtx.Load())
+		require.NotNil(t, data)
+		assert.Equal(t, typedef.DeleteWholePartitionType, data.Statement.QueryType)
+
+		// Tagged with the compensation sentinel on BOTH stores so post-mortem
+		// triage can tell these deletes apart from ordinary workload against the
+		// same partition. Attempt 0 would be indistinguishable from a genuine
+		// first-attempt delete, which is the whole reason for logging them.
+		assert.Equal(t, CompensationAttempt, data.GeminiAttempt)
+		require.NotNil(t, os.lastCtx.Load())
+		oracleData := MustGetContextData(*os.lastCtx.Load())
+		require.NotNil(t, oracleData)
+		assert.Equal(t, CompensationAttempt, oracleData.GeminiAttempt)
 	})
 
 	t.Run("test store fails → returns false", func(t *testing.T) {
@@ -168,7 +201,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		ts := &compensateStore{muErr: errors.New("test-fail")}
 		os := &compensateStore{}
 		ds := makeDS(ts, os)
-		ok := ds.compensateAsymmetricWrite(stmt)
+		ok := ds.compensateAsymmetricWrite(stmt, writeTS)
 		assert.False(t, ok)
 		assert.Equal(t, int64(1), ts.muCalls.Load())
 	})
@@ -178,7 +211,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		ts := &compensateStore{}
 		os := &compensateStore{muErr: errors.New("oracle-fail")}
 		ds := makeDS(ts, os)
-		ok := ds.compensateAsymmetricWrite(stmt)
+		ok := ds.compensateAsymmetricWrite(stmt, writeTS)
 		assert.False(t, ok)
 	})
 
@@ -186,7 +219,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		t.Parallel()
 		ts := &compensateStore{}
 		ds := makeDS(ts, nil)
-		ok := ds.compensateAsymmetricWrite(stmt)
+		ok := ds.compensateAsymmetricWrite(stmt, writeTS)
 		assert.True(t, ok)
 		assert.Equal(t, int64(1), ts.muCalls.Load())
 	})
@@ -195,7 +228,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		t.Parallel()
 		ts := &compensateStore{}
 		ds := makeDS(ts, nil)
-		ok := ds.compensateAsymmetricWrite(&typedef.Stmt{PartitionKeys: nil})
+		ok := ds.compensateAsymmetricWrite(&typedef.Stmt{PartitionKeys: nil}, writeTS)
 		assert.True(t, ok)
 		assert.Equal(t, int64(0), ts.muCalls.Load())
 	})
@@ -211,7 +244,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 			partitionKeyColumns: typedef.Columns{}, // empty
 			keyspaceAndTable:    "ks.t",
 		}
-		ok := ds.compensateAsymmetricWrite(stmt)
+		ok := ds.compensateAsymmetricWrite(stmt, writeTS)
 		// Empty partitionKeyColumns → compensation early-returns before any delete.
 		assert.True(t, ok)
 		assert.Equal(t, int64(0), ts.muCalls.Load())
@@ -230,7 +263,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		ts := &compensateStore{}
 		os := &compensateStore{}
 		ds := makeDS(ts, os)
-		ok := ds.compensateAsymmetricWrite(multiStmt)
+		ok := ds.compensateAsymmetricWrite(multiStmt, writeTS)
 		assert.True(t, ok)
 		assert.Equal(t, int64(2), ts.muCalls.Load())
 		assert.Equal(t, int64(2), os.muCalls.Load())

@@ -25,6 +25,15 @@ type QueryContextKey string
 
 const ContextDataKey QueryContextKey = "QueryContextData"
 
+// CompensationAttempt is the sentinel GeminiAttempt value stamped on the
+// compensating DELETEs issued by compensateAsymmetricWrite. Real attempts are
+// zero-based counters, so a negative value cannot collide with one: it makes a
+// compensation artifact distinguishable in _logs from ordinary generated
+// workload against the same partition. Without it a compensating delete is
+// indistinguishable from a genuine first-attempt delete (both attempt 0), which
+// defeats the point of logging it for post-mortem triage.
+const CompensationAttempt = -1
+
 type ContextData struct {
 	Statement     *typedef.Stmt
 	Timestamp     time.Time

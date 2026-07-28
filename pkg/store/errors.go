@@ -136,6 +136,23 @@ type MutationError struct {
 	ValidationError         // Embed ValidationError for common functionality
 	TestStoreSuccess   bool `json:"test_store_success"`
 	OracleStoreSuccess bool `json:"oracle_store_success"`
+
+	// CompensationFailed reports that a compensating whole-partition DELETE was
+	// attempted after a timeout and did NOT fully succeed on both clusters.
+	//
+	// This is a separate signal from the two success flags above, and the
+	// difference is load-bearing. Those flags describe the ORIGINAL write; when
+	// both clusters time out they are equal (both false) even though each server
+	// may independently have committed or not. Compensation exists precisely to
+	// collapse that ambiguity by deleting the partition on both sides. If it only
+	// half-succeeds, the clusters can be left genuinely different — one erased,
+	// one still holding a write that timed out but committed — while the original
+	// flags still look symmetric.
+	//
+	// Callers must therefore treat this as an explicit requirement to invalidate
+	// the affected partitions: without it, a partial compensation failure silently
+	// manufactures a divergence that validation later reports as a product bug.
+	CompensationFailed bool `json:"compensation_failed"`
 }
 
 // NewStoreMutationError creates a new StoreMutationError

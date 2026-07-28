@@ -98,6 +98,50 @@ Controls the distribution of data modification operations:
 
 **Note**: These three values must sum to 1.0
 
+##### Renormalization when a type is filtered
+
+Some phases exclude a mutation type entirely — most importantly **warmup** and
+any no-delete worker, which filter `delete` so the warmup phase populates data
+without removing it.
+
+When a type is filtered, its probability mass is redistributed
+**proportionally across the remaining types**, preserving their configured
+ratio to one another. It is *not* reassigned to any single type.
+
+With `insert: 0.2, update: 0.3, delete: 0.5`, a worker that filters `delete`
+generates:
+
+| Type | Configured | Effective (delete filtered) |
+|------|-----------|------------------------------|
+| `insert` | 0.2 | 0.2 / (0.2 + 0.3) = **0.4** |
+| `update` | 0.3 | 0.3 / (0.2 + 0.3) = **0.6** |
+
+A type configured to `0.0` is never generated, even when it is the only type
+left after filtering. Setting `insert: 0.0` means no INSERTs — including during
+warmup.
+
+> ⚠️ **Behaviour change.** Earlier versions dumped the filtered mass onto
+> `insert` instead of redistributing it, which skewed the insert:update
+> proportion during warmup and could generate INSERTs even with `insert: 0.0`.
+> Correcting this shifts the effective warmup mix for **every** configuration —
+> with the defaults, from ≈0.75/0.25 to ≈0.737/0.263 insert:update. Expect a
+> corresponding shift in run baselines.
+
+##### Configurations with no valid candidate
+
+Because the three ratios only have to sum to 1.0 — there is no per-type minimum —
+it is possible to configure a workload where a filtering phase has nothing left
+to generate. For example `insert: 0.0, update: 0.0, delete: 1.0` is accepted at
+startup, but a warmup worker filters `delete` and is left with only zero-weight
+types.
+
+Rather than silently substituting a statement type the phase excluded, gemini
+**terminates the mutation worker** with a clear error and stops the run. The
+condition is permanent — the ratios and the phase's filter are both fixed for
+the life of the run — so no retry could recover. If you hit this, either give
+`insert` or `update` a non-zero ratio, or do not run a warmup / no-delete phase
+with a delete-only configuration.
+
 #### Insert Subtypes (`insert_subtypes`)
 
 Fine-grained control over INSERT statement types:

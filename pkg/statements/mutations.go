@@ -30,7 +30,12 @@ func (g *Generator) MutateStatement(ctx context.Context, generateDelete bool) (*
 		filterDeletes = []StatementType{StatementTypeDelete}
 	}
 
-	switch g.ratioController.GetMutationStatementType(filterDeletes...) {
+	stmtType, err := g.ratioController.GetMutationStatementType(filterDeletes...)
+	if err != nil {
+		return nil, err
+	}
+
+	switch stmtType {
 	case StatementTypeInsert:
 		if g.table.IsCounterTable() {
 			return g.Update(ctx)

@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/stmtlogger/scylla"
@@ -314,7 +315,17 @@ func (ds delegatingStore) buildPartitionDeleteStmt(keys *typedef.PartitionKeys, 
 // ensure the process exits promptly (e.g. via the watchdog).
 // Errors are logged but not returned; this is a best-effort operation.
 // Returns true if all deletes completed without error.
-func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt) bool {
+//
+// The caller's write timestamp (ts) is threaded through so the compensating
+// DELETE lands in the SAME timestamp domain as the original writes. This is
+// load-bearing when client-side timestamps are in use (the default): both
+// clusters then apply the tombstone at one identical absolute timestamp, so the
+// cutoff is the same on both sides. Using a server-side timestamp here (as this
+// function did previously) makes each coordinator stamp the delete with its own
+// clock, so a later write can fall on opposite sides of the two clusters' delete
+// timestamps under clock skew — reintroducing the very divergence this is meant
+// to erase.
+func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt, ts mo.Option[time.Time]) bool {
 	if len(stmt.PartitionKeys) == 0 || len(ds.partitionKeyColumns) == 0 {
 		return true
 	}
@@ -329,7 +340,6 @@ func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt) bool {
 	compCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	ts := mo.None[time.Time]()
 	ok := true
 
 	for i := range stmt.PartitionKeys {
@@ -338,18 +348,42 @@ func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt) bool {
 			continue
 		}
 
-		if err := ds.testStore.mutate(compCtx, deleteStmt, ts); err != nil {
+		// Attach ContextData so the gocql observers record these compensating
+		// deletes in the statement log. Without it MustGetContextData returns nil
+		// and the observers skip logging entirely, making compensation invisible
+		// during post-mortem triage even though the deletes still execute.
+		//
+		// CompensationAttempt tags the entry so triage can tell a compensating
+		// delete apart from ordinary workload hitting the same partition.
+		//
+		// Note that logging is not free here: routing these deletes through the
+		// observers hands them to the statement logger's channel, which blocks on
+		// back-pressure and takes no context. The 15s compCtx bounds the CQL
+		// round-trips, not the log enqueue, so it is no longer a hard ceiling on
+		// this loop — and the mass-timeout conditions that trigger compensation
+		// are exactly when the logger is most likely to be backed up.
+		delCtx := WithContextData(compCtx, &ContextData{
+			Statement:     deleteStmt,
+			GeminiAttempt: CompensationAttempt,
+			Timestamp:     time.Now().UTC(),
+		})
+
+		if err := ds.testStore.mutate(delCtx, deleteStmt, ts); err != nil {
 			ds.getLogger().Error("compensating delete on test store failed — partition may be asymmetric",
 				zap.String("partition", stmt.PartitionKeys[i].ID.String()),
 				zap.Error(err))
+			metrics.MutationCompensationFailuresTotal.WithLabelValues(ds.testStore.name()).Inc()
+
 			ok = false
 		}
 
 		if ds.oracleStore != nil {
-			if err := ds.oracleStore.mutate(compCtx, deleteStmt, ts); err != nil {
+			if err := ds.oracleStore.mutate(delCtx, deleteStmt, ts); err != nil {
 				ds.getLogger().Error("compensating delete on oracle store failed — partition may be asymmetric",
 					zap.String("partition", stmt.PartitionKeys[i].ID.String()),
 					zap.Error(err))
+				metrics.MutationCompensationFailuresTotal.WithLabelValues(ds.oracleStore.name()).Inc()
+
 				ok = false
 			}
 		}
@@ -373,6 +407,40 @@ func isOnlyTimeoutFailure(result mutationResult) bool {
 	oracleTimeout := result.oracleErr == nil || errors.Is(result.oracleErr, context.DeadlineExceeded)
 	atLeastOne := errors.Is(result.testErr, context.DeadlineExceeded) || errors.Is(result.oracleErr, context.DeadlineExceeded)
 	return testTimeout && oracleTimeout && atLeastOne
+}
+
+// recordAsymmetricAck counts a dual-write that exactly one cluster
+// acknowledged. Derived from gemini's own per-store bookkeeping rather than the
+// statement log, so the signal survives a stalled or lossy logger.
+//
+// It deliberately records ACKNOWLEDGEMENT asymmetry, not confirmed divergence.
+// A nil error proves the server acknowledged the write; a non-nil error does
+// NOT prove the write was not applied, because a timed-out server may have
+// committed and merely lost the response. Labelling that as a confirmed
+// one-sided commit would emit a false corruption signal, which is the failure
+// mode this whole change set exists to avoid — so the metric says only what is
+// observable: one side answered, the other did not.
+//
+// Symmetric results (both acknowledged, or neither) are not counted;
+// single-cluster runs (no oracle) are skipped entirely.
+func (ds delegatingStore) recordAsymmetricAck(result mutationResult, outcome string) {
+	if ds.oracleStore == nil {
+		return
+	}
+
+	testAcked := result.testDone && result.testErr == nil
+	oracleAcked := result.oracleDone && result.oracleErr == nil
+
+	if testAcked == oracleAcked {
+		return
+	}
+
+	ackedStore := ds.oracleStore.name()
+	if testAcked {
+		ackedStore = ds.testStore.name()
+	}
+
+	metrics.MutationAsymmetricAcksTotal.WithLabelValues(outcome, ackedStore).Inc()
 }
 
 func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef.Stmt) error {
@@ -690,14 +758,24 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 				// DELETE on both stores so the partition is deterministically
 				// empty for the upcoming validation phase.  On success, return
 				// nil so the partition is NOT marked invalid.
-				if isOnlyTimeoutFailure(cumulativeResult) && ds.compensateAsymmetricWrite(stmt) {
-					return nil
+				if isOnlyTimeoutFailure(cumulativeResult) {
+					if ds.compensateAsymmetricWrite(stmt, ts) {
+						ds.recordAsymmetricAck(cumulativeResult, "compensated")
+						return nil
+					}
+					// Compensation ran but did not fully succeed, so the partition's
+					// cross-cluster state is now unknown even if the ORIGINAL writes
+					// failed symmetrically. Flag it explicitly: the success flags
+					// alone would look symmetric and mutation.run() would leave the
+					// partition valid, silently manufacturing a divergence.
+					mutationErr.CompensationFailed = true
 				}
 
 				// Compensation not applicable or failed — return the
-				// MutationError so mutation.run() can inspect
-				// TestStoreSuccess / OracleStoreSuccess and mark the affected
-				// partitions invalid, preventing a false divergence report.
+				// MutationError so mutation.run() can mark the affected partitions
+				// invalid, preventing a false divergence report.
+				ds.recordAsymmetricAck(cumulativeResult, "uncompensated")
+
 				return mutationErr
 			}
 		}
@@ -722,9 +800,18 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	// on both stores so the partition is deterministically empty before the
 	// validation phase starts.  On success return nil so the partition is not
 	// marked invalid.
-	if isOnlyTimeoutFailure(cumulativeResult) && ds.compensateAsymmetricWrite(stmt) {
-		return nil
+	if isOnlyTimeoutFailure(cumulativeResult) {
+		if ds.compensateAsymmetricWrite(stmt, ts) {
+			ds.recordAsymmetricAck(cumulativeResult, "compensated")
+			return nil
+		}
+		// See the retry-loop site above: a partial compensation failure leaves the
+		// clusters in an unknown state that the symmetric success flags cannot
+		// express, so it must be signalled explicitly.
+		mutationErr.CompensationFailed = true
 	}
+
+	ds.recordAsymmetricAck(cumulativeResult, "uncompensated")
 
 	ds.getLogger().Error("mutation failed after all retry attempts",
 		zap.Int("total_attempts", maxAttempts),

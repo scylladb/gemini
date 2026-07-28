@@ -27,6 +27,7 @@ import (
 // mockStoreLoader is a mock implementation of storeLoader interface
 type mockStoreLoader struct {
 	mock.Mock
+	nameStr string
 }
 
 func (m *mockStoreLoader) Init() error {
@@ -54,6 +55,5 @@ func (m *mockStoreLoader) Close() error {
 }
 
 func (m *mockStoreLoader) name() string {
-	args := m.Called()
-	return args.String(0)
+	return m.nameStr
 }

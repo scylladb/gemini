@@ -22,10 +22,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -142,6 +144,99 @@ func TestDelegatingStore_Mutate_BothFail_ReturnsError(t *testing.T) {
 	stmt := typedef.SimpleStmt("DELETE FROM ks.t WHERE k=1", typedef.DeleteSingleRowType)
 	err := ds.Mutate(t.Context(), stmt)
 	require.Error(t, err)
+}
+
+// TestDelegatingStore_Mutate_PartialCompensationFlagsInvalidation pins the one
+// case the per-store success flags cannot express.
+//
+// When BOTH original writes time out, TestStoreSuccess and OracleStoreSuccess
+// are equal (both false) — yet each server may independently have committed,
+// because a timeout says nothing about whether the write applied. Compensation
+// exists to collapse that ambiguity by deleting the partition on both sides. If
+// it only half-succeeds (test erased, oracle not), the clusters are genuinely
+// different while the flags still look symmetric.
+//
+// Without CompensationFailed, mutation.run's `OracleStoreSuccess !=
+// TestStoreSuccess` check is false, MarkInvalid is never called, and the
+// partition stays in validation coverage — so gemini reports a divergence it
+// created itself. That is the exact false-positive class this change set exists
+// to eliminate.
+func TestDelegatingStore_Mutate_PartialCompensationFlagsInvalidation(t *testing.T) {
+	t.Parallel()
+
+	timeout := context.DeadlineExceeded
+	// Two attempts each (mutationRetries=1), then the compensating DELETE:
+	// it succeeds on test and fails on oracle, leaving the partition erased on
+	// one cluster and possibly still present on the other.
+	test := &fakeStore{nameStr: "test", mutateSeq: []error{timeout, timeout, nil}}
+	oracle := &fakeStore{
+		nameStr:   "oracle",
+		mutateSeq: []error{timeout, timeout, errors.New("compensating delete failed")},
+	}
+
+	ds := &delegatingStore{
+		inflight:            new(sync.WaitGroup),
+		testStore:           test,
+		oracleStore:         oracle,
+		mutationRetries:     1,
+		mutationRetrySleep:  1 * time.Millisecond,
+		minimumDelay:        1 * time.Millisecond,
+		partitionKeyColumns: typedef.Columns{{Name: "pk", Type: typedef.TypeInt}},
+		keyspaceAndTable:    "ks.t",
+	}
+
+	stmt := &typedef.Stmt{
+		PartitionKeys: []typedef.PartitionKeys{
+			{Values: typedef.NewValuesFromMap(map[string][]any{"pk": {1}})},
+		},
+		Query: "INSERT INTO ks.t(pk) VALUES (?)",
+	}
+
+	err := ds.Mutate(t.Context(), stmt)
+	require.Error(t, err, "a half-successful compensation must not be reported as success")
+
+	var mutErr *MutationError
+	require.ErrorAs(t, err, &mutErr)
+
+	// The precondition that makes this bug invisible: the flags agree.
+	require.Equal(t, mutErr.TestStoreSuccess, mutErr.OracleStoreSuccess,
+		"precondition: both original writes timed out, so the flags look symmetric")
+
+	assert.True(t, mutErr.CompensationFailed,
+		"partial compensation must be signalled explicitly; the success flags cannot express it")
+}
+
+func TestDelegatingStore_Mutate_AsymmetricCommit_IncrementsMetric(t *testing.T) {
+	t.Parallel()
+	// Unique store names so this test owns its own label vector element and
+	// does not race the global counter against other parallel tests.
+	const testName, oracleName = "test-asym-uncomp", "oracle-asym-uncomp"
+
+	counter := metrics.MutationAsymmetricAcksTotal.WithLabelValues("uncompensated", testName)
+	before := testutil.ToFloat64(counter)
+
+	// Test commits on the first attempt; oracle fails every attempt with a
+	// non-timeout error, so compensation does not apply and the divergence is
+	// surfaced as an uncompensated asymmetric commit on the test cluster.
+	test := &fakeStore{nameStr: testName, mutateSeq: []error{nil, nil}}
+	oracle := &fakeStore{nameStr: oracleName, mutateSeq: []error{errors.New("oracle-fail"), errors.New("oracle-fail")}}
+
+	ds := &delegatingStore{
+		inflight:             new(sync.WaitGroup),
+		testStore:            test,
+		oracleStore:          oracle,
+		mutationRetries:      1, // two attempts total
+		mutationRetrySleep:   1 * time.Millisecond,
+		minimumDelay:         1 * time.Millisecond,
+		serverSideTimestamps: true,
+	}
+
+	stmt := typedef.SimpleStmt("UPDATE ks.t SET v=1 WHERE k=1", typedef.UpdateStatementType)
+	err := ds.Mutate(t.Context(), stmt)
+	require.Error(t, err)
+
+	assert.Equal(t, before+1, testutil.ToFloat64(counter),
+		"asymmetric commit (test committed, oracle failed) must increment the divergence counter")
 }
 
 func TestDelegatingStore_Mutate_ContextCanceledDuringBackoff_ReturnsNil(t *testing.T) {
