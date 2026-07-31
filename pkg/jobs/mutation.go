@@ -114,33 +114,64 @@ func (m *Mutation) run(ctx context.Context) error {
 		return context.Canceled
 	}
 
+	var mutErr *store.MutationError
+	isMutationErr := errors.As(err, &mutErr)
+
+	// Whether the partition is still trustworthy is decided FIRST, independent of
+	// how the write failed. Nesting this under the deadline check would let every
+	// non-timeout asymmetric failure through: if the test store commits and the
+	// oracle returns, say, Unavailable, the write is just as asymmetric as a
+	// timeout, but the error is not DeadlineExceeded, so the partition would stay
+	// in validation coverage and gemini would later report its own divergence as a
+	// product bug.
+	//
+	// Two independent reasons to distrust the partition:
+	//
+	//   1. Asymmetric acknowledgement — one cluster took the write and the other
+	//      did not, so their contents may differ. OracleStoreSuccess is only set
+	//      true when an oracle is configured (see delegatingStore.Mutate), so this
+	//      is safe when oracleStore == nil.
+	//   2. Failed compensation — the compensating DELETE did not fully succeed.
+	//      This one is NOT implied by the flags: when both original writes time
+	//      out the flags are equal (both false) even though each server may
+	//      independently have committed. Compensation is what collapses that
+	//      ambiguity, so if it half-succeeds the clusters can genuinely differ
+	//      while the flags still look symmetric.
+	if isMutationErr &&
+		(mutErr.OracleStoreSuccess != mutErr.TestStoreSuccess || mutErr.CompensationFailed) {
+		// Whether the clusters actually diverged is UNKNOWN — a timed-out server
+		// may have applied the write and lost the response — so this is reported as
+		// a possible divergence, not a confirmed one. Claiming otherwise would give
+		// operators a false corruption signal. Surfaced at Warn rather than
+		// accumulating silently, and the affected partitions are marked invalid so
+		// validation skips them instead of reporting a mismatch gemini caused.
+		m.logger.Warn("write left partitions in an unknown state, marking them invalid",
+			zap.Int("partition_count", len(mutateStmt.PartitionKeys)),
+			zap.String("query_type", mutateStmt.QueryType.String()),
+			zap.Bool("asymmetric_ack", mutErr.TestStoreSuccess != mutErr.OracleStoreSuccess),
+			zap.Bool("compensation_failed", mutErr.CompensationFailed),
+			zap.Bool("test_store_success", mutErr.TestStoreSuccess),
+			zap.Bool("oracle_store_success", mutErr.OracleStoreSuccess),
+			zap.Bool("timed_out", errors.Is(err, context.DeadlineExceeded)),
+		)
+
+		for i := range mutateStmt.PartitionKeys {
+			m.statement.MarkInvalid(&mutateStmt.PartitionKeys[i])
+		}
+	}
+
 	// For context deadline expirations (CQL RequestTimeout or job shutdown), don't
 	// count as data errors. This covers both the raw error and MutationError whose
 	// FinalError is DeadlineExceeded (all retries timed out on a slow CI runner).
-	// Exception: if the stores ended up asymmetric (one committed, the other timed
-	// out on all retries), mark the affected partitions invalid so the validation
-	// phase skips them rather than reporting a false divergence.
-	// OracleStoreSuccess is only set true when an oracle is configured (see
-	// delegatingStore.Mutate), so this check is safe when oracleStore == nil.
+	// Any partition invalidation the timeout warranted has already happened above.
 	if errors.Is(err, context.DeadlineExceeded) {
-		var mutErr *store.MutationError
-		if errors.As(err, &mutErr) && mutErr.OracleStoreSuccess != mutErr.TestStoreSuccess {
-			for i := range mutateStmt.PartitionKeys {
-				m.logger.Debug("marking partition invalid due to asymmetric write timeout",
-					zap.String("partition_id", mutateStmt.PartitionKeys[i].ID.String()),
-					zap.Bool("test_store_success", mutErr.TestStoreSuccess),
-					zap.Bool("oracle_store_success", mutErr.OracleStoreSuccess),
-				)
-				m.statement.MarkInvalid(&mutateStmt.PartitionKeys[i])
-			}
-		}
 		return nil
 	}
 
 	// If this is a comprehensive mutation error (all retries failed for a non-timeout
-	// reason), surface it as a write error.
-	var mutationFailErr *store.MutationError
-	if errors.As(err, &mutationFailErr) {
+	// reason), surface it as a write error. Invalidation above and error accounting
+	// here are independent: an asymmetric non-timeout failure needs BOTH.
+	if isMutationErr {
 		je := &joberror.JobError{
 			Err:       err,
 			Timestamp: time.Now(),
@@ -210,6 +241,21 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 		if errors.Is(err, context.Canceled) {
 			return nil
+		}
+
+		if errors.Is(err, statements.ErrNoMutationCandidates) {
+			// Permanent misconfiguration: the configured ratios leave nothing
+			// this worker is allowed to generate (e.g. a no-delete worker on a
+			// table whose DeleteRatio is 1.0). Retrying can never recover, so
+			// stop loudly instead of spinning on the error forever.
+			m.logger.Error("mutation worker cannot generate any statement under its filter",
+				zap.String("table", m.table.Name),
+				zap.Bool("deletes_enabled", m.delete),
+				zap.Error(err),
+			)
+			m.stopFlag.SetSoft(true)
+
+			return err
 		}
 
 		if errors.Is(err, ErrNoStatement) || errors.Is(err, statements.ErrNoTrackedRows) {

@@ -51,6 +51,77 @@ curl http://localhost:9090/metrics
 | `validated_rows` | Counter | Successfully validated rows by table |
 | `execution_errors` | Counter | Execution errors by type |
 
+### Dual-Write Divergence
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `mutation_asymmetric_acks_total` | Counter | Dual-write mutations acknowledged by one cluster but not the other |
+| `mutation_compensation_failures_total` | Counter | Compensating whole-partition `DELETE`s that failed, by the cluster whose delete failed |
+
+Labels:
+
+| Label | Values | Meaning |
+|-------|--------|---------|
+| `outcome` | `compensated` | A best-effort whole-partition `DELETE` was issued to **both** clusters, making the partition deterministically empty regardless of which side actually committed. The run continues and the partition stays valid. |
+| `outcome` | `uncompensated` | Compensation did not apply or failed. The affected partitions were marked invalid so validation skips them. |
+| `acked_store` | `test` / `oracle` | The cluster that **did** acknowledge the write. |
+
+**This counts acknowledgements, not confirmed divergence.** A non-nil error from a
+store proves it did not acknowledge; it does *not* prove the write was never
+applied, because a timed-out server may have committed and lost the response.
+Treat a non-zero value as "the dual write may not have stayed symmetric — verify
+before trusting validation results from this run", **not** as "the clusters are
+definitely inconsistent". The metric is derived from gemini's own per-store
+bookkeeping, not from the statement log, so it stays accurate even when the
+logger is stalled or back-pressured.
+
+Only emitted when an oracle cluster is configured.
+
+Example alert — any asymmetry at all is worth a look, since a healthy run should
+produce none:
+
+```promql
+sum(increase(gemini_mutation_asymmetric_acks_total[10m])) by (outcome, acked_store) > 0
+```
+
+Uncompensated asymmetry is the more serious case (partitions were dropped from
+validation coverage rather than repaired):
+
+```promql
+sum(rate(gemini_mutation_asymmetric_acks_total{outcome="uncompensated"}[5m])) > 0
+```
+
+#### Compensation failures
+
+`mutation_compensation_failures_total` is the companion signal. Compensation
+runs after a write times out and issues a whole-partition `DELETE` to **both**
+clusters, forcing the partition to a known-empty state so an ambiguous timeout
+cannot become a divergence. A failure means that collapse did not happen — the
+partition may hold a committed-but-timed-out write on one cluster and nothing on
+the other.
+
+This matters even when the acknowledgement metric stays flat. If *both* original
+writes time out, the two success flags are equal and no asymmetric ack is
+recorded, yet each server may independently have committed. A half-successful
+compensation in that state leaves the clusters genuinely different. Gemini marks
+those partitions invalid so validation skips them, so this never produces a false
+bug report — but a sustained non-zero rate means the run is steadily losing
+partition coverage and its results are correspondingly weaker.
+
+Invalidation is driven by the asymmetry itself, not by the error kind: a write
+that commits on one cluster and fails on the other with any error — timeout,
+`Unavailable`, `WriteFailure` — takes its partitions out of validation coverage.
+Only the *error accounting* distinguishes timeouts (exempt, to keep a slow
+runner from exhausting the error budget) from real failures (charged).
+
+```promql
+sum(rate(gemini_mutation_compensation_failures_total[5m])) by (store) > 0
+```
+
+> **Note on naming:** metric names in the tables above are written without the
+> registry prefix. All gemini metrics are exported with a `gemini_` prefix, so
+> the counter above is queried as `gemini_mutation_asymmetric_acks_total`.
+
 ### Statement Logger
 
 | Metric | Type | Description |

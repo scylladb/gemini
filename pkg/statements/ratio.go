@@ -15,6 +15,7 @@
 package statements
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -239,18 +240,77 @@ func (c *RatioController) buildCDFs(ratios Ratios) {
 	}
 }
 
-// GetMutationStatementType returns a mutation statement type (Insert, Update, Delete) based on configured ratios
-func (c *RatioController) GetMutationStatementType(filter ...StatementType) StatementType {
-	r := c.random.Float64()
+// ErrNoMutationCandidates is returned by GetMutationStatementType when the
+// requested filter leaves no mutation type with non-zero probability mass —
+// e.g. every type was filtered, or the only surviving types have a ratio of
+// zero. There is no correct statement to generate in that case, so the caller
+// must handle it rather than receive an arbitrary (and possibly explicitly
+// excluded) type.
+var ErrNoMutationCandidates = errors.New(
+	"no mutation statement type available: every type with a non-zero ratio was filtered out",
+)
 
-	for i, cdf := range c.mutationCDF {
-		if r <= cdf && !slices.Contains(filter, StatementType(i)) {
-			return StatementType(i)
+// GetMutationStatementType picks a mutation statement type (insert/update/delete)
+// weighted by the configured ratios. Types passed in filter are excluded and
+// their probability mass is redistributed PROPORTIONALLY across the remaining
+// types rather than leaking into a hardcoded fallback.
+//
+// A filtered type is never returned. When no candidate survives the filter the
+// method reports ErrNoMutationCandidates instead of guessing: returning a type
+// the caller explicitly excluded would fabricate exactly the disallowed
+// statement (e.g. a DELETE during warmup) that the filter exists to prevent.
+//
+// The previous implementation walked the cumulative CDF and, when the matching
+// bucket was filtered, fell through to `return StatementTypeInsert`. That dumped
+// the entire filtered mass onto insert: when deletes were filtered (warmup /
+// no-delete modes) the configured insert:update proportion was silently skewed,
+// updates never received any of the freed delete mass, and inserts were
+// generated even when InsertRatio was zero. Redistributing over the surviving
+// weights fixes all three and generalizes to filtering any type.
+func (c *RatioController) GetMutationStatementType(filter ...StatementType) (StatementType, error) {
+	// Reconstruct per-type weights from the cumulative CDF and sum the mass of
+	// the non-filtered types.
+	var weights [MutationStatementsCount]float64
+	var total, prev float64
+	for i := range c.mutationCDF {
+		weights[i] = c.mutationCDF[i] - prev
+		prev = c.mutationCDF[i]
+		if !slices.Contains(filter, StatementType(i)) {
+			total += weights[i]
 		}
 	}
 
-	// Fallback (should not happen with valid CDFs)
-	return StatementTypeInsert
+	if total <= 0 {
+		return 0, ErrNoMutationCandidates
+	}
+
+	// Sample within the surviving mass, then walk the non-filtered types.
+	// Float64() is in [0,1) so r is in [0,total); the strict `r < acc` guard
+	// skips zero-weight types (e.g. InsertRatio == 0) instead of returning them.
+	r := c.random.Float64() * total
+	last := StatementTypeCount
+	var acc float64
+	for i := range weights {
+		if slices.Contains(filter, StatementType(i)) || weights[i] <= 0 {
+			continue
+		}
+
+		acc += weights[i]
+		if r < acc {
+			return StatementType(i), nil
+		}
+
+		last = StatementType(i)
+	}
+
+	// Unreachable unless floating-point accumulation leaves r >= acc on the
+	// final bucket. Fall back to the last surviving candidate — never a
+	// filtered or zero-weight one. total > 0 guarantees last was assigned.
+	if last == StatementTypeCount {
+		return 0, ErrNoMutationCandidates
+	}
+
+	return last, nil
 }
 
 // GetValidationStatementType returns a validation statement type (currently only Select)

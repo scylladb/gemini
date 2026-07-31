@@ -187,6 +187,55 @@ var (
 		},
 	)
 
+	// MutationAsymmetricAcksTotal counts dual-write mutations acknowledged by one
+	// cluster but not the other, detected from gemini's own per-store success
+	// bookkeeping (MutationError.TestStoreSuccess vs OracleStoreSuccess) rather
+	// than from the lossy statement log.
+	//
+	// This measures ACKNOWLEDGEMENTS, not commits, and the distinction is
+	// load-bearing: when the other store failed with a timeout its commit state is
+	// genuinely unknown — the server may well have applied the write and lost the
+	// response. Reporting that as a confirmed divergence would hand operators
+	// exactly the false-positive corruption signal this metric exists to avoid. A
+	// non-zero value means "the dual write may not have stayed symmetric" — worth
+	// investigating before trusting validation results from the same run — not
+	// "the clusters are definitely inconsistent".
+	//
+	// Labels: "outcome" is how the asymmetry was resolved (compensated = a
+	// best-effort whole-partition DELETE was issued to both clusters, which makes
+	// the partition deterministically empty regardless of which side actually
+	// committed; uncompensated = the affected partitions were marked invalid
+	// instead). "acked_store" is the cluster that did acknowledge. Only counted
+	// when an oracle cluster is configured.
+	MutationAsymmetricAcksTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "mutation_asymmetric_acks_total",
+			Help: "Total dual-write mutations acknowledged by one cluster but not the other, " +
+				"by resolution outcome and acknowledging cluster. Possible divergence, not confirmed: " +
+				"a timed-out cluster may still have committed.",
+		},
+		[]string{"outcome", "acked_store"},
+	)
+
+	// MutationCompensationFailuresTotal counts compensating whole-partition
+	// DELETEs that failed, labelled by the cluster whose delete failed.
+	//
+	// Compensation runs after a write times out, to force the partition to a
+	// known-empty state on BOTH clusters so an ambiguous timeout cannot turn into
+	// a divergence. A failure here means that collapse did not happen: the
+	// partition may now hold a committed-but-timed-out write on one cluster and
+	// nothing on the other. The affected partitions are marked invalid so
+	// validation skips them, but a sustained non-zero rate means the run is losing
+	// partition coverage and its results are correspondingly less meaningful.
+	MutationCompensationFailuresTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "mutation_compensation_failures_total",
+			Help: "Total compensating whole-partition DELETEs that failed, by the cluster whose delete failed. " +
+				"Affected partitions are marked invalid and dropped from validation coverage.",
+		},
+		[]string{"store"},
+	)
+
 	// StatementLoggerMalformedTotal counts statement log items dropped by the
 	// committer because the number of partition-key values bound did not match
 	// the _logs INSERT arity (e.g. an item built with empty PartitionKeys.Values
@@ -311,6 +360,8 @@ func init() {
 		StatementLoggerOverflowItems,
 		StatementLoggerOverflowTotal,
 		StatementLoggerMalformedTotal,
+		MutationAsymmetricAcksTotal,
+		MutationCompensationFailuresTotal,
 		DeletedPartitionsHeapEvictions,
 		DeletedPartitionsSampledOut,
 		StatementLoggerFlushes,
