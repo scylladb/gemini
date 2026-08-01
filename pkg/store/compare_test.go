@@ -30,6 +30,47 @@ import (
 // Helper to quickly construct a row with arbitrary column order
 func makeRow(cols []string, vals []any) Row { return NewRow(cols, vals) }
 
+// TestCompareCollectedRows_HeterogeneousLayout_Fallback feeds rows whose column
+// order differs per row. gocql never produces this, but the comparator must
+// still align rows by key identity (the nameComparator fallback path, taken when
+// uniformKeyIndices reports the layouts are not uniform).
+func TestCompareCollectedRows_HeterogeneousLayout_Fallback(t *testing.T) {
+	t.Parallel()
+
+	table := &typedef.Table{
+		PartitionKeys: []typedef.ColumnDef{
+			{Name: "pk1", Type: typedef.TypeInt},
+			{Name: "pk2", Type: typedef.TypeText},
+		},
+		ClusteringKeys: []typedef.ColumnDef{
+			{Name: "ck1", Type: typedef.TypeInt},
+			{Name: "ck2", Type: typedef.TypeInt},
+		},
+	}
+
+	// Columns shuffled per row to force the name-based fallback comparator.
+	oracle := Rows{
+		makeRow([]string{"val", "ck2", "pk2", "pk1", "ck1"}, []any{100, 2, "A", 1, 1}), // (1,"A",1,2)
+		makeRow([]string{"ck1", "pk1", "val", "pk2", "ck2"}, []any{1, 1, 200, "B", 1}), // (1,"B",1,1)
+		makeRow([]string{"pk1", "pk2", "ck1", "ck2", "val"}, []any{2, "A", 2, 3, 300}), // (2,"A",2,3)
+	}
+	test := Rows{
+		makeRow([]string{"ck2", "pk2", "ck1", "val", "pk1"}, []any{2, "A", 1, 101, 1}), // differs only in val (100)
+		makeRow([]string{"pk1", "ck1", "ck2", "val", "pk2"}, []any{1, 1, 1, 200, "B"}),
+		makeRow([]string{"val", "ck1", "pk2", "ck2", "pk1"}, []any{300, 2, "A", 3, 2}),
+	}
+
+	res := CompareCollectedRows(table, test, oracle)
+
+	assert.Equal(t, 2, res.MatchCount)
+	require.Len(t, res.DifferentRows, 1)
+	diff := res.DifferentRows[0]
+	assert.Equal(t, 1, diff.TestRow.Get("pk1"))
+	assert.Equal(t, "A", diff.TestRow.Get("pk2"))
+	assert.Equal(t, 1, diff.TestRow.Get("ck1"))
+	assert.Equal(t, 2, diff.TestRow.Get("ck2"))
+}
+
 func TestCompareCollectedRows_MultiPKMultiCK_SortingAndDiff(t *testing.T) {
 	t.Parallel()
 
@@ -44,18 +85,24 @@ func TestCompareCollectedRows_MultiPKMultiCK_SortingAndDiff(t *testing.T) {
 		},
 	}
 
-	// Three distinct keys across two partitions, columns shuffled per row
+	// All rows from one SELECT share an identical column layout (gocql returns a
+	// fixed column order per query), so every row here uses the same column order;
+	// the rows themselves are supplied out of key order to exercise the sort. The
+	// columns are deliberately NOT in pk/ck order to confirm the comparator keys
+	// off column identity rather than positional layout.
+	cols := []string{"val", "ck2", "pk2", "pk1", "ck1"}
+	// Three distinct keys across two partitions.
 	oracle := Rows{
-		makeRow([]string{"val", "ck2", "pk2", "pk1", "ck1"}, []any{100, 2, "A", 1, 1}), // (1,"A",1,2)
-		makeRow([]string{"ck1", "pk1", "val", "pk2", "ck2"}, []any{1, 1, 200, "B", 1}), // (1,"B",1,1)
-		makeRow([]string{"pk1", "pk2", "ck1", "ck2", "val"}, []any{2, "A", 2, 3, 300}), // (2,"A",2,3)
+		makeRow(cols, []any{300, 3, "A", 2, 2}), // (pk1=2, pk2="A", ck1=2, ck2=3)
+		makeRow(cols, []any{100, 2, "A", 1, 1}), // (pk1=1, pk2="A", ck1=1, ck2=2)
+		makeRow(cols, []any{200, 1, "B", 1, 1}), // (pk1=1, pk2="B", ck1=1, ck2=1)
 	}
 
-	// Same keys and column sets, but one row differs by value only
+	// Same keys, supplied in a different row order; one row differs by value only.
 	test := Rows{
-		makeRow([]string{"ck2", "pk2", "ck1", "val", "pk1"}, []any{2, "A", 1, 101, 1}), // differs only in val vs oracle (100)
-		makeRow([]string{"pk1", "ck1", "ck2", "val", "pk2"}, []any{1, 1, 1, 200, "B"}),
-		makeRow([]string{"val", "ck1", "pk2", "ck2", "pk1"}, []any{300, 2, "A", 3, 2}),
+		makeRow(cols, []any{200, 1, "B", 1, 1}), // matches oracle (1,"B",1,1)
+		makeRow(cols, []any{101, 2, "A", 1, 1}), // differs only in val vs oracle (100) for (1,"A",1,2)
+		makeRow(cols, []any{300, 3, "A", 2, 2}), // matches oracle (2,"A",2,3)
 	}
 
 	res := CompareCollectedRows(table, test, oracle)

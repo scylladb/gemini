@@ -97,11 +97,16 @@ func TestValidationTracking_MissingAndRelease(t *testing.T) {
 	parts.ValidationSuccess(&key)
 	key.Release()
 
+	// The partition at slot 0 is still live (never replaced), so releasing the
+	// last reference must NOT wipe its validation data: a live partition whose
+	// refCount transiently reaches zero between borrows keeps its history. Its
+	// mappings are removed only once it is retired (replaced) and its final
+	// reference is released.
 	parts.ValidationFailure(&key)
 	first, last, failure, recent, sc := parts.ValidationStats(key.ID)
-	require.Zero(t, first)
-	require.Zero(t, last)
-	require.Zero(t, failure)
-	require.Empty(t, recent)
-	require.Zero(t, sc)
+	require.NotZero(t, first, "live partition keeps its recorded first-success across a transient release")
+	require.NotZero(t, last)
+	require.NotZero(t, failure)
+	require.Len(t, recent, 1)
+	require.EqualValues(t, 1, sc)
 }

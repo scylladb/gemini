@@ -246,7 +246,18 @@ func (w *window) drainReady(nowNs int64, batchSize int, send func(typedef.Partit
 			return onDones, time.Duration(front.readyAtNs - nowNs)
 		}
 
-		if !send(front.keys) {
+		// On the final emission the consumer (validator) owns the release: we
+		// hand it the onDone callback as the keys' Release so the deleted
+		// partition's UUID is retired only after re-validation completes, not
+		// the instant the keys leave the tracker. Intermediate emissions keep
+		// Release nil — the entry is re-scheduled and stays referenced.
+		final := front.bucket+1 >= len(w.buckets)
+		emitKeys := front.keys
+		if final {
+			emitKeys.Release = front.onDone
+		}
+
+		if !send(emitKeys) {
 			// Consumer not ready (channel full); retry shortly.
 			w.refreshNextReadyLocked()
 			return onDones, 10 * time.Millisecond
@@ -255,12 +266,10 @@ func (w *window) drainReady(nowNs int64, batchSize int, send func(typedef.Partit
 		processed++
 		e, _ := w.rings[ri].popFront()
 
-		if e.bucket+1 >= len(w.buckets) {
-			// Final emission done; the original keys are released once, later.
+		if final {
+			// Final emission done; release ownership was transferred to the
+			// consumer via emitKeys.Release above, so nothing to run here.
 			w.live--
-			if e.onDone != nil {
-				onDones = append(onDones, e.onDone)
-			}
 			continue
 		}
 

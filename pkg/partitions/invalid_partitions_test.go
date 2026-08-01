@@ -124,6 +124,92 @@ func TestMarkInvalid_NoLimit(t *testing.T) {
 	assert.Equal(t, total, parts.InvalidCount())
 }
 
+// TestMarkInvalid_ReplacedSlotReportsButDoesNotMark is a regression test for two
+// interacting review findings:
+//
+//   - Finding 1: a divergence discovered on a partition whose slot has since been
+//     replaced (the deleted-partition re-validation path) must still be
+//     reportable — MarkInvalid must return true.
+//   - Finding 3: that reused slot now holds a fresh, valid partition, so it must
+//     NOT be added to the invalid set or counted toward the maxInvalid budget;
+//     doing so would skip a valid partition and could trigger a premature stop.
+func TestMarkInvalid_ReplacedSlotReportsButDoesNotMark(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 4)
+
+	// Borrow the partition currently at slot 0, then replace it. The borrowed
+	// keys keep the old UUID mapped (uuidToIdx) alive, mirroring a deleted
+	// partition still awaiting re-validation.
+	oldKey := parts.Get(0)
+	oldKeys := parts.Replace(0) // installs a fresh, valid partition at slot 0
+	require.NotEqual(t, oldKey.ID, parts.Get(0).ID, "slot 0 must hold a new partition after Replace")
+
+	// The divergence is real and must be reportable even though the slot moved on.
+	assert.True(t, parts.MarkInvalid(&oldKey), "divergence on a replaced partition must still be reported")
+
+	// ...but the fresh, valid partition now occupying slot 0 must not be marked
+	// or counted.
+	assert.False(t, parts.IsInvalid(0), "replaced slot must not be flagged invalid")
+	assert.Equal(t, uint64(0), parts.InvalidCount(), "replaced slot must not inflate the invalid count")
+
+	oldKey.Release()
+	if oldKeys.Release != nil {
+		oldKeys.Release()
+	}
+}
+
+// TestMarkInvalid_ConcurrentReplaceNoInflation hammers MarkInvalid against a
+// concurrent Replace of the same slot (the finding-3 race) and asserts the
+// invalid count is never inflated by a freshly-replaced valid slot. Run under
+// -race, it also guards the invalidByIdx/invalidCount bookkeeping.
+func TestMarkInvalid_ConcurrentReplaceNoInflation(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 8)
+
+	const rounds = 2000
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Marker: repeatedly borrows slot 0 and tries to mark it invalid.
+	go func() {
+		defer wg.Done()
+		for range rounds {
+			key := parts.Get(0)
+			parts.MarkInvalid(&key)
+			key.Release()
+		}
+	}()
+
+	// Replacer: repeatedly replaces slot 0 (clears any invalid mark).
+	go func() {
+		defer wg.Done()
+		for range rounds {
+			old := parts.Replace(0)
+			if old.Release != nil {
+				old.Release()
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	// InvalidCount must never exceed the number of slots and must equal the
+	// number of slots actually flagged — a stale mark left on a replaced valid
+	// slot would break this invariant.
+	count := parts.InvalidCount()
+	assert.LessOrEqual(t, count, parts.Len())
+
+	var flagged uint64
+	for i := range parts.Len() {
+		if parts.IsInvalid(i) {
+			flagged++
+		}
+	}
+	assert.Equal(t, flagged, count, "invalidCount must match the number of slots actually flagged (no inflation)")
+}
+
 // TestIsInvalid verifies that IsInvalid correctly reflects the marked state.
 func TestIsInvalid(t *testing.T) {
 	t.Parallel()

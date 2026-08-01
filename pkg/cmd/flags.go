@@ -223,8 +223,8 @@ func setupFlags(cmd *cobra.Command) {
 		IntVarP(&asyncObjectStabilizationAttempts, "async-objects-stabilization-attempts", "", 10,
 			"Maximum number of attempts to validate result sets from MV and SI")
 	cmd.Flags().
-		DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 1*time.Second,
-			"Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
+		DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 2*time.Second,
+			"Maximum backoff delay between validation retry attempts (exponential backoff starting at 100ms)")
 	cmd.Flags().
 		BoolVarP(&useLWT, "use-lwt", "", false, "Emit LWT based updates")
 	cmd.Flags().

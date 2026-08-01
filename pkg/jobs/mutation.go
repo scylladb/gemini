@@ -285,6 +285,7 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 		if m.status.HasReachedErrorCount() {
 			m.stopFlag.SetSoft(true)
+			metrics.WorkerStopEvents.WithLabelValues("mutation", "error_budget").Inc()
 			return ErrMutationJobStopped
 		}
 	}
