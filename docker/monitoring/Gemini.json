@@ -183,7 +183,6 @@
           "id": "labelsToFields",
           "options": {
             "keepLabels": [
-              "stmt_logger",
               "stmt_storage",
               "stmt_type",
               "error",
@@ -203,9 +202,6 @@
               "partition_hash": {
                 "aggregations": [],
                 "operation": "groupby"
-              },
-              "stmt_logger": {
-                "aggregations": []
               },
               "stmt_storage": {
                 "aggregations": [],

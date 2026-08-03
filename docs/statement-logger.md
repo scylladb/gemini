@@ -54,13 +54,14 @@ Each line in the log file represents a partition that had a validation error. Th
 
 ```json
 {
-  "partitionKeys": {"col1": 5, "col2": "value"},
-  "timestamp": "2025-01-20T10:15:30Z",
+  "partitionKeys": [{"partitionKeys": {"col1": 5, "col2": "value"}}],
+  "timestamp": "2026-01-20T10:15:30Z",
   "err": "row mismatch: oracle has 5 rows, test has 3",
   "query": "SELECT * FROM ks.table1 WHERE col1 = ? AND col2 = ?",
   "message": "validation failed",
   "mutationFragments": [...],
-  "statements": [...]
+  "statements": [...],
+  "partial": true
 }
 ```
 
@@ -68,21 +69,26 @@ Each line in the log file represents a partition that had a validation error. Th
 
 | Field | Description |
 |-------|-------------|
-| `partitionKeys` | Map of partition key column names to their values |
+| `partitionKeys` | Array of partitions. Each entry holds its key columns and, if present, `lastValidations` |
 | `timestamp` | When the error was detected |
 | `err` | Error message describing the validation failure |
 | `query` | The SELECT query that detected the mismatch |
 | `message` | Additional context about the error |
 | `mutationFragments` | Low-level mutation data from MUTATION_FRAGMENTS |
-| `statements` | Array of all mutations executed on this partition |
+| `statements` | Array of mutations executed on this partition |
+| `partial` | Present and `true` only when a read of `_logs` broke part way. The two arrays above are then a lower bound, not the whole history |
 
 ### Mutations Array Format
 
-Each entry in the `statements` array represents a mutation:
+Each entry in the `statements` array is one row of the `_logs` table, as
+returned by `SELECT JSON`. The partition key columns of the original table
+appear next to the fields below.
 
 ```json
 {
-  "ts": "2025-01-20T10:14:00Z",
+  "ts": 1768903440000000000,
+  "seq": 41,
+  "ty": "test",
   "statement": "INSERT INTO ks.table1 (col1, col2, val) VALUES (?, ?, ?)",
   "values": ["5", "\"value\"", "\"data\""],
   "host": "192.168.1.10",
@@ -94,7 +100,9 @@ Each entry in the `statements` array represents a mutation:
 
 | Field | Description |
 |-------|-------------|
-| `ts` | Timestamp when statement was executed |
+| `ts` | Time the statement ran, as UTC nanoseconds. Not a CQL timestamp |
+| `seq` | Per-writer counter. It keeps two statements apart that share the same `ts`, `attempt` and `gemini_attempt` |
+| `ty` | Cluster the statement ran on: `oracle` or `test` |
 | `statement` | The CQL query |
 | `values` | Bound parameter values (as strings) |
 | `host` | Host that executed the query |
@@ -118,8 +126,8 @@ cqlsh -e "SELECT * FROM ks_logs.table1_statements WHERE col1 = 5 AND col2 = 'val
 The logs table schema includes:
 - Partition key columns (matching the original table)
 - `ty` - Type: 'oracle' or 'test'
-- `ddl` - Whether it's a DDL statement
-- `ts` - Timestamp
+- `ts` - Time the statement ran, as UTC nanoseconds (`bigint`)
+- `seq` - Per-writer counter that keeps statements of the same `ts` apart
 - `statement` - The CQL query
 - `values` - Bound parameters
 - `host` - Executing host
@@ -127,6 +135,10 @@ The logs table schema includes:
 - `gemini_attempt` - Gemini attempt
 - `error` - Error message
 - `dur` - Duration
+
+The primary key is `((<partition key columns>, ty), ts, attempt, gemini_attempt, seq)`.
+`seq` is the last clustering column. Without it, two statements that share every
+other key column overwrite each other, and the history loses rows.
 
 ## Performance Considerations
 
