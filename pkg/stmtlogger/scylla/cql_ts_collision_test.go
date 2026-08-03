@@ -128,7 +128,7 @@ func TestLineEncoderHeadAtomicity(t *testing.T) {
 		time.Now(), "", "SELECT 1", "boom")
 	e.array("statements")
 	e.endArray(true)
-	e.end()
+	e.end(false)
 
 	n, err := e.Close()
 	require.Error(t, err)
@@ -143,7 +143,7 @@ func TestLineEncoderHeadAtomicity(t *testing.T) {
 	next.endArray(false)
 	next.array("statements")
 	next.endArray(true)
-	next.end()
+	next.end(false)
 
 	_, err = next.Close()
 	require.NoError(t, err)
@@ -151,6 +151,47 @@ func TestLineEncoderHeadAtomicity(t *testing.T) {
 	lines := parseLines(t, buf.Bytes())
 	require.Len(t, lines, 1)
 	assert.Equal(t, "SELECT 2", lines[0].Query)
+}
+
+// TestLineEncoderPartialMarker: a read that breaks halfway still leaves a
+// complete line, so the marker is the only thing that tells a reader the
+// history under it is a lower bound.
+func TestLineEncoderPartialMarker(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	e := newLineEncoder(&buf)
+	e.head(nil, time.Now(), "read broke", "SELECT 1", "partial")
+	e.array("mutationFragments")
+	e.endArray(false)
+	e.array("statements")
+	e.endArray(true)
+	e.end(true)
+
+	_, err := e.Close()
+	require.NoError(t, err)
+
+	lines := parseLines(t, buf.Bytes())
+	require.Len(t, lines, 1)
+	assert.True(t, lines[0].Partial, "a cut-short line must carry the marker")
+
+	buf.Reset()
+
+	full := newLineEncoder(&buf)
+	full.head(nil, time.Now(), "", "SELECT 2", "full")
+	full.array("mutationFragments")
+	full.endArray(false)
+	full.array("statements")
+	full.endArray(true)
+	full.end(false)
+
+	_, err = full.Close()
+	require.NoError(t, err)
+
+	lines = parseLines(t, buf.Bytes())
+	require.Len(t, lines, 1)
+	assert.False(t, lines[0].Partial, "a complete line must not carry the marker")
 }
 
 // TestSameMsNoRowLoss reproduces QATOOLS-318: many workers write to one

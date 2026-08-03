@@ -393,7 +393,7 @@ func TestStatementSink_WritesAndFlushes(t *testing.T) {
 			e.array("statements")
 			e.row(true, json.RawMessage(`{"x":1}`))
 			e.endArray(true)
-			e.end()
+			e.end(false)
 
 			return e.Close()
 		},
@@ -474,7 +474,7 @@ func TestStatementSink_NoInterleaving(t *testing.T) {
 			}
 
 			e.endArray(true)
-			e.end()
+			e.end(false)
 
 			return e.Close()
 		},
@@ -530,7 +530,7 @@ func TestStatementSink_FlushesOnFetchError(t *testing.T) {
 			e.endArray(false)
 			e.array("statements")
 			e.endArray(true)
-			e.end()
+			e.end(false)
 
 			n, _ := e.Close()
 
@@ -591,6 +591,73 @@ func TestStatementSink_WriteFailureIsNotCounted(t *testing.T) {
 	assert.False(t, hasErrorSeries(marker.Error()), "a write failure must not be stamped as recorded")
 }
 
+// TestStatementSink_CancelledMidLineIsCounted: shutdown can cancel the read
+// after the line is already on disk. The line is complete and marked partial, so
+// it must be counted, not reported as never written.
+func TestStatementSink_CancelledMidLineIsCounted(t *testing.T) {
+	t.Parallel()
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			e := newLineEncoder(w)
+			e.head(nil, item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.endArray(false)
+			e.array("statements")
+			e.endArray(true)
+			e.end(true)
+
+			written, _ := e.Close()
+
+			return written, newReadError(context.Canceled)
+		},
+	}
+
+	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
+
+	t.Cleanup(lg.closeSinks)
+
+	marker := errors.New("cancelled-mid-line-marker")
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(),
+		Query:     "SELECT 1",
+		Message:   "boom",
+		Err:       marker,
+	})
+
+	assert.True(t, hasErrorSeries(marker.Error()), "a line that reached the disk must be counted")
+}
+
+// TestStatementSink_CancelledBeforeWriteIsNotCounted: the same shutdown before
+// any byte reached the file records nothing.
+func TestStatementSink_CancelledBeforeWriteIsNotCounted(t *testing.T) {
+	t.Parallel()
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError, _ io.Writer) (int64, error) {
+			return 0, newReadError(context.Canceled)
+		},
+	}
+
+	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
+
+	t.Cleanup(lg.closeSinks)
+
+	marker := errors.New("cancelled-before-write-marker")
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(),
+		Query:     "SELECT 1",
+		Message:   "boom",
+		Err:       marker,
+	})
+
+	assert.False(t, hasErrorSeries(marker.Error()), "nothing on disk must not be stamped as recorded")
+}
+
 // TestStatementSink_LatchesWriteFailure: after the file rejects a line, no
 // later job error may read its history out of _logs. Those reads cost cluster
 // time and cannot reach the disk anymore.
@@ -644,7 +711,7 @@ func TestStatementSink_ReadErrorDoesNotLatch(t *testing.T) {
 			e.endArray(false)
 			e.array("statements")
 			e.endArray(true)
-			e.end()
+			e.end(false)
 
 			written, _ := e.Close()
 
@@ -750,16 +817,28 @@ func TestOpenSinks_ClosesOnPartialFailure(t *testing.T) {
 	lg := &Logger{logger: zaptest.NewLogger(t)}
 
 	oraclePath := filepath.Join(t.TempDir(), "oracle.jsonl")
+	boom := errors.New("second file refused to open")
 
-	// A null byte is an invalid path on every supported system.
-	err := lg.openSinks(oraclePath, "/tmp/test\x00invalid.jsonl")
-	require.Error(t, err)
+	var closed atomic.Int32
+
+	// Reopening the same path succeeds whether or not the first descriptor was
+	// closed, so the double has to report the close itself.
+	lg.openHook = func(name string) (*bufio.Writer, func() error, error) {
+		if name != oraclePath {
+			return nil, nil, boom
+		}
+
+		return bufio.NewWriter(io.Discard), func() error {
+			closed.Add(1)
+
+			return nil
+		}, nil
+	}
+
+	err := lg.openSinks(oraclePath, "/tmp/test-invalid.jsonl")
+	require.ErrorIs(t, err, boom)
 	assert.Nil(t, lg.sinks, "no sink may survive a failed setup")
-
-	// The oracle file opened first; closing it must already have happened, so
-	// opening it again succeeds.
-	require.NoError(t, lg.openSinks(oraclePath, ""))
-	lg.closeSinks()
+	assert.Equal(t, int32(1), closed.Load(), "the file opened before the failure must be closed")
 }
 
 func TestFetchErrors_DedupAndFanout(t *testing.T) {

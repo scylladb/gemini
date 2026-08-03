@@ -346,7 +346,7 @@ func (c *cqlStatements) FetchTo(ctx context.Context, ty stmtlogger.Type, item *j
 	}
 
 	if err != nil {
-		return 0, err
+		return 0, newReadError(err)
 	}
 
 	switch item.StmtType {
@@ -394,7 +394,7 @@ func (c *cqlStatements) FetchTo(ctx context.Context, ty stmtlogger.Type, item *j
 
 		return written, newReadError(readErrs...)
 	case typedef.SelectByIndexStatementType, typedef.SelectFromMaterializedViewStatementType:
-		return 0, errors.New("select by index or materialized view is not supported, skipping job error")
+		return 0, newReadError(errors.New("select by index or materialized view is not supported, skipping job error"))
 	default:
 		return 0, nil
 	}
@@ -431,12 +431,14 @@ func (c *cqlStatements) streamLine(
 		statementsErr = streamStatements(ctx, e, c.session, stmt, values)
 	}
 
-	e.end()
+	// Join, not first-wins: when both reads fail, each names a different query.
+	readErr = errors.Join(statementsErr, fragmentsErr)
+
+	e.end(readErr != nil)
 
 	n, writeErr = e.Close()
 
-	// Join, not first-wins: when both reads fail, each names a different query.
-	return n, writeErr, errors.Join(statementsErr, fragmentsErr)
+	return n, writeErr, readErr
 }
 
 // buildCreateKeyspaceQuery builds the CQL that creates the shared _logs keyspace.

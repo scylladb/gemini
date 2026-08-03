@@ -133,7 +133,15 @@ func (e *lineEncoder) endArray(last bool) {
 	e.raw(`],`)
 }
 
-func (e *lineEncoder) end() {
+// end closes the object. A partial line carries the marker, because a read that
+// broke halfway leaves a syntactically complete line that looks like a full
+// history. Without the marker a reader counts a truncated history as the whole
+// one.
+func (e *lineEncoder) end(partial bool) {
+	if partial {
+		e.raw(`,"partial":true`)
+	}
+
 	e.raw("}\n")
 }
 

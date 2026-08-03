@@ -105,6 +105,9 @@ type stmtLogLine struct {
 	Message    string            `json:"message,omitempty"`
 	Err        string            `json:"err,omitempty"`
 	Statements []json.RawMessage `json:"statements,omitempty"`
+	// Partial marks a line the writer cut short. The counts below it are a
+	// lower bound, never the whole history of the partition.
+	Partial bool `json:"partial,omitempty"`
 }
 type (
 	stmtIndex          map[string][]stmtLogLine
@@ -118,6 +121,9 @@ type (
 		DeleteCount     int        `json:"delete_count"`
 		WriteErrors     int        `json:"write_errors"`
 		DeleteErrors    int        `json:"delete_errors"`
+		// Partial is true when at least one line was cut short. Every count and
+		// every time window here is then a lower bound.
+		Partial bool `json:"partial,omitempty"`
 	}
 )
 
@@ -155,53 +161,89 @@ func buildStmtIndex(path string) stmtIndex {
 	defer func() { _ = f.Close() }()
 	idx := make(stmtIndex)
 
-	// A json.Decoder, not a bufio.Scanner: one line holds a partition's whole
+	// ReadString, not a bufio.Scanner: one line holds a partition's whole
 	// statement history, which has no upper bound. A Scanner stops at its buffer
-	// cap and drops the rest of the file with it.
-	dec := json.NewDecoder(bufio.NewReaderSize(f, stmtReaderBufSize))
+	// cap and drops the rest of the file with it. A malformed line costs only
+	// itself, because the next newline starts a whole record again.
+	r := bufio.NewReaderSize(f, stmtReaderBufSize)
+
+	var malformed int
 
 	for {
-		var top map[string]json.RawMessage
+		raw, readErr := r.ReadString('\n')
 
-		if err = dec.Decode(&top); err != nil {
-			if !errors.Is(err, io.EOF) {
-				// Report what was indexed before the break, and say where it broke.
-				fmt.Fprintf(os.Stderr, "statement log %s: stopped after %d partitions: %v\n", path, len(idx), err)
-			}
-
-			return idx
+		if raw != "" && !indexStmtLine(idx, raw) {
+			malformed++
 		}
-		pkRaw, ok := top["partitionKeys"]
-		if !ok {
+
+		if readErr == nil {
 			continue
 		}
-		var partInfos []struct {
-			PartitionKeys map[string]json.RawMessage `json:"partitionKeys"`
+
+		if !errors.Is(readErr, io.EOF) {
+			fmt.Fprintf(os.Stderr, "statement log %s: stopped after %d partitions: %v\n", path, len(idx), readErr)
 		}
-		if err = json.Unmarshal(pkRaw, &partInfos); err != nil || len(partInfos) == 0 {
-			continue
+
+		if malformed > 0 {
+			fmt.Fprintf(os.Stderr, "statement log %s: skipped %d malformed lines\n", path, malformed)
 		}
-		var line stmtLogLine
-		if q, ok2 := top["query"]; ok2 {
-			_ = json.Unmarshal(q, &line.Query)
-		}
-		if m, ok2 := top["message"]; ok2 {
-			_ = json.Unmarshal(m, &line.Message)
-		}
-		if e, ok2 := top["err"]; ok2 {
-			_ = json.Unmarshal(e, &line.Err)
-		}
-		if stmts, ok2 := top["statements"]; ok2 {
-			var arr []json.RawMessage
-			if err = json.Unmarshal(stmts, &arr); err == nil {
-				line.Statements = arr
-			}
-		}
-		for _, pi := range partInfos {
-			k := stmtFileKeyFromRaw(pi.PartitionKeys)
-			idx[k] = append(idx[k], line)
+
+		return idx
+	}
+}
+
+// indexStmtLine adds one JSONL line to idx and reports whether the line parsed.
+// A line without partition keys is not malformed, it only carries nothing to
+// index.
+func indexStmtLine(idx stmtIndex, raw string) bool {
+	if strings.TrimSpace(raw) == "" {
+		return true
+	}
+
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &top); err != nil {
+		return false
+	}
+
+	pkRaw, ok := top["partitionKeys"]
+	if !ok {
+		return true
+	}
+
+	var partInfos []struct {
+		PartitionKeys map[string]json.RawMessage `json:"partitionKeys"`
+	}
+
+	if err := json.Unmarshal(pkRaw, &partInfos); err != nil || len(partInfos) == 0 {
+		return true
+	}
+
+	var line stmtLogLine
+	if q, ok2 := top["query"]; ok2 {
+		_ = json.Unmarshal(q, &line.Query)
+	}
+	if m, ok2 := top["message"]; ok2 {
+		_ = json.Unmarshal(m, &line.Message)
+	}
+	if e, ok2 := top["err"]; ok2 {
+		_ = json.Unmarshal(e, &line.Err)
+	}
+	if p, ok2 := top["partial"]; ok2 {
+		_ = json.Unmarshal(p, &line.Partial)
+	}
+	if stmts, ok2 := top["statements"]; ok2 {
+		var arr []json.RawMessage
+		if err := json.Unmarshal(stmts, &arr); err == nil {
+			line.Statements = arr
 		}
 	}
+
+	for _, pi := range partInfos {
+		k := stmtFileKeyFromRaw(pi.PartitionKeys)
+		idx[k] = append(idx[k], line)
+	}
+
+	return true
 }
 
 func stmtFileKeyFromRaw(m map[string]json.RawMessage) string {
@@ -319,6 +361,13 @@ func trackHost(seen map[string]struct{}, hosts *[]string, host string) {
 func summariseStatements(lines []stmtLogLine) StmtClusterSummary {
 	s := StmtClusterSummary{}
 	seen := make(map[string]struct{})
+	for _, l := range lines {
+		if l.Partial {
+			s.Partial = true
+
+			break
+		}
+	}
 	for _, entry := range parseStatements(lines) {
 		isWrite, isDel := statementKind(entry.Statement)
 		if !isWrite && !isDel {
@@ -465,6 +514,10 @@ func PrintCorruptionSummary(w io.Writer, entries []CorruptionEntry) {
 		_, _ = fmt.Fprintf(w, "  Partition keys  : %s\n", e.PartitionKeys)
 		_, _ = fmt.Fprintf(w, "  Error kind      : %s\n", e.ErrorKind)
 		_, _ = fmt.Fprintf(w, "  Detected at     : %s\n", e.CorruptionDetectedAt.Format(tsLayout))
+		if e.TestCluster.Partial || e.OracleCluster.Partial {
+			_, _ = fmt.Fprintf(w, "  History         : INCOMPLETE (%s). The counts below are a lower bound\n",
+				partialSides(e.TestCluster.Partial, e.OracleCluster.Partial))
+		}
 		_, _ = fmt.Fprintln(w)
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "  EVENT\tTIME\tDETAIL")
@@ -574,6 +627,17 @@ func optionalTime(t *time.Time) string {
 		return notAvailable
 	}
 	return t.UTC().Format(tsLayout)
+}
+
+func partialSides(test, oracle bool) string {
+	switch {
+	case test && oracle:
+		return "test and oracle"
+	case test:
+		return "test"
+	default:
+		return "oracle"
+	}
 }
 
 func nsToTime(ns uint64) time.Time {

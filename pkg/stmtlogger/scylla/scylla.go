@@ -75,7 +75,9 @@ type (
 		sinks       map[stmtlogger.Type]*lineSink
 		fetchCancel context.CancelFunc
 		fetchHook   func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError, w io.Writer) (int64, error)
-		wg          sync.WaitGroup
+		// openHook is openStatementFile outside tests.
+		openHook func(name string) (*bufio.Writer, func() error, error)
+		wg       sync.WaitGroup
 		// fetchDelay is statementErrorFetchDelay outside tests.
 		fetchDelay        time.Duration
 		malformedWarnOnce sync.Once
@@ -96,6 +98,8 @@ type (
 		Message           string            `json:"message"`
 		MutationFragments []json.RawMessage `json:"mutationFragments"`
 		Statements        []json.RawMessage `json:"statements"`
+		// Partial marks a line whose history was cut short by a read failure.
+		Partial bool `json:"partial,omitempty"`
 	}
 )
 
@@ -236,7 +240,12 @@ func (s *Logger) openSinks(oracleStatements, testStatements string) error {
 			continue
 		}
 
-		w, closer, err := s.openStatementFile(f.name)
+		open := s.openHook
+		if open == nil {
+			open = s.openStatementFile
+		}
+
+		w, closer, err := open(f.name)
 		if err != nil {
 			s.logger.Error("failed to open statements file",
 				zap.Error(err),
@@ -310,13 +319,35 @@ func (s *Logger) writeErrorStatements(ctx context.Context, ty stmtlogger.Type, j
 	switch {
 	case err == nil:
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		// Shutdown cut the queue short. Nothing was written for this job error.
-		s.logger.Debug("statement fetch cancelled before it reached the file",
-			zap.String("type", string(ty)),
-			zap.String("job_error_hash", jobError.HashHex()),
-		)
+		switch {
+		case written == 0:
+			// Shutdown cut the queue short before the line started.
+			s.logger.Debug("statement fetch cancelled before it reached the file",
+				zap.String("type", string(ty)),
+				zap.String("job_error_hash", jobError.HashHex()),
+			)
 
-		return
+			return
+		case !isReadError(err):
+			// The file stopped taking bytes part way through the line, so the
+			// line is not a record of anything.
+			s.logger.Error("shutdown cut the statements file short",
+				zap.Error(err),
+				zap.String("file", sink.name),
+				zap.String("type", string(ty)),
+				zap.String("job_error_hash", jobError.HashHex()),
+			)
+
+			return
+		default:
+			// The line is complete on disk and carries the partial marker, so it
+			// counts like any other short history.
+			s.logger.Warn("shutdown cut the statement history short",
+				zap.Error(err),
+				zap.String("type", string(ty)),
+				zap.String("job_error_hash", jobError.HashHex()),
+			)
+		}
 	case isReadError(err):
 		// The lines that were written are complete and flushed. Only the content
 		// of one partition is missing, so this is not a file failure.

@@ -831,7 +831,7 @@ func TestLogger_StatementSink_Integration(t *testing.T) {
 			e.array("statements")
 			e.row(true, json.RawMessage(`{"stmt":"SELECT"}`))
 			e.endArray(true)
-			e.end()
+			e.end(false)
 
 			return e.Close()
 		},

@@ -68,7 +68,7 @@ func TestStatementSink_JSONLRegression(t *testing.T) {
 			e.array("statements")
 			e.row(true, json.RawMessage(`{"statement":1}`))
 			e.endArray(true)
-			e.end()
+			e.end(false)
 
 			return e.Close()
 		},
