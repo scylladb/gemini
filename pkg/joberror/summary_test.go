@@ -432,6 +432,23 @@ func TestCQLTimestamp_UnmarshalJSON(t *testing.T) {
 			input: `"2026-02-23 12:00:00.000Z"`,
 			want:  time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC),
 		},
+		{
+			// _logs stores ts as a bigint of UTC nanoseconds, so SELECT JSON
+			// returns it unquoted. The subsecond digits must survive.
+			name:  "bare UTC nanoseconds",
+			input: `1771848000123456789`,
+			want:  time.Date(2026, 2, 23, 12, 0, 0, 123456789, time.UTC),
+		},
+		{
+			name:  "bare UTC nanoseconds at a whole second",
+			input: `1771848000000000000`,
+			want:  time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:  "null",
+			input: `null`,
+			want:  time.Time{},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

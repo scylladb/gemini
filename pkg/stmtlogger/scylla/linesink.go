@@ -38,6 +38,11 @@ func newLineSink(name string, w *bufio.Writer, closer func() error) *lineSink {
 
 // Write runs fn with the file locked, then flushes. Flushing per line keeps the
 // file usable for triage while the run is still going.
+//
+// The flush happens even when fn fails. A failed fetch still writes a complete
+// line for the partitions it did read, and that line is only useful once it
+// reaches the disk. A flush error wins over fn's error, because it says the file
+// itself is broken.
 func (s *lineSink) Write(fn func(io.Writer) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -46,11 +51,13 @@ func (s *lineSink) Write(fn func(io.Writer) error) error {
 		return nil
 	}
 
-	if err := fn(s.w); err != nil {
-		return err
+	err := fn(s.w)
+
+	if flushErr := s.w.Flush(); flushErr != nil {
+		return flushErr
 	}
 
-	return s.w.Flush()
+	return err
 }
 
 func (s *lineSink) Close() error {

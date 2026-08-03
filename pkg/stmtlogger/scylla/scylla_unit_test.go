@@ -19,6 +19,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -507,6 +508,70 @@ func TestStatementSink_NoInterleaving(t *testing.T) {
 	for _, l := range lines {
 		assert.Len(t, l.Statements, 8, "a line must carry only its own rows")
 	}
+}
+
+// TestStatementSink_FlushesOnFetchError pins the behaviour a partial fetch
+// depends on: FetchTo returns a read error after writing a complete line, so the
+// sink must still flush or that line never reaches the disk.
+func TestStatementSink_FlushesOnFetchError(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "oracle.jsonl")
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			e := newLineEncoder(w)
+			e.head(nil, item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.endArray(false)
+			e.array("statements")
+			e.endArray(true)
+			e.end()
+
+			n, _ := e.Close()
+
+			return n, errors.New("read failed halfway")
+		},
+	}
+
+	require.NoError(t, lg.openSinks(path, ""))
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(),
+		Query:     "SELECT 1",
+		Message:   "partial",
+	})
+
+	// Read before closing the sink: a flush at Close would hide the bug.
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	lines := parseLines(t, content)
+	require.Len(t, lines, 1, "the line written before the read error must be on disk")
+	assert.Equal(t, "SELECT 1", lines[0].Query)
+
+	lg.closeSinks()
+}
+
+// TestOpenSinks_ClosesOnPartialFailure: the caller gets no logger when this
+// fails, so a file opened before the failure would leak its descriptor.
+func TestOpenSinks_ClosesOnPartialFailure(t *testing.T) {
+	t.Parallel()
+
+	lg := &Logger{logger: zaptest.NewLogger(t)}
+
+	oraclePath := filepath.Join(t.TempDir(), "oracle.jsonl")
+
+	// A null byte is an invalid path on every supported system.
+	err := lg.openSinks(oraclePath, "/tmp/test\x00invalid.jsonl")
+	require.Error(t, err)
+	assert.Nil(t, lg.sinks, "no sink may survive a failed setup")
+
+	// The oracle file opened first; closing it must already have happened, so
+	// opening it again succeeds.
+	require.NoError(t, lg.openSinks(oraclePath, ""))
+	lg.closeSinks()
 }
 
 func TestFetchErrors_DedupAndFanout(t *testing.T) {

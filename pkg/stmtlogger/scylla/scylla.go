@@ -122,11 +122,13 @@ func New(
 	// per-table loop below only creates each table, not the keyspace.
 	l.Debug("dropping existing statement logs keyspace", zap.String("keyspace", keyspace))
 	if err = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec(); err != nil {
+		session.Close()
 		return nil, err
 	}
 
 	l.Debug("creating statement logs keyspace", zap.String("keyspace", keyspace))
 	if err = session.Query(buildCreateKeyspaceQuery(keyspace, repl)).Exec(); err != nil {
+		session.Close()
 		return nil, err
 	}
 
@@ -148,6 +150,7 @@ func New(
 			sourceTable.Name,
 			sourceTable.PartitionKeys, repl)
 		if err != nil {
+			session.Close()
 			return nil, err
 		}
 
@@ -156,6 +159,7 @@ func New(
 
 	l.Debug("waiting for schema agreement")
 	if err = session.AwaitSchemaAgreement(context.Background()); err != nil {
+		session.Close()
 		return nil, errors.Wrap(err, "failed to await schema agreement for keyspace logs")
 	}
 	l.Debug("schema agreement reached")
@@ -165,6 +169,18 @@ func New(
 		logger:     l,
 		session:    session,
 		statements: statements,
+	}
+
+	// Open the sinks before any worker exists. A failure here returns no logger,
+	// so nothing is left to close the session or release workers blocked on ch.
+	logFiles := oracleStatementsFile != "" || testStatementsFile != ""
+	if logFiles {
+		if err = logger.openSinks(oracleStatementsFile, testStatementsFile); err != nil {
+			session.Close()
+			return nil, err
+		}
+	} else {
+		l.Debug("statement file logging disabled: no files provided")
 	}
 
 	// Start a fixed-size worker pool to insert statement logs into Scylla.
@@ -179,17 +195,11 @@ func New(
 	}
 	logger.curWorkers.Store(int32(workerCount))
 
-	if oracleStatementsFile != "" || testStatementsFile != "" {
+	if logFiles {
 		l.Debug("starting error logger goroutine")
-
-		if err = logger.openSinks(oracleStatementsFile, testStatementsFile); err != nil {
-			return nil, err
-		}
-
 		logger.wg.Add(1)
+
 		go logger.fetchErrors(e)
-	} else {
-		l.Debug("statement file logging disabled: no files provided")
 	}
 
 	return logger, nil
@@ -198,26 +208,38 @@ func New(
 func (s *Logger) openSinks(oracleStatements, testStatements string) error {
 	s.sinks = make(map[stmtlogger.Type]*lineSink, 2)
 
-	for ty, name := range map[stmtlogger.Type]string{
-		stmtlogger.TypeOracle: oracleStatements,
-		stmtlogger.TypeTest:   testStatements,
-	} {
-		if name == "" {
+	// A slice, not a map: the second file must not open before the first, or a
+	// failure would report the wrong file and the order would vary per run.
+	files := []struct {
+		ty   stmtlogger.Type
+		name string
+	}{
+		{stmtlogger.TypeOracle, oracleStatements},
+		{stmtlogger.TypeTest, testStatements},
+	}
+
+	for _, f := range files {
+		if f.name == "" {
 			continue
 		}
 
-		w, closer, err := s.openStatementFile(name)
+		w, closer, err := s.openStatementFile(f.name)
 		if err != nil {
 			s.logger.Error("failed to open statements file",
 				zap.Error(err),
-				zap.String("file", name),
-				zap.String("type", string(ty)),
+				zap.String("file", f.name),
+				zap.String("type", string(f.ty)),
 			)
+
+			// Give back whatever already opened, or its descriptor is lost: the
+			// caller gets no logger and cannot close it.
+			s.closeSinks()
+			s.sinks = nil
 
 			return err
 		}
 
-		s.sinks[ty] = newLineSink(name, w, closer)
+		s.sinks[f.ty] = newLineSink(f.name, w, closer)
 	}
 
 	return nil
