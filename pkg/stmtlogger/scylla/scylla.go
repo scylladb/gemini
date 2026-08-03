@@ -46,6 +46,8 @@ const (
 	statementFilePerm       = 0o644
 	// Delay before fetching statements for a job error to ensure all statements are persisted and ready
 	statementErrorFetchDelay = 30 * time.Second
+	// How long Close waits for queued statement fetches before it cancels them.
+	statementFetchDrainTimeout = 2 * time.Minute
 	// Per-batch timeout for inserting statement logs into the Scylla logger
 	// cluster. Without this, a stalled Scylla cluster (e.g. during a nemesis)
 	// hangs the committer forever, fills the LogStmt channel and freezes every
@@ -55,9 +57,12 @@ const (
 
 type (
 	Logger struct {
-		logger  *zap.Logger
-		channel <-chan stmtlogger.Item
-		session *gocql.Session
+		// fetchCtx bounds the error-statement fetches only. The committer must not
+		// share it: it drains its channel to the end on shutdown.
+		fetchCtx context.Context
+		logger   *zap.Logger
+		channel  <-chan stmtlogger.Item
+		session  *gocql.Session
 		// statements holds one *cqlStatements per source table, keyed by
 		// "keyspace.table". The logger is shared across every table in the
 		// schema, so each item is routed to its own table's _logs table whose
@@ -67,11 +72,14 @@ type (
 		statements map[string]*cqlStatements
 		// sinks holds the statements file per cluster side, or is empty when file
 		// logging is off.
-		sinks             map[stmtlogger.Type]*lineSink
-		fetchHook         func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError, w io.Writer) (int64, error)
-		wg                sync.WaitGroup
-		curWorkers        atomic.Int32
+		sinks       map[stmtlogger.Type]*lineSink
+		fetchCancel context.CancelFunc
+		fetchHook   func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError, w io.Writer) (int64, error)
+		wg          sync.WaitGroup
+		// fetchDelay is statementErrorFetchDelay outside tests.
+		fetchDelay        time.Duration
 		malformedWarnOnce sync.Once
+		curWorkers        atomic.Int32
 	}
 
 	// PartitionInfo represents a single partition with its keys and validation data
@@ -207,6 +215,11 @@ func New(
 
 func (s *Logger) openSinks(oracleStatements, testStatements string) error {
 	s.sinks = make(map[stmtlogger.Type]*lineSink, 2)
+	s.fetchCtx, s.fetchCancel = context.WithCancel(context.Background())
+
+	if s.fetchDelay == 0 {
+		s.fetchDelay = statementErrorFetchDelay
+	}
 
 	// A slice, not a map: the second file must not open before the first, or a
 	// failure would report the wrong file and the order would vary per run.
@@ -235,6 +248,8 @@ func (s *Logger) openSinks(oracleStatements, testStatements string) error {
 			// caller gets no logger and cannot close it.
 			s.closeSinks()
 			s.sinks = nil
+			s.fetchCancel()
+			s.fetchCtx, s.fetchCancel = nil, nil
 
 			return err
 		}
@@ -291,17 +306,30 @@ func (s *Logger) writeErrorStatements(ctx context.Context, ty stmtlogger.Type, j
 
 		return err
 	})
-	if err != nil {
+
+	switch {
+	case err == nil:
+	case isReadError(err):
+		// The lines that were written are complete and flushed. Only the content
+		// of one partition is missing, so this is not a file failure.
+		s.logger.Warn("failed to read statements for job error",
+			zap.Error(err),
+			zap.String("type", string(ty)),
+			zap.String("job_error_hash", jobError.HashHex()),
+		)
+	default:
+		// The file did not take the line, or the flush failed. Nothing here
+		// reached the disk in a usable state, so nothing is counted.
 		s.logger.Error("failed to write failed statements",
 			zap.Error(err),
 			zap.String("file", sink.name),
 			zap.String("type", string(ty)),
 			zap.String("job_error_hash", jobError.HashHex()),
 		)
+
+		return
 	}
 
-	// A read error still leaves the lines it managed to write, so anything that
-	// reached the file is still recorded.
 	if written == 0 {
 		return
 	}
@@ -335,10 +363,23 @@ func (s *Logger) fetchErrors(ch <-chan *joberror.JobError) {
 		// all relevant statements to be synced and ready.
 		for _, ty := range storages {
 			wg.Add(1)
+
 			go func(ty stmtlogger.Type) {
 				defer wg.Done()
-				time.Sleep(statementErrorFetchDelay)
-				s.writeErrorStatements(context.Background(), ty, jobErr)
+
+				timer := time.NewTimer(s.fetchDelay)
+				defer timer.Stop()
+
+				// The delay and the fetch both watch fetchCtx. A partition scan is
+				// unbounded, so without this Close would wait for every queued fetch
+				// to page through its whole history.
+				select {
+				case <-timer.C:
+				case <-s.fetchCtx.Done():
+					return
+				}
+
+				s.writeErrorStatements(s.fetchCtx, ty, jobErr)
 			}(ty)
 		}
 	}
@@ -638,6 +679,32 @@ func (s *Logger) Close() error {
 	// close signal, guaranteeing no item is lost. The per-batch timeout
 	// (committerBatchTimeout) is what keeps a stalled Scylla logger
 	// cluster from blocking the worker indefinitely.
-	s.wg.Wait()
+	if s.fetchCancel == nil {
+		s.wg.Wait()
+		return nil
+	}
+
+	// Give the queued statement fetches a bounded window to finish. Each one
+	// pages through a whole partition under the sink lock, so without the cutoff
+	// shutdown waits for the sum of every outstanding scan.
+	done := make(chan struct{})
+
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(statementFetchDrainTimeout):
+		s.logger.Warn("statement fetches did not finish in time; cancelling",
+			zap.Duration("timeout", statementFetchDrainTimeout),
+		)
+		s.fetchCancel()
+		<-done
+	}
+
+	s.fetchCancel()
+
 	return nil
 }

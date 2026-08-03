@@ -358,12 +358,12 @@ func (c *cqlStatements) FetchTo(ctx context.Context, ty stmtlogger.Type, item *j
 			return n, writeErr
 		}
 
-		return n, readErr
+		return n, newReadError(readErr)
 	case typedef.SelectMultiPartitionType, typedef.SelectMultiPartitionRangeStatementType,
 		typedef.DeleteMultiplePartitionsType:
 		var (
 			written  int64
-			lastRead error
+			readErrs []error
 		)
 
 		for i := range len(item.PartitionKeys.Get(c.partitionKeys[0].Name)) {
@@ -385,11 +385,11 @@ func (c *cqlStatements) FetchTo(ctx context.Context, ty stmtlogger.Type, item *j
 			}
 
 			if readErr != nil {
-				lastRead = readErr
+				readErrs = append(readErrs, readErr)
 			}
 		}
 
-		return written, lastRead
+		return written, newReadError(readErrs...)
 	case typedef.SelectByIndexStatementType, typedef.SelectFromMaterializedViewStatementType:
 		return 0, errors.New("select by index or materialized view is not supported, skipping job error")
 	default:
@@ -425,12 +425,8 @@ func (c *cqlStatements) streamLine(
 
 	n, writeErr = e.Close()
 
-	readErr = statementsErr
-	if readErr == nil {
-		readErr = fragmentsErr
-	}
-
-	return n, writeErr, readErr
+	// Join, not first-wins: when both reads fail, each names a different query.
+	return n, writeErr, errors.Join(statementsErr, fragmentsErr)
 }
 
 // buildCreateKeyspaceQuery builds the CQL that creates the shared _logs keyspace.

@@ -17,6 +17,7 @@ package joberror
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,10 +31,9 @@ import (
 )
 
 const (
-	notAvailable   = "-"
-	tsLayout       = "2006-01-02 15:04:05.000 UTC"
-	scannerInitBuf = 32 * 1024 * 1024
-	scannerMaxBuf  = 256 * 1024 * 1024
+	notAvailable      = "-"
+	tsLayout          = "2006-01-02 15:04:05.000 UTC"
+	stmtReaderBufSize = 1024 * 1024
 )
 
 type stmtLogEntry struct {
@@ -154,17 +154,22 @@ func buildStmtIndex(path string) stmtIndex {
 	}
 	defer func() { _ = f.Close() }()
 	idx := make(stmtIndex)
-	sc := bufio.NewScanner(f)
 
-	sc.Buffer(make([]byte, scannerInitBuf), scannerMaxBuf)
-	for sc.Scan() {
-		raw := sc.Bytes()
-		if len(raw) == 0 {
-			continue
-		}
+	// A json.Decoder, not a bufio.Scanner: one line holds a partition's whole
+	// statement history, which has no upper bound. A Scanner stops at its buffer
+	// cap and drops the rest of the file with it.
+	dec := json.NewDecoder(bufio.NewReaderSize(f, stmtReaderBufSize))
+
+	for {
 		var top map[string]json.RawMessage
-		if err = json.Unmarshal(raw, &top); err != nil {
-			continue
+
+		if err = dec.Decode(&top); err != nil {
+			if !errors.Is(err, io.EOF) {
+				// Report what was indexed before the break, and say where it broke.
+				fmt.Fprintf(os.Stderr, "statement log %s: stopped after %d partitions: %v\n", path, len(idx), err)
+			}
+
+			return idx
 		}
 		pkRaw, ok := top["partitionKeys"]
 		if !ok {
@@ -197,7 +202,6 @@ func buildStmtIndex(path string) stmtIndex {
 			idx[k] = append(idx[k], line)
 		}
 	}
-	return idx
 }
 
 func stmtFileKeyFromRaw(m map[string]json.RawMessage) string {

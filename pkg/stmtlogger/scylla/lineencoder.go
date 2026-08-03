@@ -15,6 +15,7 @@
 package scylla
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"time"
@@ -70,17 +71,39 @@ func (e *lineEncoder) field(name string, v any) {
 
 // head opens the object and writes every scalar field of Line. The two array
 // fields follow, streamed by array/row/endArray.
+//
+// The fields are marshaled into a buffer before anything reaches w. A marshal
+// failure after the opening brace would leave a line with no closing brace, and
+// because it does not poison the underlying writer, the next line would be
+// appended to it and both would be unreadable.
 func (e *lineEncoder) head(partitions []PartitionInfo, ts time.Time, errStr, query, message string) {
-	e.raw(`{`)
-	e.field("partitionKeys", partitions)
-	e.field("timestamp", ts)
-
-	if errStr != "" {
-		e.field("err", errStr)
+	if e.err != nil {
+		return
 	}
 
-	e.field("query", query)
-	e.field("message", message)
+	var buf bytes.Buffer
+
+	head := &lineEncoder{w: &buf}
+
+	head.raw(`{`)
+	head.field("partitionKeys", partitions)
+	head.field("timestamp", ts)
+
+	if errStr != "" {
+		head.field("err", errStr)
+	}
+
+	head.field("query", query)
+	head.field("message", message)
+
+	if head.err != nil {
+		e.err = head.err
+		return
+	}
+
+	n, err := e.w.Write(buf.Bytes())
+	e.n += int64(n)
+	e.err = err
 }
 
 func (e *lineEncoder) array(name string) {

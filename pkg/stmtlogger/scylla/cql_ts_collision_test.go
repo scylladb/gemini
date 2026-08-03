@@ -114,6 +114,45 @@ func TestFillArgsBindsTSAndSeq(t *testing.T) {
 	assert.Greater(t, next[partitionKeys.LenValues()+1].(int64), firstSeq)
 }
 
+// TestLineEncoderHeadAtomicity: a marshal failure must leave the writer
+// untouched. A half-written head would merge with the next line, because a
+// marshal failure does not poison the writer the way a write failure does.
+func TestLineEncoderHeadAtomicity(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	e := newLineEncoder(&buf)
+	// A channel cannot be marshaled, so this fails inside head's first field.
+	e.head([]PartitionInfo{{PartitionKeys: map[string]any{"pk0": make(chan int)}}},
+		time.Now(), "", "SELECT 1", "boom")
+	e.array("statements")
+	e.endArray(true)
+	e.end()
+
+	n, err := e.Close()
+	require.Error(t, err)
+	assert.Zero(t, n, "a failed head must report no bytes")
+	assert.Empty(t, buf.Bytes(), "a failed head must write nothing")
+
+	// The same encoder value is never reused, but the writer is: the next line
+	// must still parse on its own.
+	next := newLineEncoder(&buf)
+	next.head(nil, time.Now(), "", "SELECT 2", "ok")
+	next.array("mutationFragments")
+	next.endArray(false)
+	next.array("statements")
+	next.endArray(true)
+	next.end()
+
+	_, err = next.Close()
+	require.NoError(t, err)
+
+	lines := parseLines(t, buf.Bytes())
+	require.Len(t, lines, 1)
+	assert.Equal(t, "SELECT 2", lines[0].Query)
+}
+
 // TestSameMsNoRowLoss reproduces QATOOLS-318: many workers write to one
 // partition inside a single millisecond. While ts was a CQL timestamp all of
 // those rows shared a primary key and only the last one survived. The "same ns"

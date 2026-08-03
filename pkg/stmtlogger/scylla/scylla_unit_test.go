@@ -25,12 +25,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -531,7 +534,7 @@ func TestStatementSink_FlushesOnFetchError(t *testing.T) {
 
 			n, _ := e.Close()
 
-			return n, errors.New("read failed halfway")
+			return n, newReadError(errors.New("read failed halfway"))
 		},
 	}
 
@@ -552,6 +555,66 @@ func TestStatementSink_FlushesOnFetchError(t *testing.T) {
 	assert.Equal(t, "SELECT 1", lines[0].Query)
 
 	lg.closeSinks()
+}
+
+// TestStatementSink_WriteFailureIsNotCounted: the flush counter is what an
+// operator reads to decide the statements file is complete, so a line that never
+// reached the disk must not increment it.
+func TestStatementSink_WriteFailureIsNotCounted(t *testing.T) {
+	t.Parallel()
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError, w io.Writer) (int64, error) {
+			n, _ := w.Write([]byte(`{"partial":`))
+
+			// A bare error, not a readError: the file did not take the line.
+			return int64(n), errors.New("disk full")
+		},
+	}
+
+	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
+
+	t.Cleanup(lg.closeSinks)
+
+	// The flush counter is shared with the other tests in this package, so the
+	// assertion uses a label value only this job error can produce.
+	marker := errors.New("write-failure-not-counted-marker")
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(),
+		Query:     "SELECT 1",
+		Message:   "boom",
+		Err:       marker,
+	})
+
+	assert.False(t, hasErrorSeries(marker.Error()), "a write failure must not be stamped as recorded")
+}
+
+// hasErrorSeries reports whether StatementErrorLastTS holds a series whose
+// error label equals want.
+func hasErrorSeries(want string) bool {
+	ch := make(chan prometheus.Metric, 1024)
+
+	go func() {
+		metrics.StatementErrorLastTS.Collect(ch)
+		close(ch)
+	}()
+
+	for m := range ch {
+		var dto dto.Metric
+		if err := m.Write(&dto); err != nil {
+			continue
+		}
+
+		for _, l := range dto.GetLabel() {
+			if l.GetName() == "error" && l.GetValue() == want {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // TestOpenSinks_ClosesOnPartialFailure: the caller gets no logger when this
@@ -575,21 +638,37 @@ func TestOpenSinks_ClosesOnPartialFailure(t *testing.T) {
 }
 
 func TestFetchErrors_DedupAndFanout(t *testing.T) {
-	lg := &Logger{logger: zaptest.NewLogger(t)}
+	t.Parallel()
 
-	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
+	// Both sinks, or a fetch for the missing side would return before it reaches
+	// the hook and the fan-out half of this test would assert nothing.
+	dir := t.TempDir()
+
+	lg := &Logger{logger: zaptest.NewLogger(t)}
+	require.NoError(t, lg.openSinks(filepath.Join(dir, "oracle.jsonl"), filepath.Join(dir, "test.jsonl")))
+
+	t.Cleanup(lg.closeSinks)
 
 	// Two job errors with identical content, and therefore an identical hash.
 	base := &joberror.JobError{Timestamp: time.Now(), Query: "Q", Message: "M"}
 	je1 := *base
 	je2 := *base
 
-	var calls atomic.Int64
+	var (
+		mu    sync.Mutex
+		types []stmtlogger.Type
+	)
 
-	lg.fetchHook = func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError, _ io.Writer) (int64, error) {
-		calls.Add(1)
+	lg.fetchHook = func(_ context.Context, ty stmtlogger.Type, _ *joberror.JobError, _ io.Writer) (int64, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		types = append(types, ty)
+
 		return 0, nil
 	}
+
+	lg.fetchDelay = time.Millisecond
 
 	in := make(chan *joberror.JobError, 2)
 	lg.wg.Add(1)
@@ -602,9 +681,47 @@ func TestFetchErrors_DedupAndFanout(t *testing.T) {
 
 	lg.wg.Wait()
 
-	// Both storages are fetched once, despite two inputs with the same hash. Only
-	// the oracle sink exists, so only that fetch reaches the hook.
-	assert.Equal(t, int64(1), calls.Load())
+	mu.Lock()
+	defer mu.Unlock()
+
+	// One fetch per cluster side, for one of the two identical job errors.
+	sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
+	assert.Equal(t, []stmtlogger.Type{stmtlogger.TypeOracle, stmtlogger.TypeTest}, types)
+}
+
+// TestFetchErrors_CancelledOnClose: a queued fetch pages through a whole
+// partition under the sink lock, so Close must be able to cut the queue short
+// instead of waiting for every scan.
+func TestFetchErrors_CancelledOnClose(t *testing.T) {
+	t.Parallel()
+
+	lg := &Logger{logger: zaptest.NewLogger(t)}
+	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
+
+	t.Cleanup(lg.closeSinks)
+
+	lg.fetchDelay = time.Hour
+
+	var calls atomic.Int64
+
+	lg.fetchHook = func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError, _ io.Writer) (int64, error) {
+		calls.Add(1)
+		return 0, nil
+	}
+
+	in := make(chan *joberror.JobError, 1)
+	lg.wg.Add(1)
+
+	go lg.fetchErrors(in)
+
+	in <- &joberror.JobError{Timestamp: time.Now(), Query: "Q", Message: "M"}
+	close(in)
+
+	// The fetch is parked on the hour-long delay. Cancelling releases it.
+	lg.fetchCancel()
+	lg.wg.Wait()
+
+	assert.Zero(t, calls.Load(), "a cancelled fetch must not run")
 }
 
 // Benchmarks
