@@ -66,6 +66,12 @@ fix:
 
 .PHONY: fieldalign
 fieldalign:
+	@go tool fieldalignment ./pkg/...
+
+# -fix rewrites each reported struct and DROPS every comment inside it, including
+# doc comments on fields. Re-read the diff before you keep it.
+.PHONY: fieldalign-fix
+fieldalign-fix:
 	@go tool fieldalignment -fix ./pkg/...
 
 .PHONY: fmt
