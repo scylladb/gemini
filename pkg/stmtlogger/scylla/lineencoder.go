@@ -137,6 +137,12 @@ func (e *lineEncoder) end() {
 	e.raw("}\n")
 }
 
+// failed reports whether a write already failed, so a caller can stop feeding
+// rows the encoder would drop.
+func (e *lineEncoder) failed() bool {
+	return e.err != nil
+}
+
 // Close returns the first error hit and the number of bytes written.
 func (e *lineEncoder) Close() (int64, error) {
 	return e.n, e.err

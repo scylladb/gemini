@@ -258,7 +258,10 @@ func streamStatements(ctx context.Context, e *lineEncoder, session *gocql.Sessio
 	e.array("statements")
 	first := true
 
-	for {
+	// e.failed() stops the scan: once the file rejects a byte nothing later can
+	// reach it, and a hot partition would otherwise page millions of rows into a
+	// writer that drops them, all while holding the sink.
+	for !e.failed() {
 		var it json.RawMessage
 		if !iter.Scan(&it) {
 			break
@@ -282,7 +285,7 @@ func streamFragments(ctx context.Context, e *lineEncoder, session *gocql.Session
 	e.array("mutationFragments")
 	first := true
 
-	for {
+	for !e.failed() {
 		row := make(map[string]any, 10)
 		if !iter.MapScan(row) {
 			break
@@ -419,7 +422,14 @@ func (c *cqlStatements) streamLine(
 	e.head(reorganizePartitionKeys(partitionKeys, item), item.Timestamp, errStr, item.Query, item.Message)
 
 	fragmentsErr := streamFragments(ctx, e, fragmentSession, c.mutationFragmentsSelect, values)
-	statementsErr := streamStatements(ctx, e, c.session, stmt, values)
+
+	// The second query only pays off if its rows can still be written. After a
+	// write failure the line is already lost, so reading the statement history
+	// would only load the cluster and delay shutdown.
+	var statementsErr error
+	if !e.failed() {
+		statementsErr = streamStatements(ctx, e, c.session, stmt, values)
+	}
 
 	e.end()
 

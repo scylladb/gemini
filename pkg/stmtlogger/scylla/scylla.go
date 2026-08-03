@@ -299,7 +299,7 @@ func (s *Logger) writeErrorStatements(ctx context.Context, ty stmtlogger.Type, j
 
 	var written int64
 
-	err := sink.Write(func(w io.Writer) error {
+	err := sink.Write(ctx, func(w io.Writer) error {
 		//nolint:govet
 		n, err := fetch(ctx, ty, jobError, w)
 		written = n
@@ -309,6 +309,14 @@ func (s *Logger) writeErrorStatements(ctx context.Context, ty stmtlogger.Type, j
 
 	switch {
 	case err == nil:
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		// Shutdown cut the queue short. Nothing was written for this job error.
+		s.logger.Debug("statement fetch cancelled before it reached the file",
+			zap.String("type", string(ty)),
+			zap.String("job_error_hash", jobError.HashHex()),
+		)
+
+		return
 	case isReadError(err):
 		// The lines that were written are complete and flushed. Only the content
 		// of one partition is missing, so this is not a file failure.

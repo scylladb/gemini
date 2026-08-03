@@ -591,6 +591,131 @@ func TestStatementSink_WriteFailureIsNotCounted(t *testing.T) {
 	assert.False(t, hasErrorSeries(marker.Error()), "a write failure must not be stamped as recorded")
 }
 
+// TestStatementSink_LatchesWriteFailure: after the file rejects a line, no
+// later job error may read its history out of _logs. Those reads cost cluster
+// time and cannot reach the disk anymore.
+func TestStatementSink_LatchesWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int64
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError, w io.Writer) (int64, error) {
+			calls.Add(1)
+
+			n, _ := w.Write([]byte(`{"partial":`))
+
+			// A bare error, not a readError: the file did not take the line.
+			return int64(n), errors.New("disk full")
+		},
+	}
+
+	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
+
+	t.Cleanup(lg.closeSinks)
+
+	je := &joberror.JobError{Timestamp: time.Now(), Query: "SELECT 1", Message: "boom"}
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, je)
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, je)
+
+	assert.Equal(t, int64(1), calls.Load(), "a broken file must reject later fetches before they read _logs")
+}
+
+// TestStatementSink_ReadErrorDoesNotLatch: a read error costs one partition its
+// content and leaves the file usable, so the next job error must still be
+// fetched and written.
+func TestStatementSink_ReadErrorDoesNotLatch(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "oracle.jsonl")
+
+	var calls atomic.Int64
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			n := calls.Add(1)
+
+			e := newLineEncoder(w)
+			e.head(nil, item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.endArray(false)
+			e.array("statements")
+			e.endArray(true)
+			e.end()
+
+			written, _ := e.Close()
+
+			if n == 1 {
+				return written, newReadError(errors.New("read failed halfway"))
+			}
+
+			return written, nil
+		},
+	}
+
+	require.NoError(t, lg.openSinks(path, ""))
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(), Query: "SELECT 1", Message: "partial",
+	})
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(), Query: "SELECT 2", Message: "whole",
+	})
+
+	assert.Equal(t, int64(2), calls.Load(), "a read error must not close the file for later job errors")
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	lines := parseLines(t, content)
+	require.Len(t, lines, 2)
+	assert.Equal(t, "SELECT 2", lines[1].Query)
+
+	lg.closeSinks()
+}
+
+// TestStatementSink_AdmissionIsCancellable: a queued writer waits behind a whole
+// partition scan, so shutdown can only be bounded if that wait ends with the
+// context.
+func TestStatementSink_AdmissionIsCancellable(t *testing.T) {
+	t.Parallel()
+
+	sink := newLineSink("test.jsonl", bufio.NewWriter(io.Discard), func() error { return nil })
+
+	held := make(chan struct{})
+	release := make(chan struct{})
+
+	go func() {
+		_ = sink.Write(t.Context(), func(io.Writer) error {
+			close(held)
+			<-release
+
+			return nil
+		})
+	}()
+
+	<-held
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var reached atomic.Bool
+
+	err := sink.Write(ctx, func(io.Writer) error {
+		reached.Store(true)
+
+		return nil
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.False(t, reached.Load(), "a cancelled writer must not enter the file")
+
+	close(release)
+}
+
 // hasErrorSeries reports whether StatementErrorLastTS holds a series whose
 // error label equals want.
 func hasErrorSeries(want string) bool {
