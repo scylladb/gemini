@@ -17,12 +17,14 @@ package scylla
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/gocql/gocql"
 	"github.com/samber/mo"
@@ -47,34 +49,25 @@ type cqlStatements struct {
 	partitionKeys           typedef.Columns
 }
 
-type cqlData struct {
-	partitionKeys     map[string][]any
-	mutationFragments []json.RawMessage
-	statements        []json.RawMessage
-}
-
-// cqlDataMap is a compact in-memory representation keyed by the 32-byte binary
-// hash. It provides a custom JSON marshaler that converts it into a
-// map[string]cqlData using hex-encoded keys. This keeps the runtime memory
-// footprint small while still enabling easy conversion to a JSON string when
-// needed (e.g., for debugging).
-type cqlDataMap map[[32]byte]cqlData
-
-// MarshalJSON implements json.Marshaler by copying the map into a
-// map[string]cqlData with hex-encoded keys, and marshaling that.
-func (m cqlDataMap) MarshalJSON() ([]byte, error) {
-	dup := make(map[string]cqlData, len(m))
-	for k, v := range m {
-		dup[hex.EncodeToString(k[:])] = v
-	}
-	return json.Marshal(dup)
-}
-
 const (
-	additionalColumns = "ts,ty,statement,values,host,attempt,gemini_attempt,error,dur"
+	additionalColumns = "ts,seq,ty,statement,values,host,attempt,gemini_attempt,error,dur"
 )
 
 var additionalColumnsArr = strings.Split(additionalColumns, ",")
+
+// ts was a CQL timestamp (millisecond resolution): concurrent statements on one
+// partition shared a primary key and overwrote each other (QATOOLS-318).
+func logTS(start time.Time) int64 {
+	return start.UTC().UnixNano()
+}
+
+var logSeq atomic.Int64
+
+// Bound at args-build time, so a batch retry or row-by-row fallback re-sends the
+// same seq instead of adding a duplicate row.
+func nextLogSeq() int64 {
+	return logSeq.Add(1)
+}
 
 // newStatements creates the _logs keyspace (idempotently) and the table, then
 // builds the per-table cqlStatements. It is the self-contained entry point for
@@ -237,7 +230,8 @@ func (c *cqlStatements) fillArgs(dst []any, item stmtlogger.Item) ([]any, bool) 
 	}
 
 	dst = append(dst,
-		item.Start.Time,
+		logTS(item.Start.Time),
+		nextLogSeq(),
 		item.Type,
 		item.Statement,
 		prepareValuesOptimized(item.Values),
@@ -251,33 +245,44 @@ func (c *cqlStatements) fillArgs(dst []any, item stmtlogger.Item) ([]any, bool) 
 	return dst, true
 }
 
-func fetchPartitionKeys(ctx context.Context, session *gocql.Session, stmt string, values []any) ([]json.RawMessage, error) {
+// streamStatements copies every statement row of one partition into e. A
+// partition can hold millions of rows, so rows go to the sink one at a time and
+// are never collected. NumRows would bound the scan to the first page: Scan
+// pages on its own.
+func streamStatements(ctx context.Context, e *lineEncoder, session *gocql.Session, stmt string, values []any) error {
 	q := session.QueryWithContext(ctx, stmt, values...)
 	defer q.Release()
 
 	iter := q.Iter()
-	data := make([]json.RawMessage, 0, iter.NumRows())
 
-	for range iter.NumRows() {
+	e.array("statements")
+	first := true
+
+	for {
 		var it json.RawMessage
 		if !iter.Scan(&it) {
 			break
 		}
 
-		data = append(data, it)
+		e.row(first, it)
+		first = false
 	}
 
-	return data, iter.Close()
+	e.endArray(true)
+
+	return iter.Close()
 }
 
-func fetchFragments(ctx context.Context, session *gocql.Session, stmt string, values []any) ([]json.RawMessage, error) {
+func streamFragments(ctx context.Context, e *lineEncoder, session *gocql.Session, stmt string, values []any) error {
 	q := session.QueryWithContext(ctx, stmt, values...)
 	defer q.Release()
 
-	data := make([]json.RawMessage, 0)
 	iter := q.Iter()
 
-	for range iter.NumRows() {
+	e.array("mutationFragments")
+	first := true
+
+	for {
 		row := make(map[string]any, 10)
 		if !iter.MapScan(row) {
 			break
@@ -288,10 +293,14 @@ func fetchFragments(ctx context.Context, session *gocql.Session, stmt string, va
 			// If JSON marshal fails for a row, skip it but continue scanning
 			continue
 		}
-		data = append(data, bs)
+
+		e.row(first, bs)
+		first = false
 	}
 
-	return data, iter.Close()
+	e.endArray(false)
+
+	return iter.Close()
 }
 
 // encodeRowToJSON encodes a row scanned from Scylla into JSON using Go's encoding/json.
@@ -309,7 +318,13 @@ func encodeRowToJSON(row map[string]any) (json.RawMessage, error) { //nolint:unu
 	return json.RawMessage(bs), nil
 }
 
-func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *joberror.JobError) (cqlDataMap, error) {
+// FetchTo streams the statement history of a job error's partitions to w as
+// JSONL, one line per partition. Rows go from the CQL iterator into w one at a
+// time: a hot partition's history is far too big to assemble in memory now that
+// _logs keeps every statement instead of one per millisecond.
+//
+// It returns the number of bytes written.
+func (c *cqlStatements) FetchTo(ctx context.Context, ty stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
 	var (
 		stmt    string
 		session *gocql.Session
@@ -328,7 +343,7 @@ func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *job
 	}
 
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	switch item.StmtType {
@@ -336,68 +351,86 @@ func (c *cqlStatements) Fetch(ctx context.Context, ty stmtlogger.Type, item *job
 		typedef.InsertStatementType, typedef.InsertJSONStatementType,
 		typedef.UpdateStatementType, typedef.DeleteWholePartitionType,
 		typedef.DeleteSingleRowType, typedef.DeleteClusteringSubsetType:
-		//nolint:govet
-		statements, err := fetchPartitionKeys(ctx, c.session, stmt, item.PartitionKeys.ToCQLValues(c.partitionKeys))
-		if err != nil {
-			return nil, err
+		values := item.PartitionKeys.ToCQLValues(c.partitionKeys)
+
+		n, writeErr, readErr := c.streamLine(ctx, session, stmt, w, item, item.PartitionKeys.ToMap(), values)
+		if writeErr != nil {
+			return n, writeErr
 		}
-		fragments, err := fetchFragments(ctx, session, c.mutationFragmentsSelect, item.PartitionKeys.ToCQLValues(c.partitionKeys))
-		if err != nil {
-			return nil, err
-		}
-		return cqlDataMap{
-			item.Hash(): {
-				mutationFragments: fragments,
-				statements:        statements,
-				partitionKeys:     item.PartitionKeys.ToMap(),
-			},
-		}, nil
+
+		return n, readErr
 	case typedef.SelectMultiPartitionType, typedef.SelectMultiPartitionRangeStatementType,
 		typedef.DeleteMultiplePartitionsType:
-		iterations := len(item.PartitionKeys.Get(c.partitionKeys[0].Name))
-		result := make(cqlDataMap, iterations)
-		for i := range iterations {
+		var (
+			written  int64
+			lastRead error
+		)
+
+		for i := range len(item.PartitionKeys.Get(c.partitionKeys[0].Name)) {
 			values := make([]any, 0, c.partitionKeys.LenValues())
 			pks := make(map[string][]any, len(c.partitionKeys))
+
 			for _, pk := range c.partitionKeys {
 				values = append(values, item.PartitionKeys.Get(pk.Name)[i])
 				pks[pk.Name] = append(pks[pk.Name], item.PartitionKeys.Get(pk.Name)[i])
 			}
 
-			//nolint:govet
-			statements, err := fetchPartitionKeys(ctx, c.session, stmt, values)
-			if err != nil {
-				// Log the error
-				continue
+			n, writeErr, readErr := c.streamLine(ctx, session, stmt, w, item, pks, values)
+			written += n
+
+			// A failed read costs one partition its content. A failed write means
+			// the file is no longer trustworthy, so it stops everything.
+			if writeErr != nil {
+				return written, writeErr
 			}
 
-			fragments, err := fetchFragments(ctx, session, c.mutationFragmentsSelect, values)
-			if err != nil {
-				continue
-			}
-
-			// Create a job error for this specific partition to get the correct hash
-			partitionJobErr := &joberror.JobError{
-				Timestamp:     item.Timestamp,
-				Query:         item.Query,
-				Message:       item.Message,
-				StmtType:      item.StmtType,
-				PartitionKeys: typedef.NewValuesFromMap(pks),
-			}
-
-			result[partitionJobErr.Hash()] = cqlData{
-				statements:        statements,
-				mutationFragments: fragments,
-				partitionKeys:     pks,
+			if readErr != nil {
+				lastRead = readErr
 			}
 		}
 
-		return result, nil
+		return written, lastRead
 	case typedef.SelectByIndexStatementType, typedef.SelectFromMaterializedViewStatementType:
-		return nil, errors.New("select by index or materialized view is not supported, skipping job error")
+		return 0, errors.New("select by index or materialized view is not supported, skipping job error")
 	default:
-		return nil, nil
+		return 0, nil
 	}
+}
+
+// streamLine writes one JSONL line for a single partition and reports the write
+// error and the read error apart. A read error still leaves a syntactically
+// complete line behind, so one unreadable partition cannot corrupt the file for
+// the partitions that follow.
+func (c *cqlStatements) streamLine(
+	ctx context.Context,
+	fragmentSession *gocql.Session,
+	stmt string,
+	w io.Writer,
+	item *joberror.JobError,
+	partitionKeys map[string][]any,
+	values []any,
+) (n int64, writeErr, readErr error) {
+	var errStr string
+	if item.Err != nil {
+		errStr = item.Err.Error()
+	}
+
+	e := newLineEncoder(w)
+	e.head(reorganizePartitionKeys(partitionKeys, item), item.Timestamp, errStr, item.Query, item.Message)
+
+	fragmentsErr := streamFragments(ctx, e, fragmentSession, c.mutationFragmentsSelect, values)
+	statementsErr := streamStatements(ctx, e, c.session, stmt, values)
+
+	e.end()
+
+	n, writeErr = e.Close()
+
+	readErr = statementsErr
+	if readErr == nil {
+		readErr = fragmentsErr
+	}
+
+	return n, writeErr, readErr
 }
 
 // buildCreateKeyspaceQuery builds the CQL that creates the shared _logs keyspace.
@@ -436,11 +469,12 @@ func buildCreateTableQuery(
 	}
 
 	builder.WriteString(
-		"ts timestamp, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, ",
+		// ts is UTC nanoseconds, not a CQL timestamp.
+		"ts bigint, seq bigint, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, gemini_attempt smallint, error text, dur duration, ",
 	)
 	builder.WriteString("PRIMARY KEY ((")
 	builder.WriteString(partitions)
-	builder.WriteString(", ty), ts, attempt, gemini_attempt)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'}")
+	builder.WriteString(", ty), ts, attempt, gemini_attempt, seq)) WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'}")
 	builder.WriteString(" AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';")
 
 	return createKeyspace, builder.String()

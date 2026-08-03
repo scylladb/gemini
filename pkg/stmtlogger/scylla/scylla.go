@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -40,7 +41,6 @@ import (
 
 const (
 	committerBatchSize      = 64
-	statementChBuffer       = 1000
 	statementFileBufferSize = 32 * 1024
 	statementDirPerm        = 0o755
 	statementFilePerm       = 0o644
@@ -64,19 +64,14 @@ type (
 		// partition-key columns match the item's PartitionKeys. Using a single
 		// fixed table's columns (the old behavior) mis-bound and dropped every
 		// statement from tables other than Tables[0].
-		statements        map[string]*cqlStatements
-		fetchHook         func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError) (cqlDataMap, error)
+		statements map[string]*cqlStatements
+		// sinks holds the statements file per cluster side, or is empty when file
+		// logging is off.
+		sinks             map[stmtlogger.Type]*lineSink
+		fetchHook         func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError, w io.Writer) (int64, error)
 		wg                sync.WaitGroup
 		curWorkers        atomic.Int32
 		malformedWarnOnce sync.Once
-	}
-
-	statementChData struct {
-		// Use the binary hash as map key for internal processing. Do NOT try to JSON-encode
-		// the whole structure directly in logs; only encode specific fields.
-		Data  cqlDataMap         `json:"data"`
-		Error *joberror.JobError `json:"error"`
-		ty    stmtlogger.Type
 	}
 
 	// PartitionInfo represents a single partition with its keys and validation data
@@ -186,11 +181,13 @@ func New(
 
 	if oracleStatementsFile != "" || testStatementsFile != "" {
 		l.Debug("starting error logger goroutine")
-		statementCh := make(chan statementChData, statementChBuffer)
+
+		if err = logger.openSinks(oracleStatementsFile, testStatementsFile); err != nil {
+			return nil, err
+		}
+
 		logger.wg.Add(1)
-		go logger.fetchErrors(statementCh, e)
-		logger.wg.Add(1)
-		go logger.statementFlusher(statementCh, oracleStatementsFile, testStatementsFile)
+		go logger.fetchErrors(e)
 	} else {
 		l.Debug("statement file logging disabled: no files provided")
 	}
@@ -198,194 +195,100 @@ func New(
 	return logger, nil
 }
 
-//nolint:gocyclo
-func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, testStatements string) {
-	defer s.wg.Done()
+func (s *Logger) openSinks(oracleStatements, testStatements string) error {
+	s.sinks = make(map[stmtlogger.Type]*lineSink, 2)
 
-	metrics.WorkersCurrent.WithLabelValues("scylla_logger_statement_flusher").Inc()
-	defer metrics.WorkersCurrent.WithLabelValues("scylla_logger_statement_flusher").Dec()
-
-	var (
-		oracleStatementsFile *bufio.Writer
-		testStatementsFile   *bufio.Writer
-		oracleCloser         func() error
-		testCloser           func() error
-		err                  error
-	)
-
-	if oracleStatements != "" {
-		oracleStatementsFile, oracleCloser, err = s.openStatementFile(oracleStatements)
-		if err != nil {
-			s.logger.Error("failed to open oracle statements file",
-				zap.Error(err),
-				zap.String("file", oracleStatements),
-				zap.String("type", string(stmtlogger.TypeOracle)),
-			)
-			panic(err)
+	for ty, name := range map[stmtlogger.Type]string{
+		stmtlogger.TypeOracle: oracleStatements,
+		stmtlogger.TypeTest:   testStatements,
+	} {
+		if name == "" {
+			continue
 		}
+
+		w, closer, err := s.openStatementFile(name)
+		if err != nil {
+			s.logger.Error("failed to open statements file",
+				zap.Error(err),
+				zap.String("file", name),
+				zap.String("type", string(ty)),
+			)
+
+			return err
+		}
+
+		s.sinks[ty] = newLineSink(name, w, closer)
 	}
 
-	if testStatements != "" {
-		testStatementsFile, testCloser, err = s.openStatementFile(testStatements)
-		if err != nil {
-			s.logger.Error("failed to open test statements file",
+	return nil
+}
+
+func (s *Logger) closeSinks() {
+	for ty, sink := range s.sinks {
+		if err := sink.Close(); err != nil {
+			s.logger.Error("failed to close statements file",
 				zap.Error(err),
-				zap.String("file", testStatements),
-				zap.String("type", string(stmtlogger.TypeTest)),
+				zap.String("file", sink.name),
+				zap.String("type", string(ty)),
 			)
-			panic(err)
 		}
 	}
+}
 
-	defer func() {
-		if oracleCloser != nil {
-			if err = oracleCloser(); err != nil {
-				s.logger.Error("failed to close statements file",
-					zap.Error(err),
-					zap.String("file", oracleStatements),
-					zap.String("type", string(stmtlogger.TypeOracle)),
-				)
-			}
-		}
+// writeErrorStatements streams one job error's statement history straight into
+// the statements file for ty. Nothing between the CQL iterator and the file
+// holds the whole history.
+func (s *Logger) writeErrorStatements(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError) {
+	sink, ok := s.sinks[ty]
+	if !ok {
+		return
+	}
 
-		if testCloser != nil {
-			if err = testCloser(); err != nil {
-				s.logger.Error("failed to close statements file",
-					zap.Error(err),
-					zap.String("file", testStatements),
-					zap.String("type", string(stmtlogger.TypeTest)),
-				)
-			}
-		}
-	}()
-	for {
-		item, ok := <-ch
+	fetch := s.fetchHook
 
-		if !ok {
-			// finalize by flushing any remaining buffers
-			if oracleStatementsFile != nil {
-				if err = oracleStatementsFile.Flush(); err == nil {
-					metrics.StatementLoggerFlushes.WithLabelValues("oracle_file").Inc()
-				}
-			}
-			if testStatementsFile != nil {
-				if err = testStatementsFile.Flush(); err == nil {
-					metrics.StatementLoggerFlushes.WithLabelValues("test_file").Inc()
-				}
-			}
+	if fetch == nil {
+		cql := s.statementsForQuery(jobError.Query)
+		if cql == nil {
+			s.logger.Error("no statement logs table for job error; cannot fetch failed statements",
+				zap.String("query", jobError.Query),
+				zap.String("job_error_hash", jobError.HashHex()),
+			)
+
 			return
 		}
 
-		for _, val := range item.Data {
-			var bytes []byte
-			errStr := ""
-			if item.Error.Err != nil {
-				errStr = item.Error.Err.Error()
-			}
-
-			// Reorganize partitionKeys from flat map to array of PartitionInfo
-			partitionInfos := reorganizePartitionKeys(val.partitionKeys, item.Error)
-
-			l := Line{
-				PartitionKeys:     partitionInfos,
-				Timestamp:         item.Error.Timestamp,
-				Err:               errStr,
-				Query:             item.Error.Query,
-				Message:           item.Error.Message,
-				MutationFragments: val.mutationFragments,
-				Statements:        val.statements,
-			}
-
-			bytes, err = json.Marshal(l)
-			if err != nil {
-				s.logger.Error("failed to marshal statement log",
-					zap.Error(err),
-					zap.String("type", string(item.ty)),
-					zap.String("query", item.Error.Query),
-					zap.String("message", item.Error.Message),
-					zap.String("job_error_hash", item.Error.HashHex()),
-				)
-				continue
-			}
-
-			RecordErrorMetrics(item.Error, bytes, string(item.ty))
-			var (
-				writer   *bufio.Writer
-				fileName string
-			)
-
-			switch item.ty {
-			case stmtlogger.TypeOracle:
-				writer = oracleStatementsFile
-				fileName = oracleStatements
-			case stmtlogger.TypeTest:
-				writer = testStatementsFile
-				fileName = testStatements
-			default:
-				s.logger.Error("unknown statement type", zap.String("type", string(item.ty)))
-				continue
-			}
-
-			if writer == nil {
-				continue // no file sink for this type
-			}
-
-			if _, err = writer.Write(bytes); err != nil {
-				s.logger.Error("failed to write statement log",
-					zap.Error(err),
-					zap.String("type", string(item.ty)),
-					zap.String("file", fileName),
-					zap.String("data", string(bytes)),
-				)
-				continue
-			}
-
-			// Write newline for JSONL format
-			if err = writer.WriteByte('\n'); err != nil {
-				s.logger.Error("failed to write newline to statement log",
-					zap.Error(err),
-					zap.String("type", string(item.ty)),
-					zap.String("file", fileName),
-				)
-				continue
-			}
-		}
+		fetch = cql.FetchTo
 	}
-}
 
-func (s *Logger) poolCallback(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError) statementChData {
-	var (
-		data cqlDataMap
-		err  error
-	)
-	if s.fetchHook != nil {
-		data, err = s.fetchHook(ctx, ty, jobError)
-	} else if cql := s.statementsForQuery(jobError.Query); cql != nil {
-		data, err = cql.Fetch(ctx, ty, jobError)
-	} else {
-		s.logger.Error("no statement logs table for job error; cannot fetch failed statements",
-			zap.String("query", jobError.Query),
+	var written int64
+
+	err := sink.Write(func(w io.Writer) error {
+		//nolint:govet
+		n, err := fetch(ctx, ty, jobError, w)
+		written = n
+
+		return err
+	})
+	if err != nil {
+		s.logger.Error("failed to write failed statements",
+			zap.Error(err),
+			zap.String("file", sink.name),
+			zap.String("type", string(ty)),
 			zap.String("job_error_hash", jobError.HashHex()),
 		)
-		return statementChData{}
-	}
-	if err != nil {
-		s.logger.Error("failed to fetch failed statements",
-			zap.Error(err),
-			zap.Any("job_error", jobError),
-		)
-
-		return statementChData{}
 	}
 
-	return statementChData{
-		ty:    ty,
-		Data:  data,
-		Error: jobError,
+	// A read error still leaves the lines it managed to write, so anything that
+	// reached the file is still recorded.
+	if written == 0 {
+		return
 	}
+
+	metrics.StatementLoggerFlushes.WithLabelValues(string(ty) + "_file").Inc()
+	RecordErrorMetrics(jobError, string(ty))
 }
 
-func (s *Logger) fetchErrors(items chan<- statementChData, ch <-chan *joberror.JobError) {
+func (s *Logger) fetchErrors(ch <-chan *joberror.JobError) {
 	metrics.WorkersCurrent.WithLabelValues("scylla_logger_error_fetcher").Inc()
 	defer metrics.WorkersCurrent.WithLabelValues("scylla_logger_error_fetcher").Dec()
 	defer s.wg.Done()
@@ -394,7 +297,7 @@ func (s *Logger) fetchErrors(items chan<- statementChData, ch <-chan *joberror.J
 
 	defer func() {
 		wg.Wait()
-		close(items)
+		s.closeSinks()
 	}()
 
 	storages := []stmtlogger.Type{stmtlogger.TypeTest, stmtlogger.TypeOracle}
@@ -413,7 +316,7 @@ func (s *Logger) fetchErrors(items chan<- statementChData, ch <-chan *joberror.J
 			go func(ty stmtlogger.Type) {
 				defer wg.Done()
 				time.Sleep(statementErrorFetchDelay)
-				items <- s.poolCallback(context.Background(), ty, jobErr)
+				s.writeErrorStatements(context.Background(), ty, jobErr)
 			}(ty)
 		}
 	}

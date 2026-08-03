@@ -19,8 +19,10 @@ package scylla
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -431,14 +433,16 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := cqlStmts.Fetch(t.Context(), tt.ty, tt.jobError)
+			var buf bytes.Buffer
+
+			n, err := cqlStmts.FetchTo(t.Context(), tt.ty, tt.jobError, &buf)
 
 			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				assert.NotNil(t, result)
-				assert.NotEmpty(t, result)
+				assert.Positive(t, n)
+				assert.NotEmpty(t, parseLines(t, buf.Bytes()))
 			}
 		})
 	}
@@ -490,7 +494,10 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 	// Create statement logger
 	session, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
-	defer session.Close()
+	// Cleanup, not defer: the subtests below are parallel, so the parent returns
+	// before they run and a deferred Close would pull the session out from under
+	// them.
+	t.Cleanup(session.Close)
 
 	// Use short name to avoid 48 character limit
 	logsKS := fmt.Sprintf("ks_logs_%d", time.Now().UnixNano()%1000000)
@@ -510,9 +517,9 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 		replication.NewSimpleStrategy(),
 	)
 	require.NoError(t, err)
-	defer func() {
+	t.Cleanup(func() {
 		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", logsKS)).Exec()
-	}()
+	})
 
 	// Insert statement logs for multiple partitions
 	for i, key := range []string{"key1", "key2", "key3"} {
@@ -538,7 +545,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 
 	tests := []struct {
 		jobError  *joberror.JobError
-		checkFunc func(*testing.T, cqlDataMap)
+		checkFunc func(*testing.T, []Line)
 		name      string
 		ty        stmtlogger.Type
 		expectErr bool
@@ -556,12 +563,12 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 				}),
 			},
 			expectErr: false,
-			checkFunc: func(t *testing.T, result cqlDataMap) {
+			checkFunc: func(t *testing.T, lines []Line) {
 				t.Helper()
 
-				// Result may be empty if statement logs don't match exactly
-				// The important thing is no error was returned
-				assert.NotNil(t, result)
+				// One line per partition. Content may be empty when no statement
+				// log matched; what matters is that no error came back.
+				assert.Len(t, lines, 3)
 			},
 		},
 		{
@@ -577,9 +584,9 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 				}),
 			},
 			expectErr: false,
-			checkFunc: func(t *testing.T, result cqlDataMap) {
+			checkFunc: func(t *testing.T, lines []Line) {
 				t.Helper()
-				assert.NotNil(t, result)
+				assert.Len(t, lines, 2)
 			},
 		},
 		{
@@ -595,9 +602,9 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 				}),
 			},
 			expectErr: false,
-			checkFunc: func(t *testing.T, result cqlDataMap) {
+			checkFunc: func(t *testing.T, lines []Line) {
 				t.Helper()
-				assert.NotNil(t, result)
+				assert.Len(t, lines, 3)
 			},
 		},
 		{
@@ -613,7 +620,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 				}),
 			},
 			expectErr: true,
-			checkFunc: func(_ *testing.T, _ cqlDataMap) {
+			checkFunc: func(_ *testing.T, _ []Line) {
 				// Should return error for unsupported statement types
 			},
 		},
@@ -630,7 +637,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 				}),
 			},
 			expectErr: true,
-			checkFunc: func(_ *testing.T, _ cqlDataMap) {
+			checkFunc: func(_ *testing.T, _ []Line) {
 				// Should return error for unsupported statement types
 			},
 		},
@@ -639,15 +646,17 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			var buf bytes.Buffer
+
 			//nolint:govet
-			result, err := cqlStmts.Fetch(t.Context(), tt.ty, tt.jobError)
+			_, err := cqlStmts.FetchTo(t.Context(), tt.ty, tt.jobError, &buf)
 
 			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 				if tt.checkFunc != nil {
-					tt.checkFunc(t, result)
+					tt.checkFunc(t, parseLines(t, buf.Bytes()))
 				}
 			}
 		})
@@ -797,65 +806,50 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 	}
 }
 
-func TestLogger_StatementFlusher_Integration(t *testing.T) {
+func TestLogger_StatementSink_Integration(t *testing.T) {
 	t.Parallel()
 
-	logger := zap.NewNop()
 	tmpDir := t.TempDir()
-
 	oracleFile := filepath.Join(tmpDir, "oracle.jsonl")
 	testFile := filepath.Join(tmpDir, "test.jsonl")
 
+	jobErr := &joberror.JobError{
+		Timestamp: time.Now(),
+		Query:     "SELECT * FROM test",
+		Message:   "oracle error",
+		StmtType:  typedef.SelectStatementType,
+	}
+
 	mockLogger := &Logger{
-		logger: logger,
-	}
+		logger: zap.NewNop(),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			e := newLineEncoder(w)
+			e.head(nil, item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.row(true, json.RawMessage(`{"data":"oracle"}`))
+			e.endArray(false)
+			e.array("statements")
+			e.row(true, json.RawMessage(`{"stmt":"SELECT"}`))
+			e.endArray(true)
+			e.end()
 
-	ch := make(chan statementChData, 10)
-
-	mockLogger.wg.Add(1)
-	go mockLogger.statementFlusher(ch, oracleFile, testFile)
-
-	// Send data
-	ch <- statementChData{
-		ty: stmtlogger.TypeOracle,
-		Data: cqlDataMap{
-			{1}: {
-				partitionKeys: map[string][]any{
-					"pk0": {"test"},
-				},
-				statements: []json.RawMessage{
-					json.RawMessage(`{"stmt":"SELECT"}`),
-				},
-				mutationFragments: []json.RawMessage{
-					json.RawMessage(`{"data":"oracle"}`),
-				},
-			},
-		},
-		Error: &joberror.JobError{
-			Timestamp: time.Now(),
-			Query:     "SELECT * FROM test",
-			Message:   "oracle error",
-			StmtType:  typedef.SelectStatementType,
+			return e.Close()
 		},
 	}
 
-	close(ch)
+	require.NoError(t, mockLogger.openSinks(oracleFile, testFile))
 
-	// Give the goroutine time to process and flush
-	time.Sleep(100 * time.Millisecond)
-	mockLogger.wg.Wait()
-
-	// Verify files
-
-	_, err := os.Stat(oracleFile)
-	assert.NoError(t, err)
+	mockLogger.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, jobErr)
+	mockLogger.closeSinks()
 
 	content, err := os.ReadFile(oracleFile)
 	require.NoError(t, err)
 	assert.NotEmpty(t, content)
 
-	var line Line
-	err = json.Unmarshal(content, &line)
-	assert.NoError(t, err)
-	assert.Equal(t, "SELECT * FROM test", line.Query)
+	lines := parseLines(t, content)
+	require.Len(t, lines, 1)
+	assert.Equal(t, "SELECT * FROM test", lines[0].Query)
+	assert.Equal(t, "oracle error", lines[0].Message)
+	assert.Len(t, lines[0].Statements, 1)
+	assert.Len(t, lines[0].MutationFragments, 1)
 }

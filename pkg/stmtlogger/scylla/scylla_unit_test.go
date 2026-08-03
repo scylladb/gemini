@@ -17,12 +17,13 @@ package scylla
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"strings"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -102,7 +103,9 @@ func TestBuildCreateTableQueryUnit(t *testing.T) {
 			wantContains: []string{
 				"CREATE TABLE IF NOT EXISTS test_logs.test_statements",
 				"pk0 text",
-				"PRIMARY KEY ((pk0, ty)",
+				"ts bigint",
+				"seq bigint",
+				"PRIMARY KEY ((pk0, ty), ts, attempt, gemini_attempt, seq)",
 			},
 		},
 		{
@@ -203,7 +206,7 @@ func TestPrepareValuesOptimizedUnit(t *testing.T) {
 func TestAdditionalColumnsUnit(t *testing.T) {
 	t.Parallel()
 
-	expected := []string{"ts", "ty", "statement", "values", "host", "attempt", "gemini_attempt", "error", "dur"}
+	expected := []string{"ts", "seq", "ty", "statement", "values", "host", "attempt", "gemini_attempt", "error", "dur"}
 
 	assert.Equal(t, len(expected), len(additionalColumnsArr))
 	for i, col := range expected {
@@ -277,85 +280,6 @@ func TestLine_JSONMarshaling(t *testing.T) {
 			assert.Equal(t, tt.line.Query, unmarshaled.Query)
 			assert.Equal(t, tt.line.Message, unmarshaled.Message)
 		})
-	}
-}
-
-func TestStatementChData_Structure(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		data statementChData
-	}{
-		{
-			name: "oracle type",
-			data: statementChData{
-				ty: stmtlogger.TypeOracle,
-				Data: cqlDataMap{
-					{1}: {
-						partitionKeys: map[string][]any{"pk0": {"key"}},
-						statements:    []json.RawMessage{json.RawMessage(`{"stmt":"SELECT"}`)},
-					},
-				},
-				Error: &joberror.JobError{
-					Timestamp: time.Now(),
-					Query:     "SELECT * FROM test",
-					StmtType:  typedef.SelectStatementType,
-				},
-			},
-		},
-		{
-			name: "test type",
-			data: statementChData{
-				ty: stmtlogger.TypeTest,
-				Data: cqlDataMap{
-					{2}: {
-						partitionKeys: map[string][]any{"pk0": {"key2"}},
-					},
-				},
-				Error: &joberror.JobError{
-					Timestamp: time.Now(),
-					Query:     "INSERT INTO test VALUES (?)",
-					StmtType:  typedef.InsertStatementType,
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.NotNil(t, tt.data.Data)
-			assert.NotNil(t, tt.data.Error)
-			assert.Contains(t, []stmtlogger.Type{stmtlogger.TypeOracle, stmtlogger.TypeTest}, tt.data.ty)
-		})
-	}
-}
-
-func TestCQLData_Structure(t *testing.T) {
-	t.Parallel()
-
-	data := cqlData{
-		partitionKeys: map[string][]any{
-			"pk0": {"test"},
-			"pk1": {123},
-		},
-		mutationFragments: []json.RawMessage{
-			json.RawMessage(`{"mutation":"test"}`),
-		},
-		statements: []json.RawMessage{
-			json.RawMessage(`{"statement":"test"}`),
-		},
-	}
-
-	assert.NotNil(t, data.partitionKeys)
-	assert.NotEmpty(t, data.partitionKeys)
-
-	for _, fragment := range data.mutationFragments {
-		var decoded map[string]any
-		err := json.Unmarshal(fragment, &decoded)
-		assert.NoError(t, err)
 	}
 }
 
@@ -454,139 +378,168 @@ func TestLogger_Close(t *testing.T) {
 	mu.Unlock()
 }
 
-func TestCqlDataMap_MarshalJSON(t *testing.T) {
-	var k1, k2 [32]byte
-	copy(k1[:], bytes.Repeat([]byte{0xAB}, 32))
-	copy(k2[:], bytes.Repeat([]byte{0xCD}, 32))
+func TestStatementSink_WritesAndFlushes(t *testing.T) {
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			e := newLineEncoder(w)
+			e.head(reorganizePartitionKeys(map[string][]any{"pk": {"a"}}, item), item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.endArray(false)
+			e.array("statements")
+			e.row(true, json.RawMessage(`{"x":1}`))
+			e.endArray(true)
+			e.end()
 
-	m := cqlDataMap{
-		k1: {partitionKeys: map[string][]any{"pk": {1}}, mutationFragments: []json.RawMessage{json.RawMessage(`{"a":1}`)}},
-		k2: {partitionKeys: map[string][]any{"pk": {2}}, statements: []json.RawMessage{json.RawMessage(`{"b":2}`)}},
+			return e.Close()
+		},
 	}
-
-	bs, err := json.Marshal(m)
-	require.NoError(t, err)
-
-	// It should be a JSON object with two keys (hex-encoded)
-	var obj map[string]any
-	require.NoError(t, json.Unmarshal(bs, &obj))
-	assert.Len(t, obj, 2)
-	// keys should be 64-char hex strings
-	for k := range obj {
-		assert.Equal(t, 64, len(k))
-		_, err = os.ReadFile("/dev/null") // no-op to silence lint on err shadowing
-		_ = err
-	}
-}
-
-func TestStatementFlusher_WritesAndFlushes(t *testing.T) {
-	lg := &Logger{logger: zaptest.NewLogger(t)}
 
 	dir := t.TempDir()
 	oraclePath := filepath.Join(dir, "oracle.jsonl")
 	testPath := filepath.Join(dir, "test.jsonl")
 
-	// reset counter
-	// Note: prometheus counters cannot be set backwards; we'll only assert it increases
+	// Prometheus counters cannot be set backwards, so only assert they grow.
 	beforeOracle := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("oracle_file"))
 	beforeTest := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("test_file"))
 
-	ch := make(chan statementChData, 2)
-	var wg sync.WaitGroup
-	lg.wg.Add(1) // statementFlusher expects the caller to have incremented wg
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		lg.statementFlusher(ch, oraclePath, testPath)
-	}()
+	require.NoError(t, lg.openSinks(oraclePath, testPath))
 
-	// Build one oracle and one test item
 	je := &joberror.JobError{
 		Timestamp: time.Now(),
 		Query:     "SELECT 1",
 		Message:   "boom",
 	}
-	val := cqlData{partitionKeys: map[string][]any{"pk": {"a"}}, statements: []json.RawMessage{json.RawMessage(`{"x":1}`)}}
-	data := cqlDataMap{}
-	var key [32]byte
-	copy(key[:], bytes.Repeat([]byte{1}, 32))
-	data[key] = val
 
-	ch <- statementChData{ty: stmtlogger.TypeOracle, Data: data, Error: je}
-	ch <- statementChData{ty: stmtlogger.TypeTest, Data: data, Error: je}
-	close(ch)
-	// Wait for flusher to finish to avoid races on files and metrics
-	wg.Wait()
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, je)
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeTest, je)
+	lg.closeSinks()
 
-	// Read files and ensure they have exactly one line each and are valid JSON
 	readAndCheck := func(p string) string {
 		f, err := os.Open(p)
 		require.NoError(t, err)
 		defer f.Close()
+
 		r := bufio.NewScanner(f)
+
 		var lines []string
 		for r.Scan() {
 			lines = append(lines, r.Text())
 		}
+
 		require.NoError(t, r.Err())
-		require.Equal(t, 1, len(lines))
-		// Must be valid JSON and contain our query
+		require.Len(t, lines, 1)
+
 		var line Line
 		require.NoError(t, json.Unmarshal([]byte(lines[0]), &line))
 		assert.Equal(t, "SELECT 1", line.Query)
+		assert.Len(t, line.Statements, 1)
+
 		return lines[0]
 	}
 
-	oracleJSON := readAndCheck(oraclePath)
-	testJSON := readAndCheck(testPath)
-	assert.True(t, strings.Contains(oracleJSON, "SELECT 1"))
-	assert.True(t, strings.Contains(testJSON, "SELECT 1"))
+	assert.Contains(t, readAndCheck(oraclePath), "SELECT 1")
+	assert.Contains(t, readAndCheck(testPath), "SELECT 1")
 
-	// Counters should have incremented at least once for each file
 	afterOracle := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("oracle_file"))
 	afterTest := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("test_file"))
 	assert.Greater(t, afterOracle, beforeOracle)
 	assert.Greater(t, afterTest, beforeTest)
 }
 
+// TestStatementSink_NoInterleaving pins the invariant the sink mutex exists for:
+// fetches stream row by row straight into a shared file, so two concurrent
+// writers must never interleave their lines.
+func TestStatementSink_NoInterleaving(t *testing.T) {
+	const writers = 32
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			e := newLineEncoder(w)
+			e.head(nil, item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.endArray(false)
+			e.array("statements")
+
+			// Write the rows one at a time with a yield between them: without the
+			// sink lock another writer would slip its own rows in here.
+			for i := range 8 {
+				e.row(i == 0, json.RawMessage(`{"x":1}`))
+				runtime.Gosched()
+			}
+
+			e.endArray(true)
+			e.end()
+
+			return e.Close()
+		},
+	}
+
+	path := filepath.Join(t.TempDir(), "oracle.jsonl")
+	require.NoError(t, lg.openSinks(path, ""))
+
+	var wg sync.WaitGroup
+
+	for i := range writers {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+				Timestamp: time.Now(),
+				Query:     fmt.Sprintf("SELECT %d", i),
+				Message:   "concurrent",
+			})
+		}()
+	}
+
+	wg.Wait()
+	lg.closeSinks()
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	lines := parseLines(t, content)
+	require.Len(t, lines, writers)
+
+	for _, l := range lines {
+		assert.Len(t, l.Statements, 8, "a line must carry only its own rows")
+	}
+}
+
 func TestFetchErrors_DedupAndFanout(t *testing.T) {
 	lg := &Logger{logger: zaptest.NewLogger(t)}
 
-	// Channel to receive items
-	out := make(chan statementChData, 10)
+	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
 
-	// Prepare two job errors with the same hash (by copying the same struct)
+	// Two job errors with identical content, and therefore an identical hash.
 	base := &joberror.JobError{Timestamp: time.Now(), Query: "Q", Message: "M"}
-	// Ensure deterministic identical hash by using same content
 	je1 := *base
 	je2 := *base
 
-	// Replace poolCallback via fetchHook to avoid real DB calls and to observe fanout
 	var calls atomic.Int64
-	lg.fetchHook = func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError) (cqlDataMap, error) {
+
+	lg.fetchHook = func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError, _ io.Writer) (int64, error) {
 		calls.Add(1)
-		return cqlDataMap{}, nil
+		return 0, nil
 	}
 
-	// Start fetchErrors which fans out to both storages and deduplicates by hash
 	in := make(chan *joberror.JobError, 2)
 	lg.wg.Add(1)
-	go lg.fetchErrors(out, in)
+
+	go lg.fetchErrors(in)
 
 	in <- &je1
 	in <- &je2 // duplicate; should be ignored by dedupe
 	close(in)
 
-	// Drain output until it's closed
-	var received int
-	for item := range out {
-		_ = item
-		received++
-	}
+	lg.wg.Wait()
 
-	// Expect exactly two calls (oracle + test) despite two inputs with same hash
-	assert.Equal(t, int64(2), calls.Load())
-	assert.Equal(t, 2, received)
+	// Both storages are fetched once, despite two inputs with the same hash. Only
+	// the oracle sink exists, so only that fetch reaches the hook.
+	assert.Equal(t, int64(1), calls.Load())
 }
 
 // Benchmarks

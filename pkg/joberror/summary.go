@@ -44,9 +44,10 @@ type stmtLogEntry struct {
 	Type      string       `json:"ty,omitempty"`
 }
 
-// cqlTimestamp wraps time.Time with JSON unmarshaling that accepts both
-// Go's RFC3339 format and Scylla/Cassandra's SELECT JSON timestamp format
-// (e.g. "2024-11-25 12:34:56.789+0000" or "2024-11-25 12:34:56.789Z").
+// cqlTimestamp wraps time.Time with JSON unmarshaling that accepts a bare
+// number of UTC nanoseconds (_logs ts), Go's RFC3339 format, and
+// Scylla/Cassandra's SELECT JSON timestamp format (e.g.
+// "2024-11-25 12:34:56.789+0000" or "2024-11-25 12:34:56.789Z").
 type cqlTimestamp struct {
 	time.Time
 }
@@ -64,9 +65,25 @@ var cqlTSFormats = []string{
 }
 
 func (ct *cqlTimestamp) UnmarshalJSON(data []byte) error {
-	// Strip surrounding quotes.
 	s := string(data)
-	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+
+	if s == "" || s == "null" {
+		ct.Time = time.Time{}
+		return nil
+	}
+
+	// Quoted layouts below stay supported for older log files.
+	if s[0] != '"' {
+		ns, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return fmt.Errorf("cqlTimestamp: unable to parse %s: %w", s, err)
+		}
+		ct.Time = time.Unix(0, ns).UTC()
+		return nil
+	}
+
+	// Strip surrounding quotes.
+	if len(s) < 2 || s[len(s)-1] != '"' {
 		return fmt.Errorf("cqlTimestamp: expected quoted string, got %s", s)
 	}
 	s = s[1 : len(s)-1]

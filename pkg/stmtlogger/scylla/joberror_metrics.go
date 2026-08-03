@@ -27,7 +27,11 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-func RecordErrorMetrics(j *joberror.JobError, lineBytes []byte, storage string) {
+// RecordErrorMetrics stamps the last-seen time for a job error. The statement
+// history itself belongs in the statements file, not in a label: a GaugeVec
+// series is never freed, so carrying the line here pinned every fetched history
+// in memory for the life of the process.
+func RecordErrorMetrics(j *joberror.JobError, storage string) {
 	if j == nil {
 		return
 	}
@@ -48,7 +52,6 @@ func RecordErrorMetrics(j *joberror.JobError, lineBytes []byte, storage string) 
 		"error":          errStr,
 		"partition_hash": ph,
 		"stmt_storage":   storage,
-		"stmt_logger":    string(lineBytes),
 	}
 
 	metrics.StatementErrorLastTS.With(labels).Set(float64(time.Now().Unix()))
