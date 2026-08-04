@@ -25,7 +25,8 @@
         "gomod"
       ],
       "matchPackageNames": [
-        "!github.com/scylladb/gocql"
+        "!github.com/scylladb/gocql",
+        "!github.com/gocql/gocql"
       ],
       "addLabels": [
         "test/integration"
@@ -55,6 +56,13 @@
         "test/integration"
       ],
       "enabled": true
+    },
+    {
+      "description": "Replaced by github.com/scylladb/gocql via the go.mod replace directive",
+      "matchPackageNames": [
+        "github.com/gocql/gocql"
+      ],
+      "enabled": false
     }
   ],
   "vulnerabilityAlerts": {
