@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -40,12 +41,13 @@ import (
 
 const (
 	committerBatchSize      = 64
-	statementChBuffer       = 1000
 	statementFileBufferSize = 32 * 1024
 	statementDirPerm        = 0o755
 	statementFilePerm       = 0o644
 	// Delay before fetching statements for a job error to ensure all statements are persisted and ready
 	statementErrorFetchDelay = 30 * time.Second
+	// How long Close waits for queued statement fetches before it cancels them.
+	statementFetchDrainTimeout = 2 * time.Minute
 	// Per-batch timeout for inserting statement logs into the Scylla logger
 	// cluster. Without this, a stalled Scylla cluster (e.g. during a nemesis)
 	// hangs the committer forever, fills the LogStmt channel and freezes every
@@ -55,28 +57,31 @@ const (
 
 type (
 	Logger struct {
-		logger  *zap.Logger
-		channel <-chan stmtlogger.Item
-		session *gocql.Session
+		// fetchCtx bounds the error-statement fetches only. The committer must not
+		// share it: it drains its channel to the end on shutdown.
+		fetchCtx context.Context
+		logger   *zap.Logger
+		channel  <-chan stmtlogger.Item
+		session  *gocql.Session
 		// statements holds one *cqlStatements per source table, keyed by
 		// "keyspace.table". The logger is shared across every table in the
 		// schema, so each item is routed to its own table's _logs table whose
 		// partition-key columns match the item's PartitionKeys. Using a single
 		// fixed table's columns (the old behavior) mis-bound and dropped every
 		// statement from tables other than Tables[0].
-		statements        map[string]*cqlStatements
-		fetchHook         func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError) (cqlDataMap, error)
-		wg                sync.WaitGroup
-		curWorkers        atomic.Int32
+		statements map[string]*cqlStatements
+		// sinks holds the statements file per cluster side, or is empty when file
+		// logging is off.
+		sinks       map[stmtlogger.Type]*lineSink
+		fetchCancel context.CancelFunc
+		fetchHook   func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError, w io.Writer) (int64, error)
+		// openHook is openStatementFile outside tests.
+		openHook func(name string) (*bufio.Writer, func() error, error)
+		wg       sync.WaitGroup
+		// fetchDelay is statementErrorFetchDelay outside tests.
+		fetchDelay        time.Duration
 		malformedWarnOnce sync.Once
-	}
-
-	statementChData struct {
-		// Use the binary hash as map key for internal processing. Do NOT try to JSON-encode
-		// the whole structure directly in logs; only encode specific fields.
-		Data  cqlDataMap         `json:"data"`
-		Error *joberror.JobError `json:"error"`
-		ty    stmtlogger.Type
+		curWorkers        atomic.Int32
 	}
 
 	// PartitionInfo represents a single partition with its keys and validation data
@@ -93,6 +98,8 @@ type (
 		Message           string            `json:"message"`
 		MutationFragments []json.RawMessage `json:"mutationFragments"`
 		Statements        []json.RawMessage `json:"statements"`
+		// Partial marks a line whose history was cut short by a read failure.
+		Partial bool `json:"partial,omitempty"`
 	}
 )
 
@@ -127,11 +134,13 @@ func New(
 	// per-table loop below only creates each table, not the keyspace.
 	l.Debug("dropping existing statement logs keyspace", zap.String("keyspace", keyspace))
 	if err = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec(); err != nil {
+		session.Close()
 		return nil, err
 	}
 
 	l.Debug("creating statement logs keyspace", zap.String("keyspace", keyspace))
 	if err = session.Query(buildCreateKeyspaceQuery(keyspace, repl)).Exec(); err != nil {
+		session.Close()
 		return nil, err
 	}
 
@@ -153,6 +162,7 @@ func New(
 			sourceTable.Name,
 			sourceTable.PartitionKeys, repl)
 		if err != nil {
+			session.Close()
 			return nil, err
 		}
 
@@ -161,6 +171,7 @@ func New(
 
 	l.Debug("waiting for schema agreement")
 	if err = session.AwaitSchemaAgreement(context.Background()); err != nil {
+		session.Close()
 		return nil, errors.Wrap(err, "failed to await schema agreement for keyspace logs")
 	}
 	l.Debug("schema agreement reached")
@@ -170,6 +181,18 @@ func New(
 		logger:     l,
 		session:    session,
 		statements: statements,
+	}
+
+	// Open the sinks before any worker exists. A failure here returns no logger,
+	// so nothing is left to close the session or release workers blocked on ch.
+	logFiles := oracleStatementsFile != "" || testStatementsFile != ""
+	if logFiles {
+		if err = logger.openSinks(oracleStatementsFile, testStatementsFile); err != nil {
+			session.Close()
+			return nil, err
+		}
+	} else {
+		l.Debug("statement file logging disabled: no files provided")
 	}
 
 	// Start a fixed-size worker pool to insert statement logs into Scylla.
@@ -184,208 +207,177 @@ func New(
 	}
 	logger.curWorkers.Store(int32(workerCount))
 
-	if oracleStatementsFile != "" || testStatementsFile != "" {
+	if logFiles {
 		l.Debug("starting error logger goroutine")
-		statementCh := make(chan statementChData, statementChBuffer)
 		logger.wg.Add(1)
-		go logger.fetchErrors(statementCh, e)
-		logger.wg.Add(1)
-		go logger.statementFlusher(statementCh, oracleStatementsFile, testStatementsFile)
-	} else {
-		l.Debug("statement file logging disabled: no files provided")
+
+		go logger.fetchErrors(e)
 	}
 
 	return logger, nil
 }
 
-//nolint:gocyclo
-func (s *Logger) statementFlusher(ch <-chan statementChData, oracleStatements, testStatements string) {
-	defer s.wg.Done()
+func (s *Logger) openSinks(oracleStatements, testStatements string) error {
+	s.sinks = make(map[stmtlogger.Type]*lineSink, 2)
+	s.fetchCtx, s.fetchCancel = context.WithCancel(context.Background())
 
-	metrics.WorkersCurrent.WithLabelValues("scylla_logger_statement_flusher").Inc()
-	defer metrics.WorkersCurrent.WithLabelValues("scylla_logger_statement_flusher").Dec()
-
-	var (
-		oracleStatementsFile *bufio.Writer
-		testStatementsFile   *bufio.Writer
-		oracleCloser         func() error
-		testCloser           func() error
-		err                  error
-	)
-
-	if oracleStatements != "" {
-		oracleStatementsFile, oracleCloser, err = s.openStatementFile(oracleStatements)
-		if err != nil {
-			s.logger.Error("failed to open oracle statements file",
-				zap.Error(err),
-				zap.String("file", oracleStatements),
-				zap.String("type", string(stmtlogger.TypeOracle)),
-			)
-			panic(err)
-		}
+	if s.fetchDelay == 0 {
+		s.fetchDelay = statementErrorFetchDelay
 	}
 
-	if testStatements != "" {
-		testStatementsFile, testCloser, err = s.openStatementFile(testStatements)
-		if err != nil {
-			s.logger.Error("failed to open test statements file",
-				zap.Error(err),
-				zap.String("file", testStatements),
-				zap.String("type", string(stmtlogger.TypeTest)),
-			)
-			panic(err)
-		}
+	// A slice, not a map: the second file must not open before the first, or a
+	// failure would report the wrong file and the order would vary per run.
+	files := []struct {
+		ty   stmtlogger.Type
+		name string
+	}{
+		{stmtlogger.TypeOracle, oracleStatements},
+		{stmtlogger.TypeTest, testStatements},
 	}
 
-	defer func() {
-		if oracleCloser != nil {
-			if err = oracleCloser(); err != nil {
-				s.logger.Error("failed to close statements file",
-					zap.Error(err),
-					zap.String("file", oracleStatements),
-					zap.String("type", string(stmtlogger.TypeOracle)),
-				)
-			}
+	for _, f := range files {
+		if f.name == "" {
+			continue
 		}
 
-		if testCloser != nil {
-			if err = testCloser(); err != nil {
-				s.logger.Error("failed to close statements file",
-					zap.Error(err),
-					zap.String("file", testStatements),
-					zap.String("type", string(stmtlogger.TypeTest)),
-				)
-			}
+		open := s.openHook
+		if open == nil {
+			open = s.openStatementFile
 		}
-	}()
-	for {
-		item, ok := <-ch
 
-		if !ok {
-			// finalize by flushing any remaining buffers
-			if oracleStatementsFile != nil {
-				if err = oracleStatementsFile.Flush(); err == nil {
-					metrics.StatementLoggerFlushes.WithLabelValues("oracle_file").Inc()
-				}
-			}
-			if testStatementsFile != nil {
-				if err = testStatementsFile.Flush(); err == nil {
-					metrics.StatementLoggerFlushes.WithLabelValues("test_file").Inc()
-				}
-			}
+		w, closer, err := open(f.name)
+		if err != nil {
+			s.logger.Error("failed to open statements file",
+				zap.Error(err),
+				zap.String("file", f.name),
+				zap.String("type", string(f.ty)),
+			)
+
+			// Give back whatever already opened, or its descriptor is lost: the
+			// caller gets no logger and cannot close it.
+			s.closeSinks()
+			s.sinks = nil
+			s.fetchCancel()
+			s.fetchCtx, s.fetchCancel = nil, nil
+
+			return err
+		}
+
+		s.sinks[f.ty] = newLineSink(f.name, w, closer)
+	}
+
+	return nil
+}
+
+func (s *Logger) closeSinks() {
+	for ty, sink := range s.sinks {
+		if err := sink.Close(); err != nil {
+			s.logger.Error("failed to close statements file",
+				zap.Error(err),
+				zap.String("file", sink.name),
+				zap.String("type", string(ty)),
+			)
+		}
+	}
+}
+
+// writeErrorStatements streams one job error's statement history straight into
+// the statements file for ty. Nothing between the CQL iterator and the file
+// holds the whole history.
+func (s *Logger) writeErrorStatements(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError) {
+	sink, ok := s.sinks[ty]
+	if !ok {
+		return
+	}
+
+	fetch := s.fetchHook
+
+	if fetch == nil {
+		cql := s.statementsForQuery(jobError.Query)
+		if cql == nil {
+			s.logger.Error("no statement logs table for job error; cannot fetch failed statements",
+				zap.String("query", jobError.Query),
+				zap.String("job_error_hash", jobError.HashHex()),
+			)
+
 			return
 		}
 
-		for _, val := range item.Data {
-			var bytes []byte
-			errStr := ""
-			if item.Error.Err != nil {
-				errStr = item.Error.Err.Error()
-			}
+		fetch = cql.FetchTo
+	}
 
-			// Reorganize partitionKeys from flat map to array of PartitionInfo
-			partitionInfos := reorganizePartitionKeys(val.partitionKeys, item.Error)
+	var written int64
 
-			l := Line{
-				PartitionKeys:     partitionInfos,
-				Timestamp:         item.Error.Timestamp,
-				Err:               errStr,
-				Query:             item.Error.Query,
-				Message:           item.Error.Message,
-				MutationFragments: val.mutationFragments,
-				Statements:        val.statements,
-			}
+	err := sink.Write(ctx, func(w io.Writer) error {
+		//nolint:govet
+		n, err := fetch(ctx, ty, jobError, w)
+		written = n
 
-			bytes, err = json.Marshal(l)
-			if err != nil {
-				s.logger.Error("failed to marshal statement log",
-					zap.Error(err),
-					zap.String("type", string(item.ty)),
-					zap.String("query", item.Error.Query),
-					zap.String("message", item.Error.Message),
-					zap.String("job_error_hash", item.Error.HashHex()),
-				)
-				continue
-			}
+		return err
+	})
 
-			RecordErrorMetrics(item.Error, bytes, string(item.ty))
-			var (
-				writer   *bufio.Writer
-				fileName string
+	switch {
+	case err == nil:
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		switch {
+		case written == 0:
+			// Shutdown cut the queue short before the line started.
+			s.logger.Debug("statement fetch cancelled before it reached the file",
+				zap.String("type", string(ty)),
+				zap.String("job_error_hash", jobError.HashHex()),
 			)
 
-			switch item.ty {
-			case stmtlogger.TypeOracle:
-				writer = oracleStatementsFile
-				fileName = oracleStatements
-			case stmtlogger.TypeTest:
-				writer = testStatementsFile
-				fileName = testStatements
-			default:
-				s.logger.Error("unknown statement type", zap.String("type", string(item.ty)))
-				continue
-			}
+			return
+		case !isReadError(err):
+			// The file stopped taking bytes part way through the line, so the
+			// line is not a record of anything.
+			s.logger.Error("shutdown cut the statements file short",
+				zap.Error(err),
+				zap.String("file", sink.name),
+				zap.String("type", string(ty)),
+				zap.String("job_error_hash", jobError.HashHex()),
+			)
 
-			if writer == nil {
-				continue // no file sink for this type
-			}
-
-			if _, err = writer.Write(bytes); err != nil {
-				s.logger.Error("failed to write statement log",
-					zap.Error(err),
-					zap.String("type", string(item.ty)),
-					zap.String("file", fileName),
-					zap.String("data", string(bytes)),
-				)
-				continue
-			}
-
-			// Write newline for JSONL format
-			if err = writer.WriteByte('\n'); err != nil {
-				s.logger.Error("failed to write newline to statement log",
-					zap.Error(err),
-					zap.String("type", string(item.ty)),
-					zap.String("file", fileName),
-				)
-				continue
-			}
+			return
+		default:
+			// The line is complete on disk and carries the partial marker, so it
+			// counts like any other short history.
+			s.logger.Warn("shutdown cut the statement history short",
+				zap.Error(err),
+				zap.String("type", string(ty)),
+				zap.String("job_error_hash", jobError.HashHex()),
+			)
 		}
-	}
-}
-
-func (s *Logger) poolCallback(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError) statementChData {
-	var (
-		data cqlDataMap
-		err  error
-	)
-	if s.fetchHook != nil {
-		data, err = s.fetchHook(ctx, ty, jobError)
-	} else if cql := s.statementsForQuery(jobError.Query); cql != nil {
-		data, err = cql.Fetch(ctx, ty, jobError)
-	} else {
-		s.logger.Error("no statement logs table for job error; cannot fetch failed statements",
-			zap.String("query", jobError.Query),
+	case isReadError(err):
+		// The lines that were written are complete and flushed. Only the content
+		// of one partition is missing, so this is not a file failure.
+		s.logger.Warn("failed to read statements for job error",
+			zap.Error(err),
+			zap.String("type", string(ty)),
 			zap.String("job_error_hash", jobError.HashHex()),
 		)
-		return statementChData{}
-	}
-	if err != nil {
-		s.logger.Error("failed to fetch failed statements",
+	default:
+		// The file did not take the line, or the flush failed. Nothing here
+		// reached the disk in a usable state, so nothing is counted.
+		s.logger.Error("failed to write failed statements",
 			zap.Error(err),
-			zap.Any("job_error", jobError),
+			zap.String("file", sink.name),
+			zap.String("type", string(ty)),
+			zap.String("job_error_hash", jobError.HashHex()),
 		)
 
-		return statementChData{}
+		return
 	}
 
-	return statementChData{
-		ty:    ty,
-		Data:  data,
-		Error: jobError,
+	if written == 0 {
+		return
 	}
+
+	metrics.StatementLoggerFlushes.WithLabelValues(string(ty) + "_file").Inc()
+	RecordErrorMetrics(jobError, string(ty))
 }
 
-func (s *Logger) fetchErrors(items chan<- statementChData, ch <-chan *joberror.JobError) {
+func (s *Logger) fetchErrors(ch <-chan *joberror.JobError) {
 	metrics.WorkersCurrent.WithLabelValues("scylla_logger_error_fetcher").Inc()
 	defer metrics.WorkersCurrent.WithLabelValues("scylla_logger_error_fetcher").Dec()
 	defer s.wg.Done()
@@ -394,7 +386,7 @@ func (s *Logger) fetchErrors(items chan<- statementChData, ch <-chan *joberror.J
 
 	defer func() {
 		wg.Wait()
-		close(items)
+		s.closeSinks()
 	}()
 
 	storages := []stmtlogger.Type{stmtlogger.TypeTest, stmtlogger.TypeOracle}
@@ -410,10 +402,23 @@ func (s *Logger) fetchErrors(items chan<- statementChData, ch <-chan *joberror.J
 		// all relevant statements to be synced and ready.
 		for _, ty := range storages {
 			wg.Add(1)
+
 			go func(ty stmtlogger.Type) {
 				defer wg.Done()
-				time.Sleep(statementErrorFetchDelay)
-				items <- s.poolCallback(context.Background(), ty, jobErr)
+
+				timer := time.NewTimer(s.fetchDelay)
+				defer timer.Stop()
+
+				// The delay and the fetch both watch fetchCtx. A partition scan is
+				// unbounded, so without this Close would wait for every queued fetch
+				// to page through its whole history.
+				select {
+				case <-timer.C:
+				case <-s.fetchCtx.Done():
+					return
+				}
+
+				s.writeErrorStatements(s.fetchCtx, ty, jobErr)
 			}(ty)
 		}
 	}
@@ -713,6 +718,32 @@ func (s *Logger) Close() error {
 	// close signal, guaranteeing no item is lost. The per-batch timeout
 	// (committerBatchTimeout) is what keeps a stalled Scylla logger
 	// cluster from blocking the worker indefinitely.
-	s.wg.Wait()
+	if s.fetchCancel == nil {
+		s.wg.Wait()
+		return nil
+	}
+
+	// Give the queued statement fetches a bounded window to finish. Each one
+	// pages through a whole partition under the sink lock, so without the cutoff
+	// shutdown waits for the sum of every outstanding scan.
+	done := make(chan struct{})
+
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(statementFetchDrainTimeout):
+		s.logger.Warn("statement fetches did not finish in time; cancelling",
+			zap.Duration("timeout", statementFetchDrainTimeout),
+		)
+		s.fetchCancel()
+		<-done
+	}
+
+	s.fetchCancel()
+
 	return nil
 }

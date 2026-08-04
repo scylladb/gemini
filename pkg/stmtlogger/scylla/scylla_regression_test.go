@@ -17,7 +17,9 @@ package scylla
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,26 +33,19 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
+// TestStatementSink_JSONLRegression pins the file format: one valid JSON object
+// per line, with the job error's own query, message and partition keys, and the
+// streamed rows verbatim. Rows are written straight from the CQL iterator now,
+// so a malformed separator would corrupt the file for every later reader.
+//
 //nolint:gocyclo
-func TestStatementFlusher_JSONMarshalRegression(t *testing.T) {
+func TestStatementSink_JSONLRegression(t *testing.T) {
 	t.Parallel()
 
-	// Prepare temp files
 	dir := t.TempDir()
 	oraclePath := filepath.Join(dir, "oracle_statements.jsonl")
 	testPath := filepath.Join(dir, "test_statements.jsonl")
 
-	// Minimal logger instance sufficient for statementFlusher
-	s := &Logger{logger: zaptest.NewLogger(t)}
-
-	// Channel for flusher
-	ch := make(chan statementChData, 2)
-
-	// Start the flusher
-	s.wg.Add(1)
-	go s.statementFlusher(ch, oraclePath, testPath)
-
-	// Create a sample JobError and associated data
 	jobErr := &joberror.JobError{
 		Timestamp: time.Now(),
 		Query:     "SELECT * FROM ks.tbl WHERE pk0 = ? AND pk1 = ?",
@@ -62,73 +57,45 @@ func TestStatementFlusher_JSONMarshalRegression(t *testing.T) {
 		}),
 	}
 
-	// Data map uses [32]byte keys internally – this is the crux of the
-	// regression: such maps must never be sent to JSON encoder via logs.
-	data := cqlDataMap{
-		jobErr.Hash(): {
-			partitionKeys: map[string][]any{
-				"pk0": {"abc"},
-				"pk1": {int32(7)},
-			},
-			mutationFragments: []json.RawMessage{json.RawMessage(`{"fragment":1}`)},
-			statements:        []json.RawMessage{json.RawMessage(`{"statement":1}`)},
+	s := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			e := newLineEncoder(w)
+			e.head(reorganizePartitionKeys(item.PartitionKeys.ToMap(), item), item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.row(true, json.RawMessage(`{"fragment":1}`))
+			e.endArray(false)
+			e.array("statements")
+			e.row(true, json.RawMessage(`{"statement":1}`))
+			e.endArray(true)
+			e.end(false)
+
+			return e.Close()
 		},
 	}
 
-	// Send both oracle and test entries
-	ch <- statementChData{ty: stmtlogger.TypeOracle, Data: data, Error: jobErr}
-	ch <- statementChData{ty: stmtlogger.TypeTest, Data: data, Error: jobErr}
-
-	// Close the channel to let flusher finish
-	close(ch)
-
-	// Avoid a race where Wait could be called before wg.Add(1) in the goroutine.
-	// Instead, poll for file appearance with a timeout.
-	waitForFile := func(path string) {
-		deadline := time.Now().Add(2 * time.Second)
-		for {
-			if _, err := os.Stat(path); err == nil {
-				return
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("timed out waiting for file %s to be created", path)
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
+	if err := s.openSinks(oraclePath, testPath); err != nil {
+		t.Fatalf("failed to open sinks: %v", err)
 	}
 
-	waitForFile(oraclePath)
-	waitForFile(testPath)
+	s.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, jobErr)
+	s.writeErrorStatements(t.Context(), stmtlogger.TypeTest, jobErr)
+	s.closeSinks()
 
-	// Validate that both files contain exactly one valid JSON object each
 	validateJSONL := func(path string) {
-		// Because the file may be created before the line is written, loop until
-		// we observe a non-empty line or time out.
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatalf("failed to open statements file %s: %v", path, err)
+		}
+		defer f.Close()
+
 		var lines []string
-		deadline := time.Now().Add(2 * time.Second)
-		for {
-			f, err := os.Open(path)
-			if err != nil {
-				t.Fatalf("failed to open statements file %s: %v", path, err)
-			}
 
-			scanner := bufio.NewScanner(f)
-			lines = lines[:0]
-			for scanner.Scan() {
-				line := strings.TrimSpace(scanner.Text())
-				if line != "" {
-					lines = append(lines, line)
-				}
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			if line := strings.TrimSpace(scanner.Text()); line != "" {
+				lines = append(lines, line)
 			}
-			_ = f.Close()
-
-			if len(lines) > 0 {
-				break
-			}
-			if time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
 		}
 
 		if len(lines) != 1 {
@@ -146,48 +113,25 @@ func TestStatementFlusher_JSONMarshalRegression(t *testing.T) {
 		if out.Message != jobErr.Message {
 			t.Fatalf("unexpected message in %s: got %q want %q", path, out.Message, jobErr.Message)
 		}
-		// Validate PKs copied through
 		if len(out.PartitionKeys) != 1 {
 			t.Fatalf("expected 1 partition, got %d in %s", len(out.PartitionKeys), path)
 		}
+
 		got := out.PartitionKeys[0]
 		if got.PartitionKeys["pk0"] != "abc" {
 			t.Fatalf("unexpected pk0 in %s: %#v", path, got.PartitionKeys["pk0"])
 		}
-		{
-			pk1Val := got.PartitionKeys["pk1"]
-			if pk1Val == nil {
-				t.Fatalf("unexpected nil pk1 in %s", path)
-			}
-			var ok bool
-			switch v := pk1Val.(type) {
-			case float64:
-				ok = int(v) == 7
-			case int:
-				ok = v == 7
-			case int32:
-				ok = v == 7
-			case int64:
-				ok = v == 7
-			case uint:
-				ok = int(v) == 7
-			case uint32:
-				ok = int(v) == 7
-			case uint64:
-				ok = int(v) == 7
-			default:
-				ok = false
-			}
-			if !ok {
-				t.Fatalf("unexpected pk1 in %s: %#v", path, got.PartitionKeys["pk1"])
-			}
+
+		pk1Val, ok := got.PartitionKeys["pk1"].(float64)
+		if !ok || int(pk1Val) != 7 {
+			t.Fatalf("unexpected pk1 in %s: %#v", path, got.PartitionKeys["pk1"])
 		}
 
 		if len(out.MutationFragments) != 1 || string(out.MutationFragments[0]) != `{"fragment":1}` {
-			t.Fatalf("unexpected mutationFragments in %s: %s", path, string(out.MutationFragments[0]))
+			t.Fatalf("unexpected mutationFragments in %s: %v", path, out.MutationFragments)
 		}
 		if len(out.Statements) != 1 || string(out.Statements[0]) != `{"statement":1}` {
-			t.Fatalf("unexpected statements in %s: %s", path, string(out.Statements[0]))
+			t.Fatalf("unexpected statements in %s: %v", path, out.Statements)
 		}
 	}
 

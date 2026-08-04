@@ -17,18 +17,23 @@ package scylla
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"strings"
+	"runtime"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -102,7 +107,9 @@ func TestBuildCreateTableQueryUnit(t *testing.T) {
 			wantContains: []string{
 				"CREATE TABLE IF NOT EXISTS test_logs.test_statements",
 				"pk0 text",
-				"PRIMARY KEY ((pk0, ty)",
+				"ts bigint",
+				"seq bigint",
+				"PRIMARY KEY ((pk0, ty), ts, attempt, gemini_attempt, seq)",
 			},
 		},
 		{
@@ -203,7 +210,7 @@ func TestPrepareValuesOptimizedUnit(t *testing.T) {
 func TestAdditionalColumnsUnit(t *testing.T) {
 	t.Parallel()
 
-	expected := []string{"ts", "ty", "statement", "values", "host", "attempt", "gemini_attempt", "error", "dur"}
+	expected := []string{"ts", "seq", "ty", "statement", "values", "host", "attempt", "gemini_attempt", "error", "dur"}
 
 	assert.Equal(t, len(expected), len(additionalColumnsArr))
 	for i, col := range expected {
@@ -277,85 +284,6 @@ func TestLine_JSONMarshaling(t *testing.T) {
 			assert.Equal(t, tt.line.Query, unmarshaled.Query)
 			assert.Equal(t, tt.line.Message, unmarshaled.Message)
 		})
-	}
-}
-
-func TestStatementChData_Structure(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		data statementChData
-	}{
-		{
-			name: "oracle type",
-			data: statementChData{
-				ty: stmtlogger.TypeOracle,
-				Data: cqlDataMap{
-					{1}: {
-						partitionKeys: map[string][]any{"pk0": {"key"}},
-						statements:    []json.RawMessage{json.RawMessage(`{"stmt":"SELECT"}`)},
-					},
-				},
-				Error: &joberror.JobError{
-					Timestamp: time.Now(),
-					Query:     "SELECT * FROM test",
-					StmtType:  typedef.SelectStatementType,
-				},
-			},
-		},
-		{
-			name: "test type",
-			data: statementChData{
-				ty: stmtlogger.TypeTest,
-				Data: cqlDataMap{
-					{2}: {
-						partitionKeys: map[string][]any{"pk0": {"key2"}},
-					},
-				},
-				Error: &joberror.JobError{
-					Timestamp: time.Now(),
-					Query:     "INSERT INTO test VALUES (?)",
-					StmtType:  typedef.InsertStatementType,
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.NotNil(t, tt.data.Data)
-			assert.NotNil(t, tt.data.Error)
-			assert.Contains(t, []stmtlogger.Type{stmtlogger.TypeOracle, stmtlogger.TypeTest}, tt.data.ty)
-		})
-	}
-}
-
-func TestCQLData_Structure(t *testing.T) {
-	t.Parallel()
-
-	data := cqlData{
-		partitionKeys: map[string][]any{
-			"pk0": {"test"},
-			"pk1": {123},
-		},
-		mutationFragments: []json.RawMessage{
-			json.RawMessage(`{"mutation":"test"}`),
-		},
-		statements: []json.RawMessage{
-			json.RawMessage(`{"statement":"test"}`),
-		},
-	}
-
-	assert.NotNil(t, data.partitionKeys)
-	assert.NotEmpty(t, data.partitionKeys)
-
-	for _, fragment := range data.mutationFragments {
-		var decoded map[string]any
-		err := json.Unmarshal(fragment, &decoded)
-		assert.NoError(t, err)
 	}
 }
 
@@ -454,139 +382,550 @@ func TestLogger_Close(t *testing.T) {
 	mu.Unlock()
 }
 
-func TestCqlDataMap_MarshalJSON(t *testing.T) {
-	var k1, k2 [32]byte
-	copy(k1[:], bytes.Repeat([]byte{0xAB}, 32))
-	copy(k2[:], bytes.Repeat([]byte{0xCD}, 32))
+func TestStatementSink_WritesAndFlushes(t *testing.T) {
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			e := newLineEncoder(w)
+			e.head(reorganizePartitionKeys(map[string][]any{"pk": {"a"}}, item), item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.endArray(false)
+			e.array("statements")
+			e.row(true, json.RawMessage(`{"x":1}`))
+			e.endArray(true)
+			e.end(false)
 
-	m := cqlDataMap{
-		k1: {partitionKeys: map[string][]any{"pk": {1}}, mutationFragments: []json.RawMessage{json.RawMessage(`{"a":1}`)}},
-		k2: {partitionKeys: map[string][]any{"pk": {2}}, statements: []json.RawMessage{json.RawMessage(`{"b":2}`)}},
+			return e.Close()
+		},
 	}
-
-	bs, err := json.Marshal(m)
-	require.NoError(t, err)
-
-	// It should be a JSON object with two keys (hex-encoded)
-	var obj map[string]any
-	require.NoError(t, json.Unmarshal(bs, &obj))
-	assert.Len(t, obj, 2)
-	// keys should be 64-char hex strings
-	for k := range obj {
-		assert.Equal(t, 64, len(k))
-		_, err = os.ReadFile("/dev/null") // no-op to silence lint on err shadowing
-		_ = err
-	}
-}
-
-func TestStatementFlusher_WritesAndFlushes(t *testing.T) {
-	lg := &Logger{logger: zaptest.NewLogger(t)}
 
 	dir := t.TempDir()
 	oraclePath := filepath.Join(dir, "oracle.jsonl")
 	testPath := filepath.Join(dir, "test.jsonl")
 
-	// reset counter
-	// Note: prometheus counters cannot be set backwards; we'll only assert it increases
+	// Prometheus counters cannot be set backwards, so only assert they grow.
 	beforeOracle := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("oracle_file"))
 	beforeTest := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("test_file"))
 
-	ch := make(chan statementChData, 2)
-	var wg sync.WaitGroup
-	lg.wg.Add(1) // statementFlusher expects the caller to have incremented wg
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		lg.statementFlusher(ch, oraclePath, testPath)
-	}()
+	require.NoError(t, lg.openSinks(oraclePath, testPath))
 
-	// Build one oracle and one test item
 	je := &joberror.JobError{
 		Timestamp: time.Now(),
 		Query:     "SELECT 1",
 		Message:   "boom",
 	}
-	val := cqlData{partitionKeys: map[string][]any{"pk": {"a"}}, statements: []json.RawMessage{json.RawMessage(`{"x":1}`)}}
-	data := cqlDataMap{}
-	var key [32]byte
-	copy(key[:], bytes.Repeat([]byte{1}, 32))
-	data[key] = val
 
-	ch <- statementChData{ty: stmtlogger.TypeOracle, Data: data, Error: je}
-	ch <- statementChData{ty: stmtlogger.TypeTest, Data: data, Error: je}
-	close(ch)
-	// Wait for flusher to finish to avoid races on files and metrics
-	wg.Wait()
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, je)
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeTest, je)
+	lg.closeSinks()
 
-	// Read files and ensure they have exactly one line each and are valid JSON
 	readAndCheck := func(p string) string {
 		f, err := os.Open(p)
 		require.NoError(t, err)
 		defer f.Close()
+
 		r := bufio.NewScanner(f)
+
 		var lines []string
 		for r.Scan() {
 			lines = append(lines, r.Text())
 		}
+
 		require.NoError(t, r.Err())
-		require.Equal(t, 1, len(lines))
-		// Must be valid JSON and contain our query
+		require.Len(t, lines, 1)
+
 		var line Line
 		require.NoError(t, json.Unmarshal([]byte(lines[0]), &line))
 		assert.Equal(t, "SELECT 1", line.Query)
+		assert.Len(t, line.Statements, 1)
+
 		return lines[0]
 	}
 
-	oracleJSON := readAndCheck(oraclePath)
-	testJSON := readAndCheck(testPath)
-	assert.True(t, strings.Contains(oracleJSON, "SELECT 1"))
-	assert.True(t, strings.Contains(testJSON, "SELECT 1"))
+	assert.Contains(t, readAndCheck(oraclePath), "SELECT 1")
+	assert.Contains(t, readAndCheck(testPath), "SELECT 1")
 
-	// Counters should have incremented at least once for each file
 	afterOracle := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("oracle_file"))
 	afterTest := testutil.ToFloat64(metrics.StatementLoggerFlushes.WithLabelValues("test_file"))
 	assert.Greater(t, afterOracle, beforeOracle)
 	assert.Greater(t, afterTest, beforeTest)
 }
 
-func TestFetchErrors_DedupAndFanout(t *testing.T) {
+// TestStatementSink_NoInterleaving pins the invariant the sink mutex exists for:
+// fetches stream row by row straight into a shared file, so two concurrent
+// writers must never interleave their lines.
+func TestStatementSink_NoInterleaving(t *testing.T) {
+	const writers = 32
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			e := newLineEncoder(w)
+			e.head(nil, item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.endArray(false)
+			e.array("statements")
+
+			// Write the rows one at a time with a yield between them: without the
+			// sink lock another writer would slip its own rows in here.
+			for i := range 8 {
+				e.row(i == 0, json.RawMessage(`{"x":1}`))
+				runtime.Gosched()
+			}
+
+			e.endArray(true)
+			e.end(false)
+
+			return e.Close()
+		},
+	}
+
+	path := filepath.Join(t.TempDir(), "oracle.jsonl")
+	require.NoError(t, lg.openSinks(path, ""))
+
+	var wg sync.WaitGroup
+
+	for i := range writers {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+				Timestamp: time.Now(),
+				Query:     fmt.Sprintf("SELECT %d", i),
+				Message:   "concurrent",
+			})
+		}()
+	}
+
+	wg.Wait()
+	lg.closeSinks()
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	lines := parseLines(t, content)
+	require.Len(t, lines, writers)
+
+	for _, l := range lines {
+		assert.Len(t, l.Statements, 8, "a line must carry only its own rows")
+	}
+}
+
+// TestStatementSink_FlushesOnFetchError pins the behaviour a partial fetch
+// depends on: FetchTo returns a read error after writing a complete line, so the
+// sink must still flush or that line never reaches the disk.
+func TestStatementSink_FlushesOnFetchError(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "oracle.jsonl")
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			e := newLineEncoder(w)
+			e.head(nil, item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.endArray(false)
+			e.array("statements")
+			e.endArray(true)
+			e.end(false)
+
+			n, _ := e.Close()
+
+			return n, newReadError(errors.New("read failed halfway"))
+		},
+	}
+
+	require.NoError(t, lg.openSinks(path, ""))
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(),
+		Query:     "SELECT 1",
+		Message:   "partial",
+	})
+
+	// Read before closing the sink: a flush at Close would hide the bug.
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	lines := parseLines(t, content)
+	require.Len(t, lines, 1, "the line written before the read error must be on disk")
+	assert.Equal(t, "SELECT 1", lines[0].Query)
+
+	lg.closeSinks()
+}
+
+// TestStatementSink_WriteFailureIsNotCounted: the flush counter is what an
+// operator reads to decide the statements file is complete, so a line that never
+// reached the disk must not increment it.
+func TestStatementSink_WriteFailureIsNotCounted(t *testing.T) {
+	t.Parallel()
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError, w io.Writer) (int64, error) {
+			n, _ := w.Write([]byte(`{"partial":`))
+
+			// A bare error, not a readError: the file did not take the line.
+			return int64(n), errors.New("disk full")
+		},
+	}
+
+	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
+
+	t.Cleanup(lg.closeSinks)
+
+	// The flush counter is shared with the other tests in this package, so the
+	// assertion uses a label value only this job error can produce.
+	marker := errors.New("write-failure-not-counted-marker")
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(),
+		Query:     "SELECT 1",
+		Message:   "boom",
+		Err:       marker,
+	})
+
+	assert.False(t, hasErrorSeries(marker.Error()), "a write failure must not be stamped as recorded")
+}
+
+// TestStatementSink_CancelledMidLineIsCounted: shutdown can cancel the read
+// after the line is already on disk. The line is complete and marked partial, so
+// it must be counted, not reported as never written.
+func TestStatementSink_CancelledMidLineIsCounted(t *testing.T) {
+	t.Parallel()
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			e := newLineEncoder(w)
+			e.head(nil, item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.endArray(false)
+			e.array("statements")
+			e.endArray(true)
+			e.end(true)
+
+			written, _ := e.Close()
+
+			return written, newReadError(context.Canceled)
+		},
+	}
+
+	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
+
+	t.Cleanup(lg.closeSinks)
+
+	marker := errors.New("cancelled-mid-line-marker")
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(),
+		Query:     "SELECT 1",
+		Message:   "boom",
+		Err:       marker,
+	})
+
+	assert.True(t, hasErrorSeries(marker.Error()), "a line that reached the disk must be counted")
+}
+
+// TestStatementSink_CancelledBeforeWriteIsNotCounted: the same shutdown before
+// any byte reached the file records nothing.
+func TestStatementSink_CancelledBeforeWriteIsNotCounted(t *testing.T) {
+	t.Parallel()
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError, _ io.Writer) (int64, error) {
+			return 0, newReadError(context.Canceled)
+		},
+	}
+
+	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
+
+	t.Cleanup(lg.closeSinks)
+
+	marker := errors.New("cancelled-before-write-marker")
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(),
+		Query:     "SELECT 1",
+		Message:   "boom",
+		Err:       marker,
+	})
+
+	assert.False(t, hasErrorSeries(marker.Error()), "nothing on disk must not be stamped as recorded")
+}
+
+// TestStatementSink_LatchesWriteFailure: after the file rejects a line, no
+// later job error may read its history out of _logs. Those reads cost cluster
+// time and cannot reach the disk anymore.
+func TestStatementSink_LatchesWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int64
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError, w io.Writer) (int64, error) {
+			calls.Add(1)
+
+			n, _ := w.Write([]byte(`{"partial":`))
+
+			// A bare error, not a readError: the file did not take the line.
+			return int64(n), errors.New("disk full")
+		},
+	}
+
+	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
+
+	t.Cleanup(lg.closeSinks)
+
+	je := &joberror.JobError{Timestamp: time.Now(), Query: "SELECT 1", Message: "boom"}
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, je)
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, je)
+
+	assert.Equal(t, int64(1), calls.Load(), "a broken file must reject later fetches before they read _logs")
+}
+
+// TestStatementSink_ReadErrorDoesNotLatch: a read error costs one partition its
+// content and leaves the file usable, so the next job error must still be
+// fetched and written.
+func TestStatementSink_ReadErrorDoesNotLatch(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "oracle.jsonl")
+
+	var calls atomic.Int64
+
+	lg := &Logger{
+		logger: zaptest.NewLogger(t),
+		fetchHook: func(_ context.Context, _ stmtlogger.Type, item *joberror.JobError, w io.Writer) (int64, error) {
+			n := calls.Add(1)
+
+			e := newLineEncoder(w)
+			e.head(nil, item.Timestamp, "", item.Query, item.Message)
+			e.array("mutationFragments")
+			e.endArray(false)
+			e.array("statements")
+			e.endArray(true)
+			e.end(false)
+
+			written, _ := e.Close()
+
+			if n == 1 {
+				return written, newReadError(errors.New("read failed halfway"))
+			}
+
+			return written, nil
+		},
+	}
+
+	require.NoError(t, lg.openSinks(path, ""))
+
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(), Query: "SELECT 1", Message: "partial",
+	})
+	lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
+		Timestamp: time.Now(), Query: "SELECT 2", Message: "whole",
+	})
+
+	assert.Equal(t, int64(2), calls.Load(), "a read error must not close the file for later job errors")
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	lines := parseLines(t, content)
+	require.Len(t, lines, 2)
+	assert.Equal(t, "SELECT 2", lines[1].Query)
+
+	lg.closeSinks()
+}
+
+// TestStatementSink_AdmissionIsCancellable: a queued writer waits behind a whole
+// partition scan, so shutdown can only be bounded if that wait ends with the
+// context.
+func TestStatementSink_AdmissionIsCancellable(t *testing.T) {
+	t.Parallel()
+
+	sink := newLineSink("test.jsonl", bufio.NewWriter(io.Discard), func() error { return nil })
+
+	held := make(chan struct{})
+	release := make(chan struct{})
+
+	go func() {
+		_ = sink.Write(t.Context(), func(io.Writer) error {
+			close(held)
+			<-release
+
+			return nil
+		})
+	}()
+
+	<-held
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var reached atomic.Bool
+
+	err := sink.Write(ctx, func(io.Writer) error {
+		reached.Store(true)
+
+		return nil
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.False(t, reached.Load(), "a cancelled writer must not enter the file")
+
+	close(release)
+}
+
+// hasErrorSeries reports whether StatementErrorLastTS holds a series whose
+// error label equals want.
+func hasErrorSeries(want string) bool {
+	ch := make(chan prometheus.Metric, 1024)
+
+	go func() {
+		metrics.StatementErrorLastTS.Collect(ch)
+		close(ch)
+	}()
+
+	for m := range ch {
+		var dto dto.Metric
+		if err := m.Write(&dto); err != nil {
+			continue
+		}
+
+		for _, l := range dto.GetLabel() {
+			if l.GetName() == "error" && l.GetValue() == want {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// TestOpenSinks_ClosesOnPartialFailure: the caller gets no logger when this
+// fails, so a file opened before the failure would leak its descriptor.
+func TestOpenSinks_ClosesOnPartialFailure(t *testing.T) {
+	t.Parallel()
+
 	lg := &Logger{logger: zaptest.NewLogger(t)}
 
-	// Channel to receive items
-	out := make(chan statementChData, 10)
+	oraclePath := filepath.Join(t.TempDir(), "oracle.jsonl")
+	boom := errors.New("second file refused to open")
 
-	// Prepare two job errors with the same hash (by copying the same struct)
+	var closed atomic.Int32
+
+	// Reopening the same path succeeds whether or not the first descriptor was
+	// closed, so the double has to report the close itself.
+	lg.openHook = func(name string) (*bufio.Writer, func() error, error) {
+		if name != oraclePath {
+			return nil, nil, boom
+		}
+
+		return bufio.NewWriter(io.Discard), func() error {
+			closed.Add(1)
+
+			return nil
+		}, nil
+	}
+
+	err := lg.openSinks(oraclePath, "/tmp/test-invalid.jsonl")
+	require.ErrorIs(t, err, boom)
+	assert.Nil(t, lg.sinks, "no sink may survive a failed setup")
+	assert.Equal(t, int32(1), closed.Load(), "the file opened before the failure must be closed")
+}
+
+func TestFetchErrors_DedupAndFanout(t *testing.T) {
+	t.Parallel()
+
+	// Both sinks, or a fetch for the missing side would return before it reaches
+	// the hook and the fan-out half of this test would assert nothing.
+	dir := t.TempDir()
+
+	lg := &Logger{logger: zaptest.NewLogger(t)}
+	require.NoError(t, lg.openSinks(filepath.Join(dir, "oracle.jsonl"), filepath.Join(dir, "test.jsonl")))
+
+	t.Cleanup(lg.closeSinks)
+
+	// Two job errors with identical content, and therefore an identical hash.
 	base := &joberror.JobError{Timestamp: time.Now(), Query: "Q", Message: "M"}
-	// Ensure deterministic identical hash by using same content
 	je1 := *base
 	je2 := *base
 
-	// Replace poolCallback via fetchHook to avoid real DB calls and to observe fanout
-	var calls atomic.Int64
-	lg.fetchHook = func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError) (cqlDataMap, error) {
-		calls.Add(1)
-		return cqlDataMap{}, nil
+	var (
+		mu    sync.Mutex
+		types []stmtlogger.Type
+	)
+
+	lg.fetchHook = func(_ context.Context, ty stmtlogger.Type, _ *joberror.JobError, _ io.Writer) (int64, error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		types = append(types, ty)
+
+		return 0, nil
 	}
 
-	// Start fetchErrors which fans out to both storages and deduplicates by hash
+	lg.fetchDelay = time.Millisecond
+
 	in := make(chan *joberror.JobError, 2)
 	lg.wg.Add(1)
-	go lg.fetchErrors(out, in)
+
+	go lg.fetchErrors(in)
 
 	in <- &je1
 	in <- &je2 // duplicate; should be ignored by dedupe
 	close(in)
 
-	// Drain output until it's closed
-	var received int
-	for item := range out {
-		_ = item
-		received++
+	lg.wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// One fetch per cluster side, for one of the two identical job errors.
+	sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
+	assert.Equal(t, []stmtlogger.Type{stmtlogger.TypeOracle, stmtlogger.TypeTest}, types)
+}
+
+// TestFetchErrors_CancelledOnClose: a queued fetch pages through a whole
+// partition under the sink lock, so Close must be able to cut the queue short
+// instead of waiting for every scan.
+func TestFetchErrors_CancelledOnClose(t *testing.T) {
+	t.Parallel()
+
+	lg := &Logger{logger: zaptest.NewLogger(t)}
+	require.NoError(t, lg.openSinks(filepath.Join(t.TempDir(), "oracle.jsonl"), ""))
+
+	t.Cleanup(lg.closeSinks)
+
+	lg.fetchDelay = time.Hour
+
+	var calls atomic.Int64
+
+	lg.fetchHook = func(_ context.Context, _ stmtlogger.Type, _ *joberror.JobError, _ io.Writer) (int64, error) {
+		calls.Add(1)
+		return 0, nil
 	}
 
-	// Expect exactly two calls (oracle + test) despite two inputs with same hash
-	assert.Equal(t, int64(2), calls.Load())
-	assert.Equal(t, 2, received)
+	in := make(chan *joberror.JobError, 1)
+	lg.wg.Add(1)
+
+	go lg.fetchErrors(in)
+
+	in <- &joberror.JobError{Timestamp: time.Now(), Query: "Q", Message: "M"}
+	close(in)
+
+	// The fetch is parked on the hour-long delay. Cancelling releases it.
+	lg.fetchCancel()
+	lg.wg.Wait()
+
+	assert.Zero(t, calls.Load(), "a cancelled fetch must not run")
 }
 
 // Benchmarks

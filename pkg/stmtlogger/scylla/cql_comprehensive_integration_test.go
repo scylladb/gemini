@@ -399,7 +399,7 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 
 	tests := []struct {
 		setupFunc    func(t *testing.T) *joberror.JobError
-		validateFunc func(t *testing.T, result cqlDataMap, jobErr *joberror.JobError)
+		validateFunc func(t *testing.T, lines []Line, jobErr *joberror.JobError)
 		name         string
 	}{
 		{
@@ -439,19 +439,15 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 					}),
 				}
 			},
-			validateFunc: func(t *testing.T, result cqlDataMap, jobErr *joberror.JobError) {
+			validateFunc: func(t *testing.T, lines []Line, jobErr *joberror.JobError) {
 				t.Helper()
-				require.NotNil(t, result, "result should not be nil")
-				require.NotEmpty(t, result, "result should not be empty")
-
-				// Should have data for the partition
-				data, exists := result[jobErr.Hash()]
-				require.True(t, exists, "should have data for job error hash")
-				assert.NotEmpty(t, data.statements, "should have statements")
-				assert.NotEmpty(t, data.mutationFragments, "should have mutation fragments")
-				assert.NotEmpty(t, data.partitionKeys, "should have partition keys")
-				assert.Equal(t, []any{"fetch_key_1"}, data.partitionKeys["pk0"])
-				assert.Equal(t, []any{int32(1)}, data.partitionKeys["pk1"])
+				require.Len(t, lines, 1, "one line per partition")
+				assert.NotEmpty(t, lines[0].Statements, "should have statements")
+				assert.NotEmpty(t, lines[0].MutationFragments, "should have mutation fragments")
+				assert.NotEmpty(t, lines[0].PartitionKeys, "should have partition keys")
+				assert.Equal(t, jobErr.Query, lines[0].Query)
+				assert.Equal(t, []any{"fetch_key_1"}, partitionKeyValues(lines, "pk0"))
+				assert.Equal(t, []any{float64(1)}, partitionKeyValues(lines, "pk1"))
 			},
 		},
 		{
@@ -490,12 +486,11 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 					}),
 				}
 			},
-			validateFunc: func(t *testing.T, result cqlDataMap, jobErr *joberror.JobError) {
+			validateFunc: func(t *testing.T, lines []Line, _ *joberror.JobError) {
 				t.Helper()
-				require.NotEmpty(t, result, "should have results")
-				data := result[jobErr.Hash()]
-				assert.NotEmpty(t, data.statements, "should have statements")
-				assert.NotEmpty(t, data.mutationFragments, "should have mutation fragments")
+				require.Len(t, lines, 1)
+				assert.NotEmpty(t, lines[0].Statements, "should have statements")
+				assert.NotEmpty(t, lines[0].MutationFragments, "should have mutation fragments")
 			},
 		},
 		{
@@ -534,11 +529,10 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 					}),
 				}
 			},
-			validateFunc: func(t *testing.T, result cqlDataMap, jobErr *joberror.JobError) {
+			validateFunc: func(t *testing.T, lines []Line, _ *joberror.JobError) {
 				t.Helper()
-				require.NotEmpty(t, result, "should have results")
-				data := result[jobErr.Hash()]
-				assert.NotEmpty(t, data.statements, "should have statements")
+				require.Len(t, lines, 1)
+				assert.NotEmpty(t, lines[0].Statements, "should have statements")
 			},
 		},
 		{
@@ -576,11 +570,10 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 					PartitionKeys: pkValues,
 				}
 			},
-			validateFunc: func(t *testing.T, result cqlDataMap, jobErr *joberror.JobError) {
+			validateFunc: func(t *testing.T, lines []Line, _ *joberror.JobError) {
 				t.Helper()
-				require.NotEmpty(t, result, "should have results")
-				data := result[jobErr.Hash()]
-				assert.NotEmpty(t, data.partitionKeys, "should have partition keys")
+				require.Len(t, lines, 1)
+				assert.NotEmpty(t, lines[0].PartitionKeys, "should have partition keys")
 			},
 		},
 	}
@@ -590,15 +583,8 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 			t.Parallel()
 			jobErr := tt.setupFunc(t)
 
-			// Fetch from Oracle
-			oracleResult, err := cqlStmts.Fetch(t.Context(), stmtlogger.TypeOracle, jobErr)
-			require.NoError(t, err, "Oracle fetch should succeed")
-			tt.validateFunc(t, oracleResult, jobErr)
-
-			// Fetch from Test
-			testResult, err := cqlStmts.Fetch(t.Context(), stmtlogger.TypeTest, jobErr)
-			require.NoError(t, err, "Test fetch should succeed")
-			tt.validateFunc(t, testResult, jobErr)
+			tt.validateFunc(t, fetchLines(t.Context(), t, cqlStmts, stmtlogger.TypeOracle, jobErr), jobErr)
+			tt.validateFunc(t, fetchLines(t.Context(), t, cqlStmts, stmtlogger.TypeTest, jobErr), jobErr)
 		})
 	}
 }
@@ -742,17 +728,13 @@ func TestCQLStatements_Fetch_MultiPartition_Comprehensive(t *testing.T) {
 
 			// Fetch from both oracle and test
 			for _, ty := range []stmtlogger.Type{stmtlogger.TypeOracle, stmtlogger.TypeTest} {
-				result, err := cqlStmts.Fetch(t.Context(), ty, jobErr)
-				require.NoError(t, err, "Fetch should succeed for %s", ty)
-				assert.NotEmpty(t, result, "Should have results for %s", ty)
+				lines := fetchLines(t.Context(), t, cqlStmts, ty, jobErr)
+				require.NotEmpty(t, lines, "Should have results for %s", ty)
 
-				// Verify we have data for multiple partitions
-				assert.LessOrEqual(t, 1, len(result), "Should have at least 1 partition result")
-
-				// Verify each partition has the expected data
-				for hash, data := range result {
-					assert.NotEmpty(t, data.partitionKeys, "Hash %v should have partition keys", hash)
-					assert.NotEmpty(t, data.statements, "Hash %v should have statements", hash)
+				// One JSONL line per partition, each carrying its own history.
+				for i, l := range lines {
+					assert.NotEmpty(t, l.PartitionKeys, "line %d should have partition keys", i)
+					assert.NotEmpty(t, l.Statements, "line %d should have statements", i)
 				}
 			}
 		})

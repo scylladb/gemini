@@ -284,6 +284,45 @@ func TestBuildStmtIndex_SkipsMalformed(t *testing.T) {
 	assert.Empty(t, idx)
 }
 
+// A malformed line costs itself only. Every line after it must still reach the
+// index, or one stray byte hides the rest of the run.
+func TestBuildStmtIndex_ContinuesAfterMalformed(t *testing.T) {
+	t.Parallel()
+	ts := time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC)
+	good := stmtLine(t,
+		map[string]any{"pk0": "after"},
+		[]map[string]any{{"ts": ts.Format(time.RFC3339), "statement": "INSERT INTO ks.tbl (pk0) VALUES (?)", "host": "10.0.0.1"}},
+	)
+
+	idx := buildStmtIndex(writeStmtFile(t, "not json at all", good))
+	require.Len(t, idx, 1)
+
+	for k, lines := range idx {
+		assert.Contains(t, k, "after")
+		require.Len(t, lines, 1)
+		require.Len(t, lines[0].Statements, 1)
+	}
+}
+
+func TestBuildStmtIndex_MarksPartialLine(t *testing.T) {
+	t.Parallel()
+	ts := time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC)
+	line := stmtLine(t,
+		map[string]any{"pk0": "abc"},
+		[]map[string]any{{"ts": ts.Format(time.RFC3339), "statement": "INSERT INTO ks.tbl (pk0) VALUES (?)", "host": "10.0.0.1"}},
+	)
+	partial := strings.TrimSuffix(line, "}") + `,"partial":true}`
+
+	idx := buildStmtIndex(writeStmtFile(t, partial))
+	require.Len(t, idx, 1)
+
+	for _, lines := range idx {
+		require.Len(t, lines, 1)
+		assert.True(t, lines[0].Partial)
+		assert.True(t, summariseStatements(lines).Partial)
+	}
+}
+
 func TestBuildStmtIndex_ParsesValidLines(t *testing.T) {
 	t.Parallel()
 	ts := time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC)
@@ -431,6 +470,23 @@ func TestCQLTimestamp_UnmarshalJSON(t *testing.T) {
 			name:  "Scylla space separator with Z",
 			input: `"2026-02-23 12:00:00.000Z"`,
 			want:  time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			// _logs stores ts as a bigint of UTC nanoseconds, so SELECT JSON
+			// returns it unquoted. The subsecond digits must survive.
+			name:  "bare UTC nanoseconds",
+			input: `1771848000123456789`,
+			want:  time.Date(2026, 2, 23, 12, 0, 0, 123456789, time.UTC),
+		},
+		{
+			name:  "bare UTC nanoseconds at a whole second",
+			input: `1771848000000000000`,
+			want:  time.Date(2026, 2, 23, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			name:  "null",
+			input: `null`,
+			want:  time.Time{},
 		},
 	}
 	for _, tt := range tests {

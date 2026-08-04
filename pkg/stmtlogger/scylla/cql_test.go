@@ -48,8 +48,8 @@ func TestBuildCreateTableQuery(t *testing.T) {
 			replication:  replication.NewSimpleStrategy(),
 			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS test_logs WITH replication={'class':'SimpleStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS test_logs.test_statements(pk0 text," +
-				"ts timestamp, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
-				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((pk0, ty), ts, attempt, gemini_attempt)) " +
+				"ts bigint, seq bigint, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
+				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((pk0, ty), ts, attempt, gemini_attempt, seq)) " +
 				"WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} " +
 				"AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';",
 		},
@@ -70,8 +70,8 @@ func TestBuildCreateTableQuery(t *testing.T) {
 			replication:  replication.NewSimpleStrategy(),
 			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS test_logs WITH replication={'class':'SimpleStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS test_logs.test_statements(pk0 text,pk1 int," +
-				"ts timestamp, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
-				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((pk0,pk1, ty), ts, attempt, gemini_attempt)) " +
+				"ts bigint, seq bigint, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
+				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((pk0,pk1, ty), ts, attempt, gemini_attempt, seq)) " +
 				"WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} " +
 				"AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';",
 		},
@@ -88,8 +88,8 @@ func TestBuildCreateTableQuery(t *testing.T) {
 			replication:  replication.NewSimpleStrategy(),
 			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS ks_logs WITH replication={'class':'SimpleStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS ks_logs.tbl_statements(id uuid," +
-				"ts timestamp, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
-				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((id, ty), ts, attempt, gemini_attempt)) " +
+				"ts bigint, seq bigint, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
+				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((id, ty), ts, attempt, gemini_attempt, seq)) " +
 				"WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} " +
 				"AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';",
 		},
@@ -170,7 +170,7 @@ func TestPrepareValuesOptimized(t *testing.T) {
 func TestAdditionalColumns(t *testing.T) {
 	t.Parallel()
 
-	expected := []string{"ts", "ty", "statement", "values", "host", "attempt", "gemini_attempt", "error", "dur"}
+	expected := []string{"ts", "seq", "ty", "statement", "values", "host", "attempt", "gemini_attempt", "error", "dur"}
 
 	if len(additionalColumnsArr) != len(expected) {
 		t.Errorf("additionalColumnsArr length = %d, want %d", len(additionalColumnsArr), len(expected))

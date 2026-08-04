@@ -50,7 +50,7 @@ func distinctItem(idx int) stmtlogger.Item {
 // checkCoherent verifies the bound row's partition-key, statement and values
 // columns all belong to the SAME item (idx) — the invariant that makes _logs
 // triage trustworthy. Layout (see cqlStatements.fillArgs):
-// [pk values...][Start][Type][Statement][Values][Host]...
+// [pk values...][ts][seq][Type][Statement][Values][Host]...
 //
 // It reports a failure as an error rather than failing the test directly, so it
 // is safe to call from a worker goroutine: testify's require calls t.FailNow,
@@ -63,18 +63,18 @@ func checkCoherent(out []any, pkLen, idx int) error {
 		return fmt.Errorf("idx %d: partition key bled from another item: got %v, want %q", idx, out[0], wantPK)
 	}
 
-	gotStmt, ok := out[pkLen+2].(string)
+	gotStmt, ok := out[pkLen+3].(string)
 	if !ok {
-		return fmt.Errorf("idx %d: statement column has type %T, want string", idx, out[pkLen+2])
+		return fmt.Errorf("idx %d: statement column has type %T, want string", idx, out[pkLen+3])
 	}
 
 	if gotStmt != want.Statement {
 		return fmt.Errorf("idx %d: statement column bled from another item: got %q, want %q", idx, gotStmt, want.Statement)
 	}
 
-	gotValues, ok := out[pkLen+3].([]string)
+	gotValues, ok := out[pkLen+4].([]string)
 	if !ok {
-		return fmt.Errorf("idx %d: values column has type %T, want []string", idx, out[pkLen+3])
+		return fmt.Errorf("idx %d: values column has type %T, want []string", idx, out[pkLen+4])
 	}
 
 	if wantValues := prepareValuesOptimized(want.Values); !slices.Equal(gotValues, wantValues) {

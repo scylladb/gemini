@@ -306,7 +306,6 @@ var (
 			"stmt_type",
 			"stmt_storage",
 			"error",
-			"stmt_logger",
 			"partition_hash",
 		},
 	)
