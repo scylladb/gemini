@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -74,7 +73,7 @@ func (g *Generator) Insert(_ context.Context) (*typedef.Stmt, error) {
 
 func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 	if g.table.IsCounterTable() {
-		return nil, nil
+		return nil, ErrCounterTableJSON
 	}
 
 	pks := g.generator.Next()
@@ -91,7 +90,7 @@ func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 			}
 			values[pk.Name] = tupVals
 		default:
-			panic(fmt.Sprintf("unknown type: %s", t.Name()))
+			panic("unknown type: " + t.Name())
 		}
 	}
 
@@ -123,15 +122,25 @@ func convertForJSON(vType typedef.Type, value any) any {
 		_, _ = encoder.Write(val)
 		return utils.UnsafeString(buffer.Bytes())
 	case typedef.TypeDate:
-		return value.(time.Time).Format(time.DateOnly)
+		if val, ok := value.(time.Time); ok {
+			return val.Format(time.DateOnly)
+		}
 	case typedef.TypeDuration:
-		return utils.TimeDurationToScyllaDuration(value.(time.Duration))
+		if val, ok := value.(time.Duration); ok {
+			return utils.TimeDurationToScyllaDuration(val)
+		}
 	case typedef.TypeDecimal:
-		return value.(*inf.Dec).String()
-	case typedef.TypeUuid, typedef.TypeTimeuuid:
-		return value.(gocql.UUID).String()
+		if val, ok := value.(*inf.Dec); ok {
+			return val.String()
+		}
+	case typedef.TypeUUID, typedef.TypeTimeuuid:
+		if val, ok := value.(gocql.UUID); ok {
+			return val.String()
+		}
 	case typedef.TypeVarint:
-		return value.(*big.Int).String()
+		if val, ok := value.(*big.Int); ok {
+			return val.String()
+		}
 	case typedef.TypeTime:
 		val, _ := value.(int64)
 		return time.Unix(0, val).UTC().Format("15:04:05.000000000")

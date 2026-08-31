@@ -157,11 +157,11 @@ func TestLogger_ConcurrentSendAndClose_NoDrop_NoPanic(t *testing.T) {
 	wg.Add(producers)
 
 	start := make(chan struct{})
-	for i := 0; i < producers; i++ {
+	for range producers {
 		go func() {
 			defer wg.Done()
 			<-start
-			for j := 0; j < perProducer; j++ {
+			for range perProducer {
 				_ = l.LogStmt(Item{StatementType: typedef.InsertStatementType})
 			}
 		}()

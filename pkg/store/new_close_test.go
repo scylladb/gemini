@@ -296,7 +296,7 @@ func TestNew_InvalidTestCluster(t *testing.T) {
 		errorList,
 	)
 
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Nil(t, store)
 }
 

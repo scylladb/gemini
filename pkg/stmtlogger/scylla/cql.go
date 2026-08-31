@@ -180,7 +180,11 @@ func (c *cqlStatements) Insert(ctx context.Context, item stmtlogger.Item) error 
 }
 
 func (c *cqlStatements) buildArgs(item stmtlogger.Item) (*[]any, bool) {
-	valuesPtr := c.valuePool.Get().(*[]any)
+	valuesPtr, pooled := c.valuePool.Get().(*[]any)
+	if !pooled {
+		valuesPtr = new([]any)
+	}
+
 	// reset capacity but keep underlying storage
 	*valuesPtr = (*valuesPtr)[:0]
 	var ok bool
@@ -313,7 +317,7 @@ func streamFragments(ctx context.Context, e *lineEncoder, session *gocql.Session
 //   - numeric values are encoded as JSON numbers
 //
 // The returned slice is safe to store as json.RawMessage.
-func encodeRowToJSON(row map[string]any) (json.RawMessage, error) { //nolint:unused // used in tests via same package
+func encodeRowToJSON(row map[string]any) (json.RawMessage, error) {
 	bs, err := json.Marshal(row)
 	if err != nil {
 		return nil, err

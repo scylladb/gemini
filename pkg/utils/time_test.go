@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//nolint:revive
 package utils_test
 
 import (
@@ -58,8 +57,7 @@ func BenchmarkTimeDurationToScyllaDuration(b *testing.B) {
 			duration: 5*time.Second + 100*time.Millisecond,
 		},
 		{
-			name: "Complex", //nolint:usestdlibvars
-			//nolint:lll
+			name:     "ComplexDuration",
 			duration: 10*365*24*time.Hour + 2*30*24*time.Hour + 1*7*24*time.Hour + 2*24*time.Hour + 1*time.Hour + 30*time.Minute + 45*time.Second + 500*time.Millisecond + 200*time.Microsecond + 100*time.Nanosecond,
 		},
 		{

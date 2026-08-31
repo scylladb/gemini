@@ -173,9 +173,9 @@ var dataset = []DataSet{
 			assert.Equal(uint64(0), status.ReadErrors.Load(), "there were validation errors")
 			assert.Equal(0, status.Errors.Len())
 
-			assert.Greater(status.WriteOps.Load(), uint64(0))
-			assert.Greater(status.ReadOps.Load(), uint64(0))
-			assert.Greater(status.ValidatedRows.Load(), uint64(0))
+			assert.Positive(status.WriteOps.Load())
+			assert.Positive(status.ReadOps.Load())
+			assert.Positive(status.ValidatedRows.Load())
 		},
 	},
 	{
@@ -193,9 +193,9 @@ var dataset = []DataSet{
 			assert.Equal(uint64(0), status.ReadErrors.Load())
 			assert.Equal(0, status.Errors.Len())
 
-			assert.Greater(status.WriteOps.Load(), uint64(0))
-			assert.Greater(status.ReadOps.Load(), uint64(0))
-			assert.Greater(status.ValidatedRows.Load(), uint64(0))
+			assert.Positive(status.WriteOps.Load())
+			assert.Positive(status.ReadOps.Load())
+			assert.Positive(status.ValidatedRows.Load())
 		},
 	},
 	{
@@ -214,7 +214,7 @@ var dataset = []DataSet{
 			assert.Equal(0, status.Errors.Len())
 			assert.Equal(uint64(0), status.ReadErrors.Load())
 
-			assert.Greater(status.WriteOps.Load(), uint64(0))
+			assert.Positive(status.WriteOps.Load())
 			assert.Equal(uint64(0), status.ReadOps.Load())
 			assert.Equal(uint64(0), status.ValidatedRows.Load())
 		},
@@ -233,7 +233,7 @@ var dataset = []DataSet{
 			assert.Equal(0, status.Errors.Len())
 			assert.Equal(uint64(0), status.ReadErrors.Load())
 
-			assert.Greater(status.WriteOps.Load(), uint64(0))
+			assert.Positive(status.WriteOps.Load())
 			assert.Equal(uint64(0), status.ReadOps.Load())
 			assert.Equal(uint64(0), status.ValidatedRows.Load())
 		},
@@ -474,7 +474,7 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 			{Name: "ck1", Type: typedef.TypeInt},
 		},
 		Columns: typedef.Columns{
-			{Name: "col1", Type: typedef.TypeAscii},
+			{Name: "col1", Type: typedef.TypeASCII},
 			{Name: "col2", Type: typedef.TypeBigint},
 			{Name: "col3", Type: typedef.TypeBlob},
 			{Name: "col4", Type: typedef.TypeBoolean},
@@ -491,7 +491,7 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 			{Name: "col15", Type: typedef.TypeTimestamp},
 			{Name: "col16", Type: typedef.TypeTimeuuid},
 			{Name: "col17", Type: typedef.TypeTinyint},
-			{Name: "col18", Type: typedef.TypeUuid},
+			{Name: "col18", Type: typedef.TypeUUID},
 			{Name: "col19", Type: typedef.TypeVarchar},
 			{Name: "col20", Type: typedef.TypeVarint},
 		},
@@ -569,8 +569,7 @@ func TestWorkloadWithAllPrimitiveTypes(t *testing.T) {
 		status.WriteErrors.Load(), status.ReadErrors.Load(), status.Errors.Len())
 
 	// Verify we did some work
-	assert.Greater(status.WriteOps.Load(), uint64(0), "should have performed some write operations")
-	assert.GreaterOrEqual(status.ReadOps.Load(), uint64(0), "should have performed some read operations")
+	assert.Positive(status.WriteOps.Load(), "should have performed some write operations")
 }
 
 // TestWorkloadHighConcurrency exercises Gemini with production-like concurrency
@@ -616,9 +615,9 @@ func TestWorkloadHighConcurrency(t *testing.T) {
 	assert.Zero(status.WriteErrors.Load(), "should have no write errors")
 	assert.Zero(status.ReadErrors.Load(), "should have no read errors")
 	assert.Equal(0, status.Errors.Len(), "should have no stored errors")
-	assert.Greater(status.WriteOps.Load(), uint64(0), "must have performed writes")
-	assert.Greater(status.ReadOps.Load(), uint64(0), "must have performed reads")
-	assert.Greater(status.ValidatedRows.Load(), uint64(0), "must have validated rows")
+	assert.Positive(status.WriteOps.Load(), "must have performed writes")
+	assert.Positive(status.ReadOps.Load(), "must have performed reads")
+	assert.Positive(status.ValidatedRows.Load(), "must have validated rows")
 }
 
 // TestWorkloadDeleteHeavy exercises the deleted-partitions heap with an
@@ -739,8 +738,8 @@ func TestWorkloadDeleteHeavy(t *testing.T) {
 	assert.Zero(status.WriteErrors.Load(), "should have no write errors")
 	assert.Zero(status.ReadErrors.Load(), "should have no read errors")
 	assert.Equal(0, status.Errors.Len(), "should have no stored errors")
-	assert.Greater(status.WriteOps.Load(), uint64(0), "must have performed writes")
-	assert.Greater(status.ReadOps.Load(), uint64(0), "must have performed reads")
+	assert.Positive(status.WriteOps.Load(), "must have performed writes")
+	assert.Positive(status.ReadOps.Load(), "must have performed reads")
 }
 
 // TestWorkloadWriteThenValidate exercises the write→read two-phase pattern:
@@ -799,7 +798,7 @@ func TestWorkloadWriteThenValidate(t *testing.T) {
 
 	writeStatus := writeWorkload.GetGlobalStatus()
 	t.Logf("Write phase: WriteOps=%d", writeStatus.WriteOps.Load())
-	assert.Greater(writeStatus.WriteOps.Load(), uint64(0), "write phase must produce writes")
+	assert.Positive(writeStatus.WriteOps.Load(), "write phase must produce writes")
 	assert.Zero(writeStatus.WriteErrors.Load(), "write phase should have no errors")
 	assert.NoError(writeWorkload.Close())
 
@@ -830,5 +829,5 @@ func TestWorkloadWriteThenValidate(t *testing.T) {
 	t.Logf("Read phase: ReadOps=%d, ValidatedRows=%d, ReadErrors=%d",
 		readStatus.ReadOps.Load(), readStatus.ValidatedRows.Load(), readStatus.ReadErrors.Load())
 	assert.Zero(readStatus.ReadErrors.Load(), "validation must find no divergence")
-	assert.Greater(readStatus.ReadOps.Load(), uint64(0), "read phase must perform reads")
+	assert.Positive(readStatus.ReadOps.Load(), "read phase must perform reads")
 }

@@ -134,10 +134,7 @@ func (r *overflowRing) reset() {
 // grow doubles the backing array (capped at maxOverflowItems), re-laying items
 // in logical order so head resets to zero.
 func (r *overflowRing) grow() {
-	newCap := len(r.buf) * 2
-	if newCap < 64 {
-		newCap = 64
-	}
+	newCap := max(len(r.buf)*2, 64)
 	// Always clamp to the cap last so the invariant len(buf) <= limit() holds
 	// even when the limit is < 64 (only reachable when tests shrink it).
 	if limit := r.limit(); newCap > limit {

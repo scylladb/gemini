@@ -38,7 +38,7 @@ func TestSimpleType_GenValue_ZeroRangeDoesNotPanic(t *testing.T) {
 	var prc typedef.PartitionRangeConfig
 
 	for _, st := range []typedef.SimpleType{
-		typedef.TypeText, typedef.TypeAscii, typedef.TypeVarchar, typedef.TypeBlob,
+		typedef.TypeText, typedef.TypeASCII, typedef.TypeVarchar, typedef.TypeBlob,
 	} {
 		assert.NotPanicsf(t, func() { _ = st.GenValue(r, prc) },
 			"genValue for %v with a zero-length range must not panic", st)

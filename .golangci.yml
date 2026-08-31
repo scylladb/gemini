@@ -1,7 +1,7 @@
 version: "2"
 run:
   concurrency: 16
-  go: "1.25"
+  go: "1.27"
   modules-download-mode: mod
   issues-exit-code: 1
   tests: true
@@ -40,6 +40,35 @@ linters:
     - usestdlibvars
     - usetesting
     - unconvert
+    - asciicheck
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - dupword
+    - embeddedstructfieldcheck
+    - errchkjson
+    - errname
+    - exptostd
+    - forcetypeassert
+    - gocheckcompilerdirectives
+    - goprintffuncname
+    - iface
+    - intrange
+    - iotamixing
+    - loggercheck
+    - mirror
+    - modernize
+    - nilnesserr
+    - nilnil
+    - noctx
+    - nolintlint
+    - perfsprint
+    - recvcheck
+    - reassign
+    - rowserrcheck
+    - sqlclosecheck
+    - testifylint
+    - unparam
 
   settings:
     unconvert:
@@ -70,7 +99,7 @@ linters:
       exclude-forbidden: false
       toolchain-forbidden: true
       go-debug-forbidden: true
-      go-version-pattern: '1\.25(\.\d+)?'
+      go-version-pattern: '1\.27(\.\d+)?'
       replace-allow-list:
         - github.com/gocql/gocql
     forbidigo:
@@ -116,6 +145,20 @@ linters:
       - legacy
       - std-error-handling
     rules:
+      - path: 'pkg/(cmd|status|benchmarks)/'
+        linters:
+          - forbidigo
+      - path: _test\.go$
+        linters:
+          - govet
+        text: '(fieldalignment|shadow)'
+      - path: _test\.go$
+        linters:
+          - lll
+      - path: _test\.go$
+        linters:
+          - revive
+        text: empty-block
       - path: (.+)\.go$
         text: Error return value of `.*.Unlock` is not checked
       - path: (.+)\.go$
@@ -136,7 +179,8 @@ formatters:
     - golines
   settings:
     gofumpt:
-      extra-rules: true
+      extra:
+        group-params: true
     goimports:
       local-prefixes:
         - github.com/scylladb/gemini

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-//nolint:revive
+
 package utils
 
 import "time"
@@ -45,10 +45,8 @@ func ExponentialBackoff(attempt int, maxDelay, minDelay time.Duration) time.Dura
 		return minDelay
 	}
 
-	delay := minDelay << uint(attempt) // minDelay * 2^attempt
-	if delay > maxDelay {
-		delay = maxDelay
-	}
+	delay := min(
+		minDelay<<uint(attempt), maxDelay)
 	return delay
 }
 

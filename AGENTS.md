@@ -16,20 +16,20 @@ a system under test (SUT) and a test oracle.
 
 ## Language & Framework
 
-- **Language**: Go 1.25
+- **Language**: Go 1.27
 - **Architecture**: CLI application with modular package structure
 - **Database**: Scylla/Cassandra using CQL protocol
 - **Testing**: Randomized testing with statistical distributions
 
-## Go instructions (1.24, 1.25)
+## Go instructions (1.26, 1.27)
 
 1. Always use `for range` instead of `for` with `i++` when iterating, this is the new syntax from Go 1.25
    Example: `for i := 0; i < 10; i++` should be replaced with `for i := range 10`. If the `i` is not needed it can be
    omitted.
    This is also true when using some integer variable as a counter. `for i := 0; i < VARIABLE; i++` can be replaced with
    `for i := range VARIABLE`, also `i` can be omitted.
-2. Always assume `go` **1.25**. Prefer `go` commands that work with Go 1.25.
-3. Keep `go.mod` `go 1.25`. Do **not** add a `toolchain` line when updating the `go` line (Go 1.25 no longer auto-adds
+2. Always assume `go` **1.27**. Prefer `go` commands that work with Go 1.27.
+3. Keep `go.mod` `go 1.27`. Do **not** add a `toolchain` line when updating the `go` line (Go 1.27 no longer auto-adds
    it).
 4. Use the new `go.mod` **`ignore`** directive to exclude non-packages (e.g., examples, scratch) from `./...`
 5. Prefer standard library first; avoid third-party deps unless asked.

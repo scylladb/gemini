@@ -13,7 +13,6 @@
 // limitations under the License.
 //
 
-//nolint:revive
 package utils
 
 import "os"

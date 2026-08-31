@@ -87,7 +87,7 @@ func TestDeleteBulk(t *testing.T) {
 			// Check that nextReadyNs is set
 			time.Sleep(10 * time.Millisecond)
 			nextNs := d.win.nextReadyNs()
-			assert.Greater(t, nextNs, int64(0))
+			assert.Positive(t, nextNs)
 		})
 	})
 
@@ -174,7 +174,7 @@ func TestFastPathOptimization(t *testing.T) {
 			time.Sleep(5 * time.Millisecond)
 
 			after := d.win.nextReadyNs()
-			assert.Greater(t, after, int64(0))
+			assert.Positive(t, after)
 		})
 	})
 }
@@ -229,10 +229,10 @@ func TestUnixNanoComparison(t *testing.T) {
 
 		// Test that UnixNano comparison matches Before()
 		assert.True(t, now.Before(future))
-		assert.True(t, now.UnixNano() < future.UnixNano())
+		assert.Less(t, now.UnixNano(), future.UnixNano())
 
 		assert.False(t, future.Before(now))
-		assert.False(t, future.UnixNano() < now.UnixNano())
+		assert.GreaterOrEqual(t, future.UnixNano(), now.UnixNano())
 	})
 }
 

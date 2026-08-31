@@ -28,9 +28,9 @@ import (
 
 // createTestPartitionsWithTracker builds a *Partitions with a live row tracker
 // of the given capacity so TrackRow / PopTrackedRow / FillRatio paths are reachable.
-func createTestPartitionsWithTracker(t *testing.T, count uint64, trackerCap int) *Partitions {
+func createTestPartitionsWithTracker(t *testing.T, trackerCap int) *Partitions {
 	t.Helper()
-	src, fn := distributions.New(distributions.Uniform, count, 1, 0, 0)
+	src, fn := distributions.New(distributions.Uniform, 10, 1, 0, 0)
 	table := &typedef.Table{
 		Name: "test_table",
 		PartitionKeys: typedef.Columns{
@@ -47,7 +47,7 @@ func createTestPartitionsWithTracker(t *testing.T, count uint64, trackerCap int)
 		MinStringLength:    5,
 		RowTrackerCapacity: trackerCap,
 	}
-	parts := New(t.Context(), rand.New(src), fn, table, config, count, 0)
+	parts := New(t.Context(), rand.New(src), fn, table, config, 10, 0)
 	t.Cleanup(parts.Close)
 	return parts
 }
@@ -59,7 +59,7 @@ func createTestPartitionsWithTracker(t *testing.T, count uint64, trackerCap int)
 func TestPartitions_TrackRow_PopTrackedRow(t *testing.T) {
 	t.Parallel()
 
-	p := createTestPartitionsWithTracker(t, 10, 50)
+	p := createTestPartitionsWithTracker(t, 50)
 
 	id := uuid.New()
 	row := TrackedRow{
@@ -81,7 +81,7 @@ func TestPartitions_TrackRow_PopTrackedRow(t *testing.T) {
 func TestPartitions_PopTrackedRow_Empty(t *testing.T) {
 	t.Parallel()
 
-	p := createTestPartitionsWithTracker(t, 10, 50)
+	p := createTestPartitionsWithTracker(t, 50)
 
 	_, ok := p.PopTrackedRow()
 	assert.False(t, ok, "PopTrackedRow must return false when tracker is empty")
@@ -91,7 +91,7 @@ func TestPartitions_TrackRow_NilTracker(t *testing.T) {
 	t.Parallel()
 
 	// Capacity 0 disables the tracker; calls must be no-ops.
-	p := createTestPartitionsWithTracker(t, 10, 0)
+	p := createTestPartitionsWithTracker(t, 0)
 
 	p.TrackRow(TrackedRow{PartitionID: uuid.New(), PartitionValues: []any{int32(1)}})
 	assert.Equal(t, uint64(0), p.TrackedRowCount())
@@ -107,22 +107,22 @@ func TestPartitions_TrackRow_NilTracker(t *testing.T) {
 func TestPartitions_RowTrackerFillRatio_Disabled(t *testing.T) {
 	t.Parallel()
 
-	p := createTestPartitionsWithTracker(t, 10, 0)
-	assert.Equal(t, 0.0, p.RowTrackerFillRatio())
+	p := createTestPartitionsWithTracker(t, 0)
+	assert.InDelta(t, 0.0, p.RowTrackerFillRatio(), 1e-9)
 }
 
 func TestPartitions_RowTrackerFillRatio_Empty(t *testing.T) {
 	t.Parallel()
 
-	p := createTestPartitionsWithTracker(t, 10, 10)
-	assert.Equal(t, 0.0, p.RowTrackerFillRatio())
+	p := createTestPartitionsWithTracker(t, 10)
+	assert.InDelta(t, 0.0, p.RowTrackerFillRatio(), 1e-9)
 }
 
 func TestPartitions_RowTrackerFillRatio_Half(t *testing.T) {
 	t.Parallel()
 
 	const capacity = 10
-	p := createTestPartitionsWithTracker(t, 10, capacity)
+	p := createTestPartitionsWithTracker(t, capacity)
 
 	for range capacity / 2 {
 		p.TrackRow(TrackedRow{PartitionID: uuid.New(), PartitionValues: []any{int32(1)}})
@@ -135,13 +135,13 @@ func TestPartitions_RowTrackerFillRatio_Full(t *testing.T) {
 	t.Parallel()
 
 	const capacity = 8
-	p := createTestPartitionsWithTracker(t, 10, capacity)
+	p := createTestPartitionsWithTracker(t, capacity)
 
 	for range capacity {
 		p.TrackRow(TrackedRow{PartitionID: uuid.New(), PartitionValues: []any{int32(1)}})
 	}
 
-	assert.Equal(t, 1.0, p.RowTrackerFillRatio())
+	assert.InDelta(t, 1.0, p.RowTrackerFillRatio(), 1e-9)
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +151,7 @@ func TestPartitions_RowTrackerFillRatio_Full(t *testing.T) {
 func TestPartitions_Replace_InvalidatesTrackedRows(t *testing.T) {
 	t.Parallel()
 
-	p := createTestPartitionsWithTracker(t, 10, 100)
+	p := createTestPartitionsWithTracker(t, 100)
 
 	// Fetch the old partition at slot 0 so we know its UUID.
 	oldKeys := p.Get(0)

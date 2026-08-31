@@ -13,8 +13,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-//nolint:tparallel
 package typedef_test
 
 import (
@@ -30,8 +28,6 @@ import (
 // can be safely used as partition keys in actual ScyllaDB/Cassandra databases.
 // This integration test verifies that the schema generation and data operations work correctly.
 func TestComplexTypesAsPartitionKeys_Integration(t *testing.T) {
-	t.Parallel()
-
 	containers := testutils.TestContainers(t)
 
 	// Use the session testutils already established (correct host-mapped port +
@@ -164,7 +160,7 @@ func TestComplexTypesAsPartitionKeys_Integration(t *testing.T) {
 
 		// Insert data
 		insertQuery := fmt.Sprintf("INSERT INTO %s.%s (pk, v) VALUES (?, ?)", keyspace, tableName)
-		testUDT := map[string]interface{}{
+		testUDT := map[string]any{
 			"street": "123 Main St",
 			"city":   "Anytown",
 			"zip":    12345,
@@ -182,6 +178,6 @@ func TestComplexTypesAsPartitionKeys_Integration(t *testing.T) {
 
 	// Clean up keyspace
 	t.Cleanup(func() {
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + keyspace).Exec()
 	})
 }

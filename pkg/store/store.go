@@ -17,14 +17,13 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
 	"time"
 
-	pkgerrors "github.com/pkg/errors"
 	"github.com/samber/mo"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/joberror"
@@ -101,7 +100,7 @@ func New(
 	schema *typedef.Schema,
 	cfg Config,
 	logger *zap.Logger,
-	e *joberror.ErrorList,
+	e *joberror.ListError,
 ) (Store, error) {
 	logger.Debug("creating store",
 		zap.Bool("has_oracle", cfg.OracleClusterConfig != nil),
@@ -142,22 +141,21 @@ func New(
 		"test",
 	)
 	if err != nil {
-		return nil, pkgerrors.Wrap(err, "failed to create test cluster")
+		return nil, fmt.Errorf("failed to create test cluster: %w", err)
 	}
 	logger.Debug("test store created successfully")
 
 	var oracleStore storeLoader
 	if cfg.OracleClusterConfig != nil {
 		logger.Debug("creating oracle store", zap.Strings("hosts", cfg.OracleClusterConfig.Hosts))
-		//nolint:govet
-		oracleStoreImpl, err := newCQLStore(
+		oracleStoreImpl, oracleErr := newCQLStore(
 			*cfg.OracleClusterConfig,
 			schema,
 			logger.Named("oracle_store"),
 			"oracle",
 		)
-		if err != nil {
-			return nil, err
+		if oracleErr != nil {
+			return nil, oracleErr
 		}
 		oracleStore = oracleStoreImpl
 		logger.Debug("oracle store created successfully")
@@ -325,7 +323,7 @@ func (ds delegatingStore) buildPartitionDeleteStmt(keys *typedef.PartitionKeys, 
 // clock, so a later write can fall on opposite sides of the two clusters' delete
 // timestamps under clock skew — reintroducing the very divergence this is meant
 // to erase.
-func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt, ts mo.Option[time.Time]) bool {
+func (ds delegatingStore) compensateAsymmetricWrite(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) bool {
 	if len(stmt.PartitionKeys) == 0 || len(ds.partitionKeyColumns) == 0 {
 		return true
 	}
@@ -337,7 +335,7 @@ func (ds delegatingStore) compensateAsymmetricWrite(stmt *typedef.Stmt, ts mo.Op
 		return true
 	}
 
-	compCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	compCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
 
 	ok := true
@@ -458,20 +456,12 @@ func (ds delegatingStore) Create(ctx context.Context, testBuilder, stmt *typedef
 	}
 
 	if err := ds.testStore.mutate(ctx, testBuilder, ts); err != nil {
-		return pkgerrors.Wrapf(
-			err,
-			"unable to apply mutations to the %s store",
-			ds.testStore.name(),
-		)
+		return fmt.Errorf("unable to apply mutations to the %s store: %w", ds.testStore.name(), err)
 	}
 
 	if ds.oracleStore != nil {
 		if err := ds.oracleStore.mutate(ctx, stmt, ts); err != nil {
-			return pkgerrors.Wrapf(
-				err,
-				"unable to apply mutations to the %s store",
-				ds.oracleStore.name(),
-			)
+			return fmt.Errorf("unable to apply mutations to the %s store: %w", ds.oracleStore.name(), err)
 		}
 		ds.getLogger().Debug("oracle mutation applied successfully")
 	}
@@ -521,25 +511,21 @@ func (ds delegatingStore) executeParallelMutations(
 	expected := 0
 	if retryTest {
 		expected++
-		ds.inflight.Add(1)
-		go func() {
-			defer ds.inflight.Done()
+		ds.inflight.Go(func() {
 			err := ds.testStore.mutate(doCtx, stmt, timestamp)
 			// Unconditional send: the channel always has capacity so this
 			// never blocks.  Dropping the "case <-doCtx.Done()" branch
 			// means the goroutine always delivers its result, which lets
 			// waitForMutationResults drain it even after ctx is cancelled.
 			ch <- mutationChanRes{oracle: false, err: err}
-		}()
+		})
 	}
 	if retryOracle && ds.oracleStore != nil {
 		expected++
-		ds.inflight.Add(1)
-		go func() {
-			defer ds.inflight.Done()
+		ds.inflight.Go(func() {
 			err := ds.oracleStore.mutate(doCtx, stmt, timestamp)
 			ch <- mutationChanRes{oracle: true, err: err}
-		}()
+		})
 	}
 
 	// Wait for results
@@ -550,7 +536,7 @@ func (ds delegatingStore) executeParallelMutations(
 
 // waitForMutationResults waits for mutation results and updates the result struct
 //
-//nolint:gocyclo
+
 func (ds delegatingStore) waitForMutationResults(ctx context.Context, ch chan mutationChanRes, result *mutationResult, expectTest, expectOracle bool, expected int) {
 	received := 0
 	for received < expected {
@@ -752,14 +738,14 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 				// Context expired during the backoff delay between retries.
 				// The stores may be asymmetric at this point (e.g. the previous
 				// attempt committed on test but timed out on oracle).
-				mutationErr.Finalize(pkgerrors.Wrap(ctx.Err(), "mutation cancelled during retry delay"))
+				mutationErr.Finalize(fmt.Errorf("mutation cancelled during retry delay: %w", ctx.Err()))
 
 				// If the only failures are CQL timeouts, attempt a compensating
 				// DELETE on both stores so the partition is deterministically
 				// empty for the upcoming validation phase.  On success, return
 				// nil so the partition is NOT marked invalid.
 				if isOnlyTimeoutFailure(cumulativeResult) {
-					if ds.compensateAsymmetricWrite(stmt, ts) {
+					if ds.compensateAsymmetricWrite(ctx, stmt, ts) {
 						ds.recordAsymmetricAck(cumulativeResult, "compensated")
 						return nil
 					}
@@ -801,7 +787,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	// validation phase starts.  On success return nil so the partition is not
 	// marked invalid.
 	if isOnlyTimeoutFailure(cumulativeResult) {
-		if ds.compensateAsymmetricWrite(stmt, ts) {
+		if ds.compensateAsymmetricWrite(ctx, stmt, ts) {
 			ds.recordAsymmetricAck(cumulativeResult, "compensated")
 			return nil
 		}
@@ -951,7 +937,7 @@ func (ds delegatingStore) Check(
 				if errors.Is(ctx.Err(), context.Canceled) {
 					return 0, nil, context.Canceled
 				}
-				return 0, nil, pkgerrors.Wrap(ctx.Err(), "validation cancelled during retry delay")
+				return 0, nil, fmt.Errorf("validation cancelled during retry delay: %w", ctx.Err())
 			}
 		}
 	}
@@ -987,15 +973,15 @@ func (ds delegatingStore) Close() error {
 	var err error
 	if ds.statementLogger != nil {
 		ds.getLogger().Debug("closing statement logger")
-		err = multierr.Append(err, ds.statementLogger.Close())
+		err = errors.Join(err, ds.statementLogger.Close())
 	}
 
 	ds.getLogger().Debug("closing test store")
-	err = multierr.Append(err, ds.testStore.Close())
+	err = errors.Join(err, ds.testStore.Close())
 
 	if ds.oracleStore != nil {
 		ds.getLogger().Debug("closing oracle store")
-		err = multierr.Append(err, ds.oracleStore.Close())
+		err = errors.Join(err, ds.oracleStore.Close())
 	}
 
 	if err != nil {

@@ -103,26 +103,26 @@ func TestSampleRate(t *testing.T) {
 	t.Run("disabled_when_no_cap", func(t *testing.T) {
 		t.Parallel()
 		d := newWithRate(-1, 3600, 2000)
-		assert.Equal(t, 1.0, d.sampleRate())
+		assert.InDelta(t, 1.0, d.sampleRate(), 1e-9)
 	})
 
 	t.Run("admit_all_when_rate_unknown", func(t *testing.T) {
 		t.Parallel()
 		d := newWithRate(1_000_000, 3600, 0)
-		assert.Equal(t, 1.0, d.sampleRate())
+		assert.InDelta(t, 1.0, d.sampleRate(), 1e-9)
 	})
 
 	t.Run("admit_all_when_inflow_within_cap", func(t *testing.T) {
 		t.Parallel()
 		// 10 deletes/s over 1h = 36k, well below a 1M cap.
 		d := newWithRate(1_000_000, 3600, 10)
-		assert.Equal(t, 1.0, d.sampleRate())
+		assert.InDelta(t, 1.0, d.sampleRate(), 1e-9)
 	})
 
 	t.Run("admit_all_without_buckets", func(t *testing.T) {
 		t.Parallel()
 		d := newWithRate(1_000_000, 0, 2000)
-		assert.Equal(t, 1.0, d.sampleRate())
+		assert.InDelta(t, 1.0, d.sampleRate(), 1e-9)
 	})
 }
 
@@ -231,7 +231,6 @@ func TestSamplingBoundsHeapUnderSustainedOverloadIntegration(t *testing.T) {
 		consumerDone := make(chan struct{})
 		go func() {
 			defer close(consumerDone)
-			//nolint:revive // intentional empty body: drain d.ch until it is closed
 			for range d.ch {
 			}
 		}()

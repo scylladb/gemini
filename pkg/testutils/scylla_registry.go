@@ -17,6 +17,7 @@
 package testutils
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -130,7 +131,7 @@ func reapDeadOwners(entries []registryEntry) []registryEntry {
 			continue
 		}
 		if e.ContainerID != "" {
-			_ = exec.Command("docker", "rm", "-f", e.ContainerID).Run()
+			_ = exec.CommandContext(context.Background(), "docker", "rm", "-f", e.ContainerID).Run()
 		}
 	}
 	return kept
@@ -190,7 +191,7 @@ func registryReleaseMine() {
 				continue
 			}
 			if e.ContainerID != "" {
-				_ = exec.Command("docker", "rm", "-f", e.ContainerID).Run()
+				_ = exec.CommandContext(context.Background(), "docker", "rm", "-f", e.ContainerID).Run()
 			}
 		}
 		return kept

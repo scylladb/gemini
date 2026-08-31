@@ -21,6 +21,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand/v2"
+	"slices"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -36,12 +37,7 @@ func (l SimpleTypes) Contains(colType Type) bool {
 	if !ok {
 		return false
 	}
-	for _, typ := range l {
-		if t == typ {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(l, t)
 }
 
 func (l SimpleTypes) Random(r *rand.Rand) SimpleType {
@@ -69,7 +65,7 @@ func (st SimpleType) LenValue() int {
 //nolint:gocyclo
 func (st SimpleType) CQLType() gocql.TypeInfo {
 	switch st {
-	case TypeAscii:
+	case TypeASCII:
 		return goCQLTypeMap[gocql.TypeAscii]
 	case TypeText:
 		return goCQLTypeMap[gocql.TypeText]
@@ -103,7 +99,7 @@ func (st SimpleType) CQLType() gocql.TypeInfo {
 		return goCQLTypeMap[gocql.TypeSmallInt]
 	case TypeTimeuuid:
 		return goCQLTypeMap[gocql.TypeTimeUUID]
-	case TypeUuid:
+	case TypeUUID:
 		return goCQLTypeMap[gocql.TypeUUID]
 	case TypeTinyint:
 		return goCQLTypeMap[gocql.TypeTinyInt]
@@ -130,7 +126,7 @@ func (st SimpleType) GenJSONValue(r utils.Random, p RangeConfig) any {
 		return utils.UnsafeString(buffer.Bytes())
 	case TypeDecimal:
 		return inf.NewDec(r.Int64N(math.MaxInt64), 3).String()
-	case TypeUuid, TypeTimeuuid:
+	case TypeUUID, TypeTimeuuid:
 		return utils.UUIDFromTime(r).String()
 	case TypeVarint:
 		return big.NewInt(r.Int64N(math.MaxInt64)).String()
@@ -173,7 +169,7 @@ func (st SimpleType) genValue(r utils.Random, p RangeConfig) any {
 	switch st {
 	case TypeBlob:
 		return utils.RandomBytes(r, r.IntN(randSpan(p.GetMaxStringLength()))+p.GetMinStringLength())
-	case TypeAscii, TypeText, TypeVarchar:
+	case TypeASCII, TypeText, TypeVarchar:
 		return utils.RandString(r, r.IntN(randSpan(p.GetMaxStringLength()))+p.GetMinStringLength(), false)
 	case TypeBigint:
 		return r.Int64()
@@ -199,7 +195,7 @@ func (st SimpleType) genValue(r utils.Random, p RangeConfig) any {
 		return int32(r.Int64N(math.MaxInt32))
 	case TypeSmallint:
 		return int16(r.Uint64N(math.MaxUint16))
-	case TypeUuid:
+	case TypeUUID:
 		uuid, _ := gocql.RandomUUID()
 		return uuid
 	case TypeTimeuuid:
@@ -216,7 +212,7 @@ func (st SimpleType) genValue(r utils.Random, p RangeConfig) any {
 // ValueVariationsNumber returns the number of bytes generated value holds
 func (st SimpleType) ValueVariationsNumber(p RangeConfig) float64 {
 	switch st {
-	case TypeAscii, TypeText, TypeVarchar:
+	case TypeASCII, TypeText, TypeVarchar:
 		return math.Pow(2, float64(p.GetMaxStringLength()))
 	case TypeBlob:
 		return math.Pow(2, float64(p.GetMaxBlobLength()))
@@ -226,7 +222,7 @@ func (st SimpleType) ValueVariationsNumber(p RangeConfig) float64 {
 		return 10000*365 + 2000*4
 	case TypeTime:
 		return 86400000000000
-	case TypeVarint, TypeTimeuuid, TypeUuid, TypeBigint, TypeTimestamp, TypeDecimal,
+	case TypeVarint, TypeTimeuuid, TypeUUID, TypeBigint, TypeTimestamp, TypeDecimal,
 		TypeDouble, TypeDuration:
 		return math.MaxUint64
 	case TypeInet, TypeInt, TypeFloat:

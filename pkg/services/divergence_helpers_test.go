@@ -170,7 +170,7 @@ func (s *clusterSaboteur) qualifiedTable() string {
 // absent from the SUT and flag them as divergence.
 func (s *clusterSaboteur) truncateSUT(tb testing.TB) {
 	tb.Helper()
-	err := s.test.Query(fmt.Sprintf("TRUNCATE TABLE %s", s.qualifiedTable())).Exec()
+	err := s.test.Query("TRUNCATE TABLE " + s.qualifiedTable()).Exec()
 	require.NoError(tb, err, "saboteur: truncate SUT")
 	tb.Log("saboteur: SUT truncated — oracle still has data, divergence introduced")
 }
@@ -180,7 +180,7 @@ func (s *clusterSaboteur) truncateSUT(tb testing.TB) {
 // from the oracle and flag them as divergence.
 func (s *clusterSaboteur) truncateOracle(tb testing.TB) {
 	tb.Helper()
-	err := s.oracle.Query(fmt.Sprintf("TRUNCATE TABLE %s", s.qualifiedTable())).Exec()
+	err := s.oracle.Query("TRUNCATE TABLE " + s.qualifiedTable()).Exec()
 	require.NoError(tb, err, "saboteur: truncate oracle")
 	tb.Log("saboteur: oracle truncated — SUT still has data, divergence introduced")
 }

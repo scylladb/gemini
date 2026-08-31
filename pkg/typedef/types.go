@@ -25,7 +25,6 @@ import (
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
-// nolint:revive
 const (
 	TypeUdt   = "udt"
 	TypeMap   = "map"
@@ -34,9 +33,8 @@ const (
 	TypeTuple = "tuple"
 )
 
-// nolint:revive
 const (
-	TypeAscii     = SimpleType("ascii")
+	TypeASCII     = SimpleType("ascii")
 	TypeBigint    = SimpleType("bigint")
 	TypeBlob      = SimpleType("blob")
 	TypeBoolean   = SimpleType("boolean")
@@ -53,7 +51,7 @@ const (
 	TypeTimestamp = SimpleType("timestamp")
 	TypeTimeuuid  = SimpleType("timeuuid")
 	TypeTinyint   = SimpleType("tinyint")
-	TypeUuid      = SimpleType("uuid")
+	TypeUUID      = SimpleType("uuid")
 	TypeVarchar   = SimpleType("varchar")
 	TypeVarint    = SimpleType("varint")
 )
@@ -88,15 +86,15 @@ var (
 	// not included here to maintain backward compatibility and avoid complexity in schema generation.
 	// TODO: Consider adding frozen complex types support when CQLFeature is CQLFeatureAll.
 	PartitionKeyTypes = SimpleTypes{
-		TypeAscii, TypeBigint, TypeDate, TypeDecimal, TypeDouble,
+		TypeASCII, TypeBigint, TypeDate, TypeDecimal, TypeDouble,
 		TypeFloat, TypeInet, TypeInt, TypeSmallint, TypeText, TypeTime, TypeTimestamp, TypeTimeuuid,
-		TypeTinyint, TypeUuid, TypeVarchar, TypeVarint, TypeBoolean,
+		TypeTinyint, TypeUUID, TypeVarchar, TypeVarint, TypeBoolean,
 	}
 
 	PkTypes = SimpleTypes{
-		TypeAscii, TypeBigint, TypeBlob, TypeDate, TypeDecimal, TypeDouble,
+		TypeASCII, TypeBigint, TypeBlob, TypeDate, TypeDecimal, TypeDouble,
 		TypeFloat, TypeInet, TypeInt, TypeSmallint, TypeText, TypeTime, TypeTimestamp, TypeTimeuuid,
-		TypeTinyint, TypeUuid, TypeVarchar, TypeVarint,
+		TypeTinyint, TypeUUID, TypeVarchar, TypeVarint,
 	}
 
 	AllTypes = append(append(SimpleTypes{}, PkTypes...), TypeBoolean, TypeDuration)
@@ -202,7 +200,7 @@ func (mt *MapType) GenValue(r utils.Random, p RangeConfig) []any {
 			reflect.TypeOf(mt.ValueType.GenValue(r, p)[0]),
 		),
 	)
-	for i := 0; i < count; i++ {
+	for range count {
 		vals.SetMapIndex(
 			reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]),
 			reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]),

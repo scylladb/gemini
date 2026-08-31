@@ -16,6 +16,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -64,7 +66,7 @@ Supports comparison with previous runs and regression detection.`,
 	return cmd
 }
 
-func runBenchmark(_ *cobra.Command, _ []string) error {
+func runBenchmark(cmd *cobra.Command, _ []string) error {
 	// Build benchmark command
 	testArgs := []string{"test", benchPackagePattern, "-bench=" + benchmarkPattern, "-benchtime=" + benchTime, "-run=^$"}
 	if benchMem {
@@ -72,7 +74,7 @@ func runBenchmark(_ *cobra.Command, _ []string) error {
 	}
 
 	// Run benchmark
-	benchCmd := exec.Command("go", testArgs...)
+	benchCmd := exec.CommandContext(cmd.Context(), "go", testArgs...)
 	var stdout bytes.Buffer
 	benchCmd.Stdout = &stdout
 	benchCmd.Stderr = os.Stderr
@@ -88,22 +90,22 @@ func runBenchmark(_ *cobra.Command, _ []string) error {
 	}
 
 	if len(results) == 0 {
-		return fmt.Errorf("no benchmark results found")
+		return errors.New("no benchmark results found")
 	}
 
 	// Get system information
-	gitCommit := getGitCommit()
-	gitBranch := getGitBranch()
+	gitCommit := getGitCommit(cmd.Context())
+	gitBranch := getGitBranch(cmd.Context())
 	goVersion := runtime.Version()
 	cpu := benchCPUInfo
 	if cpu == "" {
-		cpu = getCPUInfo()
+		cpu = getCPUInfo(cmd.Context())
 	}
 
 	// Parse tags
 	tagMap := make(map[string]string)
 	if benchTags != "" {
-		for _, tag := range strings.Split(benchTags, ",") {
+		for tag := range strings.SplitSeq(benchTags, ",") {
 			parts := strings.SplitN(tag, "=", 2)
 			if len(parts) == 2 {
 				tagMap[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
@@ -161,7 +163,7 @@ func performBenchmarkComparison(newRun *benchmarks.BenchmarkRun) error {
 	}
 
 	if oldRun == nil {
-		return fmt.Errorf("could not find run to compare with")
+		return errors.New("could not find run to compare with")
 	}
 
 	comparisons := benchmarks.CompareRuns(oldRun, newRun, benchRegressionThreshold)
@@ -170,15 +172,15 @@ func performBenchmarkComparison(newRun *benchmarks.BenchmarkRun) error {
 	// Exit with error if regressions detected
 	for _, comp := range comparisons {
 		if comp.IsRegression {
-			return fmt.Errorf("performance regressions detected")
+			return errors.New("performance regressions detected")
 		}
 	}
 
 	return nil
 }
 
-func getGitCommit() string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
+func getGitCommit(ctx context.Context) string {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
 	output, err := cmd.Output()
 	if err != nil {
 		return "unknown"
@@ -186,8 +188,8 @@ func getGitCommit() string {
 	return strings.TrimSpace(string(output))
 }
 
-func getGitBranch() string {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+func getGitBranch(ctx context.Context) string {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	output, err := cmd.Output()
 	if err != nil {
 		return "unknown"
@@ -195,17 +197,17 @@ func getGitBranch() string {
 	return strings.TrimSpace(string(output))
 }
 
-func getCPUInfo() string {
+func getCPUInfo(ctx context.Context) string {
 	// Simple CPU detection
 	switch runtime.GOOS {
 	case "linux":
-		cmd := exec.Command("sh", "-c", "cat /proc/cpuinfo | grep 'model name' | head -1 | cut -d':' -f2")
+		cmd := exec.CommandContext(ctx, "sh", "-c", "cat /proc/cpuinfo | grep 'model name' | head -1 | cut -d':' -f2")
 		output, err := cmd.Output()
 		if err == nil {
 			return strings.TrimSpace(string(output))
 		}
 	case "darwin":
-		cmd := exec.Command("sysctl", "-n", "machdep.cpu.brand_string")
+		cmd := exec.CommandContext(ctx, "sysctl", "-n", "machdep.cpu.brand_string")
 		output, err := cmd.Output()
 		if err == nil {
 			return strings.TrimSpace(string(output))

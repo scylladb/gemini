@@ -97,7 +97,8 @@ func ensureHostAIOCapacity(tb testing.TB) {
 	tb.Helper()
 	aioSetupOnce.Do(func() {
 		const want = "1048576"
-		out, err := exec.Command(
+		out, err := exec.CommandContext(
+			tb.Context(),
 			"docker", "run", "--rm", "--privileged",
 			"alpine", "sysctl", "-w", "fs.aio-max-nr="+want,
 		).CombinedOutput()
@@ -126,7 +127,8 @@ func hostReachable(addr string) bool {
 		return reachable
 	}
 
-	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+	dialer := net.Dialer{Timeout: 3 * time.Second}
+	conn, err := dialer.DialContext(context.Background(), "tcp", addr)
 	reachable = err == nil
 	if conn != nil {
 		_ = conn.Close()
@@ -651,7 +653,6 @@ func SingleScylla(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 	return nil
 }
 
-//nolint:gocyclo
 func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 	tb.Helper()
 	val, exists := os.LookupEnv("GEMINI_USE_DOCKER_SCYLLA")

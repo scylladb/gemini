@@ -141,7 +141,7 @@ func assertMurmur3H1(t *testing.T, data []byte, expected uint64) {
 // Benchmark of the performance of the murmur3 implementation
 func BenchmarkMurmur3H1(b *testing.B) {
 	data := make([]byte, 1024)
-	for i := 0; i < 1024; i++ {
+	for i := range 1024 {
 		data[i] = byte(i)
 	}
 

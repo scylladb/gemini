@@ -14,7 +14,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//nolint:govet
 package scylla
 
 import (
@@ -107,7 +106,7 @@ func TestLogger_MultiTableLogging_NoDrops_Integration(t *testing.T) {
 	querySession, err := newSession(containers.TestHosts, containers.TestPort(), containers.DockerMode, "", "", logger)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = querySession.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", logsKS)).Exec()
+		_ = querySession.Query("DROP KEYSPACE IF EXISTS " + logsKS).Exec()
 		querySession.Close()
 	})
 
@@ -169,6 +168,6 @@ func TestLogger_MultiTableLogging_NoDrops_Integration(t *testing.T) {
 	}
 
 	after := testutil.ToFloat64(metrics.StatementLoggerMalformedTotal)
-	assert.Equal(t, before, after,
+	assert.InDelta(t, before, after, 1e-9,
 		"no statement-log items should be dropped for any table (StatementLoggerMalformedTotal must stay flat)")
 }

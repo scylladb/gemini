@@ -154,9 +154,9 @@ func TestRow_MarshalJSON(t *testing.T) {
 		err = json.Unmarshal(data, &result)
 		require.NoError(t, err)
 
-		assert.Equal(t, float64(1), result["id"])
+		assert.InDelta(t, float64(1), result["id"], 1e-9)
 		assert.Equal(t, "John", result["name"])
-		assert.Equal(t, float64(30), result["age"])
+		assert.InDelta(t, float64(30), result["age"], 1e-9)
 	})
 
 	t.Run("nil values", func(t *testing.T) {

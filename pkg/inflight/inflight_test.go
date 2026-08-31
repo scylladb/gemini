@@ -23,7 +23,7 @@ import (
 
 func TestAddIfNotPresent(t *testing.T) {
 	t.Parallel()
-	flight := newSyncU64set(shrinkInflightsLimit)
+	flight := newSyncU64set()
 	if !flight.AddIfNotPresent(10) {
 		t.Error("could not add the first value")
 	}
@@ -34,7 +34,7 @@ func TestAddIfNotPresent(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	t.Parallel()
-	flight := newSyncU64set(shrinkInflightsLimit)
+	flight := newSyncU64set()
 	flight.AddIfNotPresent(10)
 
 	flight.Delete(10)
@@ -67,7 +67,7 @@ func TestDeleteSharded(t *testing.T) {
 
 func TestInflight(t *testing.T) {
 	t.Parallel()
-	flight := newSyncU64set(shrinkInflightsLimit)
+	flight := newSyncU64set()
 	f := func(v uint32) any {
 		return flight.AddIfNotPresent(v)
 	}
@@ -103,7 +103,7 @@ func createQuickConfig() *quick.Config {
 	return &quick.Config{
 		MaxCount: 200000,
 		Values: func(vs []reflect.Value, r *rand.Rand) {
-			for i := 0; i < len(vs); i++ {
+			for i := range vs {
 				uv := r.Uint32()
 				v := reflect.New(reflect.TypeOf(uv)).Elem()
 				v.SetUint(uint64(uv))

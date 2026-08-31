@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//nolint:revive
 package utils
 
 import (
@@ -121,10 +120,7 @@ func RandString(rnd Random, ln int, even bool) string {
 	// Ensure end doesn't exceed randomString length
 	if end > len(randomString) {
 		end = len(randomString)
-		start = end - ln
-		if start < 0 {
-			start = 0
-		}
+		start = max(end-ln, 0)
 	}
 
 	if even && start&1 == 1 {
@@ -160,10 +156,7 @@ func RandomBytes(rnd Random, ln int) []byte {
 	// Ensure end doesn't exceed randomBytes length
 	if end > len(randomBytes) {
 		end = len(randomBytes)
-		start = end - ln
-		if start < 0 {
-			start = 0
-		}
+		start = max(end-ln, 0)
 	}
 
 	return randomBytes[start:end]

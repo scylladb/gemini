@@ -126,7 +126,7 @@ func (g *Generator) Delete(ctx context.Context) (*typedef.Stmt, error) {
 	}
 }
 
-//nolint:unused // kept for reference; see TargetedMultiplePartitions case above for why it is not called
+//nolint:unused,unparam // kept for reference; see TargetedMultiplePartitions case above for why it is not called
 func (g *Generator) deleteMultiplePartitions(_ context.Context) (*typedef.Stmt, error) {
 	builder := qb.Delete(g.keyspaceAndTable)
 

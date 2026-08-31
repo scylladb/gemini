@@ -33,7 +33,6 @@ import (
 
 var update = flag.Bool("update", false, "regenerate golden snapshot files")
 
-func tp(t time.Time) *time.Time { return &t }
 func writeStmtFile(t *testing.T, lines ...string) string {
 	t.Helper()
 	f, err := os.CreateTemp(t.TempDir(), "stmts-*.jsonl")
@@ -199,8 +198,8 @@ func TestMergeHosts_BothEmpty(t *testing.T) {
 
 func TestStmtFileKeyFromRaw_Empty(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "", stmtFileKeyFromRaw(nil))
-	assert.Equal(t, "", stmtFileKeyFromRaw(map[string]json.RawMessage{}))
+	assert.Empty(t, stmtFileKeyFromRaw(nil))
+	assert.Empty(t, stmtFileKeyFromRaw(map[string]json.RawMessage{}))
 }
 
 func TestStmtFileKeyFromRaw_Sorted(t *testing.T) {
@@ -214,7 +213,7 @@ func TestStmtFileKeyFromRaw_Sorted(t *testing.T) {
 
 func TestBuildStmtKeyFromValues_Nil(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, "", buildStmtKeyFromValues(nil))
+	assert.Empty(t, buildStmtKeyFromValues(nil))
 }
 
 func TestBuildStmtKeyFromValues_Values(t *testing.T) {
@@ -722,7 +721,7 @@ func TestPrintCorruptionSummary_WriteToCorruptionGap(t *testing.T) {
 	PrintCorruptionSummary(&buf, []CorruptionEntry{{
 		PartitionKeys:        "pk0=1",
 		ErrorKind:            "missing in oracle",
-		InsertedAt:           tp(insertTime),
+		InsertedAt:           new(insertTime),
 		CorruptionDetectedAt: insertTime.Add(5 * time.Minute),
 		WriteToCorruptionGap: "5m0s",
 	}})
@@ -737,12 +736,12 @@ func TestPrintCorruptionSummary_DeletedAt(t *testing.T) {
 		PartitionKeys:        "pk0=1",
 		ErrorKind:            "missing in test",
 		CorruptionDetectedAt: deletedAt.Add(-time.Minute),
-		DeletedAt:            tp(deletedAt),
+		DeletedAt:            new(deletedAt),
 	}})
 	out := buf.String()
 	assert.Contains(t, out, deletedAt.UTC().Format(tsLayout))
 	found := false
-	for _, l := range strings.Split(out, "\n") {
+	for l := range strings.SplitSeq(out, "\n") {
 		if strings.Contains(l, "pk0=1") && strings.Contains(l, deletedAt.UTC().Format(tsLayout)) {
 			found = true
 			break
@@ -759,7 +758,7 @@ func TestPrintCorruptionSummary_NotDeletedShowsDash(t *testing.T) {
 		ErrorKind:            "missing in test",
 		CorruptionDetectedAt: time.Now().UTC(),
 	}})
-	for _, l := range strings.Split(buf.String(), "\n") {
+	for l := range strings.SplitSeq(buf.String(), "\n") {
 		if strings.Contains(l, "pk0=1") && strings.Contains(l, "missing in test") {
 			assert.Contains(t, l, "-", "deleted column should be '-'")
 		}
@@ -771,11 +770,11 @@ func TestCorruptionEntry_JSONRoundtrip(t *testing.T) {
 	ts := time.Date(2026, 2, 23, 10, 0, 0, 0, time.UTC)
 	entry := CorruptionEntry{
 		PartitionKeys:            "pk0=42",
-		InsertedAt:               tp(ts),
-		LastSuccessfulValidation: tp(ts.Add(30 * time.Second)),
+		InsertedAt:               new(ts),
+		LastSuccessfulValidation: new(ts.Add(30 * time.Second)),
 		SuccessfulValidations:    7,
 		CorruptionDetectedAt:     ts.Add(time.Minute),
-		DeletedAt:                tp(ts.Add(2 * time.Minute)),
+		DeletedAt:                new(ts.Add(2 * time.Minute)),
 		WriteToCorruptionGap:     "1m0s",
 		ErrorKind:                "field value mismatch",
 		FailingQuery:             "SELECT pk0 FROM ks.t WHERE pk0=?",
@@ -783,8 +782,8 @@ func TestCorruptionEntry_JSONRoundtrip(t *testing.T) {
 		DiffFieldMismatches:      1,
 		FieldDiffs:               []string{"- col: a\n+ col: b"},
 		TestCluster: StmtClusterSummary{
-			FirstWriteTime: tp(ts),
-			LastWriteTime:  tp(ts.Add(50 * time.Second)),
+			FirstWriteTime: new(ts),
+			LastWriteTime:  new(ts.Add(50 * time.Second)),
 			WriteCount:     10,
 			DeleteCount:    1,
 			Hosts:          []string{"10.0.0.1"},
@@ -832,7 +831,7 @@ func TestCorruptionEntry_JSONHasExpectedKeys(t *testing.T) {
 		PartitionKeys:        "pk0=1",
 		ErrorKind:            "missing in test",
 		CorruptionDetectedAt: ts,
-		InsertedAt:           tp(ts.Add(-time.Minute)),
+		InsertedAt:           new(ts.Add(-time.Minute)),
 		WriteToCorruptionGap: "1m0s",
 	})
 	require.NoError(t, err)

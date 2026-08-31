@@ -14,7 +14,7 @@
 
 package typedef
 
-import "github.com/pkg/errors"
+import "errors"
 
 var (
 	ErrSchemaConfigInvalidRangePK = errors.New(

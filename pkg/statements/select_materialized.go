@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// nolint
+//nolint:revive,gocritic,nilnil,prealloc,unparam
 package statements
 
 import (
@@ -113,7 +113,6 @@ func (g *Generator) genMultiplePartitionClusteringRangeQueryMv(
 	// maxClusteringRels := utils.RandInt2(g.random, 1, mv.ClusteringKeys.Len())
 
 	return nil, nil
-	//clusteringKeys := mv.ClusteringKeys
 	//pkValues := mv.PartitionKeysLenValues()
 	//valuesCount := pkValues*numQueryPKs + clusteringKeys[:maxClusteringRels].LenValues() + clusteringKeys[maxClusteringRels].Type.LenValue()*2
 	//mvKey := mv.NonPrimaryKey
@@ -185,7 +184,6 @@ func (g *Generator) genMultiplePartitionClusteringRangeQueryMv(
 func (g *Generator) genClusteringRangeQueryMv(ctx context.Context, mv *typedef.MaterializedView) (*typedef.Stmt, error) {
 	// maxClusteringRels := utils.RandInt2(g.random, 1, mv.ClusteringKeys.Len())
 	return nil, nil
-	//t.RLock()
 	//defer t.RUnlock()
 	//valuesWithToken := g.GetOld(ctx)
 	//if valuesWithToken.Token == 0 {
@@ -204,7 +202,6 @@ func (g *Generator) genClusteringRangeQueryMv(ctx context.Context, mv *typedef.M
 	//	allTypes = append(allTypes, pk.Type)
 	//}
 	//
-	//clusteringKeys := mv.ClusteringKeys
 	//if len(clusteringKeys) > 0 {
 	//	for i := 0; i < maxClusteringRels; i++ {
 	//		ck := clusteringKeys[i]

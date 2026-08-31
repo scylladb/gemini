@@ -72,7 +72,7 @@ type JobError struct {
 }
 
 func (j *JobError) Error() string {
-	data, _ := json.Marshal(j.PartitionKeys)
+	data := utils.MarshalJSON(j.PartitionKeys)
 
 	return fmt.Sprintf(
 		"JobError(err=%v): %s (stmt-type=%s, query=%s, time=%s) partition-keys=%s",
@@ -101,7 +101,7 @@ func (j *JobError) Hash() [32]byte {
 
 		for _, key := range keys {
 			hasher.Write(utils.UnsafeBytes(key))
-			data, _ := json.Marshal(j.PartitionKeys.Get(key))
+			data := utils.MarshalJSON(j.PartitionKeys.Get(key))
 			hasher.Write(data)
 		}
 	}
@@ -119,7 +119,7 @@ func (j *JobError) HashHex() string {
 	return hex.EncodeToString(sum[:])
 }
 
-type ErrorList struct {
+type ListError struct {
 	ch            chan *JobError
 	errors        []JobError
 	limit         int
@@ -127,7 +127,7 @@ type ErrorList struct {
 	channelClosed atomic.Bool
 }
 
-func (el *ErrorList) AddError(err JobError) {
+func (el *ListError) AddError(err JobError) {
 	el.mu.Lock()
 	defer el.mu.Unlock()
 
@@ -139,7 +139,7 @@ func (el *ErrorList) AddError(err JobError) {
 	}
 }
 
-func (el *ErrorList) Errors() []JobError {
+func (el *ListError) Errors() []JobError {
 	el.mu.Lock()
 	out := make([]JobError, len(el.errors))
 	copy(out, el.errors)
@@ -148,22 +148,22 @@ func (el *ErrorList) Errors() []JobError {
 	return out
 }
 
-func (el *ErrorList) MarshalJSON() ([]byte, error) {
+func (el *ListError) MarshalJSON() ([]byte, error) {
 	return json.Marshal(el.Errors())
 }
 
-func (el *ErrorList) Cap() int {
+func (el *ListError) Cap() int {
 	return el.limit
 }
 
-func (el *ErrorList) Len() int {
+func (el *ListError) Len() int {
 	el.mu.Lock()
 	defer el.mu.Unlock()
 
 	return len(el.errors)
 }
 
-func (el *ErrorList) Error() string {
+func (el *ListError) Error() string {
 	var builder strings.Builder
 	builder.Grow(1024)
 
@@ -179,11 +179,11 @@ func (el *ErrorList) Error() string {
 	return strings.TrimRight(builder.String(), "\n")
 }
 
-func (el *ErrorList) GetChannel() <-chan *JobError {
+func (el *ListError) GetChannel() <-chan *JobError {
 	return el.ch
 }
 
-func (el *ErrorList) Close() error {
+func (el *ListError) Close() error {
 	el.mu.Lock()
 	el.channelClosed.Store(true)
 	ch := el.ch
@@ -197,8 +197,8 @@ func (el *ErrorList) Close() error {
 	return nil
 }
 
-func NewErrorList(limit int) *ErrorList {
-	return &ErrorList{
+func NewErrorList(limit int) *ListError {
+	return &ListError{
 		limit:  limit,
 		errors: make([]JobError, 0, limit),
 		ch:     make(chan *JobError, limit+1),

@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//nolint:forbidigo
 
 package benchmarks
 
@@ -167,8 +166,6 @@ func CompareRuns(oldRun, newRun *BenchmarkRun, regressionThreshold float64) []Co
 }
 
 // PrintComparison prints a human-readable comparison report
-//
-//nolint:forbidigo
 func PrintComparison(comparisons []ComparisonResult) {
 	if len(comparisons) == 0 {
 		fmt.Println("No comparable benchmarks found.")

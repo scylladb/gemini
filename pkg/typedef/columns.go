@@ -16,10 +16,11 @@ package typedef
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"slices"
 
-	"github.com/mitchellh/mapstructure"
-	"github.com/pkg/errors"
+	"github.com/go-viper/mapstructure/v2"
 
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -57,27 +58,15 @@ func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		typeMap, typeOk := dataMap["type"]
 		if !typeOk {
-			return errors.Wrapf(
-				ErrSchemaValidation,
-				"missing definition of column 'type': [%T]%+[1]v",
-				dataMap,
-			)
+			return fmt.Errorf("missing definition of column 'type': [%T]%+[1]v: %w", dataMap, ErrSchemaValidation)
 		}
 		complexTypeMap, typeMapOk := typeMap.(map[string]any)
 		if !typeMapOk {
-			return errors.Wrapf(
-				ErrSchemaValidation,
-				"unknown definition column 'type': [%T]%+[1]v",
-				typeMap,
-			)
+			return fmt.Errorf("unknown definition column 'type': [%T]%+[1]v: %w", typeMap, ErrSchemaValidation)
 		}
 		complexType, complexTypeOk := complexTypeMap["complex_type"]
 		if !complexTypeOk {
-			return errors.Wrapf(
-				ErrSchemaValidation,
-				"missing definition of column 'complex_type': [%T]%+[1]v",
-				complexTypeMap,
-			)
+			return fmt.Errorf("missing definition of column 'complex_type': [%T]%+[1]v: %w", complexTypeMap, ErrSchemaValidation)
 		}
 		switch complexType {
 		case TypeList, TypeSet:
@@ -89,11 +78,7 @@ func (cd *ColumnDef) UnmarshalJSON(data []byte) error {
 		case TypeUdt:
 			t, err = GetUDTTypeColumn(dataMap)
 		default:
-			return errors.Wrapf(
-				ErrSchemaValidation,
-				"unknown 'complex_type': [%T]%+[1]v",
-				complexType,
-			)
+			return fmt.Errorf("unknown 'complex_type': [%T]%+[1]v: %w", complexType, ErrSchemaValidation)
 		}
 		if err != nil {
 			return err
@@ -185,36 +170,32 @@ func GetMapTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	}{}
 
 	if err = mapstructure.Decode(data, &st); err != nil {
-		return nil, errors.Wrapf(err, "can't decode MapType value, value=%+v", data)
+		return nil, fmt.Errorf("can't decode MapType value, value=%+v: %w", data, err)
 	}
 
 	if _, ok := st.Type["frozen"]; !ok {
-		return nil, errors.Errorf("not a map type, value=%v", st)
+		return nil, fmt.Errorf("not a map type, value=%v", st)
 	}
 
 	if _, ok := st.Type["value_type"]; !ok {
-		return nil, errors.Errorf("not a map type, value=%v", st)
+		return nil, fmt.Errorf("not a map type, value=%v", st)
 	}
 
 	if _, ok := st.Type["key_type"]; !ok {
-		return nil, errors.Errorf("not a map type, value=%v", st)
+		return nil, fmt.Errorf("not a map type, value=%v", st)
 	}
 
 	var frozen bool
 	if err = mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
-		return nil, errors.Wrapf(err, "can't decode bool value for MapType::Frozen, value=%v", st)
+		return nil, fmt.Errorf("can't decode bool value for MapType::Frozen, value=%v: %w", st, err)
 	}
 	var valueType SimpleType
 	if err = mapstructure.Decode(st.Type["value_type"], &valueType); err != nil {
-		return nil, errors.Wrapf(
-			err,
-			"can't decode SimpleType value for MapType::ValueType, value=%v",
-			st,
-		)
+		return nil, fmt.Errorf("can't decode SimpleType value for MapType::ValueType, value=%v: %w", st, err)
 	}
 	var keyType SimpleType
 	if err = mapstructure.Decode(st.Type["key_type"], &keyType); err != nil {
-		return nil, errors.Wrapf(err, "can't decode bool value for MapType::KeyType, value=%v", st)
+		return nil, fmt.Errorf("can't decode bool value for MapType::KeyType, value=%v: %w", st, err)
 	}
 	return &ColumnDef{
 		Name: st.Name,
@@ -234,23 +215,19 @@ func GetBagTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	}{}
 
 	if err = mapstructure.Decode(data, &st); err != nil {
-		return nil, errors.Wrapf(err, "can't decode string value for Collection, value=%+v", data)
+		return nil, fmt.Errorf("can't decode string value for Collection, value=%+v: %w", data, err)
 	}
 	var complexType string
 	if err = mapstructure.Decode(st.Type["complex_type"], &complexType); err != nil {
-		return nil, errors.Wrapf(err, "can't decode string value for Collection::Frozen, value=%v", st)
+		return nil, fmt.Errorf("can't decode string value for Collection::Frozen, value=%v: %w", st, err)
 	}
 	var frozen bool
 	if err = mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
-		return nil, errors.Wrapf(err, "can't decode bool value for Collection::Frozen, value=%v", st)
+		return nil, fmt.Errorf("can't decode bool value for Collection::Frozen, value=%v: %w", st, err)
 	}
 	var typ SimpleType
 	if err = mapstructure.Decode(st.Type["value_type"], &typ); err != nil {
-		return nil, errors.Wrapf(
-			err,
-			"can't decode SimpleType value for Collection::ValueType, value=%v",
-			st,
-		)
+		return nil, fmt.Errorf("can't decode SimpleType value for Collection::ValueType, value=%v: %w", st, err)
 	}
 	return &ColumnDef{
 		Name: st.Name,
@@ -269,28 +246,20 @@ func GetTupleTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	}{}
 
 	if err = mapstructure.Decode(data, &st); err != nil {
-		return nil, errors.Wrapf(err, "can't decode []SimpleType value, value=%+v", data)
+		return nil, fmt.Errorf("can't decode []SimpleType value, value=%+v: %w", data, err)
 	}
 
 	if _, ok := st.Type["value_types"]; !ok {
-		return nil, errors.Errorf("not a tuple type, value=%v", st)
+		return nil, fmt.Errorf("not a tuple type, value=%v", st)
 	}
 
 	var dbTypes []SimpleType
 	if err = mapstructure.Decode(st.Type["value_types"], &dbTypes); err != nil {
-		return nil, errors.Wrapf(
-			err,
-			"can't decode []SimpleType value for TupleType::ValueTypes, value=%v",
-			st,
-		)
+		return nil, fmt.Errorf("can't decode []SimpleType value for TupleType::ValueTypes, value=%v: %w", st, err)
 	}
 	var frozen bool
 	if err = mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
-		return nil, errors.Wrapf(
-			err,
-			"can't decode bool value for TupleType::ValueTypes, value=%v",
-			st,
-		)
+		return nil, fmt.Errorf("can't decode bool value for TupleType::ValueTypes, value=%v: %w", st, err)
 	}
 	return &ColumnDef{
 		Name: st.Name,
@@ -309,35 +278,27 @@ func GetUDTTypeColumn(data map[string]any) (out *ColumnDef, err error) {
 	}{}
 
 	if err = mapstructure.Decode(data, &st); err != nil {
-		return nil, errors.Wrapf(err, "can't decode []SimpleType , value=%+v", data)
+		return nil, fmt.Errorf("can't decode []SimpleType , value=%+v: %w", data, err)
 	}
 
 	if _, ok := st.Type["value_types"]; !ok {
-		return nil, errors.Errorf("not a UDT type, value=%v", st)
+		return nil, fmt.Errorf("not a UDT type, value=%v", st)
 	}
 	if _, ok := st.Type["type_name"]; !ok {
-		return nil, errors.Errorf("not a UDT type, value=%v", st)
+		return nil, fmt.Errorf("not a UDT type, value=%v", st)
 	}
 
 	var dbTypes map[string]SimpleType
 	if err = mapstructure.Decode(st.Type["value_types"], &dbTypes); err != nil {
-		return nil, errors.Wrapf(
-			err,
-			"can't decode []SimpleType value for UDTType::ValueTypes, value=%v",
-			st,
-		)
+		return nil, fmt.Errorf("can't decode []SimpleType value for UDTType::ValueTypes, value=%v: %w", st, err)
 	}
 	var frozen bool
 	if err = mapstructure.Decode(st.Type["frozen"], &frozen); err != nil {
-		return nil, errors.Wrapf(err, "can't decode bool value for UDTType::Frozen, value=%v", st)
+		return nil, fmt.Errorf("can't decode bool value for UDTType::Frozen, value=%v: %w", st, err)
 	}
 	var typeName string
 	if err = mapstructure.Decode(st.Type["type_name"], &typeName); err != nil {
-		return nil, errors.Wrapf(
-			err,
-			"can't decode string value for UDTType::TypeName, value=%v",
-			st,
-		)
+		return nil, fmt.Errorf("can't decode string value for UDTType::TypeName, value=%v: %w", st, err)
 	}
 	return &ColumnDef{
 		Name: st.Name,
@@ -360,18 +321,10 @@ func GetSimpleTypeColumn(data map[string]any) (*ColumnDef, error) {
 		return nil, err
 	}
 	if st.Name == "" {
-		return nil, errors.Wrapf(
-			ErrSchemaValidation,
-			"wrong definition of column 'name' [%T]%+[1]v",
-			data,
-		)
+		return nil, fmt.Errorf("wrong definition of column 'name' [%T]%+[1]v: %w", data, ErrSchemaValidation)
 	}
 	if st.Type == "" {
-		return nil, errors.Wrapf(
-			ErrSchemaValidation,
-			"empty definition of column 'type' [%T]%+[1]v",
-			data,
-		)
+		return nil, fmt.Errorf("empty definition of column 'type' [%T]%+[1]v: %w", data, ErrSchemaValidation)
 	}
 
 	knownType := false
@@ -381,11 +334,7 @@ func GetSimpleTypeColumn(data map[string]any) (*ColumnDef, error) {
 		}
 	}
 	if !knownType {
-		return nil, errors.Wrapf(
-			ErrSchemaValidation,
-			"not simple type in column 'type' [%T]%+[1]v",
-			data,
-		)
+		return nil, fmt.Errorf("not simple type in column 'type' [%T]%+[1]v: %w", data, ErrSchemaValidation)
 	}
 	return &ColumnDef{
 		Name: st.Name,

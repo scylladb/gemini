@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//nolint:govet
 package scylla
 
 import (
@@ -25,7 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -44,6 +43,7 @@ import (
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 func TestGetScyllaStatementLogsKeyspace(t *testing.T) {
@@ -132,7 +132,7 @@ func TestBuildCreateTableQueryUnit(t *testing.T) {
 			keyspace: "uuid_logs",
 			table:    "uuid_statements",
 			partitionKeys: typedef.Columns{
-				{Name: "id", Type: typedef.TypeUuid},
+				{Name: "id", Type: typedef.TypeUUID},
 			},
 			replication: replication.NewSimpleStrategy(),
 			wantContains: []string{
@@ -212,7 +212,7 @@ func TestAdditionalColumnsUnit(t *testing.T) {
 
 	expected := []string{"ts", "seq", "ty", "statement", "values", "host", "attempt", "gemini_attempt", "error", "dur"}
 
-	assert.Equal(t, len(expected), len(additionalColumnsArr))
+	assert.Len(t, additionalColumnsArr, len(expected))
 	for i, col := range expected {
 		assert.Equal(t, col, additionalColumnsArr[i])
 	}
@@ -375,7 +375,7 @@ func TestLogger_Close(t *testing.T) {
 	}
 
 	err := mockLogger.Close()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	mu.Lock()
 	assert.Equal(t, 2, completed)
@@ -486,17 +486,13 @@ func TestStatementSink_NoInterleaving(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for i := range writers {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			lg.writeErrorStatements(t.Context(), stmtlogger.TypeOracle, &joberror.JobError{
 				Timestamp: time.Now(),
 				Query:     fmt.Sprintf("SELECT %d", i),
 				Message:   "concurrent",
 			})
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -889,7 +885,7 @@ func TestFetchErrors_DedupAndFanout(t *testing.T) {
 	defer mu.Unlock()
 
 	// One fetch per cluster side, for one of the two identical job errors.
-	sort.Slice(types, func(i, j int) bool { return types[i] < types[j] })
+	slices.Sort(types)
 	assert.Equal(t, []stmtlogger.Type{stmtlogger.TypeOracle, stmtlogger.TypeTest}, types)
 }
 
@@ -944,7 +940,7 @@ func BenchmarkGetScyllaStatementLogsKeyspace(b *testing.B) {
 	keyspace := "test_keyspace"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = GetScyllaStatementLogsKeyspace(keyspace)
 	}
 }
@@ -953,7 +949,7 @@ func BenchmarkGetScyllaStatementLogsTable(b *testing.B) {
 	table := "test_table"
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = GetScyllaStatementLogsTable(table)
 	}
 }
@@ -966,7 +962,7 @@ func BenchmarkBuildCreateTableQuery(b *testing.B) {
 	repl := replication.NewSimpleStrategy()
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = buildCreateTableQuery("test_logs", "test_statements", partitionKeys, repl)
 	}
 }
@@ -993,7 +989,7 @@ func BenchmarkLine_Marshal(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = json.Marshal(line)
+	for range b.N {
+		_ = utils.MarshalJSON(line)
 	}
 }

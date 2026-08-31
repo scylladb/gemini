@@ -53,14 +53,11 @@ func (g *Generator) Select(ctx context.Context) (*typedef.Stmt, error) {
 	}
 }
 
-func (g *Generator) genSelectSinglePartitionQuery(ctx context.Context) (*typedef.Stmt, error) {
+func (g *Generator) genSelectSinglePartitionQuery(_ context.Context) (*typedef.Stmt, error) {
 	g.table.RLock()
 	defer g.table.RUnlock()
 
-	pk, builder, err := g.getSelectSinglePartitionKeys(ctx)
-	if err != nil {
-		return nil, err
-	}
+	pk, builder := g.getSelectSinglePartitionKeys()
 
 	query, _ := builder.ToCql()
 
@@ -72,7 +69,7 @@ func (g *Generator) genSelectSinglePartitionQuery(ctx context.Context) (*typedef
 	}, nil
 }
 
-func (g *Generator) getSelectSinglePartitionKeys(_ context.Context) (typedef.PartitionKeys, *qb.SelectBuilder, error) {
+func (g *Generator) getSelectSinglePartitionKeys() (typedef.PartitionKeys, *qb.SelectBuilder) {
 	partitionKeys := g.generator.Next()
 
 	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
@@ -80,10 +77,10 @@ func (g *Generator) getSelectSinglePartitionKeys(_ context.Context) (typedef.Par
 		builder = builder.Where(qb.Eq(pk.Name))
 	}
 
-	return partitionKeys, builder, nil
+	return partitionKeys, builder
 }
 
-func (g *Generator) buildSelectMultiPartitionsKey(_ context.Context) ([]typedef.PartitionKeys, *qb.SelectBuilder, *typedef.Values, error) {
+func (g *Generator) buildSelectMultiPartitionsKey() ([]typedef.PartitionKeys, *qb.SelectBuilder, *typedef.Values) {
 	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
 
 	numQueryPKs := g.getMultiplePartitionKeys()
@@ -100,7 +97,7 @@ func (g *Generator) buildSelectMultiPartitionsKey(_ context.Context) ([]typedef.
 		builder.Where(qb.InTuple(pk.Name, numQueryPKs))
 	}
 
-	return pks, builder, combined, nil
+	return pks, builder, combined
 }
 
 //nolint:unused
@@ -125,11 +122,8 @@ func (g *Generator) buildSelectClusteringRange(builder *qb.SelectBuilder, values
 	return values
 }
 
-func (g *Generator) genSelectMultiplePartitionQuery(ctx context.Context) (*typedef.Stmt, error) {
-	pks, builder, combined, err := g.buildSelectMultiPartitionsKey(ctx)
-	if err != nil {
-		return nil, err
-	}
+func (g *Generator) genSelectMultiplePartitionQuery(_ context.Context) (*typedef.Stmt, error) {
+	pks, builder, combined := g.buildSelectMultiPartitionsKey()
 
 	query, _ := builder.ToCql()
 
@@ -141,12 +135,9 @@ func (g *Generator) genSelectMultiplePartitionQuery(ctx context.Context) (*typed
 	}, nil
 }
 
-//nolint:unused
-func (g *Generator) genClusteringRangeQuery(ctx context.Context) (*typedef.Stmt, error) {
-	pk, builder, err := g.getSelectSinglePartitionKeys(ctx)
-	if err != nil {
-		return nil, err
-	}
+//nolint:unused,unparam
+func (g *Generator) genClusteringRangeQuery(_ context.Context) (*typedef.Stmt, error) {
+	pk, builder := g.getSelectSinglePartitionKeys()
 
 	values := g.buildSelectClusteringRange(builder, pk.Values.ToCQLValues(g.table.PartitionKeys))
 
@@ -160,12 +151,9 @@ func (g *Generator) genClusteringRangeQuery(ctx context.Context) (*typedef.Stmt,
 	}, nil
 }
 
-//nolint:unused
-func (g *Generator) genMultiplePartitionClusteringRangeQuery(ctx context.Context) (*typedef.Stmt, error) {
-	pks, builder, combined, err := g.buildSelectMultiPartitionsKey(ctx)
-	if err != nil {
-		return nil, err
-	}
+//nolint:unused,unparam
+func (g *Generator) genMultiplePartitionClusteringRangeQuery(_ context.Context) (*typedef.Stmt, error) {
+	pks, builder, combined := g.buildSelectMultiPartitionsKey()
 
 	values := g.buildSelectClusteringRange(builder, combined.ToCQLValues(g.table.PartitionKeys))
 

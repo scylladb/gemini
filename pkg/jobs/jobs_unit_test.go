@@ -252,7 +252,7 @@ func TestCollectLastValidations_EmptyPartitionKeys(t *testing.T) {
 
 func TestSentinelErrors(t *testing.T) {
 	t.Parallel()
-	assert.EqualError(t, ErrMutationJobStopped, "mutation job stopped due to errors")
+	require.EqualError(t, ErrMutationJobStopped, "mutation job stopped due to errors")
 	assert.EqualError(t, ErrValidationJobStopped, "validation job stopped due to errors")
 }
 

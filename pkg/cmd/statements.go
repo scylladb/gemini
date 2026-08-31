@@ -16,9 +16,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
-
-	"github.com/pkg/errors"
 
 	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/utils"
@@ -36,7 +35,7 @@ func parseStatementRatiosJSON(jsonStr string) (statements.Ratios, error) {
 	if utils.IsFile(jsonStr) {
 		bytes, err := os.ReadFile(jsonStr)
 		if err != nil {
-			return statements.Ratios{}, errors.Wrapf(err, "failed to read statement ratios JSON file %q", jsonStr)
+			return statements.Ratios{}, fmt.Errorf("failed to read statement ratios JSON file %q: %w", jsonStr, err)
 		}
 
 		data = bytes
@@ -46,15 +45,15 @@ func parseStatementRatiosJSON(jsonStr string) (statements.Ratios, error) {
 
 	var jsonMap map[string]any
 	if err := json.Unmarshal(data, &jsonMap); err != nil {
-		return statements.Ratios{}, errors.Wrap(err, "failed to parse statement ratios JSON")
+		return statements.Ratios{}, fmt.Errorf("failed to parse statement ratios JSON: %w", err)
 	}
 
 	if err := json.Unmarshal(data, &ratios); err != nil {
-		return statements.Ratios{}, errors.Wrap(err, "failed to parse statement ratios JSON")
+		return statements.Ratios{}, fmt.Errorf("failed to parse statement ratios JSON: %w", err)
 	}
 
 	if err := fixPartialSubtypes(&ratios, jsonMap); err != nil {
-		return statements.Ratios{}, errors.Wrap(err, "failed to fix partial subtype configurations")
+		return statements.Ratios{}, fmt.Errorf("failed to fix partial subtype configurations: %w", err)
 	}
 
 	return ratios, nil

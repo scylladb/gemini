@@ -96,7 +96,7 @@ func TestReplaceDoesNotLeakUUIDToIdx(t *testing.T) {
 		// Hammer Replace() to mimic the production delete workload.
 		// The mutation code always calls Release() on the returned keys after
 		// executing the DELETE statement, so we do the same here.
-		for i := uint64(0); i < replacePass; i++ {
+		for i := range uint64(replacePass) {
 			oldKeys := parts.Replace(i % count)
 			if oldKeys.Release != nil {
 				oldKeys.Release()

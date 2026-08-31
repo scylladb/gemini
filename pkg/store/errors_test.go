@@ -48,16 +48,16 @@ func TestValidationError_Error_FinalOnly(t *testing.T) {
 	assert.ErrorIs(t, ve, lastErr)
 }
 
-func TestErrorRowDifference_Error_CountsOnly(t *testing.T) {
+func TestRowDifferenceError_Error_CountsOnly(t *testing.T) {
 	t.Parallel()
-	e := ErrorRowDifference{TestRows: 5, OracleRows: 3}
+	e := RowDifferenceError{TestRows: 5, OracleRows: 3}
 	msg := e.Error()
 	assert.Contains(t, msg, "row count differ (test store rows 5, oracle store rows 3")
 }
 
-func TestErrorRowDifference_Error_WithMissingLists(t *testing.T) {
+func TestRowDifferenceError_Error_WithMissingLists(t *testing.T) {
 	t.Parallel()
-	e := ErrorRowDifference{
+	e := RowDifferenceError{
 		MissingInTest:   []string{"r1"},
 		MissingInOracle: []string{"r2"},
 		TestRows:        1,
@@ -68,7 +68,7 @@ func TestErrorRowDifference_Error_WithMissingLists(t *testing.T) {
 	assert.Contains(t, msg, "missing_in_oracle=[r2]")
 }
 
-func TestErrorRowDifference_Error_WithPointerValues(t *testing.T) {
+func TestRowDifferenceError_Error_WithPointerValues(t *testing.T) {
 	t.Parallel()
 
 	// Simulate the scenario from the issue where pointer values are included in error messages
@@ -76,7 +76,7 @@ func TestErrorRowDifference_Error_WithPointerValues(t *testing.T) {
 		Name: "table1",
 		PartitionKeys: []typedef.ColumnDef{
 			{Name: "pk0", Type: typedef.TypeDouble},
-			{Name: "pk1", Type: typedef.TypeUuid},
+			{Name: "pk1", Type: typedef.TypeUUID},
 		},
 		ClusteringKeys: []typedef.ColumnDef{
 			{Name: "ck0", Type: typedef.TypeDuration},
@@ -102,14 +102,14 @@ func TestErrorRowDifference_Error_WithPointerValues(t *testing.T) {
 	err := result.ToError()
 	require.Error(t, err)
 
-	var rowDiffErr ErrorRowDifference
+	var rowDiffErr RowDifferenceError
 	require.ErrorAs(t, err, &rowDiffErr)
 
 	msg := err.Error()
 
 	// Verify actual values are shown, not pointer addresses
 	assert.Contains(t, msg, "pk0=3.14159", "Should show actual float value")
-	assert.Contains(t, msg, fmt.Sprintf("pk1=%s", uuidVal.String()), "Should show actual UUID value")
+	assert.Contains(t, msg, "pk1="+uuidVal.String(), "Should show actual UUID value")
 	assert.Contains(t, msg, fmt.Sprintf("ck0=%v", durVal), "Should show actual duration value")
 	assert.Contains(t, msg, "ck1=test_value", "Should show actual string value")
 
@@ -120,10 +120,10 @@ func TestErrorRowDifference_Error_WithPointerValues(t *testing.T) {
 	assert.NotContains(t, msg, "*time.Duration", "Should not contain pointer type info")
 }
 
-func TestErrorRowDifference_Error_WithDiff(t *testing.T) {
+func TestRowDifferenceError_Error_WithDiff(t *testing.T) {
 	t.Parallel()
 	diff := "pk: pk0=a\n- col1: 1\n+ col1: 2\n"
-	e := ErrorRowDifference{Diff: diff}
+	e := RowDifferenceError{Diff: diff}
 	assert.Equal(t, diff, e.Error())
 }
 
@@ -143,8 +143,8 @@ func TestValidationError_Utilities(t *testing.T) {
 	ve.Finalize(final)
 	msg := ve.Error()
 	assert.Equal(t, final.Error(), msg)
-	assert.ErrorIs(t, ve, final) // Unwrap
-	assert.False(t, errors.Is(ve, e1))
+	require.ErrorIs(t, ve, final)
+	assert.NotErrorIs(t, ve, e1)
 }
 
 func TestValidationError_MarshalJSON_SanitizesAttemptsAndTable(t *testing.T) {

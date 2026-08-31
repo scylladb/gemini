@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-//nolint:revive
+
 package utils
 
 import (
@@ -31,8 +31,13 @@ var TimerPool = sync.Pool{
 
 // GetTimer gets a timer from the pool and sets it to the specified duration
 func GetTimer(d time.Duration) *time.Timer {
-	timer := TimerPool.Get().(*time.Timer)
+	timer, ok := TimerPool.Get().(*time.Timer)
+	if !ok {
+		return time.NewTimer(d)
+	}
+
 	timer.Reset(d)
+
 	return timer
 }
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-//nolint:revive
+
 package utils
 
 import (
@@ -160,10 +160,7 @@ func TestExponentialBackoffCapped_ExponentialGrowth(t *testing.T) {
 	// Test that each attempt doubles the previous (until capped)
 	for attempt := range 10 {
 		delay := ExponentialBackoff(attempt, maxDelay, minDelay)
-		expected := minDelay << uint(attempt)
-		if expected > maxDelay {
-			expected = maxDelay
-		}
+		expected := min(minDelay<<uint(attempt), maxDelay)
 
 		if delay != expected {
 			t.Errorf("Attempt %d: got %v, want %v", attempt, delay, expected)

@@ -56,8 +56,8 @@ type ComparisonResults struct {
 // RowDiffData represents a difference between a test and oracle row
 type RowDiffData struct {
 	Diff      string `json:"diff,omitempty"`
-	TestRow   Row    `json:"testRow,omitempty"`
-	OracleRow Row    `json:"oracleRow,omitempty"`
+	TestRow   Row    `json:"testRow,omitzero"`
+	OracleRow Row    `json:"oracleRow,omitzero"`
 }
 
 // Error implements the error interface
@@ -67,7 +67,7 @@ func (ve *ValidationError) Error() string {
 	}
 
 	if ve.Operation != "" {
-		return fmt.Sprintf("%s failed", ve.Operation)
+		return ve.Operation + " failed"
 	}
 
 	return "validation failed"
@@ -133,7 +133,8 @@ func (ve *ValidationError) Finalize(finalError error) {
 
 // StoreMutationError represents a comprehensive mutation error with all attempts
 type MutationError struct {
-	ValidationError         // Embed ValidationError for common functionality
+	ValidationError
+
 	TestStoreSuccess   bool `json:"test_store_success"`
 	OracleStoreSuccess bool `json:"oracle_store_success"`
 
@@ -158,11 +159,9 @@ type MutationError struct {
 // NewStoreMutationError creates a new StoreMutationError
 func NewStoreMutationError(stmt *typedef.Stmt) *MutationError {
 	return &MutationError{
-		ValidationError: ValidationError{
-			Operation: "mutation",
-			Statement: stmt,
-			StartTime: time.Now().UTC(),
-		},
+		Operation: "mutation",
+		Statement: stmt,
+		StartTime: time.Now().UTC(),
 	}
 }
 

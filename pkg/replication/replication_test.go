@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/scylladb/gemini/pkg/replication"
 )
 
@@ -148,7 +150,10 @@ func TestJSONRoundtrip(t *testing.T) {
 		t.Errorf("class mismatch: want %v, got %v", original["class"], decoded["class"])
 	}
 	// replication_factor is int(1) in original but comes back as int after our UnmarshalJSON conversion
-	if decoded["replication_factor"] != int(original["replication_factor"].(int)) {
+	originalRF, ok := original["replication_factor"].(int)
+	require.True(t, ok)
+
+	if decoded["replication_factor"] != originalRF {
 		t.Errorf("replication_factor mismatch: want %v, got %v",
 			original["replication_factor"], decoded["replication_factor"])
 	}

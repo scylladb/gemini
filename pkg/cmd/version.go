@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -25,8 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v69/github"
-	"github.com/pkg/errors"
+	"github.com/google/go-github/v90/github"
 )
 
 const (
@@ -58,7 +58,8 @@ type (
 	}
 
 	versionOptions struct {
-		httpClient        *http.Client
+		httpClient *http.Client
+		//nolint:containedctx
 		ctx               context.Context
 		outputVersionFile string
 	}
@@ -104,17 +105,17 @@ func NewVersionInfo(options ...VersionOption) (VersionInfo, error) {
 			return fetchAndSaveVersionInfo(opts.ctx, opts.httpClient, opts.outputVersionFile)
 		}
 
-		return VersionInfo{}, errors.Wrapf(err, "failed to open %s", opts.outputVersionFile)
+		return VersionInfo{}, fmt.Errorf("failed to open %s: %w", opts.outputVersionFile, err)
 	}
 
 	var v VersionInfo
 
 	if err = json.NewDecoder(f).Decode(&v); err != nil {
-		return VersionInfo{}, errors.Wrapf(err, "failed to decode %s", opts.outputVersionFile)
+		return VersionInfo{}, fmt.Errorf("failed to decode %s: %w", opts.outputVersionFile, err)
 	}
 
 	if err = f.Close(); err != nil {
-		return VersionInfo{}, errors.Wrapf(err, "failed to close %s", opts.outputVersionFile)
+		return VersionInfo{}, fmt.Errorf("failed to close %s: %w", opts.outputVersionFile, err)
 	}
 
 	return v, nil
@@ -125,12 +126,17 @@ func fetchAndSaveVersionInfo(
 	httpClient *http.Client,
 	filePath string,
 ) (VersionInfo, error) {
-	client := github.NewClient(httpClient)
-	client.UserAgent = userAgent
+	client, err := github.NewClient(
+		github.WithHTTPClient(httpClient),
+		github.WithUserAgent(userAgent),
+	)
+	if err != nil {
+		return VersionInfo{}, fmt.Errorf("failed to create github client: %w", err)
+	}
 
 	driverInfo, err := getDriverVersionInfo(ctx, client)
 	if err != nil {
-		return VersionInfo{}, errors.Wrapf(err, "failed to get scylla-gocql-driver version info")
+		return VersionInfo{}, fmt.Errorf("failed to get scylla-gocql-driver version info: %w", err)
 	}
 
 	v := VersionInfo{
@@ -216,7 +222,7 @@ func extractReleaseInfo(
 		},
 	)
 	if err != nil {
-		return "", "", errors.Wrapf(err, "failed to get release info for %s", versionToCheck)
+		return "", "", fmt.Errorf("failed to get release info for %s: %w", versionToCheck, err)
 	}
 
 	var releaseDate, tagName string
@@ -235,7 +241,7 @@ func extractReleaseInfo(
 
 	reference, _, err := client.Git.GetRef(ctx, repoOwner, "gocql", "tags/"+tagName)
 	if err != nil {
-		return "", "", errors.Wrapf(err, "failed to get reference info for %s", tagName)
+		return "", "", fmt.Errorf("failed to get reference info for %s: %w", tagName, err)
 	}
 
 	return releaseDate, reference.GetObject().GetSHA(), nil

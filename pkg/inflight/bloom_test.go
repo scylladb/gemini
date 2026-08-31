@@ -245,7 +245,7 @@ func TestBloomConcurrent(t *testing.T) {
 	wg.Wait()
 
 	// After all goroutines have finished, every key must be present.
-	for v := uint64(0); v < uint64(totalValues); v++ {
+	for v := range uint64(totalValues) {
 		if !filter.Has(v) {
 			t.Fatalf("value %d missing after concurrent inserts", v)
 		}
@@ -256,12 +256,12 @@ func BenchmarkBloomConcurrent(b *testing.B) {
 	const mBits = 1 << 20 // 128 KiB of bits
 
 	filter := NewBloom(mBits)
-	var counter uint64 // provides unique numbers across goroutines
+	var counter atomic.Uint64
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			v := atomic.AddUint64(&counter, 1)
+			v := counter.Add(1)
 			filter.AddIfNotPresent(v)
 			_ = filter.Has(v + 123456) // mixed read
 		}

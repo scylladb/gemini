@@ -16,7 +16,7 @@ package store
 
 import "fmt"
 
-type ErrorRowDifference struct {
+type RowDifferenceError struct {
 	OracleRow       Row
 	TestRow         Row
 	Diff            string
@@ -26,7 +26,7 @@ type ErrorRowDifference struct {
 	OracleRows      int
 }
 
-func (e ErrorRowDifference) Error() string {
+func (e RowDifferenceError) Error() string {
 	switch {
 	case len(e.MissingInTest) > 0 || len(e.MissingInOracle) > 0:
 		return fmt.Sprintf(

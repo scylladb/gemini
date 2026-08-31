@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//nolint:lll
 package typedef
 
 import (
@@ -101,7 +100,6 @@ func TestSchemaConfigValidate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			got := test.config.Valid()
-			//nolint:errorlint
 			if !errors.Is(got, test.want) {
 				t.Fatalf("expected '%s', got '%s'", test.want, got)
 			}
@@ -167,7 +165,6 @@ func TestSchemaMarshalUnmarshalNotChanged(t *testing.T) {
 	}
 }
 
-// nolint: revive
 var fullSchema = Schema{
 	Keyspace: Keyspace{
 		Replication:       replication.NewSimpleStrategy(),
@@ -178,7 +175,7 @@ var fullSchema = Schema{
 		{
 			Name: "tb0",
 			PartitionKeys: Columns{
-				{Name: "pk0", Type: TypeAscii},
+				{Name: "pk0", Type: TypeASCII},
 				{Name: "pk1", Type: TypeBigint},
 				{Name: "pk2", Type: TypeBlob},
 				{Name: "pk3", Type: TypeBoolean},
@@ -196,7 +193,7 @@ var fullSchema = Schema{
 				{Name: "ck6", Type: TypeTimeuuid},
 			},
 			Columns: Columns{
-				{Name: "col0", Type: TypeAscii},
+				{Name: "col0", Type: TypeASCII},
 				{Name: "col1", Type: TypeBigint},
 				{Name: "col2", Type: TypeBlob},
 				{Name: "col3", Type: TypeBoolean},
@@ -211,7 +208,7 @@ var fullSchema = Schema{
 				{Name: "col12", Type: TypeTimestamp},
 				{Name: "col13", Type: TypeTimeuuid},
 				{Name: "col14", Type: TypeTinyint},
-				{Name: "col15", Type: TypeUuid},
+				{Name: "col15", Type: TypeUUID},
 				{Name: "col16", Type: TypeVarchar},
 				{Name: "col17", Type: TypeVarint},
 				{Name: "col18", Type: TypeTime},
@@ -242,7 +239,7 @@ var fullSchema = Schema{
 				{Name: "pk6", Type: TypeTimeuuid},
 			},
 			ClusteringKeys: Columns{
-				{Name: "ck0", Type: TypeAscii},
+				{Name: "ck0", Type: TypeASCII},
 				{Name: "ck1", Type: TypeBigint},
 				{Name: "ck2", Type: TypeBlob},
 				{Name: "ck3", Type: TypeBoolean},
@@ -251,7 +248,7 @@ var fullSchema = Schema{
 				{Name: "ck6", Type: TypeDouble},
 			},
 			Columns: Columns{
-				{Name: "col0", Type: TypeAscii},
+				{Name: "col0", Type: TypeASCII},
 				{Name: "col1", Type: TypeBigint},
 				{Name: "col2", Type: TypeBlob},
 				{Name: "col3", Type: TypeBoolean},
@@ -266,7 +263,7 @@ var fullSchema = Schema{
 				{Name: "col12", Type: TypeTimestamp},
 				{Name: "col13", Type: TypeTimeuuid},
 				{Name: "col14", Type: TypeTinyint},
-				{Name: "col15", Type: TypeUuid},
+				{Name: "col15", Type: TypeUUID},
 				{Name: "col16", Type: TypeVarchar},
 				{Name: "col17", Type: TypeVarint},
 				{Name: "col18", Type: TypeTime},
@@ -293,7 +290,7 @@ var fullSchema = Schema{
 						{Name: "pk6", Type: TypeTimeuuid},
 					},
 					ClusteringKeys: Columns{
-						{Name: "ck0", Type: TypeAscii},
+						{Name: "ck0", Type: TypeASCII},
 						{Name: "ck1", Type: TypeBigint},
 						{Name: "ck2", Type: TypeBlob},
 						{Name: "ck3", Type: TypeBoolean},
@@ -303,7 +300,7 @@ var fullSchema = Schema{
 					},
 				}, {
 					NonPrimaryKey: mo.Some(ColumnDef{
-						Type: TypeAscii,
+						Type: TypeASCII,
 						Name: "col0_idx",
 					}),
 					Name: "mv1",
@@ -317,7 +314,7 @@ var fullSchema = Schema{
 						{Name: "pk6", Type: TypeTimeuuid},
 					},
 					ClusteringKeys: Columns{
-						{Name: "ck0", Type: TypeAscii},
+						{Name: "ck0", Type: TypeASCII},
 						{Name: "ck1", Type: TypeBigint},
 						{Name: "ck2", Type: TypeBlob},
 						{Name: "ck3", Type: TypeBoolean},
@@ -339,14 +336,14 @@ var fullSchema = Schema{
 			Name: "tb2",
 			PartitionKeys: Columns{
 				{Name: "pk0", Type: TypeTinyint},
-				{Name: "pk1", Type: TypeUuid},
+				{Name: "pk1", Type: TypeUUID},
 				{Name: "pk2", Type: TypeVarchar},
 				{Name: "pk3", Type: TypeVarint},
 				{Name: "pk4", Type: TypeTime},
 			},
 			ClusteringKeys: Columns{
 				{Name: "ck0", Type: TypeTinyint},
-				{Name: "ck1", Type: TypeUuid},
+				{Name: "ck1", Type: TypeUUID},
 				{Name: "ck2", Type: TypeVarchar},
 				{Name: "ck3", Type: TypeVarint},
 				{Name: "ck4", Type: TypeTime},
@@ -376,7 +373,7 @@ var fullSchema = Schema{
 				}},
 				{Name: "col3", Type: &Collection{
 					ComplexType: "list",
-					ValueType:   TypeUuid,
+					ValueType:   TypeUUID,
 					Frozen:      true,
 				}},
 				{Name: "col4", Type: &Collection{
@@ -396,14 +393,14 @@ var fullSchema = Schema{
 					Name:          "mv0",
 					PartitionKeys: Columns{
 						{Name: "pk0", Type: TypeTinyint},
-						{Name: "pk1", Type: TypeUuid},
+						{Name: "pk1", Type: TypeUUID},
 						{Name: "pk2", Type: TypeVarchar},
 						{Name: "pk3", Type: TypeVarint},
 						{Name: "pk4", Type: TypeTime},
 					},
 					ClusteringKeys: Columns{
 						{Name: "ck0", Type: TypeTinyint},
-						{Name: "ck1", Type: TypeUuid},
+						{Name: "ck1", Type: TypeUUID},
 						{Name: "ck2", Type: TypeVarchar},
 						{Name: "ck3", Type: TypeVarint},
 						{Name: "ck4", Type: TypeTime},

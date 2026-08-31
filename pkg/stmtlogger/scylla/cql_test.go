@@ -82,7 +82,7 @@ func TestBuildCreateTableQuery(t *testing.T) {
 			partitionKeys: typedef.Columns{
 				{
 					Name: "id",
-					Type: typedef.TypeUuid,
+					Type: typedef.TypeUUID,
 				},
 			},
 			replication:  replication.NewSimpleStrategy(),

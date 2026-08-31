@@ -16,7 +16,6 @@ package distributions
 
 import (
 	"crypto/sha256"
-	"fmt"
 	"math/rand/v2"
 	"strconv"
 
@@ -117,6 +116,6 @@ func New(distribution Distribution, partitionCount, seed uint64, mu, sigma float
 			return uint64(d.Rand())
 		}
 	default:
-		panic(fmt.Sprintf("unsupported distribution: %s", string(distribution)))
+		panic("unsupported distribution: " + string(distribution))
 	}
 }

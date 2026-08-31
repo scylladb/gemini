@@ -528,7 +528,8 @@ func TestDeduplicateListValues(t *testing.T) {
 		// The []any is compacted in-place; we read back the full slice but only
 		// the first `after` elements are valid — here the row stores the original
 		// slice reference and the caller sees the compacted view via Set.
-		got := rows[0].Get("vals").([]any)
+		got, ok := rows[0].Get("vals").([]any)
+		require.True(t, ok)
 		assert.Equal(t, []any{int32(10), int32(20), int32(30)}, got[:3])
 	})
 
@@ -631,7 +632,6 @@ func TestCompareCollectedRows_ListDuplicatesMatch(t *testing.T) {
 			oracleVal: []string{"a", "b", "b", "c"},
 		},
 	} {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -649,7 +649,7 @@ func TestCompareCollectedRows_ListDuplicatesMatch(t *testing.T) {
 			}
 
 			res := CompareCollectedRows(table, testRows, oracleRows)
-			assert.NoError(t, res.ToError())
+			require.NoError(t, res.ToError())
 			assert.Equal(t, 1, res.MatchCount)
 			assert.Empty(t, res.DifferentRows)
 		})
@@ -675,7 +675,7 @@ func TestZipAndCompare_UnorderedIterators(t *testing.T) {
 	}
 
 	res := ZipAndCompare(t.Context(), table, testIter, oracleIter)
-	assert.NoError(t, res.ToError())
+	require.NoError(t, res.ToError())
 	assert.Equal(t, 2, res.MatchCount)
 	assert.Empty(t, res.DifferentRows)
 }

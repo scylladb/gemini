@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -61,7 +62,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 
 		err := ds.Mutate(t.Context(), stmt)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
@@ -86,7 +87,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 
 		err := ds.Mutate(ctx, stmt)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		testStore.AssertExpectations(t)
 	})
 
@@ -123,8 +124,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 
 		err := ds.Mutate(ctx, stmt)
 
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, testErr)
+		require.Error(t, err)
+		require.ErrorIs(t, err, testErr)
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
@@ -161,8 +162,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 
 		err := ds.Mutate(ctx, stmt)
 
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, oracleErr)
+		require.Error(t, err)
+		require.ErrorIs(t, err, oracleErr)
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
@@ -197,7 +198,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 
 		err := ds.Mutate(ctx, stmt)
 
-		assert.Error(t, err)
+		require.Error(t, err)
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)
 	})
@@ -245,7 +246,7 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		err := ds.Mutate(ctx, stmt)
 		duration := time.Since(start)
 
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		// Verify concurrent execution - should take less than 100ms if truly concurrent
 		// (each store operation takes 50ms)
@@ -298,8 +299,8 @@ func TestDelegatingStore_Mutate(t *testing.T) {
 		err := ds.Mutate(ctx, stmt)
 
 		// Should fail because test store keeps failing
-		assert.Error(t, err)
-		assert.ErrorIs(t, err, testErr)
+		require.Error(t, err)
+		require.ErrorIs(t, err, testErr)
 
 		testStore.AssertExpectations(t)
 		oracleStore.AssertExpectations(t)

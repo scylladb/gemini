@@ -13,8 +13,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-//nolint:govet
 package scylla
 
 import (
@@ -105,7 +103,7 @@ func TestNewStatements_Integration(t *testing.T) {
 		assert.NotEmpty(t, cqlStmts.mutationFragmentsSelect)
 
 		// Cleanup
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace+"_1")).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + keyspace + "_1").Exec()
 	})
 
 	t.Run("multiple partition keys", func(t *testing.T) {
@@ -130,7 +128,7 @@ func TestNewStatements_Integration(t *testing.T) {
 		require.NotNil(t, cqlStmts)
 
 		// Cleanup
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace+"_2")).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + keyspace + "_2").Exec()
 	})
 }
 
@@ -162,7 +160,7 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + keyspace).Exec()
 	})
 
 	tests := []struct {
@@ -229,7 +227,7 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			err := cqlStmts.Insert(t.Context(), tt.item)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			// Verify data was inserted
 			var count int
@@ -238,7 +236,7 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 				tt.item.PartitionKeys.Values.Get("pk0")[0],
 				tt.item.Type,
 			).Scan(&count)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, 1, count)
 		})
 	}
@@ -281,7 +279,7 @@ func TestNewStatements_WithTupleType_Integration(t *testing.T) {
 	require.NotNil(t, cqlStmts)
 
 	defer func() {
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + keyspace).Exec()
 	}()
 
 	// Verify the insert statement was created correctly with tuple column
@@ -289,10 +287,7 @@ func TestNewStatements_WithTupleType_Integration(t *testing.T) {
 	assert.NotEmpty(t, cqlStmts.insertStmt)
 }
 
-//nolint:tparallel
 func TestCQLStatements_Fetch_Integration(t *testing.T) {
-	t.Parallel()
-
 	containers := testutils.TestContainers(t)
 	logger := zap.NewNop()
 
@@ -316,8 +311,8 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 	require.NoError(t, containers.Test.Query(createTable).Exec())
 
 	defer func() {
-		_ = containers.Oracle.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
-		_ = containers.Test.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
+		_ = containers.Oracle.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
+		_ = containers.Test.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
 	}()
 
 	// Insert some test data
@@ -353,7 +348,7 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 	)
 	require.NoError(t, err)
 	defer func() {
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", logsKS)).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + logsKS).Exec()
 	}()
 
 	// Insert statement logs for both oracle and test
@@ -440,7 +435,7 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 			if tt.expectErr {
 				assert.Error(t, err)
 			} else {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				assert.Positive(t, n)
 				assert.NotEmpty(t, parseLines(t, buf.Bytes()))
 			}
@@ -475,8 +470,8 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 	require.NoError(t, containers.Test.Query(createTable).Exec())
 
 	t.Cleanup(func() {
-		_ = containers.Oracle.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
-		_ = containers.Test.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
+		_ = containers.Oracle.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
+		_ = containers.Test.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
 	})
 
 	// Insert multiple test data rows
@@ -518,7 +513,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", logsKS)).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + logsKS).Exec()
 	})
 
 	// Insert statement logs for multiple partitions
@@ -648,7 +643,6 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 			t.Parallel()
 			var buf bytes.Buffer
 
-			//nolint:govet
 			_, err := cqlStmts.FetchTo(t.Context(), tt.ty, tt.jobError, &buf)
 
 			if tt.expectErr {
@@ -688,8 +682,8 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 	require.NoError(t, containers.Test.Query(createTable).Exec())
 
 	defer func() {
-		_ = containers.Oracle.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
-		_ = containers.Test.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
+		_ = containers.Oracle.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
+		_ = containers.Test.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
 	}()
 
 	// Create temp directory for statement files
@@ -742,13 +736,13 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 		if err != nil {
 			t.Logf("cleanup: failed to create session for logs keyspace drop: %v", err)
 		} else if session != nil {
-			_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", logsKS)).Exec()
+			_ = session.Query("DROP KEYSPACE IF EXISTS " + logsKS).Exec()
 			session.Close()
 		}
 	}()
 
 	// Send some items
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		itemCh <- stmtlogger.Item{
 			Start: stmtlogger.Time{Time: time.Now()},
 			PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
@@ -767,7 +761,7 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 	}
 
 	// Send some errors
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		errorCh <- &joberror.JobError{
 			Timestamp: time.Now(),
 			Query:     fmt.Sprintf("SELECT * FROM test WHERE pk0 = 'error_key_%d'", i),
@@ -784,25 +778,24 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 
 	// Verify statement files were created
 	_, err = os.Stat(oracleFile)
-	assert.NoError(t, err, "Oracle statements file should exist")
+	require.NoError(t, err, "Oracle statements file should exist")
 
 	_, err = os.Stat(testFile)
-	assert.NoError(t, err, "Test statements file should exist")
+	require.NoError(t, err, "Test statements file should exist")
 
 	// Read and verify oracle file
 	oracleContent, err := os.ReadFile(oracleFile)
 	if err == nil && len(oracleContent) > 0 {
 		var line Line
 		lines := 0
-		for _, l := range bytes.Split(oracleContent, []byte("\n")) {
+		for l := range bytes.SplitSeq(oracleContent, []byte("\n")) {
 			if len(l) > 0 {
-				//nolint:govet
 				err := json.Unmarshal(l, &line)
-				assert.NoError(t, err)
+				require.NoError(t, err)
 				lines++
 			}
 		}
-		assert.Greater(t, lines, 0, "Should have oracle statements")
+		assert.Positive(t, lines, "Should have oracle statements")
 	}
 }
 

@@ -94,7 +94,7 @@ func TestConvertForJSON(t *testing.T) {
 	t.Run("uuid", func(t *testing.T) {
 		t.Parallel()
 		uid, _ := gocql.RandomUUID()
-		result := convertForJSON(typedef.TypeUuid, uid)
+		result := convertForJSON(typedef.TypeUUID, uid)
 		str, ok := result.(string)
 		if !ok {
 			t.Fatalf("expected string, got %T", result)

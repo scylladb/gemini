@@ -247,7 +247,7 @@ func TestErrorList_Errors(t *testing.T) {
 	}
 
 	// Add some errors
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		err := JobError{
 			Timestamp: timestamp,
 			Err:       errors.New("error"),
