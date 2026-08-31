@@ -271,8 +271,7 @@ func (m *Mutation) Do(ctx context.Context) error {
 			}
 		}
 
-		var jobErr *joberror.JobError
-		if errors.As(err, &jobErr) {
+		if jobErr, ok := errors.AsType[*joberror.JobError](err); ok {
 			// Record the write error, but only stop if we've exceeded the error budget
 			m.status.AddWriteError(*jobErr)
 			if m.status.HasReachedErrorCount() {
@@ -318,40 +317,7 @@ func (m *Mutation) recordTrackedMisses() {
 	}
 }
 
-// nolint
+//nolint:unused
 func (m *Mutation) ddl(_ context.Context) error {
-	if len(m.table.MaterializedViews) > 0 {
-		// Scylla does not allow changing the DDL of a table with materialized views.
-		return nil
-	}
-	//w.table.Lock()
-	//defer w.table.Unlock()
-	////ddlStmts, err := GenDDLStmt(w.schema, w.table, w., p, sc)
-	//if err != nil {
-	//	w.status.WriteErrors.Add(1)
-	//	return err
-	//}
-	//
-	//if ddlStmts == nil {
-	//	return nil
-	//}
-	//
-	//for _, ddlStmt := range ddlStmts.Jobs {
-	//	if err = w.store.Mutate(ctx, ddlStmt); err != nil {
-	//		w.status.AddWriteError(joberror.JobError{
-	//			Timestamp: time.Now(),
-	//			StmtType:  ddlStmts.QueryType,
-	//			Message:   "DDL failed: " + err.Error(),
-	//			Query:     ddlStmt.Query,
-	//		})
-	//
-	//		return err
-	//	}
-	//
-	//	w.status.WriteOps.Add(1)
-	//}
-	//ddlStmts.PostStmtHook()
-	//jsonSchema, _ := json.MarshalIndent(w.schema, "", "    ")
-	//fmt.Printf("New schema: %v\n", string(jsonSchema)) //nolint:forbidigo
 	return nil
 }

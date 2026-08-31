@@ -227,5 +227,5 @@ func TestPrintResult(t *testing.T) {
 
 	out := buf.String()
 	// It must produce some output
-	assert.True(t, len(strings.TrimSpace(out)) > 0)
+	assert.NotEmpty(t, strings.TrimSpace(out))
 }

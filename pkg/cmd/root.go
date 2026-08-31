@@ -28,7 +28,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -109,12 +108,10 @@ func checkVersion(cmd *cobra.Command) (bool, error) {
 				return false, err
 			}
 
-			//nolint:forbidigo
 			fmt.Println(string(data))
 			return true, nil
 		}
 
-		//nolint:forbidigo
 		fmt.Println(versionInfo.String())
 
 		return true, nil
@@ -123,7 +120,6 @@ func checkVersion(cmd *cobra.Command) (bool, error) {
 	return false, nil
 }
 
-//nolint:gocyclo
 func run(cmd *cobra.Command, _ []string) error {
 	shouldAbort, err := checkVersion(cmd)
 	if err != nil {
@@ -148,24 +144,24 @@ func run(cmd *cobra.Command, _ []string) error {
 		readConcurrency = concurrency
 	}
 
-	for i := range len(testClusterHost) {
+	for i := range testClusterHost {
 		testClusterHost[i] = strings.TrimSpace(testClusterHost[i])
 	}
 
-	for i := range len(oracleClusterHost) {
+	for i := range oracleClusterHost {
 		oracleClusterHost[i] = strings.TrimSpace(oracleClusterHost[i])
 	}
 
 	if err = validateSeed(seed); err != nil {
-		return errors.Wrapf(err, "failed to parse --seed argument")
+		return fmt.Errorf("failed to parse --seed argument: %w", err)
 	}
 	if err = validateSeed(schemaSeed); err != nil {
-		return errors.Wrapf(err, "failed to parse --schema-seed argument")
+		return fmt.Errorf("failed to parse --schema-seed argument: %w", err)
 	}
 
 	statementRatio, err := parseStatementRatiosJSON(statementRatios)
 	if err != nil {
-		return errors.Wrapf(err, "failed to parse statement ratios JSON")
+		return fmt.Errorf("failed to parse statement ratios JSON: %w", err)
 	}
 
 	intSeed := seedFromString(seed)
@@ -175,7 +171,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		schemaFile,
 	)
 	if err != nil {
-		return errors.Wrap(err, "failed to get schema")
+		return fmt.Errorf("failed to get schema: %w", err)
 	}
 
 	storeConfig := store.Config{
@@ -276,12 +272,16 @@ func createLogger(level string) *zap.Logger {
 	encoderCfg.EncodeLevel = zapcore.LowercaseLevelEncoder
 	encoderCfg.EncodeCaller = nil
 
-	logger := zap.New(zapcore.NewCore(
+	syncer, ok := file.(zapcore.WriteSyncer)
+	if !ok {
+		syncer = zapcore.AddSync(file)
+	}
+
+	return zap.New(zapcore.NewCore(
 		zapcore.NewJSONEncoder(encoderCfg),
-		zapcore.NewMultiWriteSyncer(zapcore.Lock(file.(zapcore.WriteSyncer)), zapcore.Lock(os.Stdout)),
+		zapcore.NewMultiWriteSyncer(zapcore.Lock(syncer), zapcore.Lock(os.Stdout)),
 		lvl,
 	))
-	return logger
 }
 
 func getCQLFeature(feature string) typedef.CQLFeature {
@@ -312,11 +312,11 @@ func printSetup(schema *typedef.Schema, ratio statements.Ratios, seed, schemaSee
 	}
 	_ = tw.Flush()
 
-	jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
-	fmt.Printf("Schema: %v\n", string(jsonSchema)) //nolint:forbidigo
+	jsonSchema := utils.MarshalJSONIndent(schema, "", "    ")
+	fmt.Printf("Schema: %v\n", string(jsonSchema))
 
-	jsonStatementsRatio, _ := json.MarshalIndent(ratio, "", "    ")
-	fmt.Printf("Statement Ratios: %v\n", string(jsonStatementsRatio)) //nolint:forbidigo
+	jsonStatementsRatio := utils.MarshalJSONIndent(ratio, "", "    ")
+	fmt.Printf("Statement Ratios: %v\n", string(jsonStatementsRatio))
 }
 
 func RealRandom() uint64 {

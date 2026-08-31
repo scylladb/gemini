@@ -17,12 +17,14 @@ package replication
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type Replication map[string]any
 
 func (r Replication) ToCQL() string {
-	b, _ := json.Marshal(r)
+	b := utils.MarshalJSON(r)
 	return strings.ReplaceAll(string(b), "\"", "'")
 }
 

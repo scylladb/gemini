@@ -29,6 +29,8 @@ import (
 // back to random data.
 var ErrNoTrackedRows = errors.New("no tracked rows available")
 
+var ErrCounterTableJSON = errors.New("counter tables do not support JSON inserts")
+
 const (
 	SelectSinglePartitionQuery int = iota
 	SelectMultiplePartitionQuery

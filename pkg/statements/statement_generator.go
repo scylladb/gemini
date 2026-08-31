@@ -151,13 +151,13 @@ func GetCreateSchema(s *typedef.Schema) []string {
 				mvPartitionKeys = append(mvPartitionKeys, pk.Name)
 				mvPrimaryKeysNotNull = append(
 					mvPrimaryKeysNotNull,
-					fmt.Sprintf("%s IS NOT NULL", pk.Name),
+					pk.Name+" IS NOT NULL",
 				)
 			}
 			for _, ck := range mv.ClusteringKeys {
 				mvPrimaryKeysNotNull = append(
 					mvPrimaryKeysNotNull,
-					fmt.Sprintf("%s IS NOT NULL", ck.Name),
+					ck.Name+" IS NOT NULL",
 				)
 			}
 			var createMaterializedView string
@@ -178,7 +178,7 @@ func GetCreateSchema(s *typedef.Schema) []string {
 
 func GetDropKeyspace(s *typedef.Schema) []string {
 	return []string{
-		fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", s.Keyspace.Name),
+		"DROP KEYSPACE IF EXISTS " + s.Keyspace.Name,
 	}
 }
 

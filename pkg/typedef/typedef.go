@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -26,7 +27,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/scylladb/gocqlx/v3/qb"
-	"golang.org/x/exp/maps"
 
 	"github.com/scylladb/gemini/pkg/replication"
 )
@@ -432,9 +432,7 @@ func (v *Values) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("unmarshal values: %w", err)
 	}
 
-	for k, value := range m {
-		v.data[k] = value
-	}
+	maps.Copy(v.data, m)
 
 	return nil
 }
@@ -453,7 +451,7 @@ func (v *Values) Copy() *Values {
 	}
 
 	v.mu.RLock()
-	m := maps.Clone(v.data) //nolint:govet // inline: type parameter inference not yet supported by inliner
+	m := maps.Clone(v.data)
 	v.mu.RUnlock()
 
 	return &Values{data: m}

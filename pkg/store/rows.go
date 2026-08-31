@@ -312,11 +312,8 @@ func rowsEqual(a, b Rows) bool {
 // It supports a wide range of scalar types and falls back to string
 // comparison for differing concrete types.
 func rowsCmp(i, j Row) int {
-	maximum := len(i.values)
-	if len(j.values) < maximum {
-		maximum = len(j.values)
-	}
-	for idx := 0; idx < maximum; idx++ {
+	maximum := min(len(j.values), len(i.values))
+	for idx := range maximum {
 		if c := compareValues(i.values[idx], j.values[idx]); c != 0 {
 			return c
 		}

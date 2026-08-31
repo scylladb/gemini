@@ -15,8 +15,8 @@
 package partitions
 
 import (
-	"fmt"
 	"math/rand/v2"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -60,10 +60,10 @@ func createTestPartitions(t *testing.T, count uint64) *Partitions {
 	return parts
 }
 
-func requirePartitionKeysPopulated(t *testing.T, keys typedef.PartitionKeys) {
+func assertPartitionKeysPopulated(t *testing.T, keys typedef.PartitionKeys) {
 	t.Helper()
-	require.NotNil(t, keys.Values)
-	require.Greater(t, keys.Values.Len(), 0)
+	assert.NotNil(t, keys.Values)
+	assert.Positive(t, keys.Values.Len())
 }
 
 func assertPartitionKeysEqual(t *testing.T, left, right typedef.PartitionKeys) {
@@ -86,10 +86,10 @@ func TestPartitionsGet(t *testing.T) {
 
 	parts := createTestPartitions(t, 100)
 
-	for i := uint64(0); i < 100; i++ {
+	for i := range uint64(100) {
 		values := parts.Get(i)
 		require.NotNil(t, values)
-		requirePartitionKeysPopulated(t, values)
+		assertPartitionKeysPopulated(t, values)
 	}
 }
 
@@ -99,10 +99,10 @@ func TestPartitionsNext(t *testing.T) {
 
 	parts := createTestPartitions(t, 1000)
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		values := parts.Next()
 		require.NotNil(t, values)
-		requirePartitionKeysPopulated(t, values)
+		assertPartitionKeysPopulated(t, values)
 	}
 }
 
@@ -113,10 +113,10 @@ func TestPartitionsExtend(t *testing.T) {
 	parts := createTestPartitions(t, 10)
 	initialLen := parts.Len()
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		values := parts.Extend()
 		require.NotNil(t, values)
-		requirePartitionKeysPopulated(t, values)
+		assertPartitionKeysPopulated(t, values)
 	}
 
 	assert.Equal(t, initialLen+5, parts.Len())
@@ -154,10 +154,10 @@ func TestPartitionsReplaceNext(t *testing.T) {
 
 	parts := createTestPartitions(t, 100)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		values := parts.ReplaceNext()
 		require.NotNil(t, values)
-		requirePartitionKeysPopulated(t, values)
+		assertPartitionKeysPopulated(t, values)
 	}
 
 	stats := parts.Stats()
@@ -189,7 +189,7 @@ func TestPartitionsReplaceNextWithoutOld(t *testing.T) {
 
 	parts := createTestPartitions(t, 100)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		parts.ReplaceNextWithoutOld()
 	}
 
@@ -233,17 +233,17 @@ func TestPartitionsConcurrentGet(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		go func(workerID int) {
 			defer wg.Done()
 			src := rand.NewPCG(uint64(workerID), uint64(workerID*2))
 			r := rand.New(src)
 
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				idx := uint64(r.IntN(1000))
 				values := parts.Get(idx)
-				require.NotNil(t, values)
-				requirePartitionKeysPopulated(t, values)
+				assert.NotNil(t, values)
+				assertPartitionKeysPopulated(t, values)
 			}
 		}(i)
 	}
@@ -262,14 +262,14 @@ func TestPartitionsConcurrentNext(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			defer wg.Done()
 
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				values := parts.Next()
-				require.NotNil(t, values)
-				requirePartitionKeysPopulated(t, values)
+				assert.NotNil(t, values)
+				assertPartitionKeysPopulated(t, values)
 			}
 		}()
 	}
@@ -288,14 +288,14 @@ func TestPartitionsConcurrentExtend(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			defer wg.Done()
 
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				values := parts.Extend()
-				require.NotNil(t, values)
-				requirePartitionKeysPopulated(t, values)
+				assert.NotNil(t, values)
+				assertPartitionKeysPopulated(t, values)
 			}
 		}()
 	}
@@ -320,17 +320,17 @@ func TestPartitionsConcurrentReplace(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		go func(workerID int) {
 			defer wg.Done()
 			src := rand.NewPCG(uint64(workerID), uint64(workerID*2))
 			r := rand.New(src)
 
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				idx := uint64(r.IntN(1000))
 				values := parts.Replace(idx)
-				require.NotNil(t, values)
-				requirePartitionKeysPopulated(t, values)
+				assert.NotNil(t, values)
+				assertPartitionKeysPopulated(t, values)
 			}
 		}(i)
 	}
@@ -353,52 +353,52 @@ func TestPartitionsConcurrentMixed(t *testing.T) {
 	wg.Add(concurrency * 4) // 4 operation types
 
 	// Concurrent Get operations
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		go func(workerID int) {
 			defer wg.Done()
 			src := rand.NewPCG(uint64(workerID), uint64(workerID*2))
 			r := rand.New(src)
 
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				idx := uint64(r.IntN(1000))
 				values := parts.Get(idx)
-				require.NotNil(t, values)
+				assert.NotNil(t, values)
 			}
 		}(i)
 	}
 
 	// Concurrent Next operations
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			defer wg.Done()
 
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				values := parts.Next()
-				require.NotNil(t, values)
+				assert.NotNil(t, values)
 			}
 		}()
 	}
 
 	// Concurrent Extend operations
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			defer wg.Done()
 
-			for j := 0; j < iterations/10; j++ { // Fewer extends
+			for range iterations / 10 {
 				values := parts.Extend()
-				require.NotNil(t, values)
+				assert.NotNil(t, values)
 			}
 		}()
 	}
 
 	// Concurrent Replace operations
-	for k := 0; k < concurrency; k++ {
+	for k := range concurrency {
 		go func(workerID int) {
 			defer wg.Done()
 			src := rand.NewPCG(uint64(workerID+100), uint64(workerID*2+100))
 			r := rand.New(src)
 
-			for j := 0; j < iterations/10; j++ { // Fewer replaces
+			for range iterations / 10 {
 				idx := uint64(r.IntN(1000))
 				parts.ReplaceWithoutOld(idx)
 			}
@@ -409,8 +409,8 @@ func TestPartitionsConcurrentMixed(t *testing.T) {
 
 	stats := parts.Stats()
 	assert.Greater(t, stats.CurrentPartitionCount, uint64(1000))
-	assert.Greater(t, stats.PartitionsCreated, uint64(0))
-	assert.Greater(t, stats.PartitionsDeleted, uint64(0))
+	assert.Positive(t, stats.PartitionsCreated)
+	assert.Positive(t, stats.PartitionsDeleted)
 }
 
 // TestPartitionsMemoryUsage tests memory usage tracking
@@ -420,7 +420,7 @@ func TestPartitionsMemoryUsage(t *testing.T) {
 	parts := createTestPartitions(t, 1000)
 
 	stats := parts.Stats()
-	assert.GreaterOrEqual(t, stats.MemoryUsage, uint64(0))
+	assert.Equal(t, uint64(1000), stats.CurrentPartitionCount)
 
 	// Note: Current implementation returns 0 for memory usage
 	// This test verifies the Stats call works correctly
@@ -434,12 +434,12 @@ func TestPartitionsMetrics(t *testing.T) {
 	parts := createTestPartitions(t, 100)
 
 	// Track creates
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		parts.Extend()
 	}
 
 	// Track replaces
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		parts.ReplaceWithoutOld(uint64(i % 100))
 	}
 
@@ -461,10 +461,10 @@ func TestPartitionsAtomicCounters(t *testing.T) {
 
 	// Concurrent extends
 	wg.Add(concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				parts.Extend()
 			}
 		}()
@@ -473,13 +473,13 @@ func TestPartitionsAtomicCounters(t *testing.T) {
 
 	// Concurrent replaces
 	wg.Add(concurrency)
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		go func(workerID int) {
 			defer wg.Done()
 			src := rand.NewPCG(uint64(workerID), uint64(workerID*2))
 			r := rand.New(src)
 
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				idx := uint64(r.IntN(100))
 				parts.ReplaceWithoutOld(idx)
 			}
@@ -527,7 +527,7 @@ func TestNewPartitionKeys(t *testing.T) {
 
 	pk := NewPartitionKeys(r, table, &config)
 	require.NotNil(t, pk.Values)
-	require.Greater(t, pk.Values.Len(), 0)
+	require.Positive(t, pk.Values.Len())
 }
 
 // TestPartitionSize verifies partition size calculation
@@ -577,7 +577,7 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 	sizes := []uint64{100, 1_000, 10_000, 100_000}
 
 	for _, size := range sizes {
-		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
+		b.Run(strconv.FormatUint(size, 10), func(b *testing.B) {
 			src, fn := distributions.New(distributions.Uniform, size, 1, 0, 0)
 			table := createTestTable()
 			config := typedef.PartitionRangeConfig{
@@ -586,7 +586,7 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 
 			b.ReportAllocs()
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for b.Loop() {
 				_ = New(b.Context(), rand.New(src), fn, table, config, size, 0)
 			}
 		})

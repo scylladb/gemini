@@ -16,13 +16,13 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
 	"runtime"
 	"time"
 
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -324,26 +324,3 @@ func (j *Jobs) Run(
 	}
 	return err
 }
-
-//nolint
-// mutationJob continuously applies mutations against the database
-// for as long as the pump is active.
-//func mutationJob(ctx context.Context, stmtGen *statements.Generator, globalStatus *status.GlobalStatus, logger *zap.Logger, stopFlag *stop.Flag) error {
-//	for !stopFlag.IsHardOrSoft() {
-//		metrics.ExecutionTime("mutation_job", func() {
-//			if schemaCfg.CQLFeature == typedef.CQL_FEATURE_ALL && r.IntN(1000000)%100000 == 0 {
-//				_ = ddl(ctx, globalStatus, logger)
-//				return
-//			}
-//
-//			_ = mutation(ctx, globalStatus, true, logger)
-//		})
-//
-//		if globalStatus.HasReachedErrorCount() {
-//			stopFlag.SetSoft(true)
-//			return nil
-//		}
-//	}
-//
-//	return nil
-//}

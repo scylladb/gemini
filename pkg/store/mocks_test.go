@@ -27,6 +27,7 @@ import (
 // mockStoreLoader is a mock implementation of storeLoader interface
 type mockStoreLoader struct {
 	mock.Mock
+
 	nameStr string
 }
 
@@ -41,12 +42,14 @@ func (m *mockStoreLoader) mutate(ctx context.Context, stmt *typedef.Stmt, _ mo.O
 
 func (m *mockStoreLoader) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	args := m.Called(ctx, stmt)
-	return args.Get(0).(Rows), args.Error(1)
+	rows, _ := args.Get(0).(Rows)
+	return rows, args.Error(1)
 }
 
 func (m *mockStoreLoader) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator {
 	args := m.Called(ctx, stmt)
-	return args.Get(0).(RowIterator)
+	iter, _ := args.Get(0).(RowIterator)
+	return iter
 }
 
 func (m *mockStoreLoader) Close() error {

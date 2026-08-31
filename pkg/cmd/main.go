@@ -27,6 +27,10 @@ import (
 )
 
 func main() {
+	os.Exit(execute())
+}
+
+func execute() int {
 	uuid.EnableRandPool()
 
 	runtime.SetMutexProfileFraction(1)
@@ -52,7 +56,8 @@ func main() {
 	}
 
 	utils.ExecuteFinalizers()
-	os.Exit(status) //nolint:gocritic
+
+	return status
 }
 
 func init() {

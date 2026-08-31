@@ -169,8 +169,8 @@ func testGeminiAcceptsIdenticalClusters(t *testing.T, containers *testutils.Scyl
 	status := w.GetGlobalStatus()
 	require.Equal(t, uint64(0), status.ReadErrors.Load(), "no read errors expected")
 	require.Equal(t, uint64(0), status.WriteErrors.Load(), "no write errors expected")
-	require.Greater(t, status.WriteOps.Load(), uint64(0), "must have performed at least one write")
-	require.Greater(t, status.ReadOps.Load(), uint64(0), "must have performed at least one read")
+	require.Positive(t, status.WriteOps.Load(), "must have performed at least one write")
+	require.Positive(t, status.ReadOps.Load(), "must have performed at least one read")
 	t.Logf("status: WriteOps=%d ReadOps=%d ValidatedRows=%d",
 		status.WriteOps.Load(), status.ReadOps.Load(), status.ValidatedRows.Load())
 }

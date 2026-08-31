@@ -15,7 +15,6 @@
 package scylla
 
 import (
-	"encoding/json"
 	"regexp"
 	"sort"
 	"strings"
@@ -25,6 +24,7 @@ import (
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 // RecordErrorMetrics stamps the last-seen time for a job error. The statement
@@ -85,11 +85,11 @@ func partitionHashFromValues(v *typedef.Values) string {
 			b.WriteByte(',')
 		}
 		// Marshal key
-		kb, _ := json.Marshal(k)
+		kb := utils.MarshalJSON(k)
 		b.Write(kb)
 		b.WriteByte(':')
 		// Marshal values
-		vb, _ := json.Marshal(m[k])
+		vb := utils.MarshalJSON(m[k])
 		b.Write(vb)
 	}
 	b.WriteByte('}')

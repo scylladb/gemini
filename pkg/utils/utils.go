@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//nolint:revive
 package utils
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -27,7 +28,6 @@ import (
 	"unsafe"
 
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
 	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/testutils"
@@ -141,7 +141,7 @@ func CreateFile(input string, closeOnExit bool, def ...io.Writer) (io.Writer, er
 	default:
 		w, err := os.OpenFile(input, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to open file %s", input)
+			return nil, fmt.Errorf("failed to open file %s: %w", input, err)
 		}
 
 		if closeOnExit {
@@ -155,13 +155,11 @@ func CreateFile(input string, closeOnExit bool, def ...io.Writer) (io.Writer, er
 	}
 }
 
-//nolint:gosec
 /*#nosec G103*/
 func UnsafeBytes(s string) []byte {
 	return unsafe.Slice(unsafe.StringData(s), len(s))
 }
 
-//nolint:gosec
 /*#nosec G103*/
 func UnsafeString(b []byte) string {
 	return unsafe.String(unsafe.SliceData(b), len(b))
@@ -196,4 +194,22 @@ func Sizeof(v any) uint64 {
 	default:
 		return uint64(unsafe.Sizeof(v))
 	}
+}
+
+func MarshalJSON(v any) []byte {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Appendf(nil, "%q", "json marshal failed: "+err.Error())
+	}
+
+	return data
+}
+
+func MarshalJSONIndent(v any, prefix, indent string) []byte {
+	data, err := json.MarshalIndent(v, prefix, indent)
+	if err != nil {
+		return fmt.Appendf(nil, "%q", "json marshal failed: "+err.Error())
+	}
+
+	return data
 }

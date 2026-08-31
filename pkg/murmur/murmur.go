@@ -38,7 +38,7 @@ func block(p byte) int64 {
 
 func rotl(x int64, r uint8) int64 {
 	// cast to unsigned for logical right bitshift (to match C* MM3 implementation)
-	return (x << r) | (int64)(uint64(x)>>(64-r))
+	return (x << r) | int64(uint64(x)>>(64-r))
 }
 
 func Murmur3H1(data []byte) int64 {
@@ -48,7 +48,7 @@ func Murmur3H1(data []byte) int64 {
 
 	// body
 	nBlocks := length / 16
-	for i := 0; i < nBlocks; i++ {
+	for i := range nBlocks {
 		k1, k2 = getBlock(data, i)
 
 		k1 *= c1

@@ -16,10 +16,12 @@ package tableopts
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type Option interface {
@@ -40,14 +42,14 @@ type MapOption struct {
 }
 
 func (o *MapOption) ToCQL() string {
-	b, _ := json.Marshal(o.val)
+	b := utils.MarshalJSON(o.val)
 	return o.key + " = " + strings.ReplaceAll(string(b), "\"", "'")
 }
 
 func FromCQL(cql string) (Option, error) {
 	parts := strings.Split(cql, "=")
 	if len(parts) != 2 {
-		return nil, errors.Errorf(
+		return nil, fmt.Errorf(
 			"invalid table option, exactly two parts separated by '=' is needed, input=%s",
 			cql,
 		)
@@ -60,7 +62,7 @@ func FromCQL(cql string) (Option, error) {
 			key: keyPart,
 		}
 		if err := json.Unmarshal([]byte(strings.ReplaceAll(valPart, "'", "\"")), &o.val); err != nil {
-			return nil, errors.Wrapf(err, "unable to interpret table options %s", cql)
+			return nil, fmt.Errorf("unable to interpret table options %s: %w", cql, err)
 		}
 		return o, nil
 	}

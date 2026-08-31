@@ -95,7 +95,7 @@ func TestCreateSelectStmtForPartitionKeys(t *testing.T) {
 			table: &typedef.Table{
 				Name: "users",
 				PartitionKeys: typedef.Columns{
-					{Name: "user_id", Type: typedef.TypeUuid},
+					{Name: "user_id", Type: typedef.TypeUUID},
 				},
 			},
 			keyspaceName: "my_keyspace",
@@ -198,7 +198,7 @@ func TestValidateDeletedPartition_StoreError(t *testing.T) {
 	require.Error(t, err)
 
 	var jobErr *joberror.JobError
-	require.True(t, errors.As(err, &jobErr))
+	require.ErrorAs(t, err, &jobErr)
 	require.Contains(t, jobErr.Message, "Deleted partition validation failed")
 	require.Equal(t, typedef.SelectStatementType, jobErr.StmtType)
 }
@@ -235,7 +235,7 @@ func TestValidateDeletedPartition_ContextCanceled(t *testing.T) {
 	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues}, 0)
 
 	require.Error(t, err)
-	require.True(t, errors.Is(err, context.Canceled))
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestValidateDeletedPartition_ContextDeadlineExceeded(t *testing.T) {
@@ -269,7 +269,7 @@ func TestValidateDeletedPartition_ContextDeadlineExceeded(t *testing.T) {
 	err := v.validateDeletedPartition(ctx, typedef.PartitionKeys{Values: partitionKeyValues}, 0)
 
 	require.Error(t, err)
-	require.True(t, errors.Is(err, context.DeadlineExceeded))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
 func TestValidateDeletedPartition_MultiplePartitionKeys(t *testing.T) {
@@ -280,7 +280,7 @@ func TestValidateDeletedPartition_MultiplePartitionKeys(t *testing.T) {
 		PartitionKeys: typedef.Columns{
 			{Name: "pk1", Type: typedef.TypeInt},
 			{Name: "pk2", Type: typedef.TypeText},
-			{Name: "pk3", Type: typedef.TypeUuid},
+			{Name: "pk3", Type: typedef.TypeUUID},
 		},
 	}
 

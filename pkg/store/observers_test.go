@@ -22,6 +22,7 @@ import (
 
 	"github.com/gocql/gocql"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/stmtlogger"
@@ -341,9 +342,9 @@ type nopCloser struct{}
 
 func (nopCloser) Close() error { return nil }
 
-func pkWith(col string, val any) typedef.PartitionKeys {
+func pkWith(val any) typedef.PartitionKeys {
 	return typedef.PartitionKeys{
-		Values: typedef.NewValuesFromMap(map[string][]any{col: {val}}),
+		Values: typedef.NewValuesFromMap(map[string][]any{"pk0": {val}}),
 	}
 }
 
@@ -362,11 +363,11 @@ func TestClusterObserver_logStatement_PerPartition(t *testing.T) {
 		want int
 	}{
 		{name: "no partitions emits nothing", pks: nil, want: 0},
-		{name: "single partition emits one", pks: []typedef.PartitionKeys{pkWith("pk0", "a")}, want: 1},
+		{name: "single partition emits one", pks: []typedef.PartitionKeys{pkWith("a")}, want: 1},
 		{
 			name: "multi partition emits one per pk",
 			pks: []typedef.PartitionKeys{
-				pkWith("pk0", "a"), pkWith("pk0", "b"), pkWith("pk0", "c"),
+				pkWith("a"), pkWith("b"), pkWith("c"),
 			},
 			want: 3,
 		},
@@ -382,7 +383,7 @@ func TestClusterObserver_logStatement_PerPartition(t *testing.T) {
 				stmtlogger.WithLogger(nopCloser{}, nil),
 				stmtlogger.WithZapLogger(zap.NewNop()),
 			)
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			t.Cleanup(func() { _ = logger.Close() })
 
 			obs := NewClusterObserver(logger, zap.NewNop(), stmtlogger.TypeTest)
@@ -433,7 +434,6 @@ func TestObserver_Concurrency(t *testing.T) {
 	done := make(chan bool)
 
 	for _, host := range hosts {
-		host := host // capture loop variable
 		go func() {
 			for i := range typedef.StatementTypeCount {
 				obs.Get(host, i)

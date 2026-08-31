@@ -52,11 +52,16 @@ func (g *trackingGenerator) RowTrackerFillRatio() float64 { return g.fillRatio }
 
 // -- no-op stubs for the rest of partitions.Interface --
 
-func (g *trackingGenerator) Stats() partitions.Stats                    { return partitions.Stats{} }
-func (g *trackingGenerator) Get(_ uint64) typedef.PartitionKeys         { return typedef.PartitionKeys{} }
-func (g *trackingGenerator) Next() typedef.PartitionKeys                { return typedef.PartitionKeys{} }
-func (g *trackingGenerator) Extend() typedef.PartitionKeys              { return typedef.PartitionKeys{} }
-func (g *trackingGenerator) ReplaceNext() typedef.PartitionKeys         { return typedef.PartitionKeys{} }
+func (g *trackingGenerator) Stats() partitions.Stats { return partitions.Stats{} }
+
+func (g *trackingGenerator) Get(_ uint64) typedef.PartitionKeys { return typedef.PartitionKeys{} }
+
+func (g *trackingGenerator) Next() typedef.PartitionKeys { return typedef.PartitionKeys{} }
+
+func (g *trackingGenerator) Extend() typedef.PartitionKeys { return typedef.PartitionKeys{} }
+
+func (g *trackingGenerator) ReplaceNext() typedef.PartitionKeys { return typedef.PartitionKeys{} }
+
 func (g *trackingGenerator) Replace(_ uint64) typedef.PartitionKeys     { return typedef.PartitionKeys{} }
 func (g *trackingGenerator) ReplaceWithoutOld(_ uint64)                 {}
 func (g *trackingGenerator) ReplaceNextWithoutOld()                     {}
@@ -270,7 +275,8 @@ func TestSampleRowsForTracker_MultiPartition_AttributedToCorrectPartition(t *tes
 
 	idByPK := make(map[int32]uuid.UUID, len(stmt.PartitionKeys))
 	for i := range stmt.PartitionKeys {
-		pkVal := stmt.PartitionKeys[i].Values.Get("pk1")[0].(int32)
+		pkVal, ok := stmt.PartitionKeys[i].Values.Get("pk1")[0].(int32)
+		require.True(t, ok)
 		idByPK[pkVal] = stmt.PartitionKeys[i].ID
 	}
 
@@ -284,7 +290,8 @@ func TestSampleRowsForTracker_MultiPartition_AttributedToCorrectPartition(t *tes
 	require.NotEmpty(t, gen.tracked, "multi-partition rows must be sampled")
 	for _, tr := range gen.tracked {
 		require.Len(t, tr.PartitionValues, 1)
-		pkVal := tr.PartitionValues[0].(int32)
+		pkVal, ok := tr.PartitionValues[0].(int32)
+		require.True(t, ok)
 		wantID, ok := idByPK[pkVal]
 		require.True(t, ok, "tracked PartitionValues must match an IN-clause partition")
 		assert.Equal(t, wantID, tr.PartitionID, "row must carry the UUID of the partition whose PK it matches")

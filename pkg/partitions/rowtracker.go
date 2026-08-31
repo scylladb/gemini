@@ -181,7 +181,7 @@ func (rt *RowTracker) Invalidate(id uuid.UUID) {
 
 	rt.mu.Lock()
 	n := rt.count.Load()
-	for k := uint64(0); k < n; k++ {
+	for k := range n {
 		i := (rt.head - n + k) % rt.capacity
 		if rt.buf[i].PartitionID != id {
 			continue

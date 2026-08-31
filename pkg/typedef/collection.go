@@ -58,7 +58,7 @@ func (ct *Collection) CQLHolder() string {
 func (ct *Collection) GenValue(r utils.Random, p RangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]any, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		out[i] = ct.ValueType.GenValue(r, p)[0]
 	}
 	return []any{out}
@@ -75,7 +75,7 @@ func (ct *Collection) GenValueOut(out []any, r utils.Random, p RangeConfig) []an
 func (ct *Collection) GenJSONValue(r utils.Random, p RangeConfig) any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]any, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		out[i] = ct.ValueType.GenJSONValue(r, p)
 	}
 	return out

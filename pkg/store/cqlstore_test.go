@@ -63,7 +63,7 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 		Tables: []*typedef.Table{{
 			Name: "table_1",
 			Columns: typedef.Columns{
-				{Name: "id", Type: typedef.TypeUuid},
+				{Name: "id", Type: typedef.TypeUUID},
 				{Name: "values", Type: &typedef.Collection{
 					ComplexType: typedef.TypeList,
 					ValueType:   typedef.TypeText,

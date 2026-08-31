@@ -34,9 +34,8 @@ func TestHardStop(t *testing.T) {
 	// drive the worker goroutines deterministically instead of real sleeps.
 	synctest.Test(t, func(t *testing.T) {
 		testFlag, ctx, workersDone := initVars()
-		workers := 30
 
-		testSignals(t, workersDone, workers, testFlag.IsHard, testFlag.SetHard)
+		testSignals(t, workersDone, testFlag.IsHard, testFlag.SetHard)
 		if ctx.Err() == nil {
 			t.Error("Error:SetHard function does not apply hardStopHandler")
 		}
@@ -46,9 +45,8 @@ func TestHardStop(t *testing.T) {
 func TestSoftStop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		testFlag, ctx, workersDone := initVars()
-		workers := 30
 
-		testSignals(t, workersDone, workers, testFlag.IsSoft, testFlag.SetSoft)
+		testSignals(t, workersDone, testFlag.IsSoft, testFlag.SetSoft)
 		if ctx.Err() != nil {
 			t.Error("Error:SetSoft function apply hardStopHandler")
 		}
@@ -58,15 +56,14 @@ func TestSoftStop(t *testing.T) {
 func TestSoftOrHardStop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		testFlag, ctx, workersDone := initVars()
-		workers := 30
 
-		testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetSoft)
+		testSignals(t, workersDone, testFlag.IsHardOrSoft, testFlag.SetSoft)
 		if ctx.Err() != nil {
 			t.Error("Error:SetSoft function apply hardStopHandler")
 		}
 
 		workersDone.Store(uint32(0))
-		testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetHard)
+		testSignals(t, workersDone, testFlag.IsHardOrSoft, testFlag.SetHard)
 		if ctx.Err() != nil {
 			t.Error("Error:SetHard function apply hardStopHandler after SetSoft")
 		}
@@ -74,7 +71,7 @@ func TestSoftOrHardStop(t *testing.T) {
 		testFlag, ctx, workersDone = initVars()
 		workersDone.Store(uint32(0))
 
-		testSignals(t, workersDone, workers, testFlag.IsHardOrSoft, testFlag.SetHard)
+		testSignals(t, workersDone, testFlag.IsHardOrSoft, testFlag.SetHard)
 		if ctx.Err() == nil {
 			t.Error("Error:SetHard function does not apply hardStopHandler")
 		}
@@ -91,12 +88,14 @@ func initVars() (testFlag *stop.Flag, ctx context.Context, workersDone *atomic.U
 func testSignals(
 	t *testing.T,
 	workersDone *atomic.Uint32,
-	workers int,
 	checkFunc func() bool,
 	setFunc func(propagation bool) bool,
 ) {
 	t.Helper()
-	for i := 0; i != workers; i++ {
+
+	const workers = 30
+
+	for range workers {
 		go func() {
 			for {
 				if checkFunc() {
@@ -219,7 +218,6 @@ func TestSendToParent(t *testing.T) {
 	}
 }
 
-// nolint: govet
 type parentChildInfo struct {
 	parent        *stop.Flag
 	child1        *stop.Flag
@@ -246,7 +244,7 @@ func (t *parentChildInfo) getFlag(flagName string) *stop.Flag {
 	case "child12":
 		return t.child12
 	default:
-		panic(fmt.Sprintf("no such flag %s", flagName))
+		panic("no such flag " + flagName)
 	}
 }
 
@@ -263,7 +261,7 @@ func (t *parentChildInfo) getFlagHandlerState(flagName string) uint32 {
 	case "child12":
 		return t.child12Signal
 	default:
-		panic(fmt.Sprintf("no such flag %s", flagName))
+		panic("no such flag " + flagName)
 	}
 }
 
@@ -309,7 +307,7 @@ type tCase struct {
 func (t *tCase) runTest() error {
 	chunk := strings.Split(t.testName, "-")
 	if len(chunk) != 3 {
-		panic(fmt.Sprintf("wrong test name %s", t.testName))
+		panic("wrong test name " + t.testName)
 	}
 	flagName := chunk[0]
 	signalTypeName := chunk[1]
@@ -322,7 +320,7 @@ func (t *tCase) runTest() error {
 	case "false":
 		sendToParent = false
 	default:
-		panic(fmt.Sprintf("wrong test name %s", t.testName))
+		panic("wrong test name " + t.testName)
 	}
 	runt := newParentChildInfo()
 	flag := runt.getFlag(flagName)
@@ -332,7 +330,7 @@ func (t *tCase) runTest() error {
 	case "hard":
 		flag.SetHard(sendToParent)
 	default:
-		panic(fmt.Sprintf("wrong test name %s", t.testName))
+		panic("wrong test name " + t.testName)
 	}
 	var err error
 	err = errors.Join(err, runt.checkFlagState(runt.parent, t.parentSignal))

@@ -125,7 +125,7 @@ func GenPrimaryKeyColumnType(r utils.Random) typedef.Type {
 }
 
 func GenIndexName(prefix string, idx int) string {
-	return fmt.Sprintf("%s_idx", GenColumnName(prefix, idx))
+	return GenColumnName(prefix, idx) + "_idx"
 }
 
 func CreateIndexesForColumn(table *typedef.Table, maxIndexes int) []typedef.IndexDef {

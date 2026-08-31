@@ -156,7 +156,6 @@ func makeRowIterator(rows Rows) RowIterator {
 
 func BenchmarkNewRow(b *testing.B) {
 	for _, nCols := range []int{3, 8, 16, 32} {
-		nCols := nCols
 		names := make([]string, nCols)
 		vals := make([]any, nCols)
 		for i := range nCols {
@@ -283,7 +282,6 @@ func BenchmarkCompareValues(b *testing.B) {
 
 func BenchmarkRowsCmp(b *testing.B) {
 	for _, nCols := range []int{3, 8, 16} {
-		nCols := nCols
 		table := makeScalarTable(nCols - 2)
 		r1 := makeScalarRow(table, 1, 1)
 		r2 := makeScalarRow(table, 1, 1) // equal — worst case (all cols compared)
@@ -321,7 +319,6 @@ func BenchmarkSortRows(b *testing.B) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		table := makeMultiPKTable(tc.nPK, tc.nCK, tc.nExtra)
 
 		// Build a pre-shuffled slice; copy it each iteration so each sort
@@ -462,7 +459,6 @@ func BenchmarkCanonicalValueString(b *testing.B) {
 // We benchmark diffRows directly at the same col widths to capture the same cost.
 func BenchmarkCanonicalizeRow(b *testing.B) {
 	for _, nCols := range []int{4, 8, 16, 32} {
-		nCols := nCols
 		table := makeScalarTable(nCols - 2)
 		testRow := makeScalarRow(table, 1, 1)
 		oracleRow := makeScalarRow(table, 1, 1)
@@ -498,7 +494,6 @@ func BenchmarkDiffRows(b *testing.B) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		table := makeScalarTable(tc.nCols - 2)
 
 		// Build a row, then a mutated oracle row with nDiffed cols changed.
@@ -523,7 +518,6 @@ func BenchmarkDiffRows(b *testing.B) {
 
 func BenchmarkBuildRowMap(b *testing.B) {
 	for _, nRows := range []int{10, 100, 1000} {
-		nRows := nRows
 		table := makeScalarTable(2)
 		rows := make(Rows, nRows)
 		for i := range nRows {
@@ -544,7 +538,6 @@ func BenchmarkBuildRowMap(b *testing.B) {
 
 func BenchmarkPks(b *testing.B) {
 	for _, nRows := range []int{10, 100, 1000} {
-		nRows := nRows
 		table := makeScalarTable(2)
 		rows := make(Rows, nRows)
 		for i := range nRows {
@@ -565,7 +558,6 @@ func BenchmarkPks(b *testing.B) {
 
 func BenchmarkRowKeyString(b *testing.B) {
 	for _, nKeys := range []int{1, 3, 6} {
-		nKeys := nKeys
 		table := makeMultiPKTable(nKeys, nKeys, 2)
 
 		// Build column names / values matching table schema
@@ -595,7 +587,6 @@ func BenchmarkRowKeyString(b *testing.B) {
 func BenchmarkRowsToKeyStrings(b *testing.B) {
 	table := makeScalarTable(2)
 	for _, nRows := range []int{10, 100, 1000} {
-		nRows := nRows
 		rows := make(Rows, nRows)
 		for i := range nRows {
 			rows[i] = makeScalarRow(table, i, i)
@@ -631,7 +622,6 @@ func BenchmarkCompareCollectedRows_AllMatch(b *testing.B) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		table := makeMultiPKTable(tc.nPK, tc.nCK, tc.nExtra)
 
 		name := fmt.Sprintf("rows=%d/pk=%d/ck=%d/extra=%d",
@@ -665,7 +655,6 @@ func BenchmarkCompareCollectedRows_SomeDiff(b *testing.B) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		table := makeScalarTable(tc.nExtra)
 
 		name := fmt.Sprintf("rows=%d/extra=%d/diffs=%d", tc.nRows, tc.nExtra, tc.nDiff)
@@ -694,7 +683,6 @@ func BenchmarkCompareCollectedRows_CountMismatch(b *testing.B) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		table := makeScalarTable(2)
 
 		name := fmt.Sprintf("rows=%d/missing=%d", tc.nRows, tc.nMissing)
@@ -731,7 +719,6 @@ func BenchmarkZipAndCompare(b *testing.B) {
 	ctx := b.Context()
 
 	for _, tc := range cases {
-		tc := tc
 		name := fmt.Sprintf("rows=%d/extra=%d/%s", tc.nRows, tc.nExtra, tc.scenario)
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//nolint:revive
 package utils_test
 
 import (
@@ -251,58 +250,58 @@ func TestSizeof_String(t *testing.T) {
 	t.Parallel()
 	s := "hello"
 	sz := utils.Sizeof(s)
-	assert.Greater(t, sz, uint64(0))
+	assert.Positive(t, sz)
 }
 
 func TestSizeof_Bytes(t *testing.T) {
 	t.Parallel()
 	b := []byte{1, 2, 3}
 	sz := utils.Sizeof(b)
-	assert.Greater(t, sz, uint64(0))
+	assert.Positive(t, sz)
 }
 
 func TestSizeof_Int(t *testing.T) {
 	t.Parallel()
 	sz := utils.Sizeof(int(42))
-	assert.Greater(t, sz, uint64(0))
+	assert.Positive(t, sz)
 }
 
 func TestSizeof_Bool(t *testing.T) {
 	t.Parallel()
 	sz := utils.Sizeof(true)
-	assert.Greater(t, sz, uint64(0))
+	assert.Positive(t, sz)
 }
 
 func TestSizeof_Float64(t *testing.T) {
 	t.Parallel()
 	sz := utils.Sizeof(float64(3.14))
-	assert.Greater(t, sz, uint64(0))
+	assert.Positive(t, sz)
 }
 
 func TestSizeof_BigInt(t *testing.T) {
 	t.Parallel()
 	sz := utils.Sizeof(big.NewInt(12345))
-	assert.Greater(t, sz, uint64(0))
+	assert.Positive(t, sz)
 }
 
 func TestSizeof_InfDec(t *testing.T) {
 	t.Parallel()
 	d := inf.NewDec(12345, 2)
 	sz := utils.Sizeof(d)
-	assert.Greater(t, sz, uint64(0))
+	assert.Positive(t, sz)
 }
 
 func TestSizeof_SliceOfAny(t *testing.T) {
 	t.Parallel()
 	val := []any{"a", "b", "c"}
 	sz := utils.Sizeof(val)
-	assert.Greater(t, sz, uint64(0))
+	assert.Positive(t, sz)
 }
 
 func TestSizeof_Duration(t *testing.T) {
 	t.Parallel()
 	sz := utils.Sizeof(time.Second)
-	assert.Greater(t, sz, uint64(0))
+	assert.Positive(t, sz)
 }
 
 // ---------------------------------------------------------------------------
@@ -341,7 +340,7 @@ func TestCreateFile_RealFile(t *testing.T) {
 
 	// Ensure the file was actually created
 	_, statErr := os.Stat(path)
-	assert.NoError(t, statErr)
+	require.NoError(t, statErr)
 
 	// Close the file via the returned writer
 	if f, ok := w.(*os.File); ok {

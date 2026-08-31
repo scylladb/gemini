@@ -29,6 +29,7 @@ import (
 // isolation from the tracker's Push/Pop bookkeeping.
 type constPopPartitions struct {
 	mockPartitions
+
 	row partitions.TrackedRow
 }
 

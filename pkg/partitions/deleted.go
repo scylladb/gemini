@@ -54,6 +54,7 @@ type (
 	}
 
 	deletedPartitions struct {
+		//nolint:containedctx
 		ctx          context.Context
 		ch           chan typedef.PartitionKeys
 		cancel       context.CancelFunc
@@ -412,10 +413,7 @@ func jitterDuration(d time.Duration) time.Duration {
 	if d <= 0 {
 		return 0
 	}
-	maxDuration := time.Duration(float64(d) * 0.2)
-	if maxDuration > 5*time.Second {
-		maxDuration = 5 * time.Second
-	}
+	maxDuration := min(time.Duration(float64(d)*0.2), 5*time.Second)
 	if maxDuration <= 0 {
 		return 0
 	}

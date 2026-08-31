@@ -47,7 +47,7 @@ func TestPrimaryKeyTypes_AreSingleValue(t *testing.T) {
 }
 
 var allSimpleTypes = []typedef.SimpleType{
-	typedef.TypeAscii,
+	typedef.TypeASCII,
 	typedef.TypeBigint,
 	typedef.TypeBlob,
 	typedef.TypeBoolean,
@@ -64,7 +64,7 @@ var allSimpleTypes = []typedef.SimpleType{
 	typedef.TypeTimestamp,
 	typedef.TypeTimeuuid,
 	typedef.TypeTinyint,
-	typedef.TypeUuid,
+	typedef.TypeUUID,
 	typedef.TypeVarchar,
 	typedef.TypeVarint,
 }
@@ -106,7 +106,6 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 			},
 			Name: "udt1",
 		},
-		//nolint:lll
 		expected: "{\"type\":{\"complex_type\":\"udt\",\"value_types\":{\"col_ascii\":\"ascii\",\"col_bigint\":\"bigint\",\"col_blob\":\"blob\",\"col_boolean\":\"boolean\",\"col_date\":\"date\",\"col_decimal\":\"decimal\",\"col_double\":\"double\",\"col_duration\":\"duration\",\"col_float\":\"float\",\"col_inet\":\"inet\",\"col_int\":\"int\",\"col_smallint\":\"smallint\",\"col_text\":\"text\",\"col_time\":\"time\",\"col_timestamp\":\"timestamp\",\"col_timeuuid\":\"timeuuid\",\"col_tinyint\":\"tinyint\",\"col_uuid\":\"uuid\",\"col_varchar\":\"varchar\",\"col_varint\":\"varint\"},\"type_name\":\"udt1\",\"frozen\":false},\"name\":\"udt1\"}",
 	})
 

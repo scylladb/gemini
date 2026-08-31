@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//nolint:revive
 package utils_test
 
 import (
@@ -144,10 +143,7 @@ func TestRandomBytes_DifferentSeeds(t *testing.T) {
 }
 
 func RandomStringGeminiV186(rnd *randv1.Rand, ln int) string {
-	buffLen := ln
-	if buffLen > 32 {
-		buffLen = 32
-	}
+	buffLen := min(ln, 32)
 	binBuff := make([]byte, buffLen/2+1)
 	_, _ = rnd.Read(binBuff)
 	buff := hex.EncodeToString(binBuff)[:buffLen]
@@ -176,7 +172,7 @@ func CurrentImplementation(rnd utils.Random, ln int) string {
 
 	for i := 0; i < length; i += uint64Size {
 		number := rnd.Uint64()
-		for j := 0; j < uint64Size; j++ {
+		for j := range uint64Size {
 			binBuff[i+j] = hextable[(number>>j)&0x0f]
 		}
 	}

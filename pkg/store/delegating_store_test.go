@@ -235,7 +235,7 @@ func TestDelegatingStore_Mutate_AsymmetricCommit_IncrementsMetric(t *testing.T) 
 	err := ds.Mutate(t.Context(), stmt)
 	require.Error(t, err)
 
-	assert.Equal(t, before+1, testutil.ToFloat64(counter),
+	assert.InDelta(t, before+1, testutil.ToFloat64(counter), 1e-9,
 		"asymmetric commit (test committed, oracle failed) must increment the divergence counter")
 }
 

@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -28,7 +29,6 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/joberror"
@@ -59,6 +59,7 @@ type (
 	Logger struct {
 		// fetchCtx bounds the error-statement fetches only. The committer must not
 		// share it: it drains its channel to the end on shutdown.
+		//nolint:containedctx
 		fetchCtx context.Context
 		logger   *zap.Logger
 		channel  <-chan stmtlogger.Item
@@ -133,7 +134,7 @@ func New(
 	// Drop and recreate the shared _logs keyspace once for a clean slate; the
 	// per-table loop below only creates each table, not the keyspace.
 	l.Debug("dropping existing statement logs keyspace", zap.String("keyspace", keyspace))
-	if err = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec(); err != nil {
+	if err = session.Query("DROP KEYSPACE IF EXISTS " + keyspace).Exec(); err != nil {
 		session.Close()
 		return nil, err
 	}
@@ -155,15 +156,14 @@ func New(
 			zap.String("table", GetScyllaStatementLogsTable(sourceTable.Name)),
 		)
 
-		//nolint:govet
-		cqlStmts, err := newTableStatements(session, oracleSession, testSession,
+		cqlStmts, stmtsErr := newTableStatements(session, oracleSession, testSession,
 			keyspace, GetScyllaStatementLogsTable(sourceTable.Name),
 			originalKeyspace,
 			sourceTable.Name,
 			sourceTable.PartitionKeys, repl)
-		if err != nil {
+		if stmtsErr != nil {
 			session.Close()
-			return nil, err
+			return nil, stmtsErr
 		}
 
 		statements[originalKeyspace+"."+sourceTable.Name] = cqlStmts
@@ -172,7 +172,7 @@ func New(
 	l.Debug("waiting for schema agreement")
 	if err = session.AwaitSchemaAgreement(context.Background()); err != nil {
 		session.Close()
-		return nil, errors.Wrap(err, "failed to await schema agreement for keyspace logs")
+		return nil, fmt.Errorf("failed to await schema agreement for keyspace logs: %w", err)
 	}
 	l.Debug("schema agreement reached")
 
@@ -197,10 +197,7 @@ func New(
 
 	// Start a fixed-size worker pool to insert statement logs into Scylla.
 	l.Debug("starting committer worker pool")
-	workerCount := runtime.GOMAXPROCS(0)
-	if workerCount < 2 {
-		workerCount = 2
-	}
+	workerCount := max(runtime.GOMAXPROCS(0), 2)
 	for range workerCount {
 		logger.wg.Add(1)
 		go logger.insertWorker()
@@ -309,7 +306,6 @@ func (s *Logger) writeErrorStatements(ctx context.Context, ty stmtlogger.Type, j
 	var written int64
 
 	err := sink.Write(ctx, func(w io.Writer) error {
-		//nolint:govet
 		n, err := fetch(ctx, ty, jobError, w)
 		written = n
 
@@ -675,7 +671,7 @@ func (s *Logger) openStatementFile(name string) (*bufio.Writer, func() error, er
 	// Create parent directories if they don't exist
 	dir := filepath.Dir(name)
 	if err := os.MkdirAll(dir, statementDirPerm); err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to create directory for statements file '%q'", name)
+		return nil, nil, fmt.Errorf("failed to create directory for statements file '%q': %w", name, err)
 	}
 
 	// NOTE: the perm argument must be a plain Unix permission. fs.ModeExclusive
@@ -685,7 +681,7 @@ func (s *Logger) openStatementFile(name string) (*bufio.Writer, func() error, er
 	// which then panics the flusher and crashes the whole run. Use 0o644 only.
 	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, statementFilePerm)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to open statements file '%q'", name)
+		return nil, nil, fmt.Errorf("failed to open statements file '%q': %w", name, err)
 	}
 
 	buffered := bufio.NewWriterSize(file, statementFileBufferSize)

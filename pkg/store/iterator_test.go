@@ -37,7 +37,7 @@ func TestRowIterator_Collect(t *testing.T) {
 		})
 
 		rows, err := iter.Collect()
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Empty(t, rows)
 	})
 
@@ -59,7 +59,7 @@ func TestRowIterator_Collect(t *testing.T) {
 		})
 
 		rows, err := iter.Collect()
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, expectedRows, rows)
 	})
 
@@ -74,7 +74,7 @@ func TestRowIterator_Collect(t *testing.T) {
 		})
 
 		rows, err := iter.Collect()
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Equal(t, expectedErr, err)
 		assert.Len(t, rows, 1)
 	})
@@ -114,7 +114,7 @@ func TestRowIterator_Count(t *testing.T) {
 		iter := RowIterator(func(_ func(Row, error) bool) {})
 
 		count, err := iter.Count()
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, 0, count)
 	})
 
@@ -130,7 +130,7 @@ func TestRowIterator_Count(t *testing.T) {
 		})
 
 		count, err := iter.Count()
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.Equal(t, 5, count)
 	})
 
@@ -145,7 +145,7 @@ func TestRowIterator_Count(t *testing.T) {
 		})
 
 		count, err := iter.Count()
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.Equal(t, expectedErr, err)
 		assert.Equal(t, 1, count)
 	})
@@ -174,7 +174,7 @@ func TestCompareCollectedRows(t *testing.T) {
 
 		result := CompareCollectedRows(table, testRows, oracleRows)
 
-		assert.NoError(t, result.ToError())
+		require.NoError(t, result.ToError())
 		assert.Equal(t, 2, result.MatchCount)
 		assert.Empty(t, result.DifferentRows)
 		assert.Empty(t, result.TestOnlyRows)
@@ -186,7 +186,7 @@ func TestCompareCollectedRows(t *testing.T) {
 
 		result := CompareCollectedRows(table, Rows{}, Rows{})
 
-		assert.NoError(t, result.ToError())
+		require.NoError(t, result.ToError())
 		assert.Equal(t, 0, result.MatchCount)
 	})
 
@@ -203,7 +203,7 @@ func TestCompareCollectedRows(t *testing.T) {
 
 		result := CompareCollectedRows(table, testRows, oracleRows)
 
-		assert.Error(t, result.ToError())
+		require.Error(t, result.ToError())
 		assert.Equal(t, 0, result.MatchCount)
 		assert.Len(t, result.TestOnlyRows, 1)
 		assert.Empty(t, result.OracleOnlyRows)
@@ -221,7 +221,7 @@ func TestCompareCollectedRows(t *testing.T) {
 
 		result := CompareCollectedRows(table, testRows, oracleRows)
 
-		assert.Error(t, result.ToError())
+		require.Error(t, result.ToError())
 		assert.Equal(t, 0, result.MatchCount)
 		assert.Len(t, result.DifferentRows, 1)
 		assert.Contains(t, result.DifferentRows[0].Diff, "value1")
@@ -241,7 +241,7 @@ func TestCompareCollectedRows(t *testing.T) {
 
 		result := CompareCollectedRows(table, testRows, oracleRows)
 
-		assert.NoError(t, result.ToError())
+		require.NoError(t, result.ToError())
 		assert.Equal(t, 2, result.MatchCount)
 	})
 }
@@ -270,7 +270,7 @@ func TestZipAndCompare(t *testing.T) {
 
 		result := ZipAndCompare(t.Context(), table, testIter, oracleIter)
 
-		assert.NoError(t, result.ToError())
+		require.NoError(t, result.ToError())
 		assert.Equal(t, 2, result.MatchCount)
 	})
 
@@ -289,7 +289,7 @@ func TestZipAndCompare(t *testing.T) {
 
 		result := ZipAndCompare(t.Context(), table, testIter, oracleIter)
 
-		assert.Error(t, result.ToError())
+		require.Error(t, result.ToError())
 		assert.Equal(t, expectedErr, result.TestError)
 	})
 
@@ -308,7 +308,7 @@ func TestZipAndCompare(t *testing.T) {
 
 		result := ZipAndCompare(t.Context(), table, testIter, oracleIter)
 
-		assert.Error(t, result.ToError())
+		require.Error(t, result.ToError())
 		assert.Equal(t, expectedErr, result.OracleError)
 	})
 }
@@ -336,7 +336,7 @@ func TestComparisonResult_ToError(t *testing.T) {
 		}
 
 		err := result.ToError()
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
 	})
 
@@ -349,7 +349,7 @@ func TestComparisonResult_ToError(t *testing.T) {
 		}
 
 		err := result.ToError()
-		assert.Error(t, err)
+		require.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
 	})
 
@@ -365,7 +365,7 @@ func TestComparisonResult_ToError(t *testing.T) {
 		err := result.ToError()
 		require.Error(t, err)
 
-		var rowDiffErr ErrorRowDifference
+		var rowDiffErr RowDifferenceError
 		assert.ErrorAs(t, err, &rowDiffErr)
 	})
 
@@ -385,7 +385,7 @@ func TestComparisonResult_ToError(t *testing.T) {
 		err := result.ToError()
 		require.Error(t, err)
 
-		var rowDiffErr ErrorRowDifference
+		var rowDiffErr RowDifferenceError
 		assert.ErrorAs(t, err, &rowDiffErr)
 	})
 }
@@ -502,7 +502,7 @@ func TestCompareCollectedRows_CleanUnifiedDiff(t *testing.T) {
 	err := result.ToError()
 	require.Error(t, err)
 
-	var rowDiffErr ErrorRowDifference
+	var rowDiffErr RowDifferenceError
 	require.ErrorAs(t, err, &rowDiffErr)
 	require.NotEmpty(t, rowDiffErr.Diff)
 
@@ -539,7 +539,7 @@ func TestCompareCollectedRows_MissingInTestOnly(t *testing.T) {
 	err := result.ToError()
 	require.Error(t, err)
 
-	var rowDiffErr ErrorRowDifference
+	var rowDiffErr RowDifferenceError
 	require.ErrorAs(t, err, &rowDiffErr)
 	require.NotEmpty(t, rowDiffErr.Diff)
 
@@ -569,7 +569,7 @@ func TestCompareCollectedRows_MissingInOracleOnly(t *testing.T) {
 	err := result.ToError()
 	require.Error(t, err)
 
-	var rowDiffErr ErrorRowDifference
+	var rowDiffErr RowDifferenceError
 	require.ErrorAs(t, err, &rowDiffErr)
 	require.NotEmpty(t, rowDiffErr.Diff)
 
@@ -587,7 +587,7 @@ func TestCompareCollectedRows_BothEmpty_NoError(t *testing.T) {
 	table := &typedef.Table{PartitionKeys: []typedef.ColumnDef{{Name: "pk0", Type: typedef.TypeInt}}}
 
 	result := CompareCollectedRows(table, nil, nil)
-	assert.NoError(t, result.ToError())
+	require.NoError(t, result.ToError())
 	assert.Equal(t, 0, result.MatchCount)
 	assert.Empty(t, result.DifferentRows)
 	assert.Empty(t, result.TestOnlyRows)
@@ -603,7 +603,7 @@ func TestCompareCollectedRows_IdenticalRows_NoDiff(t *testing.T) {
 	r2 := NewRow([]string{"pk0", "col"}, []any{2, "B"})
 
 	result := CompareCollectedRows(table, Rows{r1, r2}, Rows{r1, r2})
-	assert.NoError(t, result.ToError())
+	require.NoError(t, result.ToError())
 	assert.Equal(t, 2, result.MatchCount)
 	assert.Empty(t, result.DifferentRows)
 }
@@ -621,7 +621,7 @@ func TestCompareCollectedRows_UnorderedRows_AreSortedAndMatch(t *testing.T) {
 	oracleRows := Rows{a, b}
 
 	result := CompareCollectedRows(table, testRows, oracleRows)
-	assert.NoError(t, result.ToError())
+	require.NoError(t, result.ToError())
 	assert.Equal(t, 2, result.MatchCount)
 	assert.Empty(t, result.DifferentRows)
 }
@@ -656,7 +656,7 @@ func TestCompareCollectedRows_SortingOrder(t *testing.T) {
 	result := CompareCollectedRows(table, testRows, oracleRows)
 
 	assert.Equal(t, 1, result.MatchCount, "Should have 1 matching row")
-	assert.Equal(t, 1, len(result.DifferentRows), "Should have 1 different row")
+	assert.Len(t, result.DifferentRows, 1, "Should have 1 different row")
 	if len(result.DifferentRows) > 0 {
 		assert.Equal(t, 1, result.DifferentRows[0].OracleRow.Get("ck"), "Different row should be CK=1")
 		assert.Equal(t, 1, result.DifferentRows[0].TestRow.Get("ck"), "Different row should be CK=1")
@@ -681,7 +681,7 @@ func TestCompareCollectedRows_RowCountMismatch_ExtraInOracle(t *testing.T) {
 
 	err := result.ToError()
 	require.Error(t, err)
-	var rowDiffErr ErrorRowDifference
+	var rowDiffErr RowDifferenceError
 	require.ErrorAs(t, err, &rowDiffErr)
 	// With only row-count mismatch, ToError reports counts without matches
 	// (MatchCount is not included). Since test has 1 row and oracle has 2
@@ -708,7 +708,7 @@ func TestCompareCollectedRows_RowCountMismatch_ExtraInTest(t *testing.T) {
 
 	err := result.ToError()
 	require.Error(t, err)
-	var rowDiffErr ErrorRowDifference
+	var rowDiffErr RowDifferenceError
 	require.ErrorAs(t, err, &rowDiffErr)
 	// With only row-count mismatch, ToError reports counts without matches
 	// (MatchCount is not included). Since test has 2 rows and oracle has 1,
@@ -732,7 +732,7 @@ func TestCompareCollectedRows_MultipleColumnDifferences(t *testing.T) {
 	err2 := result.ToError()
 	require.Error(t, err2)
 
-	var rowDiffErr ErrorRowDifference
+	var rowDiffErr RowDifferenceError
 	require.ErrorAs(t, err2, &rowDiffErr)
 	diff := rowDiffErr.Diff
 
@@ -776,7 +776,7 @@ func TestCompareCollectedRows_CanonicalValueRendering(t *testing.T) {
 	err = result.ToError()
 	require.Error(t, err)
 
-	var rowDiffErr ErrorRowDifference
+	var rowDiffErr RowDifferenceError
 	require.ErrorAs(t, err, &rowDiffErr)
 	diff := rowDiffErr.Diff
 
@@ -795,13 +795,8 @@ func TestCompareCollectedRows_CanonicalValueRendering(t *testing.T) {
 }
 
 // Helper iterator constructors
-func iterFromRows(rows Rows, err error) RowIterator {
+func iterFromRows(err error) RowIterator {
 	return func(yield func(Row, error) bool) {
-		for _, r := range rows {
-			if !yield(r, nil) {
-				return
-			}
-		}
 		if err != nil {
 			_ = yield(Row{}, err)
 		}
@@ -816,26 +811,26 @@ func TestZipAndCompare_ErrorShortCircuit(t *testing.T) {
 	oracleErr := errors.New("oracle-iter-error")
 
 	// Only test side errors
-	r1 := ZipAndCompare(t.Context(), table, iterFromRows(nil, testErr), iterFromRows(nil, nil))
-	assert.ErrorIs(t, r1.TestError, testErr)
-	assert.NoError(t, r1.OracleError)
+	r1 := ZipAndCompare(t.Context(), table, iterFromRows(testErr), iterFromRows(nil))
+	require.ErrorIs(t, r1.TestError, testErr)
+	require.NoError(t, r1.OracleError)
 	require.Error(t, r1.ToError())
-	assert.ErrorIs(t, r1.ToError(), testErr)
+	require.ErrorIs(t, r1.ToError(), testErr)
 
 	// Only oracle side errors
-	r2 := ZipAndCompare(t.Context(), table, iterFromRows(nil, nil), iterFromRows(nil, oracleErr))
-	assert.NoError(t, r2.TestError)
-	assert.ErrorIs(t, r2.OracleError, oracleErr)
+	r2 := ZipAndCompare(t.Context(), table, iterFromRows(nil), iterFromRows(oracleErr))
+	require.NoError(t, r2.TestError)
+	require.ErrorIs(t, r2.OracleError, oracleErr)
 	require.Error(t, r2.ToError())
-	assert.ErrorIs(t, r2.ToError(), oracleErr)
+	require.ErrorIs(t, r2.ToError(), oracleErr)
 
 	// Both errors
-	r3 := ZipAndCompare(t.Context(), table, iterFromRows(nil, testErr), iterFromRows(nil, oracleErr))
-	assert.ErrorIs(t, r3.TestError, testErr)
-	assert.ErrorIs(t, r3.OracleError, oracleErr)
+	r3 := ZipAndCompare(t.Context(), table, iterFromRows(testErr), iterFromRows(oracleErr))
+	require.ErrorIs(t, r3.TestError, testErr)
+	require.ErrorIs(t, r3.OracleError, oracleErr)
 	err := r3.ToError()
 	require.Error(t, err)
-	assert.ErrorIs(t, err, testErr)
+	require.ErrorIs(t, err, testErr)
 	assert.ErrorIs(t, err, oracleErr)
 }
 
@@ -877,7 +872,7 @@ func TestRowsToKeyStrings_AndFormatRowForError(t *testing.T) {
 	// Fallback to JSON when table information is not available
 	noKeyList := rowsToKeyStrings(nil, []Row{rNoPK})
 	require.Len(t, noKeyList, 1)
-	assert.Equal(t, `{"other":"x"}`, noKeyList[0])
+	assert.JSONEq(t, `{"other":"x"}`, noKeyList[0])
 }
 
 func TestCanonicalValueString_Edges(t *testing.T) {

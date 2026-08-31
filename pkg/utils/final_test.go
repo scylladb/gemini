@@ -35,7 +35,7 @@ func resetFinalizers(tb testing.TB) {
 	})
 }
 
-func TestAddFinalizer(t *testing.T) { //nolint:tparallel
+func TestAddFinalizer(t *testing.T) {
 	// NOT parallel — manipulates global state
 	resetFinalizers(t)
 
@@ -56,7 +56,7 @@ func TestAddFinalizer(t *testing.T) { //nolint:tparallel
 	}
 }
 
-func TestAddFinalizerMultiple(t *testing.T) { //nolint:tparallel
+func TestAddFinalizerMultiple(t *testing.T) {
 	// NOT parallel — manipulates global state
 	resetFinalizers(t)
 
@@ -76,7 +76,7 @@ func TestAddFinalizerMultiple(t *testing.T) { //nolint:tparallel
 	}
 }
 
-func TestExecuteFinalizersOnce(t *testing.T) { //nolint:tparallel
+func TestExecuteFinalizersOnce(t *testing.T) {
 	// NOT parallel — manipulates global state
 	resetFinalizers(t)
 
@@ -94,7 +94,7 @@ func TestExecuteFinalizersOnce(t *testing.T) { //nolint:tparallel
 	}
 }
 
-func TestExecuteFinalizersEmpty(t *testing.T) { //nolint:tparallel
+func TestExecuteFinalizersEmpty(t *testing.T) {
 	// NOT parallel — manipulates global state
 	resetFinalizers(t)
 

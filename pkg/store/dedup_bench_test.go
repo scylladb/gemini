@@ -141,7 +141,6 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 	// *[]int64  — most common real-world form (list<bigint>)
 	b.Run("ptrInt64/halfDups", func(b *testing.B) {
 		for _, n := range sizes {
-			n := n
 			b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
 				b.ReportAllocs()
 				orig := makeDupInt64Slice(n)
@@ -162,7 +161,6 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 	// *[]int64 — no duplicates (early-exit / steady-state path)
 	b.Run("ptrInt64/noDups", func(b *testing.B) {
 		for _, n := range sizes {
-			n := n
 			b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
 				b.ReportAllocs()
 				orig := makeUniqueInt64Slice(n)
@@ -180,7 +178,6 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 	// []string — second most common (list<text>)
 	b.Run("sliceString/halfDups", func(b *testing.B) {
 		for _, n := range sizes {
-			n := n
 			b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
 				b.ReportAllocs()
 				orig := makeStringSlice(n/2, n/2)
@@ -197,7 +194,6 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 	// []any — legacy / already-expanded path
 	b.Run("sliceAny/halfDups", func(b *testing.B) {
 		for _, n := range sizes {
-			n := n
 			b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
 				b.ReportAllocs()
 				orig := makeAnyInt64Slice(n/2, n/2)
@@ -214,7 +210,6 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 	// []gocql.UUID
 	b.Run("sliceUUID/halfDups", func(b *testing.B) {
 		for _, n := range sizes {
-			n := n
 			b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
 				b.ReportAllocs()
 				half := n / 2
@@ -236,7 +231,6 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 	// []time.Time — uses special Equal-based path
 	b.Run("sliceTime/halfDups", func(b *testing.B) {
 		for _, n := range sizes {
-			n := n
 			b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
 				b.ReportAllocs()
 				half := n / 2
@@ -277,7 +271,6 @@ func BenchmarkDeduplicateListValues(b *testing.B) {
 	}
 
 	for _, bc := range cases {
-		bc := bc
 		name := fmt.Sprintf("rows=%d/cols=%d/len=%d/dups=%d",
 			bc.rows, bc.cols, bc.listLen, bc.dups)
 		b.Run(name, func(b *testing.B) {
@@ -310,7 +303,6 @@ func BenchmarkCompareCollectedRows_WithListCols(b *testing.B) {
 	}
 
 	for _, bc := range cases {
-		bc := bc
 		name := fmt.Sprintf("rows=%d/cols=%d/len=%d/dups=%d",
 			bc.rows, bc.cols, bc.listLen, bc.dups)
 		b.Run(name, func(b *testing.B) {

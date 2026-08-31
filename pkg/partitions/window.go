@@ -128,18 +128,12 @@ func (r *ringBuf) shrinkIfIdle() {
 	if r.n >= len(r.buf)/4 || len(r.buf) <= minRingCap {
 		return
 	}
-	newCap := r.n * 2
-	if newCap < minRingCap {
-		newCap = minRingCap
-	}
+	newCap := max(r.n*2, minRingCap)
 	r.reseat(newCap)
 }
 
 func (r *ringBuf) grow() {
-	newCap := len(r.buf) * 2
-	if newCap < minRingCap {
-		newCap = minRingCap
-	}
+	newCap := max(len(r.buf)*2, minRingCap)
 	r.reseat(newCap)
 }
 

@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 const (
@@ -307,7 +309,7 @@ func buildStmtKeyFromValues(v partitionKeyReader) string {
 				val = json.Number(strconv.FormatInt(i64, 10))
 			}
 		}
-		b, _ := json.Marshal(val)
+		b := utils.MarshalJSON(val)
 		sb.Write(b)
 	}
 	return sb.String()
@@ -427,7 +429,6 @@ func resolveInsertTime(e JobError, testStats, oracleStats StmtClusterSummary) *t
 	return earliest
 }
 
-//nolint:gocyclo
 func BuildCorruptionEntries(errors []JobError, testIdx, oracleIdx stmtIndex) []CorruptionEntry {
 	if errors == nil {
 		return nil
@@ -499,7 +500,6 @@ func ComputeSummary(errors []JobError, testStmtFile, oracleStmtFile string) []Co
 	return BuildCorruptionEntries(errors, buildStmtIndex(testStmtFile), buildStmtIndex(oracleStmtFile))
 }
 
-//nolint:forbidigo,gocyclo
 func PrintCorruptionSummary(w io.Writer, entries []CorruptionEntry) {
 	if len(entries) == 0 {
 		return
@@ -560,7 +560,7 @@ func PrintCorruptionSummary(w io.Writer, entries []CorruptionEntry) {
 			}
 			for j, diff := range e.FieldDiffs {
 				_, _ = fmt.Fprintf(w, "    field diff #%d:\n", j+1)
-				for _, line := range strings.Split(diff, "\n") {
+				for line := range strings.SplitSeq(diff, "\n") {
 					if line != "" {
 						_, _ = fmt.Fprintf(w, "      %s\n", line)
 					}

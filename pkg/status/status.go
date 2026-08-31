@@ -21,11 +21,10 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	"github.com/pkg/errors"
-
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type Uint64 struct {
@@ -37,13 +36,13 @@ func (u *Uint64) MarshalJSON() ([]byte, error) {
 }
 
 type GlobalStatus struct {
-	Errors         *joberror.ErrorList `json:"errors,omitempty"`
+	Errors         *joberror.ListError `json:"errors,omitempty"`
 	testStmtFile   string
 	oracleStmtFile string
 	WriteOps       Uint64 `json:"write_ops"`
 	WriteErrors    Uint64 `json:"write_errors"`
 	ReadOps        Uint64 `json:"read_ops"`
-	ValidatedRows  Uint64 `json:"validated_rows,omitempty"`
+	ValidatedRows  Uint64 `json:"validated_rows,omitzero"`
 	ReadErrors     Uint64 `json:"read_errors"`
 }
 
@@ -99,7 +98,7 @@ func (gs *GlobalStatus) PrintResultAsJSONWithSummary(
 	encoder.SetEscapeHTML(false)
 	encoder.SetIndent(" ", "    ")
 	if err = encoder.Encode(result); err != nil {
-		return errors.Wrap(err, "unable to create json from result")
+		return fmt.Errorf("unable to create json from result: %w", err)
 	}
 
 	return nil
@@ -118,7 +117,6 @@ func (gs *GlobalStatus) HasErrors() bool {
 	return gs.WriteErrors.Load() > 0 || gs.ReadErrors.Load() > 0
 }
 
-//nolint:forbidigo
 func (gs *GlobalStatus) PrintResult(
 	w io.Writer,
 	summaryWriter io.Writer,
@@ -151,7 +149,7 @@ func (gs *GlobalStatus) PrintResult(
 		for i, err := range gs.Errors.Errors() {
 			fmt.Printf("Error %d: %v\n", i, err)
 		}
-		jsonSchema, _ := json.MarshalIndent(schema, "", "    ")
+		jsonSchema := utils.MarshalJSONIndent(schema, "", "    ")
 		fmt.Printf("Schema: %v\n", string(jsonSchema))
 	}
 

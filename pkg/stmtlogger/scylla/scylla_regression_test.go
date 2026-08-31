@@ -11,8 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-//nolint:govet
 package scylla
 
 import (
@@ -38,7 +36,7 @@ import (
 // streamed rows verbatim. Rows are written straight from the CQL iterator now,
 // so a malformed separator would corrupt the file for every later reader.
 //
-//nolint:gocyclo
+
 func TestStatementSink_JSONLRegression(t *testing.T) {
 	t.Parallel()
 

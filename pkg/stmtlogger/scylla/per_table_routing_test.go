@@ -80,7 +80,7 @@ func TestLogger_PerTableRouting_NoDrops(t *testing.T) {
 	require.True(t, okB, "table B item must bind (regression: it used to be dropped)")
 	require.Same(t, cqlB, gotB, "table B item must route to table B statements")
 
-	assert.Equal(t, before, testutil.ToFloat64(metrics.StatementLoggerMalformedTotal),
+	assert.InDelta(t, before, testutil.ToFloat64(metrics.StatementLoggerMalformedTotal), 1e-9,
 		"no statement-log items should be dropped for any table")
 
 	// Demonstrate the bug per-table routing avoids: binding table B's item
@@ -96,6 +96,6 @@ func TestLogger_PerTableRouting_NoDrops(t *testing.T) {
 	itemUnknown.Table = "ks.missing"
 	_, _, okUnknown := lg.bind(itemUnknown, make([]any, 0, lg.maxArgsCap()))
 	assert.False(t, okUnknown, "unknown-table item must be dropped")
-	assert.Equal(t, before+1, testutil.ToFloat64(metrics.StatementLoggerMalformedTotal),
+	assert.InDelta(t, before+1, testutil.ToFloat64(metrics.StatementLoggerMalformedTotal), 1e-9,
 		"only the unknown-table item should be counted as malformed")
 }

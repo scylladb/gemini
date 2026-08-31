@@ -42,7 +42,7 @@ type (
 
 	Item struct {
 		Start     Time                     `json:"s"`
-		Error     mo.Either[error, string] `json:"e,omitempty"`
+		Error     mo.Either[error, string] `json:"e,omitzero"`
 		Type      Type                     `json:"-"`
 		Statement string                   `json:"q"`
 		// Table is the source "keyspace.table" the statement targeted. The

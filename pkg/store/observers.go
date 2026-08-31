@@ -16,13 +16,13 @@ package store
 
 import (
 	"context"
+	"errors"
 	"net"
 	"slices"
 	"strconv"
 	"sync"
 
 	"github.com/gocql/gocql"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/mo"
 	"go.uber.org/zap"
@@ -227,6 +227,36 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 }
 
 func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQuery) {
+	c.observeQuery(ctx, query, query.Attempt)
+}
+
+func (c *ClusterObserver) ObserveQueryWithAttemptMetrics(
+	ctx context.Context,
+	query gocql.ObservedQueryWithAttemptMetrics,
+) {
+	c.observeQuery(ctx, query.ObservedQuery, hostAttempts(query.AttemptMetrics, query.Host))
+}
+
+func hostAttempts(metrics gocql.AttemptMetrics, host *gocql.HostInfo) int {
+	if host == nil {
+		return metrics.Attempts()
+	}
+
+	hostID := host.HostID()
+	attempts := 0
+
+	metrics.ForEachAttempt(func(attempt gocql.AttemptMetric) bool {
+		if attempt.Host != nil && attempt.Host.HostID() == hostID {
+			attempts++
+		}
+
+		return true
+	})
+
+	return attempts
+}
+
+func (c *ClusterObserver) observeQuery(ctx context.Context, query gocql.ObservedQuery, attempts int) {
 	data := MustGetContextData(ctx)
 	if data == nil {
 		return
@@ -251,12 +281,6 @@ func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.Observed
 	duration := query.End.Sub(query.Start)
 
 	if c.logger != nil && !data.Statement.QueryType.IsSelect() {
-		attempts := 0
-		// Protect against possible nil metrics in tests or certain driver paths
-		if query.Metrics != nil {
-			attempts = query.Metrics.Attempts
-		}
-
 		c.logStatement(data.Statement, stmtlogger.Item{
 			Error:         mo.Right[error, string](errStr),
 			Statement:     query.Statement,

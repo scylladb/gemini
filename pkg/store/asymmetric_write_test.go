@@ -119,10 +119,11 @@ func TestIsOnlyTimeoutFailure(t *testing.T) {
 // that compensation attaches ContextData (for statement logging) and threads the
 // caller's write timestamp through.
 type compensateStore struct {
+	fakeStore
+
 	muErr   error
 	lastCtx atomic.Pointer[context.Context]
 	lastTS  atomic.Pointer[mo.Option[time.Time]]
-	fakeStore
 	muCalls atomic.Int64
 }
 
@@ -167,7 +168,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		ts := &compensateStore{}
 		os := &compensateStore{}
 		ds := makeDS(ts, os)
-		ok := ds.compensateAsymmetricWrite(stmt, writeTS)
+		ok := ds.compensateAsymmetricWrite(t.Context(), stmt, writeTS)
 		assert.True(t, ok)
 		assert.Equal(t, int64(1), ts.muCalls.Load())
 		assert.Equal(t, int64(1), os.muCalls.Load())
@@ -201,7 +202,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		ts := &compensateStore{muErr: errors.New("test-fail")}
 		os := &compensateStore{}
 		ds := makeDS(ts, os)
-		ok := ds.compensateAsymmetricWrite(stmt, writeTS)
+		ok := ds.compensateAsymmetricWrite(t.Context(), stmt, writeTS)
 		assert.False(t, ok)
 		assert.Equal(t, int64(1), ts.muCalls.Load())
 	})
@@ -211,7 +212,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		ts := &compensateStore{}
 		os := &compensateStore{muErr: errors.New("oracle-fail")}
 		ds := makeDS(ts, os)
-		ok := ds.compensateAsymmetricWrite(stmt, writeTS)
+		ok := ds.compensateAsymmetricWrite(t.Context(), stmt, writeTS)
 		assert.False(t, ok)
 	})
 
@@ -219,7 +220,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		t.Parallel()
 		ts := &compensateStore{}
 		ds := makeDS(ts, nil)
-		ok := ds.compensateAsymmetricWrite(stmt, writeTS)
+		ok := ds.compensateAsymmetricWrite(t.Context(), stmt, writeTS)
 		assert.True(t, ok)
 		assert.Equal(t, int64(1), ts.muCalls.Load())
 	})
@@ -228,7 +229,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		t.Parallel()
 		ts := &compensateStore{}
 		ds := makeDS(ts, nil)
-		ok := ds.compensateAsymmetricWrite(&typedef.Stmt{PartitionKeys: nil}, writeTS)
+		ok := ds.compensateAsymmetricWrite(t.Context(), &typedef.Stmt{PartitionKeys: nil}, writeTS)
 		assert.True(t, ok)
 		assert.Equal(t, int64(0), ts.muCalls.Load())
 	})
@@ -244,7 +245,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 			partitionKeyColumns: typedef.Columns{}, // empty
 			keyspaceAndTable:    "ks.t",
 		}
-		ok := ds.compensateAsymmetricWrite(stmt, writeTS)
+		ok := ds.compensateAsymmetricWrite(t.Context(), stmt, writeTS)
 		// Empty partitionKeyColumns → compensation early-returns before any delete.
 		assert.True(t, ok)
 		assert.Equal(t, int64(0), ts.muCalls.Load())
@@ -263,7 +264,7 @@ func TestCompensateAsymmetricWrite(t *testing.T) {
 		ts := &compensateStore{}
 		os := &compensateStore{}
 		ds := makeDS(ts, os)
-		ok := ds.compensateAsymmetricWrite(multiStmt, writeTS)
+		ok := ds.compensateAsymmetricWrite(t.Context(), multiStmt, writeTS)
 		assert.True(t, ok)
 		assert.Equal(t, int64(2), ts.muCalls.Load())
 		assert.Equal(t, int64(2), os.muCalls.Load())
@@ -294,7 +295,7 @@ func TestBuildPartitionDeleteStmt_ArityFollowsStmtNotStore(t *testing.T) {
 
 	del := ds.buildPartitionDeleteStmt(keys, "ks.table9")
 	if assert.NotNil(t, del) {
-		assert.Equal(t, 4, len(del.Values), "bind values must match the statement's PK column count, not the store's")
+		assert.Len(t, del.Values, 4, "bind values must match the statement's PK column count, not the store's")
 		assert.Equal(t, 4, strings.Count(del.Query, "=?"), "marker count must match value count")
 		assert.Contains(t, del.Query, "ks.table9", "must target the statement's table, not the store's table0")
 		assert.NotContains(t, del.Query, "table0")
@@ -307,9 +308,10 @@ func TestBuildPartitionDeleteStmt_ArityFollowsStmtNotStore(t *testing.T) {
 
 // blockingStore is a storeLoader whose mutate blocks until released.
 type blockingStore struct {
+	fakeStore
+
 	ret     error
 	release chan struct{}
-	fakeStore
 }
 
 func newBlockingStore(ret error) *blockingStore {

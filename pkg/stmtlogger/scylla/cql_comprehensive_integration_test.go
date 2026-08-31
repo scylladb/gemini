@@ -13,13 +13,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-//nolint:govet
 package scylla
 
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,13 +65,13 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + keyspace).Exec()
 	})
 
 	testErr := errors.New("test error")
 
 	tests := []struct {
-		expectedColumns map[string]interface{}
+		expectedColumns map[string]any
 		name            string
 		item            stmtlogger.Item
 	}{
@@ -94,7 +93,7 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 				GeminiAttempt: 1,
 				StatementType: typedef.SelectStatementType,
 			},
-			expectedColumns: map[string]interface{}{
+			expectedColumns: map[string]any{
 				"pk0":            "test_key_1",
 				"pk1":            int32(100),
 				"ty":             "oracle",
@@ -123,7 +122,7 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 				GeminiAttempt: 1,
 				StatementType: typedef.InsertStatementType,
 			},
-			expectedColumns: map[string]interface{}{
+			expectedColumns: map[string]any{
 				"pk0":            "test_key_2",
 				"pk1":            int32(200),
 				"ty":             "test",
@@ -152,7 +151,7 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 				GeminiAttempt: 2,
 				StatementType: typedef.UpdateStatementType,
 			},
-			expectedColumns: map[string]interface{}{
+			expectedColumns: map[string]any{
 				"pk0":            "test_key_3",
 				"pk1":            int32(300),
 				"ty":             "oracle",
@@ -181,7 +180,7 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 				GeminiAttempt: 3,
 				StatementType: typedef.DeleteSingleRowType,
 			},
-			expectedColumns: map[string]interface{}{
+			expectedColumns: map[string]any{
 				"pk0":            "test_key_4",
 				"pk1":            int32(400),
 				"ty":             "test",
@@ -210,7 +209,7 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 				GeminiAttempt: 1,
 				StatementType: typedef.SelectStatementType,
 			},
-			expectedColumns: map[string]interface{}{
+			expectedColumns: map[string]any{
 				"pk0":            "test_key_5",
 				"pk1":            int32(500),
 				"ty":             "oracle",
@@ -239,7 +238,7 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 				GeminiAttempt: 2,
 				StatementType: typedef.InsertStatementType,
 			},
-			expectedColumns: map[string]interface{}{
+			expectedColumns: map[string]any{
 				"pk0":            "test_key_6",
 				"pk1":            int32(600),
 				"ty":             "test",
@@ -345,8 +344,8 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 	require.NoError(t, containers.Test.Query(createTable).Exec())
 
 	t.Cleanup(func() {
-		_ = containers.Oracle.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
-		_ = containers.Test.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
+		_ = containers.Oracle.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
+		_ = containers.Test.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
 	})
 
 	// Insert test data into both oracle and test
@@ -394,7 +393,7 @@ func TestCQLStatements_Fetch_AllStatementTypes(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", logsKS)).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + logsKS).Exec()
 	})
 
 	tests := []struct {
@@ -615,8 +614,8 @@ func TestCQLStatements_Fetch_MultiPartition_Comprehensive(t *testing.T) {
 	require.NoError(t, containers.Test.Query(createTable).Exec())
 
 	t.Cleanup(func() {
-		_ = containers.Oracle.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
-		_ = containers.Test.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
+		_ = containers.Oracle.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
+		_ = containers.Test.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
 	})
 
 	// Insert multiple partition data
@@ -655,7 +654,7 @@ func TestCQLStatements_Fetch_MultiPartition_Comprehensive(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", logsKS)).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + logsKS).Exec()
 	})
 
 	tests := []struct {
@@ -685,7 +684,7 @@ func TestCQLStatements_Fetch_MultiPartition_Comprehensive(t *testing.T) {
 			t.Parallel()
 			// Create partition keys for multi-partition statement
 			pkValues := make([]any, tt.partitionNum)
-			for i := 0; i < tt.partitionNum; i++ {
+			for i := range tt.partitionNum {
 				pkValues[i] = multiKeys[i]
 			}
 
@@ -770,7 +769,7 @@ func TestCQLStatements_Insert_ConcurrentWrites(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + keyspace).Exec()
 	})
 
 	numWorkers := 10
@@ -778,11 +777,11 @@ func TestCQLStatements_Insert_ConcurrentWrites(t *testing.T) {
 	done := make(chan struct{})
 
 	// Launch concurrent workers
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
 		go func(workerID int) {
 			defer func() { done <- struct{}{} }()
 
-			for j := 0; j < itemsPerWorker; j++ {
+			for j := range itemsPerWorker {
 				item := stmtlogger.Item{
 					Start: stmtlogger.Time{Time: time.Now()},
 					PartitionKeys: typedef.PartitionKeys{Values: typedef.NewValuesFromMap(map[string][]any{
@@ -805,7 +804,7 @@ func TestCQLStatements_Insert_ConcurrentWrites(t *testing.T) {
 	}
 
 	// Wait for all workers to complete
-	for i := 0; i < numWorkers; i++ {
+	for range numWorkers {
 		<-done
 	}
 
@@ -822,9 +821,11 @@ func generatePlaceholders(n int) string {
 		return ""
 	}
 	result := "?"
+	var resultSb825 strings.Builder
 	for i := 1; i < n; i++ {
-		result += ",?"
+		resultSb825.WriteString(",?")
 	}
+	result += resultSb825.String()
 	return result
 }
 
@@ -853,8 +854,8 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 	require.NoError(t, containers.Test.Query(createTable).Exec())
 
 	t.Cleanup(func() {
-		_ = containers.Oracle.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
-		_ = containers.Test.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", testKS)).Exec()
+		_ = containers.Oracle.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
+		_ = containers.Test.Query("DROP KEYSPACE IF EXISTS " + testKS).Exec()
 	})
 
 	// Insert test data
@@ -889,7 +890,7 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", logsKS)).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + logsKS).Exec()
 	})
 
 	tests := []struct {
@@ -921,7 +922,6 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 
 	for i, tt := range tests {
 		// Rebind loop variables to avoid closure capture issues when running in parallel
-		i, tt := i, tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			pkValue := fmt.Sprintf("error_key_%d", i)
@@ -956,12 +956,12 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 
 			require.NoError(t, err)
 
-			//nolint:gocritic
-			if tt.error.IsLeft() && tt.error.MustLeft() != nil {
+			switch {
+			case tt.error.IsLeft() && tt.error.MustLeft() != nil:
 				assert.Equal(t, tt.error.MustLeft().Error(), storedError)
-			} else if tt.error.IsRight() {
+			case tt.error.IsRight():
 				assert.Equal(t, tt.error.MustRight(), storedError)
-			} else {
+			default:
 				assert.Empty(t, storedError)
 			}
 		})

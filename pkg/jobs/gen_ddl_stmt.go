@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// nolint
+//nolint:revive,gocritic,nilnil
 package jobs
 
 import (
-	"fmt"
+	"strconv"
 
 	"github.com/scylladb/gemini/pkg/statements"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -53,7 +53,7 @@ func GenDDLStmt(
 	case DDLDropColumnStatement:
 		return genDropColumnStmt(t, s.Keyspace.Name, validCols.Random(r))
 	default:
-		panic("invalid DDL statement type: " + fmt.Sprint(n))
+		panic("invalid DDL statement type: " + strconv.Itoa(n))
 	}
 }
 
@@ -63,7 +63,6 @@ func genAddColumnStmt(
 	column *typedef.ColumnDef,
 ) (*typedef.Stmts, error) {
 	return nil, nil
-	//var stmts []*typedef.Stmt
 	//if c, ok := column.Type.(*typedef.UDTType); ok {
 	//	createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s);"
 	//	var typs []string
@@ -102,7 +101,6 @@ func genDropColumnStmt(
 	column typedef.ColumnDef,
 ) (*typedef.Stmts, error) {
 	return nil, nil
-	//var stmts []*typedef.Stmt
 	//
 	//stmt := "ALTER TABLE " + keyspace + "." + t.Name + " DROP " + column.Name
 	//stmts = append(stmts, &typedef.Stmt{

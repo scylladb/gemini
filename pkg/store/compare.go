@@ -16,7 +16,7 @@ package store
 
 import (
 	"bytes"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -26,11 +26,11 @@ import (
 	"time"
 
 	"github.com/gocql/gocql"
-	"go.uber.org/multierr"
 	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 // CompareCollectedRows compares already collected rows from both sides
@@ -155,7 +155,7 @@ func buildPKMap(table *typedef.Table, rows Rows) map[string]Row {
 // ToError converts ComparisonResult to an error if there are differences
 func (cr ComparisonResult) ToError() error {
 	if cr.TestError != nil || cr.OracleError != nil {
-		return multierr.Combine(cr.TestError, cr.OracleError)
+		return errors.Join(cr.TestError, cr.OracleError)
 	}
 
 	var err error
@@ -163,7 +163,7 @@ func (cr ComparisonResult) ToError() error {
 	if len(cr.TestOnlyRows) > 0 || len(cr.OracleOnlyRows) > 0 {
 		// For row-count mismatches we report only the unmatched counts,
 		// excluding matched rows from the totals to satisfy existing tests.
-		err = multierr.Append(err, ErrorRowDifference{
+		err = errors.Join(err, RowDifferenceError{
 			MissingInTest:   rowsToKeyStrings(cr.Table, cr.OracleOnlyRows),
 			MissingInOracle: rowsToKeyStrings(cr.Table, cr.TestOnlyRows),
 			TestRows:        len(cr.TestOnlyRows),
@@ -172,7 +172,7 @@ func (cr ComparisonResult) ToError() error {
 	}
 
 	for _, diff := range cr.DifferentRows {
-		err = multierr.Append(err, ErrorRowDifference{
+		err = errors.Join(err, RowDifferenceError{
 			Diff:      diff.Diff,
 			OracleRow: diff.OracleRow,
 			TestRow:   diff.TestRow,
@@ -198,7 +198,7 @@ func rowsToKeyStrings(table *typedef.Table, rows []Row) []string {
 
 func rowKeyString(table *typedef.Table, row Row) string {
 	if table == nil {
-		bytes, _ := json.Marshal(row)
+		bytes := utils.MarshalJSON(row)
 		return string(bytes)
 	}
 

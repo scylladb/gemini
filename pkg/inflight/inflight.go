@@ -15,11 +15,10 @@
 package inflight
 
 import (
+	"maps"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"go.uber.org/atomic"
-	"golang.org/x/exp/maps"
 )
 
 // We track inflights in the map, maps in golang are not shrinking
@@ -36,10 +35,10 @@ type InFlight interface {
 // New creates a instance of a simple InFlight set.
 // It's internal data is protected by a simple sync.RWMutex.
 func New() InFlight {
-	return newSyncU64set(shrinkInflightsLimit)
+	return newSyncU64set()
 }
 
-func newSyncU64set(limit int64) *syncU64set {
+func newSyncU64set() *syncU64set {
 	s := &syncU64set{
 		values: make(map[uint32]struct{}),
 		lock:   sync.Mutex{},
@@ -50,9 +49,9 @@ func newSyncU64set(limit int64) *syncU64set {
 		defer ticker.Stop()
 
 		for range ticker.C {
-			if s.deleted.Load() >= limit {
+			if s.deleted.Load() >= shrinkInflightsLimit {
 				s.lock.Lock()
-				s.values = maps.Clone(s.values) //nolint:govet // inline: type parameter inference not yet supported by inliner
+				s.values = maps.Clone(s.values)
 				s.lock.Unlock()
 			}
 		}
@@ -71,7 +70,7 @@ func NewConcurrent() InFlight {
 func newShardedSyncU64set() *shardedSyncU64set {
 	s := &shardedSyncU64set{}
 	for i := range s.shards {
-		s.shards[i] = newSyncU64set(shrinkInflightsLimit)
+		s.shards[i] = newSyncU64set()
 	}
 	return s
 }
@@ -132,5 +131,5 @@ func (s *syncU64set) Delete(u uint32) {
 	delete(s.values, u)
 	s.lock.Unlock()
 
-	s.deleted.Dec()
+	s.deleted.Add(-1)
 }

@@ -61,10 +61,7 @@ func TestNextLogSeqIsUniqueUnderConcurrency(t *testing.T) {
 	)
 
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			local := make([]int64, 0, perWorker)
 			for range perWorker {
 				local = append(local, nextLogSeq())
@@ -75,7 +72,7 @@ func TestNextLogSeqIsUniqueUnderConcurrency(t *testing.T) {
 			for _, v := range local {
 				got[v] = struct{}{}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -111,7 +108,9 @@ func TestFillArgsBindsTSAndSeq(t *testing.T) {
 
 	next, ok := c.fillArgs(nil, item)
 	require.True(t, ok)
-	assert.Greater(t, next[partitionKeys.LenValues()+1].(int64), firstSeq)
+	seq, ok := next[partitionKeys.LenValues()+1].(int64)
+	require.True(t, ok)
+	assert.Greater(t, seq, firstSeq)
 }
 
 // TestLineEncoderHeadAtomicity: a marshal failure must leave the writer
@@ -240,7 +239,7 @@ func TestSameMsNoRowLoss(t *testing.T) {
 			)
 			require.NoError(t, err)
 			t.Cleanup(func() {
-				_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec()
+				_ = session.Query("DROP KEYSPACE IF EXISTS " + keyspace).Exec()
 			})
 
 			const (
@@ -285,16 +284,13 @@ func TestSameMsNoRowLoss(t *testing.T) {
 			errs := make(chan error, totalWritten)
 
 			for w := range workers {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-
+				wg.Go(func() {
 					for i := range perWorker {
 						if insErr := cqlStmts.Insert(t.Context(), items[w*perWorker+i]); insErr != nil {
 							errs <- insErr
 						}
 					}
-				}()
+				})
 			}
 
 			wg.Wait()
@@ -371,7 +367,7 @@ func TestFetchPagesBeyondFirstPage(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = session.Query(fmt.Sprintf("DROP KEYSPACE IF EXISTS %s", keyspace)).Exec()
+		_ = session.Query("DROP KEYSPACE IF EXISTS " + keyspace).Exec()
 	})
 
 	// One row over the gocql default page size of 5000.
@@ -385,10 +381,7 @@ func TestFetchPagesBeyondFirstPage(t *testing.T) {
 	errs := make(chan error, totalWritten)
 
 	for w := range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for i := range perWorker {
 				insErr := cqlStmts.Insert(t.Context(), stmtlogger.Item{
 					Start: stmtlogger.Time{Time: time.Now()},
@@ -408,7 +401,7 @@ func TestFetchPagesBeyondFirstPage(t *testing.T) {
 					errs <- insErr
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

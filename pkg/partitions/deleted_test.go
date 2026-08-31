@@ -264,7 +264,7 @@ func TestDeletedPartitionsConcurrency(t *testing.T) {
 			}
 
 			// Should have read at least some partitions
-			assert.Greater(t, totalRead, 0)
+			assert.Positive(t, totalRead)
 		})
 	})
 
@@ -414,7 +414,7 @@ func TestDeletedPartitionsChannelBehavior(t *testing.T) {
 			synctest.Wait()
 
 			// Should still have items in heap (some requeued when channel was full)
-			assert.Greater(t, d.Len(), 0)
+			assert.Positive(t, d.Len())
 
 			// Drain channel
 			drained := 0
@@ -469,7 +469,7 @@ func TestDeletedPartitionsEdgeCases(t *testing.T) {
 		}()
 
 		buckets := []time.Duration{100 * time.Millisecond}
-		d := newDeleted(nil, buckets, 0) // nolint:staticcheck
+		d := newDeleted(nil, buckets, 0) //nolint:staticcheck
 		defer d.Close()
 	})
 
@@ -588,7 +588,7 @@ func TestDeletedPartitionsIntegration(t *testing.T) {
 		}
 
 		// Each deleted partition should be validated at least once
-		assert.Greater(t, len(validations), 0)
+		assert.NotEmpty(t, validations)
 		t.Logf("Validated %d unique partitions with total %d validations",
 			len(validations), sumMapValues(validations))
 	})
@@ -624,7 +624,6 @@ func BenchmarkDeletedPartitions(b *testing.B) {
 
 		// Consumer goroutine
 		go func() {
-			//nolint:revive
 			for range d.ch {
 				// Drain channel
 			}

@@ -28,13 +28,14 @@ import (
 
 // mockPartitionsWithTracker extends mockPartitions with row tracking support.
 type mockPartitionsWithTracker struct {
-	tracker *partitions.RowTracker
 	mockPartitions
+
+	tracker *partitions.RowTracker
 }
 
-func newMockPartitionsWithTracker(count, trackerCapacity uint64) *mockPartitionsWithTracker {
+func newMockPartitionsWithTracker(trackerCapacity uint64) *mockPartitionsWithTracker {
 	return &mockPartitionsWithTracker{
-		mockPartitions: *newMockPartitions(count),
+		mockPartitions: *newMockPartitions(10),
 		tracker:        partitions.NewRowTracker(trackerCapacity),
 	}
 }
@@ -82,7 +83,7 @@ func TestDeleteSingleRow_WithTrackedRow(t *testing.T) {
 		},
 	}
 
-	mp := newMockPartitionsWithTracker(10, 100)
+	mp := newMockPartitionsWithTracker(100)
 	t.Cleanup(mp.Close)
 
 	// Push a tracked row
@@ -134,7 +135,7 @@ func TestDeleteSingleRow_FallsBackWhenNoTrackedRows(t *testing.T) {
 		},
 	}
 
-	mp := newMockPartitionsWithTracker(10, 100)
+	mp := newMockPartitionsWithTracker(100)
 	t.Cleanup(mp.Close)
 	ratios := DefaultStatementRatios()
 	rng := rand.New(rand.NewChaCha8([32]byte{}))
@@ -172,7 +173,7 @@ func TestDeleteClusteringSubset_FallsBackWhenNoTrackedRows(t *testing.T) {
 		},
 	}
 
-	mp := newMockPartitionsWithTracker(10, 100)
+	mp := newMockPartitionsWithTracker(100)
 	t.Cleanup(mp.Close)
 
 	ratios := DefaultStatementRatios()
@@ -207,7 +208,7 @@ func TestDeleteSingleRow_NoClustering(t *testing.T) {
 		ClusteringKeys: nil, // No clustering keys
 	}
 
-	mp := newMockPartitionsWithTracker(10, 100)
+	mp := newMockPartitionsWithTracker(100)
 	t.Cleanup(mp.Close)
 
 	ratios := DefaultStatementRatios()
@@ -248,7 +249,7 @@ func TestDeleteClusteringSubset_WithTrackedRow(t *testing.T) {
 		},
 	}
 
-	mp := newMockPartitionsWithTracker(10, 100)
+	mp := newMockPartitionsWithTracker(100)
 	t.Cleanup(mp.Close)
 
 	// Push a tracked row with full CK values
@@ -294,7 +295,7 @@ func TestDeleteClusteringSubset_WithTrackedRow(t *testing.T) {
 
 func newGen(t *testing.T, table *typedef.Table, trackerCap uint64) (*Generator, *mockPartitionsWithTracker) {
 	t.Helper()
-	mp := newMockPartitionsWithTracker(10, trackerCap)
+	mp := newMockPartitionsWithTracker(trackerCap)
 	t.Cleanup(mp.Close)
 	ratios := DefaultStatementRatios()
 	rng := rand.New(rand.NewChaCha8([32]byte{42}))

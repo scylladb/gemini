@@ -373,8 +373,8 @@ func marshalDifferentRows(diffs []store.RowDifference) []joberror.RowDiff {
 	}
 	result := make([]joberror.RowDiff, 0, len(diffs))
 	for _, d := range diffs {
-		testData, _ := json.Marshal(d.TestRow)
-		oracleData, _ := json.Marshal(d.OracleRow)
+		testData := utils.MarshalJSON(d.TestRow)
+		oracleData := utils.MarshalJSON(d.OracleRow)
 		result = append(result, joberror.RowDiff{
 			TestRow:   testData,
 			OracleRow: oracleData,
@@ -534,8 +534,7 @@ func (v *Validation) Do(ctx context.Context) error {
 			}
 
 			// Handle validation error
-			var jobErr *joberror.JobError
-			if errors.As(err, &jobErr) {
+			if jobErr, isJobErr := errors.AsType[*joberror.JobError](err); isJobErr {
 				v.status.AddReadError(*jobErr)
 			} else {
 				panic(fmt.Sprintf("invalid type err %T: %v", err, err))
@@ -586,8 +585,7 @@ func (v *Validation) Do(ctx context.Context) error {
 			}
 
 			// Handle different error types that can be returned from the store
-			var jobErr *joberror.JobError
-			if errors.As(err, &jobErr) {
+			if jobErr, isJobErr := errors.AsType[*joberror.JobError](err); isJobErr {
 				// It's already a joberror.JobError, use it directly
 				v.status.AddReadError(*jobErr)
 			} else {

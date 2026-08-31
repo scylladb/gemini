@@ -359,7 +359,7 @@ func TestComplexTypesPartitionKeyValues(t *testing.T) {
 			ValueTypes: map[string]typedef.SimpleType{
 				"ip":        typedef.TypeInet,
 				"timestamp": typedef.TypeTimestamp,
-				"uuid":      typedef.TypeUuid,
+				"uuid":      typedef.TypeUUID,
 			},
 			Frozen: true,
 		}

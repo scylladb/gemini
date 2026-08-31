@@ -138,7 +138,7 @@ func TestRowTracker_Concurrent(t *testing.T) {
 	}
 
 	wg.Wait()
-	assert.True(t, rt.Len() <= rt.Capacity())
+	assert.LessOrEqual(t, rt.Len(), rt.Capacity())
 }
 
 func TestRowTracker_FullQueueDropsSilently(t *testing.T) {
@@ -173,14 +173,14 @@ func TestRowTracker_FillRatio_ZeroCapacity(t *testing.T) {
 	t.Parallel()
 
 	rt := NewRowTracker(0)
-	assert.Equal(t, 0.0, rt.FillRatio())
+	assert.InDelta(t, 0.0, rt.FillRatio(), 1e-9)
 }
 
 func TestRowTracker_FillRatio_Empty(t *testing.T) {
 	t.Parallel()
 
 	rt := NewRowTracker(10)
-	assert.Equal(t, 0.0, rt.FillRatio())
+	assert.InDelta(t, 0.0, rt.FillRatio(), 1e-9)
 }
 
 func TestRowTracker_FillRatio_Half(t *testing.T) {
@@ -200,7 +200,7 @@ func TestRowTracker_FillRatio_Full(t *testing.T) {
 	for range 4 {
 		rt.Push(TrackedRow{PartitionID: uuid.New(), PartitionValues: []any{int32(1)}})
 	}
-	assert.Equal(t, 1.0, rt.FillRatio())
+	assert.InDelta(t, 1.0, rt.FillRatio(), 1e-9)
 }
 
 func TestRowTracker_FillRatio_DecreasesOnPop(t *testing.T) {
@@ -210,7 +210,7 @@ func TestRowTracker_FillRatio_DecreasesOnPop(t *testing.T) {
 	for range 4 {
 		rt.Push(TrackedRow{PartitionID: uuid.New(), PartitionValues: []any{int32(1)}})
 	}
-	require.Equal(t, 1.0, rt.FillRatio())
+	require.InDelta(t, 1.0, rt.FillRatio(), 1e-9)
 
 	_, ok := rt.Pop()
 	require.True(t, ok)
@@ -230,7 +230,7 @@ func TestRowTracker_FillRatio_ExcludesInvalidated(t *testing.T) {
 		rt.Push(TrackedRow{PartitionID: deadID, PartitionValues: []any{int32(1)}})
 	}
 	rt.Push(TrackedRow{PartitionID: liveID, PartitionValues: []any{int32(2)}})
-	require.Equal(t, 1.0, rt.FillRatio(), "tracker is physically full")
+	require.InDelta(t, 1.0, rt.FillRatio(), 1e-9, "tracker is physically full")
 
 	rt.Invalidate(deadID)
 
@@ -253,9 +253,9 @@ func TestFillZoneConstants(t *testing.T) {
 	assert.Less(t, FillZoneSkip, 1.0)
 
 	// Verify expected values match documented thresholds
-	assert.Equal(t, 0.30, FillZoneAlwaysPush)
-	assert.Equal(t, 0.70, FillZoneSampled)
-	assert.Equal(t, 0.90, FillZoneSkip)
+	assert.InDelta(t, 0.30, FillZoneAlwaysPush, 1e-9)
+	assert.InDelta(t, 0.70, FillZoneSampled, 1e-9)
+	assert.InDelta(t, 0.90, FillZoneSkip, 1e-9)
 }
 
 // ---------------------------------------------------------------------------
@@ -532,11 +532,9 @@ func TestRowTracker_Invalidate_Concurrent(t *testing.T) {
 
 	// Invalidate id1 from a separate goroutine while consumers drain
 	var invalidateDone sync.WaitGroup
-	invalidateDone.Add(1)
-	go func() {
-		defer invalidateDone.Done()
+	invalidateDone.Go(func() {
 		rt.Invalidate(id1)
-	}()
+	})
 
 	invalidateDone.Wait()
 

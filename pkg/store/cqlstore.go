@@ -16,7 +16,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -30,7 +29,6 @@ import (
 	"github.com/hailocab/go-hostpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/samber/mo"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/metrics"
@@ -185,7 +183,7 @@ type MutationStoreError struct {
 }
 
 func (e MutationStoreError) Error() string {
-	data, _ := json.Marshal(e.PartitionKeys)
+	data := utils.MarshalJSON(e.PartitionKeys)
 
 	return "mutation error: " + e.Inner.Error() + ", partition keys: " + utils.UnsafeString(data)
 }
@@ -234,7 +232,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 		zap.Error(mutateErr),
 	)
 
-	acc = multierr.Append(acc, MutationStoreError{
+	acc = errors.Join(acc, MutationStoreError{
 		Inner: mutateErr,
 		PartitionKeys: func() *typedef.Values {
 			if len(stmt.PartitionKeys) > 0 {

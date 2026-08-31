@@ -292,7 +292,6 @@ func BenchmarkDeletePerformance(b *testing.B) {
 
 		// Consume items
 		go func() {
-			//nolint: revive
 			for range d.ch {
 			}
 		}()
@@ -310,7 +309,6 @@ func BenchmarkDeletePerformance(b *testing.B) {
 
 		// Consume items
 		go func() {
-			//nolint:revive
 			for range d.ch {
 			}
 		}()
@@ -338,7 +336,6 @@ func BenchmarkDeletePerformance(b *testing.B) {
 
 		// Consume items
 		go func() {
-			//nolint:revive
 			for range d.ch {
 			}
 		}()

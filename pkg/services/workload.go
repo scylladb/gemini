@@ -16,12 +16,12 @@ package services
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math/rand/v2"
 	"os"
 	"time"
 
-	"github.com/pkg/errors"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 
 	"github.com/scylladb/gemini/pkg/distributions"
@@ -137,13 +137,13 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 		schema.Tables[0].Name,
 		schema.Tables[0].PartitionKeys, schema, storeConfig, logger.Named("store"), globalStatus.Errors)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create store")
+		return nil, fmt.Errorf("failed to create store: %w", err)
 	}
 
 	logger.Debug("creating statement ratio controller")
 	statementRatioController, err := statements.NewRatioController(config.StatementRatios, rand.New(randSrc))
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create statement ratio controller")
+		return nil, fmt.Errorf("failed to create statement ratio controller: %w", err)
 	}
 
 	logger.Debug("creating jobs")
@@ -170,7 +170,7 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 
 	logger.Debug("creating schema and tables")
 	if err = w.createSchemaAndTables(context.Background()); err != nil {
-		return nil, errors.Wrap(err, "failed to create schema and tables")
+		return nil, fmt.Errorf("failed to create schema and tables: %w", err)
 	}
 
 	logger.Debug("workload created successfully")
@@ -189,7 +189,7 @@ func (w *Workload) createSchemaAndTables(base context.Context) error {
 			w.logger.Debug("executing drop statement", zap.String("statement", stmt))
 			if err := w.store.Mutate(dropCtx, typedef.SimpleStmt(stmt, typedef.DropKeyspaceStatementType)); err != nil {
 				dropCancel()
-				return errors.Wrap(err, "unable to drop schema")
+				return fmt.Errorf("unable to drop schema: %w", err)
 			}
 			dropCancel()
 		}
@@ -205,7 +205,7 @@ func (w *Workload) createSchemaAndTables(base context.Context) error {
 		ctx,
 		typedef.SimpleStmt(testKeyspace, typedef.CreateKeyspaceStatementType),
 		typedef.SimpleStmt(oracleKeyspace, typedef.CreateKeyspaceStatementType)); err != nil {
-		return errors.Wrap(err, "unable to create keyspace")
+		return fmt.Errorf("unable to create keyspace: %w", err)
 	}
 	w.logger.Debug("keyspaces created successfully")
 
@@ -216,7 +216,7 @@ func (w *Workload) createSchemaAndTables(base context.Context) error {
 		w.logger.Debug("executing create table statement", zap.String("statement", stmt))
 		if err := w.store.Mutate(createSchemaCtx, typedef.SimpleStmt(stmt, typedef.CreateSchemaStatementType)); err != nil {
 			createSchemaCancel()
-			return errors.Wrap(err, "unable to create schema")
+			return fmt.Errorf("unable to create schema: %w", err)
 		}
 
 		createSchemaCancel()
@@ -241,7 +241,7 @@ func (w *Workload) Run(base context.Context) error {
 			jobs.WarmupMode,
 			uint64(w.config.MaxErrorsToStore),
 		); err != nil {
-			return errors.Wrap(err, "failed to run warmup jobs")
+			return fmt.Errorf("failed to run warmup jobs: %w", err)
 		}
 		w.logger.Debug("warmup phase completed")
 	}
@@ -273,7 +273,7 @@ func (w *Workload) Run(base context.Context) error {
 		if w.status.Errors.Len() > 0 {
 			return w.status.Errors
 		}
-		return errors.Errorf(
+		return fmt.Errorf(
 			"gemini encountered errors (write_errors=%d, read_errors=%d)",
 			w.status.WriteErrors.Load(),
 			w.status.ReadErrors.Load(),
@@ -361,7 +361,7 @@ func (w *Workload) Close() error {
 	err := w.status.Errors.Close()
 
 	w.logger.Debug("closing store")
-	err = multierr.Append(err, w.store.Close())
+	err = errors.Join(err, w.store.Close())
 	if err != nil {
 		w.logger.Error("workload closed with errors", zap.Error(err))
 	} else {

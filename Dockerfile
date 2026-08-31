@@ -1,4 +1,4 @@
-FROM golang:1.25-bookworm AS build
+FROM golang:1.27-bookworm AS build
 
 ENV GO111MODULE=on
 ENV CFLAGS="-O3"
@@ -25,7 +25,7 @@ LABEL com.scylladb.loader-type="gemini"
 WORKDIR /
 
 ENV DEBIAN_FRONTEND="noninteractive"
-ENV GODEBUG="default=go1.25,netdns=go,gctrace=0,cgocheck=0,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=1"
+ENV GODEBUG="default=go1.27,netdns=go,gctrace=0,cgocheck=0,disablethp=0,panicnil=0,http2client=1,http2server=1,madvdontneed=1"
 ENV PATH="/usr/local/bin:${PATH}"
 
 RUN apt-get update \
@@ -50,7 +50,7 @@ RUN gemini --version
 
 FROM build AS debug
 
-ENV GODEBUG="default=go1.25,gctrace=1,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,asynctimerchan=0,madvdontneed=0"
+ENV GODEBUG="default=go1.27,gctrace=1,cgocheck=1,disablethp=0,panicnil=0,http2client=1,http2server=1,madvdontneed=0"
 ENV PATH="/gemini/bin:${PATH}"
 
 RUN apt-get install -y gdb gcc iputils-ping mlocate vim \
