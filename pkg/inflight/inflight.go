@@ -52,6 +52,7 @@ func newSyncU64set() *syncU64set {
 			if s.deleted.Load() >= shrinkInflightsLimit {
 				s.lock.Lock()
 				s.values = maps.Clone(s.values)
+				s.deleted.Store(0)
 				s.lock.Unlock()
 			}
 		}
@@ -131,5 +132,5 @@ func (s *syncU64set) Delete(u uint32) {
 	delete(s.values, u)
 	s.lock.Unlock()
 
-	s.deleted.Add(-1)
+	s.deleted.Add(1)
 }

@@ -92,7 +92,7 @@ func TestNewStatements_Integration(t *testing.T) {
 			keyspace+"_1", table,
 			"test_ks", "test_table",
 			partitionKeys,
-			replication.NewSimpleStrategy(),
+			replication.NewNetworkTopologyStrategy(),
 		)
 
 		require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestNewStatements_Integration(t *testing.T) {
 			keyspace+"_2", table,
 			"test_ks", "test_table",
 			multiKeys,
-			replication.NewSimpleStrategy(),
+			replication.NewNetworkTopologyStrategy(),
 		)
 
 		require.NoError(t, err)
@@ -156,7 +156,7 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 		keyspace, table,
 		"test_ks", "test_table",
 		partitionKeys,
-		replication.NewSimpleStrategy(),
+		replication.NewNetworkTopologyStrategy(),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -273,7 +273,7 @@ func TestNewStatements_WithTupleType_Integration(t *testing.T) {
 		keyspace, table,
 		"test_ks", "test_table",
 		partitionKeys,
-		replication.NewSimpleStrategy(),
+		replication.NewNetworkTopologyStrategy(),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, cqlStmts)
@@ -297,7 +297,7 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 
 	// Create schema in both oracle and test
 	createKS := fmt.Sprintf(
-		"CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
+		"CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1}",
 		testKS,
 	)
 	createTable := fmt.Sprintf(
@@ -344,7 +344,7 @@ func TestCQLStatements_Fetch_Integration(t *testing.T) {
 		logsKS, logsTable,
 		testKS, testTable,
 		partitionKeys,
-		replication.NewSimpleStrategy(),
+		replication.NewNetworkTopologyStrategy(),
 	)
 	require.NoError(t, err)
 	defer func() {
@@ -456,7 +456,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 
 	// Create schema in both oracle and test
 	createKS := fmt.Sprintf(
-		"CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
+		"CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1}",
 		testKS,
 	)
 	createTable := fmt.Sprintf(
@@ -509,7 +509,7 @@ func TestCQLStatements_FetchMultiPartition_Integration(t *testing.T) {
 		logsKS, logsTable,
 		testKS, testTable,
 		partitionKeys,
-		replication.NewSimpleStrategy(),
+		replication.NewNetworkTopologyStrategy(),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -668,7 +668,7 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 	testTable := "test_table"
 
 	createKS := fmt.Sprintf(
-		"CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
+		"CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1}",
 		testKS,
 	)
 	createTable := fmt.Sprintf(
@@ -715,7 +715,7 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 		containers.TestPort(),
 		containers.DockerMode,
 		"", "",
-		replication.NewSimpleStrategy(),
+		replication.NewNetworkTopologyStrategy(),
 		itemCh,
 		oracleFile,
 		testFile,

@@ -54,7 +54,7 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string, testPort, or
 			RequestTimeout:          10 * time.Second,
 			ConnectTimeout:          10 * time.Second,
 			UseServerSideTimestamps: true,
-			Replication:             replication.NewSimpleStrategy(),
+			Replication:             replication.NewNetworkTopologyStrategy(),
 		}
 	}
 
@@ -75,7 +75,7 @@ func getStoreConfig(tb testing.TB, testHosts, oracleHosts []string, testPort, or
 			RequestTimeout:          10 * time.Second,
 			ConnectTimeout:          10 * time.Second,
 			UseServerSideTimestamps: false,
-			Replication:             replication.NewSimpleStrategy(),
+			Replication:             replication.NewNetworkTopologyStrategy(),
 		},
 		MaxRetriesMutate:                 5,
 		MaxRetriesMutateSleep:            1 * time.Second,
@@ -111,14 +111,14 @@ func getSchema(tb testing.TB, table ...*typedef.Table) *typedef.Schema {
 
 	return &typedef.Schema{
 		Keyspace: typedef.Keyspace{
-			Replication:       replication.NewSimpleStrategy(),
-			OracleReplication: replication.NewSimpleStrategy(),
+			Replication:       replication.NewNetworkTopologyStrategy(),
+			OracleReplication: replication.NewNetworkTopologyStrategy(),
 			Name:              keyspace,
 		},
 		Tables: tables,
 		Config: typedef.SchemaConfig{
-			ReplicationStrategy:              replication.NewSimpleStrategy(),
-			OracleReplicationStrategy:        replication.NewSimpleStrategy(),
+			ReplicationStrategy:              replication.NewNetworkTopologyStrategy(),
+			OracleReplicationStrategy:        replication.NewNetworkTopologyStrategy(),
 			TableOptions:                     nil,
 			DeleteBuckets:                    []time.Duration{5 * time.Second, 10 * time.Second, 15 * time.Second},
 			MaxUDTParts:                      2,
@@ -637,8 +637,8 @@ func TestWorkloadDeleteHeavy(t *testing.T) {
 	// deleted-partitions lifecycle within the test duration.
 	schema := &typedef.Schema{
 		Keyspace: typedef.Keyspace{
-			Replication:       replication.NewSimpleStrategy(),
-			OracleReplication: replication.NewSimpleStrategy(),
+			Replication:       replication.NewNetworkTopologyStrategy(),
+			OracleReplication: replication.NewNetworkTopologyStrategy(),
 			Name:              "ks_delete_heavy",
 		},
 		Tables: []*typedef.Table{
@@ -656,8 +656,8 @@ func TestWorkloadDeleteHeavy(t *testing.T) {
 			},
 		},
 		Config: typedef.SchemaConfig{
-			ReplicationStrategy:              replication.NewSimpleStrategy(),
-			OracleReplicationStrategy:        replication.NewSimpleStrategy(),
+			ReplicationStrategy:              replication.NewNetworkTopologyStrategy(),
+			OracleReplicationStrategy:        replication.NewNetworkTopologyStrategy(),
 			MaxTables:                        1,
 			MinPartitionKeys:                 1,
 			MaxPartitionKeys:                 1,

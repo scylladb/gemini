@@ -159,11 +159,11 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		DurationVarP(&warmup, "warmup", "", 0, "Specify the warmup period as a duration for example 30s or 10h")
 	cmd.Flags().
-		StringVarP(&replicationStrategy, "replication-strategy", "", "simple",
+		StringVarP(&replicationStrategy, "replication-strategy", "", "network",
 			"Specify the desired replication strategy as either the coded short hand simple|network to get the default for each type or provide "+
 				"the entire specification in the form {'class':'....'}")
 	cmd.Flags().
-		StringVarP(&oracleReplicationStrategy, "oracle-replication-strategy", "", "simple",
+		StringVarP(&oracleReplicationStrategy, "oracle-replication-strategy", "", "network",
 			"Specify the desired replication strategy of the oracle cluster as either the coded short hand simple|network to get the default for each "+
 				"type or provide the entire specification in the form {'class':'....'}")
 	cmd.Flags().

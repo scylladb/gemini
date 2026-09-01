@@ -65,13 +65,13 @@ func divergenceSchema(tb testing.TB) *typedef.Schema {
 	return &typedef.Schema{
 		Keyspace: typedef.Keyspace{
 			Name:              ksName,
-			Replication:       replication.NewSimpleStrategy(),
-			OracleReplication: replication.NewSimpleStrategy(),
+			Replication:       replication.NewNetworkTopologyStrategy(),
+			OracleReplication: replication.NewNetworkTopologyStrategy(),
 		},
 		Tables: []*typedef.Table{divergenceTable},
 		Config: typedef.SchemaConfig{
-			ReplicationStrategy:              replication.NewSimpleStrategy(),
-			OracleReplicationStrategy:        replication.NewSimpleStrategy(),
+			ReplicationStrategy:              replication.NewNetworkTopologyStrategy(),
+			OracleReplicationStrategy:        replication.NewNetworkTopologyStrategy(),
 			MaxTables:                        1,
 			MinPartitionKeys:                 1,
 			MaxPartitionKeys:                 1,

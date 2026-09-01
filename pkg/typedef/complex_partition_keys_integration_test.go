@@ -41,7 +41,7 @@ func TestComplexTypesAsPartitionKeys_Integration(t *testing.T) {
 
 	// Create keyspace
 	createKsErr := session.Query(fmt.Sprintf(
-		"CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
+		"CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1}",
 		keyspace,
 	)).Exec()
 	require.NoError(t, createKsErr, "Failed to create keyspace")

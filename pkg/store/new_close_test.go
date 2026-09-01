@@ -42,17 +42,17 @@ func TestNew_BasicConfiguration(t *testing.T) {
 
 	// Create keyspace on both clusters
 	require.NoError(t, scyllaContainer.Test.Query(
-		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
+		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1}", keyspace),
 	).Exec())
 	require.NoError(t, scyllaContainer.Oracle.Query(
-		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
+		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1}", keyspace),
 	).Exec())
 
 	schema := &typedef.Schema{
 		Keyspace: typedef.Keyspace{Name: keyspace},
 		Config: typedef.SchemaConfig{
-			ReplicationStrategy:       replication.NewSimpleStrategy(),
-			OracleReplicationStrategy: replication.NewSimpleStrategy(),
+			ReplicationStrategy:       replication.NewNetworkTopologyStrategy(),
+			OracleReplicationStrategy: replication.NewNetworkTopologyStrategy(),
 		},
 		Tables: []*typedef.Table{{
 			Name: table,
@@ -121,13 +121,13 @@ func TestNew_WithoutOracleCluster(t *testing.T) {
 
 	// Create keyspace on test cluster
 	require.NoError(t, scyllaContainer.Test.Query(
-		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
+		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1}", keyspace),
 	).Exec())
 
 	schema := &typedef.Schema{
 		Keyspace: typedef.Keyspace{Name: keyspace},
 		Config: typedef.SchemaConfig{
-			ReplicationStrategy: replication.NewSimpleStrategy(),
+			ReplicationStrategy: replication.NewNetworkTopologyStrategy(),
 		},
 		Tables: []*typedef.Table{{
 			Name: table,
@@ -185,13 +185,13 @@ func TestNew_DefaultConfiguration(t *testing.T) {
 	table := "test_table"
 
 	require.NoError(t, scyllaContainer.Test.Query(
-		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
+		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1}", keyspace),
 	).Exec())
 
 	schema := &typedef.Schema{
 		Keyspace: typedef.Keyspace{Name: keyspace},
 		Config: typedef.SchemaConfig{
-			ReplicationStrategy: replication.NewSimpleStrategy(),
+			ReplicationStrategy: replication.NewNetworkTopologyStrategy(),
 		},
 		Tables: []*typedef.Table{{
 			Name: table,
@@ -261,7 +261,7 @@ func TestNew_InvalidTestCluster(t *testing.T) {
 	schema := &typedef.Schema{
 		Keyspace: typedef.Keyspace{Name: keyspace},
 		Config: typedef.SchemaConfig{
-			ReplicationStrategy: replication.NewSimpleStrategy(),
+			ReplicationStrategy: replication.NewNetworkTopologyStrategy(),
 		},
 		Tables: []*typedef.Table{{
 			Name: table,
