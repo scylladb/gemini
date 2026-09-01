@@ -602,6 +602,11 @@ func newScyllaNode(tb testing.TB, version, token string) (*scyllaNode, error) {
 	return &scyllaNode{container: ctr, session: session, host: host, port: port, version: version, token: token}, nil
 }
 
+const (
+	DefaultOracleVersion = "2026.1"
+	DefaultTestVersion   = "2026.2"
+)
+
 func SingleScylla(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 	tb.Helper()
 
@@ -609,7 +614,7 @@ func SingleScylla(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 	if (len(forceSpawn) > 0 && forceSpawn[0]) || !existsDockerScylla {
 		testVersion, exists := os.LookupEnv("GEMINI_SCYLLA_TEST")
 		if !exists || testVersion == "" {
-			testVersion = "2025.1"
+			testVersion = DefaultTestVersion
 		}
 
 		test := acquireNodes(tb, testVersion)[0]
@@ -660,12 +665,12 @@ func TestContainers(tb testing.TB, forceSpawn ...bool) *ScyllaContainer {
 	if (len(forceSpawn) > 0 && forceSpawn[0]) || !exists {
 		oracleVersion, existsScyllaOracle := os.LookupEnv("GEMINI_SCYLLA_ORACLE")
 		if !existsScyllaOracle || oracleVersion == "" {
-			oracleVersion = "6.2"
+			oracleVersion = DefaultOracleVersion
 		}
 
 		testVersion, existsScyllaTest := os.LookupEnv("GEMINI_SCYLLA_TEST")
 		if !existsScyllaTest || testVersion == "" {
-			testVersion = "2025.1"
+			testVersion = DefaultTestVersion
 		}
 
 		// Borrow an oracle node and a test node together (atomically) from the

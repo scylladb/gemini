@@ -235,7 +235,7 @@ func TestSameMsNoRowLoss(t *testing.T) {
 				keyspace, table,
 				"test_ks", "test_table",
 				partitionKeys,
-				replication.NewSimpleStrategy(),
+				replication.NewNetworkTopologyStrategy(),
 			)
 			require.NoError(t, err)
 			t.Cleanup(func() {
@@ -363,7 +363,7 @@ func TestFetchPagesBeyondFirstPage(t *testing.T) {
 		keyspace, table,
 		"test_ks", "test_table",
 		partitionKeys,
-		replication.NewSimpleStrategy(),
+		replication.NewNetworkTopologyStrategy(),
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {

@@ -40,13 +40,13 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 	keyspace := testutils.GenerateUniqueKeyspaceName(t)
 
 	assert.NoError(scyllaContainer.Test.Query(
-		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
+		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1}", keyspace),
 	).Exec())
 	assert.NoError(scyllaContainer.Test.Query(
 		fmt.Sprintf("CREATE TABLE %s.table_1 (id timeuuid PRIMARY KEY, value list<text>)", keyspace),
 	).Exec())
 	assert.NoError(scyllaContainer.Oracle.Query(
-		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}", keyspace),
+		fmt.Sprintf("CREATE KEYSPACE %s WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 1}", keyspace),
 	).Exec())
 	assert.NoError(scyllaContainer.Oracle.Query(
 		fmt.Sprintf("CREATE TABLE %s.table_1 (id timeuuid PRIMARY KEY, value list<text>)", keyspace),
@@ -55,8 +55,8 @@ func Test_DuplicateValuesWithCompare(t *testing.T) {
 	schema := &typedef.Schema{
 		Keyspace: typedef.Keyspace{Name: keyspace},
 		Config: typedef.SchemaConfig{
-			ReplicationStrategy:              replication.NewSimpleStrategy(),
-			OracleReplicationStrategy:        replication.NewSimpleStrategy(),
+			ReplicationStrategy:              replication.NewNetworkTopologyStrategy(),
+			OracleReplicationStrategy:        replication.NewNetworkTopologyStrategy(),
 			AsyncObjectStabilizationAttempts: 10,
 			AsyncObjectStabilizationDelay:    10 * time.Millisecond,
 		},

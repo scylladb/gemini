@@ -103,7 +103,7 @@ func TestBuildCreateTableQueryUnit(t *testing.T) {
 			partitionKeys: typedef.Columns{
 				{Name: "pk0", Type: typedef.TypeText},
 			},
-			replication: replication.NewSimpleStrategy(),
+			replication: replication.NewNetworkTopologyStrategy(),
 			wantContains: []string{
 				"CREATE TABLE IF NOT EXISTS test_logs.test_statements",
 				"pk0 text",
@@ -120,7 +120,7 @@ func TestBuildCreateTableQueryUnit(t *testing.T) {
 				{Name: "pk0", Type: typedef.TypeText},
 				{Name: "pk1", Type: typedef.TypeInt},
 			},
-			replication: replication.NewSimpleStrategy(),
+			replication: replication.NewNetworkTopologyStrategy(),
 			wantContains: []string{
 				"pk0 text",
 				"pk1 int",
@@ -134,7 +134,7 @@ func TestBuildCreateTableQueryUnit(t *testing.T) {
 			partitionKeys: typedef.Columns{
 				{Name: "id", Type: typedef.TypeUUID},
 			},
-			replication: replication.NewSimpleStrategy(),
+			replication: replication.NewNetworkTopologyStrategy(),
 			wantContains: []string{
 				"id uuid",
 			},
@@ -959,7 +959,7 @@ func BenchmarkBuildCreateTableQuery(b *testing.B) {
 		{Name: "pk0", Type: typedef.TypeText},
 		{Name: "pk1", Type: typedef.TypeInt},
 	}
-	repl := replication.NewSimpleStrategy()
+	repl := replication.NewNetworkTopologyStrategy()
 
 	b.ResetTimer()
 	for range b.N {

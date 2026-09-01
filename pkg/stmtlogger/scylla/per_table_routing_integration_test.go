@@ -93,7 +93,7 @@ func TestLogger_MultiTableLogging_NoDrops_Integration(t *testing.T) {
 		containers.TestPort(),
 		containers.DockerMode,
 		"", "",
-		replication.NewSimpleStrategy(),
+		replication.NewNetworkTopologyStrategy(),
 		itemCh,
 		"", "", // no statement files: exercise the committer / _logs tables only
 		errorCh,

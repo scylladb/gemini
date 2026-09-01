@@ -137,7 +137,7 @@ Results are stored in JSON format:
       "timestamp": "2025-10-26T17:14:00Z",
       "git_commit": "abc123def456",
       "git_branch": "main",
-      "go_version": "go1.25.2",
+      "go_version": "go1.27.0",
       "os": "linux",
       "arch": "amd64",
       "cpu": "Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz",
@@ -184,7 +184,7 @@ jobs:
       
       - uses: actions/setup-go@v4
         with:
-          go-version: '1.25'
+          go-version: '1.27'
       
       - name: Run Benchmarks
         run: |

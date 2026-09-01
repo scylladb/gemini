@@ -199,7 +199,7 @@ func Sizeof(v any) uint64 {
 func MarshalJSON(v any) []byte {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Appendf(nil, "%q", "json marshal failed: "+err.Error())
+		return marshalFailure(err)
 	}
 
 	return data
@@ -208,7 +208,16 @@ func MarshalJSON(v any) []byte {
 func MarshalJSONIndent(v any, prefix, indent string) []byte {
 	data, err := json.MarshalIndent(v, prefix, indent)
 	if err != nil {
-		return fmt.Appendf(nil, "%q", "json marshal failed: "+err.Error())
+		return marshalFailure(err)
+	}
+
+	return data
+}
+
+func marshalFailure(cause error) []byte {
+	data, err := json.Marshal("json marshal failed: " + cause.Error())
+	if err != nil {
+		return []byte(`"json marshal failed"`)
 	}
 
 	return data
