@@ -1,6 +1,6 @@
 module github.com/scylladb/gemini
 
-go 1.25.0
+go 1.26.0
 
 replace github.com/gocql/gocql => github.com/scylladb/gocql v1.19.0
 
@@ -26,7 +26,7 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.1
-	golang.org/x/exp v0.0.0-20260727155853-b88d891fe743
+	golang.org/x/exp v0.0.0-20260824195058-e88cd73687aa
 	golang.org/x/sync v0.22.0
 	gonum.org/v1/gonum v0.17.0
 	gopkg.in/inf.v0 v0.9.1
@@ -98,9 +98,9 @@ require (
 	golang.org/x/mod v0.40.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260807164820-c8921c73eeea // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260831171406-18b4a7587f8a // indirect
 	google.golang.org/grpc v1.82.1 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	mvdan.cc/gofumpt v0.9.1 // indirect
 )
