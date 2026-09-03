@@ -200,7 +200,10 @@ func Sizeof(v any) uint64 {
 	}
 }
 
-func MarshalJSON(v any) []byte {
+// MarshalJSONUnchecked returns the JSON encoding of v, or a JSON string that
+// holds the marshal error. Call it only from String, Error and ToCQL, which
+// cannot return an error.
+func MarshalJSONUnchecked(v any) []byte {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return marshalFailure(err)
@@ -209,13 +212,18 @@ func MarshalJSON(v any) []byte {
 	return data
 }
 
-func MarshalJSONIndent(v any, prefix, indent string) []byte {
-	data, err := json.MarshalIndent(v, prefix, indent)
-	if err != nil {
-		return marshalFailure(err)
+// MarshalJSONKey returns the JSON encoding of v for use as a hash input, a sort
+// key or a row in a report. JSON cannot encode every value, for example a NaN
+// float. For such a value, MarshalJSONKey returns v in Go syntax as a JSON
+// string. Two different values thus give two different results, and the
+// result is always valid JSON.
+func MarshalJSONKey(v any) []byte {
+	data, err := json.Marshal(v)
+	if err == nil {
+		return data
 	}
 
-	return data
+	return MarshalJSONUnchecked(fmt.Sprintf("%#v", v))
 }
 
 func marshalFailure(cause error) []byte {

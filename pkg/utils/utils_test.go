@@ -15,8 +15,10 @@
 package utils_test
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"math/big"
 	"math/rand/v2"
 	"net"
@@ -415,4 +417,17 @@ func TestGetPutTimer_Reuse(t *testing.T) {
 	utils.PutTimer(t1)
 	t2 := utils.GetTimer(10 * time.Millisecond)
 	utils.PutTimer(t2)
+}
+
+func TestMarshalJSONKey(t *testing.T) {
+	t.Parallel()
+
+	require.JSONEq(t, `[1,"a"]`, string(utils.MarshalJSONKey([]any{1, "a"})))
+
+	nan := utils.MarshalJSONKey([]any{math.NaN()})
+	inf := utils.MarshalJSONKey([]any{math.Inf(1)})
+
+	require.True(t, json.Valid(nan), "the result must stay valid JSON: %s", nan)
+	require.True(t, json.Valid(inf), "the result must stay valid JSON: %s", inf)
+	require.NotEqual(t, string(nan), string(inf), "two values that JSON cannot encode must not share one key")
 }

@@ -322,11 +322,18 @@ func printSetup(schema *typedef.Schema, ratio statements.Ratios, seed, schemaSee
 	}
 	_ = tw.Flush()
 
-	jsonSchema := utils.MarshalJSONIndent(schema, "", "    ")
-	fmt.Printf("Schema: %v\n", string(jsonSchema))
+	printJSON("Schema", schema)
+	printJSON("Statement Ratios", ratio)
+}
 
-	jsonStatementsRatio := utils.MarshalJSONIndent(ratio, "", "    ")
-	fmt.Printf("Statement Ratios: %v\n", string(jsonStatementsRatio))
+func printJSON(label string, v any) {
+	data, err := json.MarshalIndent(v, "", "    ")
+	if err != nil {
+		fmt.Printf("%s: cannot encode as JSON: %v\n", label, err)
+		return
+	}
+
+	fmt.Printf("%s: %s\n", label, data)
 }
 
 func RealRandom() uint64 {
