@@ -163,7 +163,7 @@ func TestHeapMemoryManagement(t *testing.T) {
 	t.Run("heap_grows_as_needed", func(t *testing.T) {
 		t.Parallel()
 
-		buckets := []time.Duration{100 * time.Millisecond}
+		buckets := []time.Duration{1 * time.Hour}
 		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 
@@ -201,7 +201,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 
 	t.Run("empty_heap_works", func(t *testing.T) {
 		t.Parallel()
-		buckets := []time.Duration{100 * time.Millisecond}
+		buckets := []time.Duration{1 * time.Hour}
 		d := newDeleted(t.Context(), buckets, 0)
 		defer d.Close()
 

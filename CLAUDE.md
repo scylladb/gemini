@@ -29,6 +29,38 @@ Any difference indicates a bug in the SUT.
    After configurable delays, they are re-validated (expecting zero rows on both clusters).
 9. **Error budget**: When max errors reached, workers stop gracefully via `stop.Flag`.
 
+## Cluster Requirements
+
+Gemini writes to real ScyllaDB or Cassandra nodes. Three constraints control keyspace creation.
+
+1. **ScyllaDB 2026 turns tablets on by default and rejects `SimpleStrategy`.** The server answers
+   "SimpleStrategy doesn't support tablet replication" and creates no keyspace. Use
+   `NetworkTopologyStrategy` in every default, test fixture and hardcoded `CREATE KEYSPACE`.
+2. **A replication default must not name a datacenter.** `replication.NewNetworkTopologyStrategy()`
+   emits `{'class':'NetworkTopologyStrategy','replication_factor':1}`. A literal datacenter key makes
+   `CREATE KEYSPACE` fail on every cluster with a different datacenter name. A user who needs a
+   datacenter passes it through `--replication-strategy`.
+3. **The oracle runs an older version than the system under test.** `pkg/testutils/scylladb.go` sets
+   `DefaultOracleVersion = "2026.1"` and `DefaultTestVersion = "2026.2"`. The oracle is the source of
+   truth, so it must be the version you already trust.
+
+## Cross-Cutting Invariants
+
+- **One store serves every table.** `pkg/services/workload.go` builds the store from
+  `schema.Tables[0]`. Per-table behavior must come from the statement's own query, never from the
+  store constructor arguments. `utils.KeyspaceTableFromQuery` does this for statement-log routing
+  and for asymmetric-write compensation.
+- **A compensating DELETE must reuse the original write timestamp.** Client-side timestamps are the
+  default. A DELETE in a different timestamp domain does not cancel the write it compensates.
+- **`_logs` statement/values pairing rests on an aliasing rule.** `gocql.Batch.Query` stores the
+  caller's args slice, it does not copy. The committer binds into `held[idx]` and reuses that buffer
+  only after the batch executed, so every row is coherent at the moment the driver reads it. Never
+  make batch execution asynchronous, and never rebind a `held` slot that a pending entry still
+  aliases. `pkg/stmtlogger/scylla/scylla_pairing_test.go` fails when either rule breaks.
+- **A failed validation is not proof of a SUT bug until the run is clean.** A timed-out mutation
+  leaves one cluster ahead of the other. Check the asymmetric-write metrics before you attribute a
+  difference to the system under test.
+
 ## Project Structure
 
 - `pkg/` -- all packages for the gemini project
@@ -72,26 +104,26 @@ Any difference indicates a bug in the SUT.
 - **Database**: Scylla/Cassandra using CQL protocol
 - **Testing**: Randomized testing with statistical distributions
 
-## Go Instructions (1.26, 1.27)
+## Go Instructions (Go 1.27)
 
-1. Always use `for range` instead of `for` with `i++` when iterating, this is the new syntax from Go 1.25
+1. Always use `for range` instead of `for` with `i++` when iterating, this is the syntax added in Go 1.22
    Example: `for i := 0; i < 10; i++` should be replaced with `for i := range 10`. If the `i` is not needed it can be
    omitted.
    This is also true when using some integer variable as a counter. `for i := 0; i < VARIABLE; i++` can be replaced with
    `for i := range VARIABLE`, also `i` can be omitted.
-2. Always assume `go` **1.27**. Prefer `go` commands that work with Go 1.27.
+2. Go **1.27** is the default. Assume it, and prefer `go` commands that work with Go 1.27.
 3. Keep `go.mod` `go 1.27`. Do **not** add a `toolchain` line when updating the `go` line (Go 1.27 no longer auto-adds
    it).
 4. Use the new `go.mod` **`ignore`** directive to exclude non-packages (e.g., examples, scratch) from `./...`
 5. Prefer standard library first; avoid third-party deps unless asked.
-6. Slice stack-allocation opportunities (new in 1.25) and avoid unsafe pointer aliasing.
+6. Slice stack-allocation opportunities (added in Go 1.25) and avoid unsafe pointer aliasing.
 7. Use testing/synctest for flaky/racy tests.
 8. Consider the container-aware GOMAXPROCS defaults when benchmarking.
 9. **DWARF 5** debug info by default
 10. Add a `synctest` based test that removes `time.Sleep` and waits deterministically.
 11. Use `go test -race` to detect data races.
-12. Always use in tests for context `t.Context()` and for benchmarking `b.Context()`, there are new go 1.24 function,
-    and they better and avoid linting errors.
+12. In tests use `t.Context()` for context, and `b.Context()` in benchmarks. Both were added in Go 1.24 and they
+    avoid linting errors.
 13. Use `t.Cleanup()` to register cleanup functions in tests instead of `defer` to ensure proper execution order.
 14. Use `t.Parallel()` to run tests in parallel.
 
@@ -144,6 +176,79 @@ Integration tests require two running ScyllaDB nodes (oracle + test).
 | `GEMINI_ORACLE_CLUSTER_IP` | IP of the oracle node | `192.168.100.2` |
 
 For cluster tests (3-node), use `docker/docker-compose-scylla-cluster.yml` instead.
+
+### Test Runtime
+
+Four packages start containers and take minutes, not seconds. Measured on an idle machine with a
+warm image cache:
+
+| Package | Typical time |
+|---|---|
+| `pkg/stmtlogger/scylla` | 4 min 30 s |
+| `pkg/store` | 3 min |
+| `pkg/typedef` | 3 min |
+| `pkg/services` | 2 min 30 s |
+
+Give the whole suite at least 10 minutes. `make test` already passes `-timeout 10m`. A run that
+appears to hang after two minutes is one of these packages, not a deadlock. Run one package when you
+only changed one package.
+
+## Make Targets
+
+| Target | Action |
+|---|---|
+| `make check` | `golangci-lint run` |
+| `make fix` | `golangci-lint run --fix` |
+| `make fmt` | `golangci-lint fmt` |
+| `make test` | Full suite with race detector, coverage and `gotestfmt` output |
+| `make setup` | Start the two-node Docker environment and build the debug binary |
+| `make scylla-setup` / `make scylla-shutdown` | Start or stop the two-node environment |
+| `make scylla-setup-cluster` | Start the three-node environment with monitoring |
+| `make integration-test` | Run gemini against the two nodes |
+| `make fieldalign` | Report struct field ordering |
+
+`make fieldalign-fix` rewrites every reported struct and drops the comments inside it. Read the diff
+before you keep it.
+
+## Lint Gates That Change Code
+
+`golangci-lint` runs more than 60 linters. Five of them push toward a weaker program if you satisfy
+them without thought.
+
+- **`forcetypeassert`** bans `v := x.(T)`. Do not answer it with `if v, ok := x.(T); ok` and a silent
+  fallthrough. Gemini generates its own values, so a failed assertion is a gemini bug, and a silent
+  fallthrough books that bug as a SUT failure. Panic with the concrete and the wanted type, as
+  `mustConvert` does in `pkg/statements/insert.go`.
+- **`errchkjson`** bans an unchecked `json.Marshal`. `String()`, `Error()` and `ToCQL()` cannot
+  return an error, so they call `utils.MarshalJSONUnchecked`, which puts the failure in the returned
+  JSON. Every other call site handles the error.
+- **`errname`** requires the `Error` suffix on an error type. This is why the list of job errors is
+  `joberror.ListError`.
+- **`testifylint`** rejects `assert.Equal` on floats. A test that pins an exact constant compares
+  with `!=` in plain Go. Do not weaken it to `InDelta`.
+- **`forbidigo`** bans `fmt.Print*`. Four files print by design and are named in `.golangci.yml`.
+  Everything else logs through `zap`.
+
+`gofumpt` uses `extra.group-params`. `extra-rules` is the deprecated spelling of the same rule.
+
+## Documentation Map
+
+| File | Content |
+|---|---|
+| `docs/architecture.md` | Component diagram and data flow |
+| `docs/getting-started.md` | First run |
+| `docs/cli-arguments.md`, `docs/cmdhelp.md` | Every flag |
+| `docs/schema.md` | Schema JSON format and replication examples |
+| `docs/partitions.md` | Partition pool and distributions |
+| `docs/statement-logger.md` | Statement log tables and files |
+| `docs/statement-ratio.md` | Mutation and validation ratio control |
+| `docs/targeted-deletions.md` | Delete tracking and re-validation |
+| `docs/metrics.md` | Prometheus metrics |
+| `docs/investigation.md`, `docs/troubleshooting.md` | Triage of a failed run |
+| `docs/benchmarks.md`, `docs/development.md`, `docs/release-process.md` | Contributor workflow |
+| `docs/quickref.md` | Command cheat sheet |
+
+Keep `docs/` current. Update the architecture diagrams when the flow changes.
 
 ---
 

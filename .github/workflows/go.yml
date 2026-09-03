@@ -49,3 +49,4 @@ jobs:
         name: Linting
         with:
           install-mode: goinstall
+          version: v2.13.2
