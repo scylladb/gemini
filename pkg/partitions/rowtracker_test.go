@@ -253,9 +253,17 @@ func TestFillZoneConstants(t *testing.T) {
 	assert.Less(t, FillZoneSkip, 1.0)
 
 	// Verify expected values match documented thresholds
-	assert.InDelta(t, 0.30, FillZoneAlwaysPush, 1e-9)
-	assert.InDelta(t, 0.70, FillZoneSampled, 1e-9)
-	assert.InDelta(t, 0.90, FillZoneSkip, 1e-9)
+	if FillZoneAlwaysPush != 0.30 {
+		t.Errorf("FillZoneAlwaysPush = %v, want 0.30", FillZoneAlwaysPush)
+	}
+
+	if FillZoneSampled != 0.70 {
+		t.Errorf("FillZoneSampled = %v, want 0.70", FillZoneSampled)
+	}
+
+	if FillZoneSkip != 0.90 {
+		t.Errorf("FillZoneSkip = %v, want 0.90", FillZoneSkip)
+	}
 }
 
 // ---------------------------------------------------------------------------
