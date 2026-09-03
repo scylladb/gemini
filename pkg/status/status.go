@@ -149,7 +149,7 @@ func (gs *GlobalStatus) PrintResult(
 		for i, err := range gs.Errors.Errors() {
 			fmt.Printf("Error %d: %v\n", i, err)
 		}
-		jsonSchema := utils.MarshalJSONIndent(schema, "", "    ")
+		jsonSchema := utils.MarshalJSONIndentUnchecked(schema, "", "    ")
 		fmt.Printf("Schema: %v\n", string(jsonSchema))
 	}
 
@@ -170,6 +170,6 @@ func (gs *GlobalStatus) AddValidatedRows(rows int) {
 
 func NewGlobalStatus(limit int) *GlobalStatus {
 	return &GlobalStatus{
-		Errors: joberror.NewErrorList(limit),
+		Errors: joberror.NewListError(limit),
 	}
 }

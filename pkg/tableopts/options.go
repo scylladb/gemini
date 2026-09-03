@@ -42,7 +42,7 @@ type MapOption struct {
 }
 
 func (o *MapOption) ToCQL() string {
-	b := utils.MarshalJSON(o.val)
+	b := utils.MarshalJSONUnchecked(o.val)
 	return o.key + " = " + strings.ReplaceAll(string(b), "\"", "'")
 }
 

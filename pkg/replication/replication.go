@@ -24,7 +24,7 @@ import (
 type Replication map[string]any
 
 func (r Replication) ToCQL() string {
-	b := utils.MarshalJSON(r)
+	b := utils.MarshalJSONUnchecked(r)
 	return strings.ReplaceAll(string(b), "\"", "'")
 }
 
@@ -38,7 +38,6 @@ func NewSimpleStrategy() Replication {
 func NewNetworkTopologyStrategy() Replication {
 	return Replication{
 		"class":              "NetworkTopologyStrategy",
-		"datacenter1":        1,
 		"replication_factor": 1,
 	}
 }

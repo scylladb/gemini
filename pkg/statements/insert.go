@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"time"
 
@@ -84,10 +85,19 @@ func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 		case typedef.SimpleType:
 			values[pk.Name] = convertForJSON(t, pks.Values.Get(pk.Name)[0])
 		case *typedef.TupleType:
-			tupVals := make([]any, 0, len(t.ValueTypes))
-			for _, value := range t.ValueTypes {
-				tupVals = append(tupVals, convertForJSON(t, value))
+			elems := pks.Values.Get(pk.Name)
+			if len(elems) != len(t.ValueTypes) {
+				return nil, fmt.Errorf(
+					"partition key %q carries %d values, want %d for %s",
+					pk.Name, len(elems), len(t.ValueTypes), t.CQLDef(),
+				)
 			}
+
+			tupVals := make([]any, len(t.ValueTypes))
+			for i, elemType := range t.ValueTypes {
+				tupVals[i] = convertForJSON(elemType, elems[i])
+			}
+
 			values[pk.Name] = tupVals
 		default:
 			panic("unknown type: " + t.Name())
@@ -114,7 +124,7 @@ func (g *Generator) InsertJSON(_ context.Context) (*typedef.Stmt, error) {
 func convertForJSON(vType typedef.Type, value any) any {
 	switch vType {
 	case typedef.TypeBlob:
-		val, _ := value.([]byte)
+		val := mustConvert[[]byte](vType, value)
 		buffer := bytes.NewBuffer(nil)
 		buffer.Grow(len(val)*2 + 2) // 2 for "0x" prefix
 		buffer.WriteString("0x")
@@ -122,29 +132,29 @@ func convertForJSON(vType typedef.Type, value any) any {
 		_, _ = encoder.Write(val)
 		return utils.UnsafeString(buffer.Bytes())
 	case typedef.TypeDate:
-		if val, ok := value.(time.Time); ok {
-			return val.Format(time.DateOnly)
-		}
+		return mustConvert[time.Time](vType, value).Format(time.DateOnly)
 	case typedef.TypeDuration:
-		if val, ok := value.(time.Duration); ok {
-			return utils.TimeDurationToScyllaDuration(val)
-		}
+		return utils.TimeDurationToScyllaDuration(mustConvert[time.Duration](vType, value))
 	case typedef.TypeDecimal:
-		if val, ok := value.(*inf.Dec); ok {
-			return val.String()
-		}
+		return mustConvert[*inf.Dec](vType, value).String()
 	case typedef.TypeUUID, typedef.TypeTimeuuid:
-		if val, ok := value.(gocql.UUID); ok {
-			return val.String()
-		}
+		return mustConvert[gocql.UUID](vType, value).String()
 	case typedef.TypeVarint:
-		if val, ok := value.(*big.Int); ok {
-			return val.String()
-		}
+		return mustConvert[*big.Int](vType, value).String()
 	case typedef.TypeTime:
-		val, _ := value.(int64)
-		return time.Unix(0, val).UTC().Format("15:04:05.000000000")
+		val := mustConvert[time.Duration](vType, value)
+		return time.Unix(0, int64(val)).UTC().Format("15:04:05.000000000")
 	}
 
 	return value
+}
+
+func mustConvert[T any](vType typedef.Type, value any) T {
+	val, ok := value.(T)
+	if !ok {
+		var want T
+		panic(fmt.Sprintf("gemini generated %T for column type %s, want %T", value, vType.CQLDef(), want))
+	}
+
+	return val
 }
