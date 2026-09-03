@@ -226,8 +226,10 @@ them without thought.
   fallthrough books that bug as a SUT failure. Panic with the concrete type, as the validation
   worker does in `pkg/jobs/validation.go` when an error is not a `*joberror.JobError`.
 - **`errchkjson`** bans an unchecked `json.Marshal`. `String()`, `Error()` and `ToCQL()` cannot
-  return an error, so they call `utils.MarshalJSON` or `utils.MarshalJSONIndent`. Both put the
-  failure in the returned JSON. Every other call site handles the error.
+  return an error, so they call `utils.MarshalJSONUnchecked`. It puts the failure in the returned
+  JSON. A hash input, a sort key or a report row uses `utils.MarshalJSONKey`. It encodes a value
+  that JSON rejects, such as a NaN float, in Go syntax, so two values never share one key. Every
+  other call site handles the error.
 - **`errname`** requires the `Error` suffix on an error type. This is why the list of job errors is
   `joberror.ListError`.
 - **`testifylint`** rejects `assert.Equal` on floats. A test that pins an exact constant compares

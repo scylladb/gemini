@@ -85,11 +85,11 @@ func partitionHashFromValues(v *typedef.Values) string {
 			b.WriteByte(',')
 		}
 		// Marshal key
-		kb := utils.MarshalJSON(k)
+		kb := utils.MarshalJSONKey(k)
 		b.Write(kb)
 		b.WriteByte(':')
 		// Marshal values
-		vb := utils.MarshalJSON(m[k])
+		vb := utils.MarshalJSONKey(m[k])
 		b.Write(vb)
 	}
 	b.WriteByte('}')

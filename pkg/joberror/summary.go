@@ -309,7 +309,7 @@ func buildStmtKeyFromValues(v partitionKeyReader) string {
 				val = json.Number(strconv.FormatInt(i64, 10))
 			}
 		}
-		b := utils.MarshalJSON(val)
+		b := utils.MarshalJSONKey(val)
 		sb.Write(b)
 	}
 	return sb.String()

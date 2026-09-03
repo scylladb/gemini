@@ -63,7 +63,7 @@ type (
 		fetchCtx context.Context
 		logger   *zap.Logger
 		channel  <-chan stmtlogger.Item
-		session  *gocql.Session
+		logs     logSession
 		// statements holds one *cqlStatements per source table, keyed by
 		// "keyspace.table". The logger is shared across every table in the
 		// schema, so each item is routed to its own table's _logs table whose
@@ -179,7 +179,7 @@ func New(
 	logger := &Logger{
 		channel:    ch,
 		logger:     l,
-		session:    session,
+		logs:       gocqlLogSession{session: session},
 		statements: statements,
 	}
 
@@ -476,19 +476,29 @@ func (s *Logger) bind(it stmtlogger.Item, dst []any) (*cqlStatements, []any, boo
 	return cql, args, true
 }
 
-// makeBatch creates a new gocql batch on the shared _logs session.
-func (s *Logger) makeBatch(ctx context.Context) *gocql.Batch {
-	return s.session.BatchWithContext(ctx, gocql.UnloggedBatch)
+// logSession writes the committer's batches and single rows to the _logs
+// keyspace. gocqlLogSession is the only production implementation.
+type logSession interface {
+	makeBatch(ctx context.Context) *gocql.Batch
+	execBatch(ctx context.Context, batch *gocql.Batch) error
+	execQuery(ctx context.Context, stmt string, args ...any) error
 }
 
-// execBatch executes the provided batch on the shared _logs session.
-func (s *Logger) execBatch(_ context.Context, batch *gocql.Batch) error {
-	return s.session.ExecuteBatch(batch)
+// gocqlLogSession runs every write on the shared _logs session.
+type gocqlLogSession struct {
+	session *gocql.Session
 }
 
-// execQuery executes a single statement on the shared _logs session.
-func (s *Logger) execQuery(ctx context.Context, stmt string, args ...any) error {
-	q := s.session.QueryWithContext(ctx, stmt, args...)
+func (g gocqlLogSession) makeBatch(ctx context.Context) *gocql.Batch {
+	return g.session.BatchWithContext(ctx, gocql.UnloggedBatch)
+}
+
+func (g gocqlLogSession) execBatch(_ context.Context, batch *gocql.Batch) error {
+	return g.session.ExecuteBatch(batch)
+}
+
+func (g gocqlLogSession) execQuery(ctx context.Context, stmt string, args ...any) error {
+	q := g.session.QueryWithContext(ctx, stmt, args...)
 	defer q.Release()
 	return q.Exec()
 }
@@ -500,7 +510,7 @@ func (s *Logger) executeBatchWithFallback(ctx context.Context, batch *gocql.Batc
 		return
 	}
 
-	err := s.execBatch(ctx, batch)
+	err := s.logs.execBatch(ctx, batch)
 
 	if err == nil || errors.Is(err, context.Canceled) {
 		return
@@ -533,7 +543,7 @@ func (s *Logger) executeBatchWithFallback(ctx context.Context, batch *gocql.Batc
 		if ctx.Err() != nil {
 			return
 		}
-		if err = s.execQuery(ctx, heldInsert[i], held[i]...); err != nil && !errors.Is(err, context.Canceled) {
+		if err = s.logs.execQuery(ctx, heldInsert[i], held[i]...); err != nil && !errors.Is(err, context.Canceled) {
 			s.logger.Error("failed to insert item after batch failure", zap.Error(err))
 		}
 	}
@@ -579,7 +589,7 @@ func (s *Logger) insertWorker() {
 		// filling LogStmt's channel and freezing every gocql observer
 		// callback (and thus every mutation/validation worker).
 		ctx, cancel := context.WithTimeout(parentCtx, committerBatchTimeout)
-		batch := s.makeBatch(ctx)
+		batch := s.logs.makeBatch(ctx)
 
 		// Helper to add an item to the batch
 		addItem := func(it stmtlogger.Item) {
@@ -644,7 +654,7 @@ func (s *Logger) insert(it stmtlogger.Item) {
 	if !ok {
 		return
 	}
-	_ = s.execQuery(context.Background(), cql.insertStmt, args...)
+	_ = s.logs.execQuery(context.Background(), cql.insertStmt, args...)
 }
 
 // recordMalformed counts a dropped log item whose partition-key bind arity did

@@ -24,7 +24,7 @@ import (
 type Replication map[string]any
 
 func (r Replication) ToCQL() string {
-	b := utils.MarshalJSON(r)
+	b := utils.MarshalJSONUnchecked(r)
 	return strings.ReplaceAll(string(b), "\"", "'")
 }
 

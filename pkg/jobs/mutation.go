@@ -282,6 +282,13 @@ func (m *Mutation) Do(ctx context.Context) error {
 			continue
 		}
 
+		if err != nil && ctx.Err() == nil {
+			m.logger.Error("mutation worker could not generate or run a statement",
+				zap.String("table", m.table.Name),
+				zap.Error(err),
+			)
+		}
+
 		if m.status.HasReachedErrorCount() {
 			m.stopFlag.SetSoft(true)
 			return ErrMutationJobStopped

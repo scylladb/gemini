@@ -227,21 +227,21 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 }
 
 func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQuery) {
-	c.observeQuery(ctx, query, query.Attempt)
+	c.observeQuery(ctx, query, func() int { return query.Attempt })
 }
 
 func (c *ClusterObserver) ObserveQueryWithAttemptMetrics(
 	ctx context.Context,
 	query gocql.ObservedQueryWithAttemptMetrics,
 ) {
-	c.observeQuery(ctx, query.ObservedQuery, hostAttempts(query.AttemptMetrics, query.Host))
+	c.observeQuery(ctx, query.ObservedQuery, func() int {
+		return hostAttempts(query.AttemptMetrics, query.Host)
+	})
 }
 
+// hostAttempts counts the attempts that went to host. observeQuery reads
+// query.Host before it calls the attempt function, so host is never nil here.
 func hostAttempts(metrics gocql.AttemptMetrics, host *gocql.HostInfo) int {
-	if host == nil {
-		return metrics.Attempts()
-	}
-
 	hostID := host.HostID()
 	attempts := 0
 
@@ -256,7 +256,11 @@ func hostAttempts(metrics gocql.AttemptMetrics, host *gocql.HostInfo) int {
 	return attempts
 }
 
-func (c *ClusterObserver) observeQuery(ctx context.Context, query gocql.ObservedQuery, attempts int) {
+func (c *ClusterObserver) observeQuery(
+	ctx context.Context,
+	query gocql.ObservedQuery,
+	attempts func() int,
+) {
 	data := MustGetContextData(ctx)
 	if data == nil {
 		return
@@ -288,7 +292,7 @@ func (c *ClusterObserver) observeQuery(ctx context.Context, query gocql.Observed
 			Start:         stmtlogger.Time{Time: query.Start},
 			Duration:      stmtlogger.Duration{Duration: duration},
 			Host:          instance,
-			Attempt:       attempts,
+			Attempt:       attempts(),
 			GeminiAttempt: data.GeminiAttempt,
 			Type:          c.clusterName,
 			StatementType: data.Statement.QueryType,

@@ -24,7 +24,6 @@ import (
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
-	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type Uint64 struct {
@@ -149,8 +148,12 @@ func (gs *GlobalStatus) PrintResult(
 		for i, err := range gs.Errors.Errors() {
 			fmt.Printf("Error %d: %v\n", i, err)
 		}
-		jsonSchema := utils.MarshalJSONIndent(schema, "", "    ")
-		fmt.Printf("Schema: %v\n", string(jsonSchema))
+		jsonSchema, schemaErr := json.MarshalIndent(schema, "", "    ")
+		if schemaErr != nil {
+			fmt.Printf("Schema: cannot encode as JSON: %v\n", schemaErr)
+		} else {
+			fmt.Printf("Schema: %s\n", jsonSchema)
+		}
 	}
 
 	joberror.PrintCorruptionSummary(summaryWriter, summary)
@@ -170,6 +173,6 @@ func (gs *GlobalStatus) AddValidatedRows(rows int) {
 
 func NewGlobalStatus(limit int) *GlobalStatus {
 	return &GlobalStatus{
-		Errors: joberror.NewErrorList(limit),
+		Errors: joberror.NewListError(limit),
 	}
 }
