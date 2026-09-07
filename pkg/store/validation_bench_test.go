@@ -734,7 +734,6 @@ func BenchmarkZipAndCompare(b *testing.B) {
 }
 
 // ── BenchmarkComparisonResult_ToError ────────────────────────────────────────
-// ToError builds multierr error values; benchmarks the error-rendering path.
 
 func BenchmarkComparisonResult_ToError(b *testing.B) {
 	table := makeScalarTable(2)

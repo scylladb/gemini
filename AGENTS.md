@@ -21,26 +21,26 @@ a system under test (SUT) and a test oracle.
 - **Database**: Scylla/Cassandra using CQL protocol
 - **Testing**: Randomized testing with statistical distributions
 
-## Go instructions (1.26, 1.27)
+## Go instructions (Go 1.27)
 
-1. Always use `for range` instead of `for` with `i++` when iterating, this is the new syntax from Go 1.25
+1. Always use `for range` instead of `for` with `i++` when iterating, this is the syntax added in Go 1.22
    Example: `for i := 0; i < 10; i++` should be replaced with `for i := range 10`. If the `i` is not needed it can be
    omitted.
    This is also true when using some integer variable as a counter. `for i := 0; i < VARIABLE; i++` can be replaced with
    `for i := range VARIABLE`, also `i` can be omitted.
-2. Always assume `go` **1.27**. Prefer `go` commands that work with Go 1.27.
+2. Go **1.27** is the default. Assume it, and prefer `go` commands that work with Go 1.27.
 3. Keep `go.mod` `go 1.27`. Do **not** add a `toolchain` line when updating the `go` line (Go 1.27 no longer auto-adds
    it).
 4. Use the new `go.mod` **`ignore`** directive to exclude non-packages (e.g., examples, scratch) from `./...`
 5. Prefer standard library first; avoid third-party deps unless asked.
-6. Slice stack-allocation opportunities (new in 1.25) and avoid unsafe pointer aliasing.
+6. Slice stack-allocation opportunities (added in Go 1.25) and avoid unsafe pointer aliasing.
 7. Use testing/synctest for flaky/racy tests.
 8. Consider the container-aware GOMAXPROCS defaults when benchmarking.
 9. **DWARF 5** debug info by default
 10. Add a `synctest` based test that removes `time.Sleep` and waits deterministically.
 11. Use `go test -race` to detect data races.
-12. Always use in tests for context `t.Context()` and for benchmarking `b.Context()`, there are new go 1.24 function,
-    and they better and avoid linting errors.
+12. In tests use `t.Context()` for context, and `b.Context()` in benchmarks. Both were added in Go 1.24 and they
+    avoid linting errors.
 13. Use `t.Cleanup()` to register cleanup functions in tests instead of `defer` to ensure proper execution order.
 14. Use `t.Parallel()` to run tests in parallel.
 

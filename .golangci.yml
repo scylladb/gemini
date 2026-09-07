@@ -145,13 +145,17 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      - path: 'pkg/(cmd|status|benchmarks)/'
+      - path: 'pkg/(cmd/(root|benchmark)|status/status|benchmarks/results)\.go$'
         linters:
           - forbidigo
       - path: _test\.go$
         linters:
           - govet
-        text: '(fieldalignment|shadow)'
+        text: fieldalignment
+      - path: 'pkg/stmtlogger/scylla/.*_test\.go$'
+        linters:
+          - govet
+        text: shadow
       - path: _test\.go$
         linters:
           - lll

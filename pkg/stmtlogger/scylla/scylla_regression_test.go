@@ -35,8 +35,6 @@ import (
 // per line, with the job error's own query, message and partition keys, and the
 // streamed rows verbatim. Rows are written straight from the CQL iterator now,
 // so a malformed separator would corrupt the file for every later reader.
-//
-
 func TestStatementSink_JSONLRegression(t *testing.T) {
 	t.Parallel()
 
