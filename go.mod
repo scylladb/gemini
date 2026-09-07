@@ -9,6 +9,7 @@ require (
 	github.com/gocql/gocql v1.8.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v90 v90.0.0
+	github.com/google/go-github/v91 v91.0.0
 	github.com/google/uuid v1.6.0
 	github.com/hailocab/go-hostpool v0.0.0-20160125115350-e80d13ce29ed
 	github.com/prometheus/client_golang v1.24.1
@@ -33,6 +34,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
+	github.com/cenkalti/backoff/v7 v7.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
