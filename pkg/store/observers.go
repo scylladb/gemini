@@ -227,14 +227,14 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 }
 
 func (c *ClusterObserver) ObserveQuery(ctx context.Context, query gocql.ObservedQuery) {
-	c.observeQuery(ctx, query, query.Attempt)
+	c.observeQuery(ctx, query, gocql.AttemptMetrics{}, false)
 }
 
 func (c *ClusterObserver) ObserveQueryWithAttemptMetrics(
 	ctx context.Context,
 	query gocql.ObservedQueryWithAttemptMetrics,
 ) {
-	c.observeQuery(ctx, query.ObservedQuery, hostAttempts(query.AttemptMetrics, query.Host))
+	c.observeQuery(ctx, query.ObservedQuery, query.AttemptMetrics, true)
 }
 
 func hostAttempts(metrics gocql.AttemptMetrics, host *gocql.HostInfo) int {
@@ -256,7 +256,12 @@ func hostAttempts(metrics gocql.AttemptMetrics, host *gocql.HostInfo) int {
 	return attempts
 }
 
-func (c *ClusterObserver) observeQuery(ctx context.Context, query gocql.ObservedQuery, attempts int) {
+func (c *ClusterObserver) observeQuery(
+	ctx context.Context,
+	query gocql.ObservedQuery,
+	attemptMetrics gocql.AttemptMetrics,
+	perHostAttempts bool,
+) {
 	data := MustGetContextData(ctx)
 	if data == nil {
 		return
@@ -281,6 +286,11 @@ func (c *ClusterObserver) observeQuery(ctx context.Context, query gocql.Observed
 	duration := query.End.Sub(query.Start)
 
 	if c.logger != nil && !data.Statement.QueryType.IsSelect() {
+		attempts := query.Attempt
+		if perHostAttempts {
+			attempts = hostAttempts(attemptMetrics, query.Host)
+		}
+
 		c.logStatement(data.Statement, stmtlogger.Item{
 			Error:         mo.Right[error, string](errStr),
 			Statement:     query.Statement,

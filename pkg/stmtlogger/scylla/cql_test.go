@@ -46,7 +46,7 @@ func TestBuildCreateTableQuery(t *testing.T) {
 				},
 			},
 			replication:  replication.NewNetworkTopologyStrategy(),
-			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS test_logs WITH replication={'class':'NetworkTopologyStrategy','datacenter1':1,'replication_factor':1} AND durable_writes = true;",
+			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS test_logs WITH replication={'class':'NetworkTopologyStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS test_logs.test_statements(pk0 text," +
 				"ts bigint, seq bigint, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
 				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((pk0, ty), ts, attempt, gemini_attempt, seq)) " +
@@ -68,7 +68,7 @@ func TestBuildCreateTableQuery(t *testing.T) {
 				},
 			},
 			replication:  replication.NewNetworkTopologyStrategy(),
-			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS test_logs WITH replication={'class':'NetworkTopologyStrategy','datacenter1':1,'replication_factor':1} AND durable_writes = true;",
+			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS test_logs WITH replication={'class':'NetworkTopologyStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS test_logs.test_statements(pk0 text,pk1 int," +
 				"ts bigint, seq bigint, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
 				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((pk0,pk1, ty), ts, attempt, gemini_attempt, seq)) " +
@@ -86,7 +86,7 @@ func TestBuildCreateTableQuery(t *testing.T) {
 				},
 			},
 			replication:  replication.NewNetworkTopologyStrategy(),
-			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS ks_logs WITH replication={'class':'NetworkTopologyStrategy','datacenter1':1,'replication_factor':1} AND durable_writes = true;",
+			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS ks_logs WITH replication={'class':'NetworkTopologyStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS ks_logs.tbl_statements(id uuid," +
 				"ts bigint, seq bigint, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
 				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((id, ty), ts, attempt, gemini_attempt, seq)) " +

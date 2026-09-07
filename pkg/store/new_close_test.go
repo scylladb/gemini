@@ -88,7 +88,7 @@ func TestNew_BasicConfiguration(t *testing.T) {
 	}
 
 	logger := zap.NewNop()
-	errorList := joberror.NewErrorList(10)
+	errorList := joberror.NewListError(10)
 
 	store, err := New(
 		keyspace,
@@ -153,7 +153,7 @@ func TestNew_WithoutOracleCluster(t *testing.T) {
 	}
 
 	logger := zap.NewNop()
-	errorList := joberror.NewErrorList(10)
+	errorList := joberror.NewListError(10)
 
 	store, err := New(
 		keyspace,
@@ -221,7 +221,7 @@ func TestNew_DefaultConfiguration(t *testing.T) {
 	}
 
 	logger := zap.NewNop()
-	errorList := joberror.NewErrorList(10)
+	errorList := joberror.NewListError(10)
 
 	store, err := New(
 		keyspace,
@@ -284,7 +284,7 @@ func TestNew_InvalidTestCluster(t *testing.T) {
 	}
 
 	logger := zap.NewNop()
-	errorList := joberror.NewErrorList(10)
+	errorList := joberror.NewListError(10)
 
 	store, err := New(
 		keyspace,
