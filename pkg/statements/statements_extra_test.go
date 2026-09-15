@@ -34,6 +34,7 @@ import (
 // Do NOT add any field of type *rand.Rand or math/rand.Rand to this struct.
 type mockPartitions struct {
 	deleted      chan typedef.PartitionKeys
+	nextKeys     atomic.Pointer[typedef.PartitionKeys]
 	count        atomic.Uint64
 	invalidCount atomic.Uint64
 }
@@ -61,6 +62,10 @@ func (m *mockPartitions) Get(_ uint64) typedef.PartitionKeys {
 }
 
 func (m *mockPartitions) Next() typedef.PartitionKeys {
+	if keys := m.nextKeys.Load(); keys != nil {
+		return *keys
+	}
+
 	return typedef.PartitionKeys{ID: uuid.New()}
 }
 

@@ -196,7 +196,7 @@ func Sizeof(v any) uint64 {
 	}
 }
 
-func MarshalJSON(v any) []byte {
+func MarshalJSONUnchecked(v any) []byte {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return marshalFailure(err)
@@ -205,7 +205,7 @@ func MarshalJSON(v any) []byte {
 	return data
 }
 
-func MarshalJSONIndent(v any, prefix, indent string) []byte {
+func MarshalJSONIndentUnchecked(v any, prefix, indent string) []byte {
 	data, err := json.MarshalIndent(v, prefix, indent)
 	if err != nil {
 		return marshalFailure(err)
