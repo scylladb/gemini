@@ -535,8 +535,6 @@ func (ds delegatingStore) executeParallelMutations(
 }
 
 // waitForMutationResults waits for mutation results and updates the result struct
-//
-
 func (ds delegatingStore) waitForMutationResults(ctx context.Context, ch chan mutationChanRes, result *mutationResult, expectTest, expectOracle bool, expected int) {
 	received := 0
 	for received < expected {
