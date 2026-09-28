@@ -80,7 +80,7 @@ Any difference indicates a bug in the SUT.
    This is also true when using some integer variable as a counter. `for i := 0; i < VARIABLE; i++` can be replaced with
    `for i := range VARIABLE`, also `i` can be omitted.
 2. Always assume `go` **1.27**. Prefer `go` commands that work with Go 1.27.
-3. Keep `go.mod` `go 1.27`. Do **not** add a `toolchain` line when updating the `go` line (Go 1.27 no longer auto-adds
+3. Keep `go.mod` `go 1.27.0`. Do **not** add a `toolchain` line when updating the `go` line (Go 1.27 no longer auto-adds
    it).
 4. Use the new `go.mod` **`ignore`** directive to exclude non-packages (e.g., examples, scratch) from `./...`
 5. Prefer standard library first; avoid third-party deps unless asked.
@@ -93,11 +93,14 @@ Any difference indicates a bug in the SUT.
 12. Always use in tests for context `t.Context()` and for benchmarking `b.Context()`, there are new go 1.24 function,
     and they better and avoid linting errors.
 13. Use `t.Cleanup()` to register cleanup functions in tests instead of `defer` to ensure proper execution order.
-14. Use `t.Parallel()` to run tests in parallel.
+14. Use `t.Parallel()` to run tests in parallel. Do not call it in a test that calls `t.Setenv()`, or in one of its
+    parent tests. Do not call `t.Parallel()`, `t.Run()`, or
+    `t.Deadline()` on the `*testing.T` inside `synctest.Test`.
 
 ## Vet & Static Checks
 
-Always run go vet ./... and address:
+`make check` runs the `govet` analyzers with the `testing` tag. Outside `make check`, run `go vet -tags testing ./...`.
+Address these reports:
 
 - waitgroup analyzer: fix misplaced (*sync.WaitGroup).Add calls.
 - hostport analyzer: replace fmt.Sprintf("%s:%d", host, port) with net.JoinHostPort(host, strconv.Itoa(port)).
@@ -117,17 +120,16 @@ Integration tests require two running ScyllaDB nodes (oracle + test).
 
 **Setup on Linux:**
 
-1. Start the docker compose environment with 2 nodes:
+1. Start the two nodes and wait until CQL is ready:
    ```bash
-   docker compose -f docker/docker-compose-scylla.yml up -d
+   make scylla-setup
    ```
-   This creates two ScyllaDB containers on a bridge network:
+   It first removes the Scylla containers and networks of this repository, including a running cluster.
+   Then it creates two ScyllaDB containers on a bridge network:
    - `gemini-oracle` at `192.168.100.2`
    - `gemini-test` at `192.168.100.3`
 
-2. Wait for both nodes to be ready (CQL port responsive).
-
-3. Run integration tests with the required environment variables:
+2. Run integration tests with the required environment variables:
    ```bash
    GEMINI_USE_DOCKER_SCYLLA=true \
    GEMINI_TEST_CLUSTER_IP=192.168.100.3 \
@@ -143,7 +145,7 @@ Integration tests require two running ScyllaDB nodes (oracle + test).
 | `GEMINI_TEST_CLUSTER_IP` | IP of the system under test node | `192.168.100.3` |
 | `GEMINI_ORACLE_CLUSTER_IP` | IP of the oracle node | `192.168.100.2` |
 
-For cluster tests (3-node), use `docker/docker-compose-scylla-cluster.yml` instead.
+For cluster tests (3-node), start the nodes with `make scylla-setup-cluster`.
 
 ---
 
@@ -400,3 +402,41 @@ pre-cached query strings and pre-resolved metrics.
 
 Uses Cartesian product calculation bounded by `MaxCartesianProductCount` (100) to limit IN
 clause sizes for multi-partition SELECT and DELETE queries.
+
+## Commands
+
+The tests need the oracle and test nodes. Start them with `make scylla-setup`. It first removes the Scylla containers
+and networks of this repository, including a running cluster. Then run the verify sequence in this order:
+
+```bash
+make check
+GEMINI_USE_DOCKER_SCYLLA=true \
+GEMINI_TEST_CLUSTER_IP=192.168.100.3 \
+GEMINI_ORACLE_CLUSTER_IP=192.168.100.2 \
+go test -tags testing -race ./pkg/...
+```
+
+<!-- qatools-sdlc:begin -->
+## Development flow
+
+This repository uses the `qatools-sdlc` plugin. Every piece of work goes
+through its flow: `/qatools-sdlc:intent <KEY>`, then `/qatools-sdlc:spec` or
+`/qatools-sdlc:rca` for a bug, then `/qatools-sdlc:plan`, then the code.
+Commit each artifact before the stage that consumes it. A review works
+through `/qatools-sdlc:review`. File a Jira issue about our work with
+`/qatools-sdlc:issue`. It needs the Atlassian connector.
+The user may skip the flow for a very small fix when they say so. The pull
+request description then states the skip in one line.
+
+If the `/qatools-sdlc:*` skills are not available, stop and ask the user to
+run these two commands, then start a new session:
+
+    /plugin marketplace add git@github.com:scylladb/qatools.git
+    /plugin install qatools-sdlc@qatools
+
+Jira keys: `QATOOLS-<n>`. Task artifacts: `tasks/<KEY>/`, or
+`tasks/<PARENT>/<KEY>/` for a subtask. Read `docs/INDEX.md` before any task
+and follow the standards in `docs/standards/`. Suggest
+`/qatools-sdlc:standards-update` when a convention comes up that no standard
+holds. Verify sequence: section `Commands` of this file.
+<!-- qatools-sdlc:end -->
