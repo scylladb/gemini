@@ -29,7 +29,7 @@ a system under test (SUT) and a test oracle.
    This is also true when using some integer variable as a counter. `for i := 0; i < VARIABLE; i++` can be replaced with
    `for i := range VARIABLE`, also `i` can be omitted.
 2. Always assume `go` **1.27**. Prefer `go` commands that work with Go 1.27.
-3. Keep `go.mod` `go 1.27`. Do **not** add a `toolchain` line when updating the `go` line (Go 1.27 no longer auto-adds
+3. Keep `go.mod` `go 1.27.0`. Do **not** add a `toolchain` line when updating the `go` line (Go 1.27 no longer auto-adds
    it).
 4. Use the new `go.mod` **`ignore`** directive to exclude non-packages (e.g., examples, scratch) from `./...`
 5. Prefer standard library first; avoid third-party deps unless asked.
@@ -42,11 +42,14 @@ a system under test (SUT) and a test oracle.
 12. Always use in tests for context `t.Context()` and for benchmarking `b.Context()`, there are new go 1.24 function,
     and they better and avoid linting errors.
 13. Use `t.Cleanup()` to register cleanup functions in tests instead of `defer` to ensure proper execution order.
-14. Use `t.Parallel()` to run tests in parallel.
+14. Use `t.Parallel()` to run tests in parallel. Do not call it in a test that calls `t.Setenv()`, or in one of its
+    parent tests. Do not call `t.Parallel()`, `t.Run()`, or
+    `t.Deadline()` on the `*testing.T` inside `synctest.Test`.
 
 ## Vet & Static Checks
 
-Always run go vet ./... and address:
+`make check` runs the `govet` analyzers with the `testing` tag. Outside `make check`, run `go vet -tags testing ./...`.
+Address these reports:
 
 - waitgroup analyzer: fix misplaced (*sync.WaitGroup).Add calls.
 - hostport analyzer: replace fmt.Sprintf("%s:%d", host, port) with net.JoinHostPort(host, strconv.Itoa(port)).
@@ -59,6 +62,24 @@ Always run go vet ./... and address:
 3. IMPORTANT THING: Running tests locally and in CI should be deterministic, so use environment variables to set up
    ScyllaDB clusters
     * ```GEMINI_ORACLE_CLUSTER_IP=192.168.100.2 GEMINI_TEST_CLUSTER_IP=192.168.100.3 GEMINI_USE_DOCKER_SCYLLA=true```
+
+## Commands
+
+The tests need the oracle and test nodes. Start them with `make scylla-setup`. It first removes the Scylla containers
+and networks of this repository, including a running cluster. Then run the verify sequence in this order:
+
+```bash
+make check
+GEMINI_USE_DOCKER_SCYLLA=true \
+GEMINI_TEST_CLUSTER_IP=192.168.100.3 \
+GEMINI_ORACLE_CLUSTER_IP=192.168.100.2 \
+go test -tags testing -race ./pkg/...
+```
+
+## Development flow
+
+The `qatools-sdlc` development flow runs only through Claude Code skills. Other agents do not use the flow. Read
+`docs/INDEX.md` before any task and follow the standards in `docs/standards/`.
 
 <!-- CODEGRAPH_START -->
 ## CodeGraph

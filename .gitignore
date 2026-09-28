@@ -10,7 +10,5 @@ scylla-monitoring/
 gemini.log
 buildkitd.toml
 
-# Local agent/editor state (not shared). Tracked project docs/skills under
-# .claude/ (CLAUDE.md, skills/) are kept intentionally.
-.claude/settings.json
+# Local agent/editor state (not shared).
 .claude/settings.local.json
