@@ -990,6 +990,6 @@ func BenchmarkLine_Marshal(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		_ = utils.MarshalJSON(line)
+		_ = utils.MarshalJSONUnchecked(line)
 	}
 }

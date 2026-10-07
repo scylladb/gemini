@@ -65,14 +65,14 @@ func TestJobError_ErrorWithEmptyFields(t *testing.T) {
 	require.NotEmpty(t, actual)
 }
 
-func TestNewErrorList(t *testing.T) {
+func TestNewListError(t *testing.T) {
 	t.Parallel()
 
 	limit := 5
-	el := NewErrorList(limit)
+	el := NewListError(limit)
 
 	if el == nil {
-		t.Fatal("NewErrorList returned nil")
+		t.Fatal("NewListError returned nil")
 	}
 
 	if el.limit != limit {
@@ -149,7 +149,7 @@ func TestHashHex_StableAndMatchesSum(t *testing.T) {
 func TestErrorList_AddError(t *testing.T) {
 	t.Parallel()
 
-	el := NewErrorList(3)
+	el := NewListError(3)
 	timestamp := time.Now()
 
 	err1 := JobError{
@@ -188,7 +188,7 @@ func TestErrorList_AddError(t *testing.T) {
 func TestErrorList_AddErrorExceedsLimit(t *testing.T) {
 	t.Parallel()
 
-	el := NewErrorList(2)
+	el := NewListError(2)
 	timestamp := time.Now()
 
 	// Add exactly limit number of errors
@@ -237,7 +237,7 @@ func TestErrorList_AddErrorExceedsLimit(t *testing.T) {
 func TestErrorList_Errors(t *testing.T) {
 	t.Parallel()
 
-	el := NewErrorList(5)
+	el := NewListError(5)
 	timestamp := time.Now()
 
 	// Test empty list
@@ -268,7 +268,7 @@ func TestErrorList_Error(t *testing.T) {
 	t.Parallel()
 
 	assert := require.New(t)
-	el := NewErrorList(3)
+	el := NewListError(3)
 	timestamp := time.Date(2023, 1, 1, 12, 0, 0, 0, time.UTC)
 
 	assert.Empty(el.Error())
@@ -298,7 +298,7 @@ func TestErrorList_Error(t *testing.T) {
 }
 
 func TestErrorList_ConcurrentAccess(t *testing.T) {
-	el := NewErrorList(100)
+	el := NewListError(100)
 	timestamp := time.Now()
 
 	var wg sync.WaitGroup

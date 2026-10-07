@@ -72,7 +72,7 @@ type JobError struct {
 }
 
 func (j *JobError) Error() string {
-	data := utils.MarshalJSON(j.PartitionKeys)
+	data := utils.MarshalJSONUnchecked(j.PartitionKeys)
 
 	return fmt.Sprintf(
 		"JobError(err=%v): %s (stmt-type=%s, query=%s, time=%s) partition-keys=%s",
@@ -101,7 +101,7 @@ func (j *JobError) Hash() [32]byte {
 
 		for _, key := range keys {
 			hasher.Write(utils.UnsafeBytes(key))
-			data := utils.MarshalJSON(j.PartitionKeys.Get(key))
+			data := utils.MarshalJSONUnchecked(j.PartitionKeys.Get(key))
 			hasher.Write(data)
 		}
 	}
@@ -197,7 +197,7 @@ func (el *ListError) Close() error {
 	return nil
 }
 
-func NewErrorList(limit int) *ListError {
+func NewListError(limit int) *ListError {
 	return &ListError{
 		limit:  limit,
 		errors: make([]JobError, 0, limit),

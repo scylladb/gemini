@@ -17,16 +17,124 @@ package statements
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"math/big"
+	"math/rand/v2"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/typedef"
+	"github.com/scylladb/gemini/pkg/utils"
 )
+
+func TestConvertForJSON_EveryPartitionKeyTypeKeepsItsValue(t *testing.T) {
+	t.Parallel()
+
+	utils.PreallocateRandomString(rand.New(rand.NewChaCha8([32]byte{})), 1<<20)
+
+	valueRange := &typedef.ValueRangeConfig{
+		MaxBlobLength:   32,
+		MinBlobLength:   1,
+		MaxStringLength: 32,
+		MinStringLength: 1,
+	}
+
+	for _, pkType := range typedef.PartitionKeyTypes {
+		t.Run(pkType.Name(), func(t *testing.T) {
+			t.Parallel()
+
+			rng := rand.New(rand.NewChaCha8([32]byte{}))
+			encodings := make(map[string]struct{}, 32)
+
+			for range 32 {
+				generated := pkType.GenValue(rng, valueRange)
+				require.Len(t, generated, 1)
+
+				encoded, err := json.Marshal(convertForJSON(pkType, generated[0]))
+				require.NoError(t, err)
+				require.NotEqual(t, `"`+string(pkType)+`"`, string(encoded),
+					"conversion returned the CQL type name instead of the value")
+
+				encodings[string(encoded)] = struct{}{}
+			}
+
+			require.Greater(t, len(encodings), 1,
+				"every generated value encoded to the same JSON, so the conversion discards the value")
+		})
+	}
+}
+
+func TestInsertJSON_TuplePartitionKeyCarriesItsValues(t *testing.T) {
+	t.Parallel()
+
+	tupleType := &typedef.TupleType{
+		ComplexType: typedef.TypeTuple,
+		ValueTypes:  []typedef.SimpleType{typedef.TypeInt, typedef.TypeText, typedef.TypeUUID},
+	}
+
+	table := &typedef.Table{
+		Name:          "tuple_pk_table",
+		PartitionKeys: typedef.Columns{{Name: "pk1", Type: tupleType}},
+	}
+
+	wantUUID, err := gocql.RandomUUID()
+	require.NoError(t, err)
+
+	mp := newMockPartitions(1)
+	mp.nextKeys.Store(&typedef.PartitionKeys{
+		ID:     uuid.New(),
+		Values: typedef.NewValuesFromMap(map[string][]any{"pk1": {int32(7), "seven", wantUUID}}),
+	})
+
+	rng := rand.New(rand.NewChaCha8([32]byte{}))
+	rc, err := NewRatioController(DefaultStatementRatios(), rng)
+	require.NoError(t, err)
+
+	valueRange := &typedef.ValueRangeConfig{
+		MaxBlobLength:   32,
+		MinBlobLength:   1,
+		MaxStringLength: 32,
+		MinStringLength: 1,
+	}
+
+	gen := New("ks", mp, table, rng, valueRange, rc, false)
+
+	stmt, err := gen.InsertJSON(t.Context())
+	require.NoError(t, err)
+	require.Len(t, stmt.Values, 1)
+
+	payload, ok := stmt.Values[0].(string)
+	require.True(t, ok)
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal([]byte(payload), &decoded))
+
+	require.Equal(t, []any{float64(7), "seven", wantUUID.String()}, decoded["pk1"])
+}
+
+func TestConvertForJSON_GeneratedTimeKeepsItsValue(t *testing.T) {
+	t.Parallel()
+
+	generated := typedef.TypeTime.GenValue(rand.New(rand.NewPCG(1, 2)), typedef.ValueRangeConfig{})
+	for _, value := range generated {
+		result := convertForJSON(typedef.TypeTime, value)
+
+		str, ok := result.(string)
+		if !ok {
+			t.Fatalf("expected string, got %T", result)
+		}
+
+		if str == "00:00:00.000000000" {
+			t.Errorf("generated time collapsed to zero: %v (%T)", value, value)
+		}
+	}
+}
 
 func TestConvertForJSON(t *testing.T) {
 	t.Parallel()
@@ -132,14 +240,14 @@ func TestConvertForJSON(t *testing.T) {
 
 	t.Run("time", func(t *testing.T) {
 		t.Parallel()
-		ns := int64(12*3600+30*60+45)*1e9 + 123456789
-		result := convertForJSON(typedef.TypeTime, ns)
+		sinceMidnight := time.Duration(int64(12*3600+30*60+45)*1e9 + 123456789)
+		result := convertForJSON(typedef.TypeTime, sinceMidnight)
 		str, ok := result.(string)
 		if !ok {
 			t.Fatalf("expected string, got %T", result)
 		}
-		if str == "" {
-			t.Error("expected non-empty time string")
+		if want := "12:30:45.123456789"; str != want {
+			t.Errorf("got %q, want %q", str, want)
 		}
 	})
 
