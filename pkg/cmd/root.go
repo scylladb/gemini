@@ -312,10 +312,10 @@ func printSetup(schema *typedef.Schema, ratio statements.Ratios, seed, schemaSee
 	}
 	_ = tw.Flush()
 
-	jsonSchema := utils.MarshalJSONIndent(schema, "", "    ")
+	jsonSchema := utils.MarshalJSONIndentUnchecked(schema, "", "    ")
 	fmt.Printf("Schema: %v\n", string(jsonSchema))
 
-	jsonStatementsRatio := utils.MarshalJSONIndent(ratio, "", "    ")
+	jsonStatementsRatio := utils.MarshalJSONIndentUnchecked(ratio, "", "    ")
 	fmt.Printf("Statement Ratios: %v\n", string(jsonStatementsRatio))
 }
 

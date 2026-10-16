@@ -1,6 +1,6 @@
 
 [TestBuildQueriesCreation - 1]
-CREATE KEYSPACE IF NOT EXISTS ks1_logs WITH replication={'class':'NetworkTopologyStrategy','datacenter1':1,'replication_factor':1} AND durable_writes = true;
+CREATE KEYSPACE IF NOT EXISTS ks1_logs WITH replication={'class':'NetworkTopologyStrategy','replication_factor':1} AND durable_writes = true;
 createKeyspace
 ---
 
