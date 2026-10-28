@@ -41,7 +41,6 @@ func TestMarshalJSON(t *testing.T) {
 			r: replication.NewNetworkTopologyStrategy(),
 			want: map[string]any{
 				"class":              "NetworkTopologyStrategy",
-				"datacenter1":        float64(1),
 				"replication_factor": float64(1),
 			},
 		},
@@ -171,7 +170,7 @@ func TestToCQL(t *testing.T) {
 		},
 		"network": {
 			rs:   replication.NewNetworkTopologyStrategy(),
-			want: "{'class':'NetworkTopologyStrategy','datacenter1':1,'replication_factor':1}",
+			want: "{'class':'NetworkTopologyStrategy','replication_factor':1}",
 		},
 	}
 	for name := range tests {

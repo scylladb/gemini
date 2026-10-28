@@ -183,7 +183,7 @@ type MutationStoreError struct {
 }
 
 func (e MutationStoreError) Error() string {
-	data := utils.MarshalJSON(e.PartitionKeys)
+	data := utils.MarshalJSONUnchecked(e.PartitionKeys)
 
 	return "mutation error: " + e.Inner.Error() + ", partition keys: " + utils.UnsafeString(data)
 }

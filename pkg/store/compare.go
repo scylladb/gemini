@@ -198,7 +198,7 @@ func rowsToKeyStrings(table *typedef.Table, rows []Row) []string {
 
 func rowKeyString(table *typedef.Table, row Row) string {
 	if table == nil {
-		bytes := utils.MarshalJSON(row)
+		bytes := utils.MarshalJSONUnchecked(row)
 		return string(bytes)
 	}
 

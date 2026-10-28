@@ -373,8 +373,8 @@ func marshalDifferentRows(diffs []store.RowDifference) []joberror.RowDiff {
 	}
 	result := make([]joberror.RowDiff, 0, len(diffs))
 	for _, d := range diffs {
-		testData := utils.MarshalJSON(d.TestRow)
-		oracleData := utils.MarshalJSON(d.OracleRow)
+		testData := utils.MarshalJSONUnchecked(d.TestRow)
+		oracleData := utils.MarshalJSONUnchecked(d.OracleRow)
 		result = append(result, joberror.RowDiff{
 			TestRow:   testData,
 			OracleRow: oracleData,

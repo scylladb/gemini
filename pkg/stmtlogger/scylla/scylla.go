@@ -77,8 +77,11 @@ type (
 		fetchCancel context.CancelFunc
 		fetchHook   func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError, w io.Writer) (int64, error)
 		// openHook is openStatementFile outside tests.
-		openHook func(name string) (*bufio.Writer, func() error, error)
-		wg       sync.WaitGroup
+		openHook      func(name string) (*bufio.Writer, func() error, error)
+		makeBatchHook func(ctx context.Context) *gocql.Batch
+		execBatchHook func(ctx context.Context, batch *gocql.Batch) error
+		execQueryHook func(ctx context.Context, stmt string, args ...any) error
+		wg            sync.WaitGroup
 		// fetchDelay is statementErrorFetchDelay outside tests.
 		fetchDelay        time.Duration
 		malformedWarnOnce sync.Once
@@ -478,16 +481,28 @@ func (s *Logger) bind(it stmtlogger.Item, dst []any) (*cqlStatements, []any, boo
 
 // makeBatch creates a new gocql batch on the shared _logs session.
 func (s *Logger) makeBatch(ctx context.Context) *gocql.Batch {
+	if s.makeBatchHook != nil {
+		return s.makeBatchHook(ctx)
+	}
+
 	return s.session.BatchWithContext(ctx, gocql.UnloggedBatch)
 }
 
 // execBatch executes the provided batch on the shared _logs session.
-func (s *Logger) execBatch(_ context.Context, batch *gocql.Batch) error {
+func (s *Logger) execBatch(ctx context.Context, batch *gocql.Batch) error {
+	if s.execBatchHook != nil {
+		return s.execBatchHook(ctx, batch)
+	}
+
 	return s.session.ExecuteBatch(batch)
 }
 
 // execQuery executes a single statement on the shared _logs session.
 func (s *Logger) execQuery(ctx context.Context, stmt string, args ...any) error {
+	if s.execQueryHook != nil {
+		return s.execQueryHook(ctx, stmt, args...)
+	}
+
 	q := s.session.QueryWithContext(ctx, stmt, args...)
 	defer q.Release()
 	return q.Exec()
