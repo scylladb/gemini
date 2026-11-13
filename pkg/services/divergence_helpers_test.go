@@ -19,6 +19,7 @@ package services
 import (
 	"crypto/sha256"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,12 +165,34 @@ func (s *clusterSaboteur) qualifiedTable() string {
 	return fmt.Sprintf("%s.%s", s.schema.Keyspace.Name, divergenceTable.Name)
 }
 
+// truncateTable runs TRUNCATE on table. The package tests share one cluster,
+// and Scylla rejects a TRUNCATE while another TRUNCATE runs. truncateTable
+// tries again for that error only, for up to 30 seconds.
+func truncateTable(session *gocql.Session, table string) error {
+	const (
+		attempts = 30
+		pause    = time.Second
+	)
+
+	var err error
+	for range attempts {
+		err = session.Query("TRUNCATE TABLE " + table).Exec()
+		if err == nil || !strings.Contains(err.Error(), "Another TRUNCATE TABLE is ongoing") {
+			return err
+		}
+
+		time.Sleep(pause)
+	}
+
+	return err
+}
+
 // truncateSUT wipes all data from the test cluster while leaving the oracle
 // intact.  The next validation pass will find rows in the oracle that are
 // absent from the SUT and flag them as divergence.
 func (s *clusterSaboteur) truncateSUT(tb testing.TB) {
 	tb.Helper()
-	err := s.test.Query("TRUNCATE TABLE " + s.qualifiedTable()).Exec()
+	err := truncateTable(s.test, s.qualifiedTable())
 	require.NoError(tb, err, "saboteur: truncate SUT")
 	tb.Log("saboteur: SUT truncated — oracle still has data, divergence introduced")
 }
@@ -179,7 +202,7 @@ func (s *clusterSaboteur) truncateSUT(tb testing.TB) {
 // from the oracle and flag them as divergence.
 func (s *clusterSaboteur) truncateOracle(tb testing.TB) {
 	tb.Helper()
-	err := s.oracle.Query("TRUNCATE TABLE " + s.qualifiedTable()).Exec()
+	err := truncateTable(s.oracle, s.qualifiedTable())
 	require.NoError(tb, err, "saboteur: truncate oracle")
 	tb.Log("saboteur: oracle truncated — SUT still has data, divergence introduced")
 }

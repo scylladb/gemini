@@ -18,7 +18,6 @@ package services
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -398,9 +397,9 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	assert.NoError(err)
 
 	time.AfterFunc(10*time.Second, func() {
-		truncateQuery := fmt.Sprintf("TRUNCATE TABLE %s.%s", schema.Keyspace.Name, schema.Tables[0].Name)
-		if err = scyllaContainer.Test.Query(truncateQuery).Exec(); err != nil {
-			t.Logf("Failed to execute truncate query: %v", err)
+		table := schema.Keyspace.Name + "." + schema.Tables[0].Name
+		if truncErr := truncateTable(scyllaContainer.Test, table); truncErr != nil {
+			t.Logf("Failed to execute truncate query: %v", truncErr)
 		} else {
 			t.Log("TEST cluster truncated successfully")
 		}
