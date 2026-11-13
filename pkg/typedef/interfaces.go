@@ -25,12 +25,12 @@ type Type interface {
 	CQLDef() string
 	CQLHolder() string
 
-	GenValueOut([]any, utils.Random, RangeConfig) []any
-	GenValue(utils.Random, RangeConfig) []any
-	GenJSONValue(utils.Random, RangeConfig) any
+	GenValueOut(out []any, r utils.Random, p RangeConfig) []any
+	GenValue(r utils.Random, p RangeConfig) []any
+	GenJSONValue(r utils.Random, p RangeConfig) any
 	LenValue() int
 	// ValueVariationsNumber returns number of bytes generated value holds
-	ValueVariationsNumber(RangeConfig) float64
+	ValueVariationsNumber(p RangeConfig) float64
 	Indexable() bool
 	CQLType() gocql.TypeInfo
 }

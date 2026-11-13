@@ -149,7 +149,7 @@ type CorruptionEntry struct {
 }
 type partitionKeyReader interface {
 	Keys() []string
-	Get(string) []any
+	Get(key string) []any
 }
 
 func buildStmtIndex(path string) stmtIndex {

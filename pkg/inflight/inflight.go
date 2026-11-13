@@ -27,9 +27,9 @@ import (
 const shrinkInflightsLimit = 1000
 
 type InFlight interface {
-	AddIfNotPresent(uint32) bool
-	Delete(uint32)
-	Has(uint32) bool
+	AddIfNotPresent(value uint32) bool
+	Delete(value uint32)
+	Has(value uint32) bool
 }
 
 // New creates a instance of a simple InFlight set.

@@ -69,8 +69,30 @@ linters:
     - sqlclosecheck
     - testifylint
     - unparam
+    - canonicalheader
+    - dogsled
+    - exhaustive
+    - fatcontext
+    - godoclint
+    - gosec
+    - gosmopolitan
+    - grouper
+    - importas
+    - inamedparam
+    - musttag
+    - nakedret
+    - nosprintfhostport
+    - testableexamples
+    - whitespace
 
   settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    gosec:
+      excludes:
+        - G115 # integer conversions: gemini bounds its generated values
+        - G306 # log and summary files are meant for the user who runs gemini
+        - G404 # math/rand drives reproducible, seeded workloads
     unconvert:
       fast-math: true
       safe: true
@@ -145,7 +167,7 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      - path: 'pkg/(cmd/(root|benchmark)|status/status|benchmarks/results)\.go$'
+      - path: 'pkg/(cmd/root|status/status|benchmarks/results)\.go$'
         linters:
           - forbidigo
       - path: _test\.go$
@@ -159,6 +181,13 @@ linters:
       - path: _test\.go$
         linters:
           - lll
+      - path: _test\.go$
+        linters:
+          - dogsled
+      - path: pkg/testutils/
+        linters:
+          - gosec
+        text: G204
       - path: _test\.go$
         linters:
           - revive

@@ -45,8 +45,11 @@ jobs:
           export GEMINI_ORACLE_CLUSTER_IP=192.168.100.2
 
           make test
+      - name: Read golangci-lint version
+        id: golangci-lint-version
+        run: echo "version=$(make -s golangci-lint-version)" >> "$GITHUB_OUTPUT"
       - uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
         name: Linting
         with:
           install-mode: goinstall
-          version: v2.13.2
+          version: ${{ steps.golangci-lint-version.outputs.version }}

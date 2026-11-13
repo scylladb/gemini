@@ -131,7 +131,7 @@ func (ve *ValidationError) Finalize(finalError error) {
 	}
 }
 
-// StoreMutationError represents a comprehensive mutation error with all attempts
+// MutationError represents a comprehensive mutation error with all attempts
 type MutationError struct {
 	ValidationError
 

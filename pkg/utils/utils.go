@@ -39,11 +39,11 @@ var SingleToDoubleQuoteReplacer = strings.NewReplacer("'", "\"")
 
 type Random interface {
 	Uint32() uint32
-	IntN(int) int
+	IntN(n int) int
 	Int64() int64
 	Uint64() uint64
-	Uint64N(uint64) uint64
-	Int64N(int64) int64
+	Uint64N(n uint64) uint64
+	Int64N(n int64) int64
 	Float64() float64
 }
 
@@ -155,11 +155,15 @@ func CreateFile(input string, closeOnExit bool, def ...io.Writer) (io.Writer, er
 	}
 }
 
+// UnsafeBytes returns the bytes of s without a copy. The caller must not modify them.
+//
 /*#nosec G103*/
 func UnsafeBytes(s string) []byte {
 	return unsafe.Slice(unsafe.StringData(s), len(s))
 }
 
+// UnsafeString returns b as a string without a copy. The caller must not modify b after the call.
+//
 /*#nosec G103*/
 func UnsafeString(b []byte) string {
 	return unsafe.String(unsafe.SliceData(b), len(b))

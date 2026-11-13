@@ -5,6 +5,18 @@ the Scylla database. It operates by generating random mutations (INSERT, UPDATE,
 verifying them (SELECT) using the CQL protocol across two clusters:
 a system under test (SUT) and a test oracle.
 
+## Constraints and Invariants
+
+`CLAUDE.md` is the single source for these sections:
+
+- Cluster Requirements
+- Cross-Cutting Invariants
+- Test Runtime
+- Make Targets
+- Lint Gates That Change Code
+
+Read them before you change keyspace creation, the store, the statement logger or `.golangci.yml`.
+
 ## Project Structure
 
 - `pkg/` contains everything that is needed for `gemini` project

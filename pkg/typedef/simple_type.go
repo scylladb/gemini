@@ -139,9 +139,9 @@ func (st SimpleType) GenJSONValue(r utils.Random, p RangeConfig) any {
 			Unix(0, utils.RandTime(r)).
 			UTC().
 			Format("15:04:05.000000000")
+	default:
+		return st.genValue(r, p)
 	}
-
-	return st.genValue(r, p)
 }
 
 func (st SimpleType) GenValue(r utils.Random, p RangeConfig) []any {

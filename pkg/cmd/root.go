@@ -20,6 +20,7 @@ import (
 	"log"
 	"math"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -79,7 +80,13 @@ func preRun(cmd *cobra.Command, _ []string) {
 			mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
 			mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
 
-			log.Fatal(http.ListenAndServe("0.0.0.0:"+strconv.Itoa(profilingPort), mux))
+			server := &http.Server{
+				Addr:              net.JoinHostPort("0.0.0.0", strconv.Itoa(profilingPort)),
+				Handler:           mux,
+				ReadHeaderTimeout: 10 * time.Second,
+			}
+
+			log.Fatal(server.ListenAndServe())
 		}()
 	}
 }

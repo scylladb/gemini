@@ -107,7 +107,7 @@ func (r Row) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// valuesEqual reports whether two values are semantically equal, handling
+// ValuesEqual reports whether two values are semantically equal, handling
 // cross-type pointer/value equivalence correctly.
 //
 // Unlike compareValues (which falls back to fmt.Sprint for cross-type pairs and
