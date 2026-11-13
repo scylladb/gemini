@@ -17,13 +17,16 @@
 package services
 
 import (
+	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gocql/gocql"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/scylladb/gemini/pkg/distributions"
@@ -167,8 +170,8 @@ func (s *clusterSaboteur) qualifiedTable() string {
 
 // truncateTable runs TRUNCATE on table. The package tests share one cluster,
 // and Scylla rejects a TRUNCATE while another TRUNCATE runs. truncateTable
-// tries again for that error only, for up to 30 seconds.
-func truncateTable(session *gocql.Session, table string) error {
+// tries again for that error only, for up to 30 seconds or until ctx ends.
+func truncateTable(ctx context.Context, session *gocql.Session, table string) error {
 	const (
 		attempts = 30
 		pause    = time.Second
@@ -176,51 +179,82 @@ func truncateTable(session *gocql.Session, table string) error {
 
 	var err error
 	for range attempts {
-		err = session.Query("TRUNCATE TABLE " + table).Exec()
+		err = session.Query("TRUNCATE TABLE " + table).WithContext(ctx).Exec()
 		if err == nil || !strings.Contains(err.Error(), "Another TRUNCATE TABLE is ongoing") {
 			return err
 		}
 
-		time.Sleep(pause)
+		timer := time.NewTimer(pause)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return errors.Join(err, ctx.Err())
+		case <-timer.C:
+		}
 	}
 
 	return err
 }
 
+// afterDelay runs fn in its own goroutine after delay. ctx ends when the test
+// ends. The test cleanup stops the timer, or waits for fn when fn already
+// started, so fn never logs after the test finished.
+func afterDelay(tb testing.TB, delay time.Duration, fn func(ctx context.Context)) {
+	tb.Helper()
+
+	ctx := tb.Context()
+	done := make(chan struct{})
+	timer := time.AfterFunc(delay, func() {
+		defer close(done)
+		fn(ctx)
+	})
+
+	tb.Cleanup(func() {
+		if !timer.Stop() {
+			<-done
+		}
+	})
+}
+
 // truncateSUT wipes all data from the test cluster while leaving the oracle
 // intact.  The next validation pass will find rows in the oracle that are
-// absent from the SUT and flag them as divergence.
-func (s *clusterSaboteur) truncateSUT(tb testing.TB) {
+// absent from the SUT and flag them as divergence. It runs outside the test
+// goroutine, so it reports a failure with assert, not require.
+func (s *clusterSaboteur) truncateSUT(ctx context.Context, tb testing.TB) {
 	tb.Helper()
-	err := truncateTable(s.test, s.qualifiedTable())
-	require.NoError(tb, err, "saboteur: truncate SUT")
-	tb.Log("saboteur: SUT truncated — oracle still has data, divergence introduced")
+
+	err := truncateTable(ctx, s.test, s.qualifiedTable())
+	if assert.NoError(tb, err, "saboteur: truncate SUT") {
+		tb.Log("saboteur: SUT truncated — oracle still has data, divergence introduced")
+	}
 }
 
 // truncateOracle wipes all data from the oracle cluster while leaving the SUT
 // intact.  The next validation pass will find rows in the SUT that are absent
-// from the oracle and flag them as divergence.
-func (s *clusterSaboteur) truncateOracle(tb testing.TB) {
+// from the oracle and flag them as divergence. It runs outside the test
+// goroutine, so it reports a failure with assert, not require.
+func (s *clusterSaboteur) truncateOracle(ctx context.Context, tb testing.TB) {
 	tb.Helper()
-	err := truncateTable(s.oracle, s.qualifiedTable())
-	require.NoError(tb, err, "saboteur: truncate oracle")
-	tb.Log("saboteur: oracle truncated — SUT still has data, divergence introduced")
+
+	err := truncateTable(ctx, s.oracle, s.qualifiedTable())
+	if assert.NoError(tb, err, "saboteur: truncate oracle") {
+		tb.Log("saboteur: oracle truncated — SUT still has data, divergence introduced")
+	}
 }
 
 // runDivergenceWorkload creates a MixedMode [Workload], schedules the sabotage
 // function after sabotageDelay, runs the workload to completion, and returns
 // the workload (for status inspection) and any run error.
 //
-// The sabotage function is executed exactly once inside a time.AfterFunc
-// goroutine.  It takes no arguments; callers should close over the test helper
-// they need (e.g. via a closure that captures tb).
+// The sabotage function runs once through afterDelay, so it gets the test
+// context and the test waits for it.
 func runDivergenceWorkload(
 	tb testing.TB,
 	cfg *WorkloadConfig,
 	storeConfig store.Config,
 	schema *typedef.Schema,
 	sabotageDelay time.Duration,
-	sabotage func(),
+	sabotage func(ctx context.Context),
 ) (*Workload, error) {
 	tb.Helper()
 
@@ -231,7 +265,7 @@ func runDivergenceWorkload(
 	require.NoError(tb, err, "workload creation must not fail")
 
 	if sabotage != nil {
-		time.AfterFunc(sabotageDelay, sabotage)
+		afterDelay(tb, sabotageDelay, sabotage)
 	}
 
 	runErr := w.Run(tb.Context())

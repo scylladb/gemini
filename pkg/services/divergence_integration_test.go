@@ -17,6 +17,7 @@
 package services
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -86,7 +87,7 @@ func testGeminiDetectsRowsMissingFromSUT(t *testing.T, containers *testutils.Scy
 		storeConfig,
 		schema,
 		sabotageAfter,
-		func() { saboteur.truncateSUT(t) },
+		func(ctx context.Context) { saboteur.truncateSUT(ctx, t) },
 	)
 
 	require.Error(t, runErr, "validation must detect rows missing from SUT and return an error")
@@ -127,7 +128,7 @@ func testGeminiDetectsExtraRowsInSUT(t *testing.T, containers *testutils.ScyllaC
 		storeConfig,
 		schema,
 		sabotageAfter,
-		func() { saboteur.truncateOracle(t) },
+		func(ctx context.Context) { saboteur.truncateOracle(ctx, t) },
 	)
 
 	require.Error(t, runErr, "validation must detect extra rows in SUT and return an error")

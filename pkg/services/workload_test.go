@@ -17,6 +17,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -396,9 +397,9 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 	}, storeConfig, schema, logger, stopFlag)
 	assert.NoError(err)
 
-	time.AfterFunc(10*time.Second, func() {
+	afterDelay(t, 10*time.Second, func(ctx context.Context) {
 		table := schema.Keyspace.Name + "." + schema.Tables[0].Name
-		if truncErr := truncateTable(scyllaContainer.Test, table); truncErr != nil {
+		if truncErr := truncateTable(ctx, scyllaContainer.Test, table); truncErr != nil {
 			t.Logf("Failed to execute truncate query: %v", truncErr)
 		} else {
 			t.Log("TEST cluster truncated successfully")
