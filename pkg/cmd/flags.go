@@ -24,8 +24,8 @@ import (
 )
 
 // MaxDeletedHeapSize is the largest number of deleted partitions that wait for
-// re-validation at one time.
-const MaxDeletedHeapSize = 1_000_000
+// re-validation at one time. A larger --max-deleted-heap-size is lowered to it.
+const MaxDeletedHeapSize = 3_000_000
 
 var (
 	testClusterHost                  []string
@@ -114,6 +114,11 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().IntVarP(&mutationConcurrency, "mutation-concurrency", "", 0, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().IntVarP(&readConcurrency, "read-concurrency", "", 0, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().BoolVarP(&versionFlag, "version", "", false, "Print version information")
+	// scylla-cluster-tests passes --io-worker-pool, so gemini must accept it.
+	cmd.PersistentFlags().Int("io-worker-pool", 0, "")
+	if err := cmd.PersistentFlags().MarkDeprecated("io-worker-pool", "it has no effect"); err != nil {
+		panic(err)
+	}
 	cmd.PersistentFlags().
 		BoolP("version-json", "", false, "Print version information in JSON format")
 	cmd.Flags().IntVarP(&maxStringLength, "max-string-length", "", 1024, "Maximum string length")
@@ -205,7 +210,7 @@ func setupFlags(cmd *cobra.Command) {
 		Uint64VarP(&partitionCount, "partition-count", "", 2_000_000, "Number of Scylla Partitions")
 	cmd.Flags().
 		IntVarP(&maxDeletedHeapSize, "max-deleted-heap-size", "", MaxDeletedHeapSize,
-			"Maximum number of entries in the deleted-partitions heap, from 1 to 1000000")
+			"Maximum number of entries in the deleted-partitions heap. Gemini lowers a value above 3000000 to 3000000")
 	cmd.Flags().
 		DurationSliceVarP(&deletedPartitionsTimeBucket, "deleted-partitions-time-bucket", "",
 			[]time.Duration{time.Minute, 10 * time.Minute},

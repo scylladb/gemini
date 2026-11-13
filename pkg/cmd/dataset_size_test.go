@@ -44,3 +44,18 @@ func TestCreateSchemaConfig_SmallSetsPartitionKeyLengths(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateSchemaConfig_SmallKeepsDeletedHeapCap(t *testing.T) {
+	t.Parallel()
+
+	small := createSchemaConfig("small", zap.NewNop())
+	defaults := createSchemaConfig("", zap.NewNop())
+
+	if small.MaxDeletedHeapSize < 1 {
+		t.Fatalf("small preset MaxDeletedHeapSize = %d, want >= 1 (zero turns the cap off)", small.MaxDeletedHeapSize)
+	}
+	if small.MaxDeletedHeapSize != defaults.MaxDeletedHeapSize {
+		t.Fatalf("small preset MaxDeletedHeapSize = %d, want the flag value %d",
+			small.MaxDeletedHeapSize, defaults.MaxDeletedHeapSize)
+	}
+}

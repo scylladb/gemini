@@ -168,8 +168,16 @@ func run(cmd *cobra.Command, _ []string) error {
 	if err = validateSeed(schemaSeed); err != nil {
 		return fmt.Errorf("failed to parse --schema-seed argument: %w", err)
 	}
-	if err = validateDeletedPartitions(maxDeletedHeapSize, deletedPartitionsTimeBucket); err != nil {
+	heapSize, err := deletedHeapSize(maxDeletedHeapSize, deletedPartitionsTimeBucket)
+	if err != nil {
 		return err
+	}
+	if heapSize != maxDeletedHeapSize {
+		logger.Warn("--max-deleted-heap-size is above the cap, gemini uses the cap",
+			zap.Int("requested", maxDeletedHeapSize),
+			zap.Int("cap", heapSize),
+		)
+		maxDeletedHeapSize = heapSize
 	}
 
 	statementRatio, err := parseStatementRatiosJSON(statementRatios)
@@ -342,18 +350,20 @@ func RealRandom() uint64 {
 	return rand.New(random.Source).Uint64()
 }
 
-func validateDeletedPartitions(heapSize int, buckets []time.Duration) error {
-	if heapSize < 1 || heapSize > MaxDeletedHeapSize {
-		return fmt.Errorf("--max-deleted-heap-size is %d, it must be from 1 to %d", heapSize, MaxDeletedHeapSize)
+// deletedHeapSize checks the deleted-partition flags and returns the heap size
+// to use. A size above MaxDeletedHeapSize becomes MaxDeletedHeapSize.
+func deletedHeapSize(heapSize int, buckets []time.Duration) (int, error) {
+	if heapSize < 1 {
+		return 0, fmt.Errorf("--max-deleted-heap-size is %d, it must be 1 or more", heapSize)
 	}
 
 	for _, bucket := range buckets {
 		if bucket <= 0 {
-			return fmt.Errorf("--deleted-partitions-time-bucket has %s, every delay must be positive", bucket)
+			return 0, fmt.Errorf("--deleted-partitions-time-bucket has %s, every delay must be positive", bucket)
 		}
 	}
 
-	return nil
+	return min(heapSize, MaxDeletedHeapSize), nil
 }
 
 func validateSeed(seed string) error {
@@ -445,6 +455,7 @@ func createSchemaConfig(datasetSize string, logger *zap.Logger) typedef.SchemaCo
 			MinPKBlobLength:    defaultConfig.MinPKBlobLength,
 			MaxPKBlobLength:    defaultConfig.MaxPKBlobLength,
 			DeleteBuckets:      defaultConfig.DeleteBuckets,
+			MaxDeletedHeapSize: defaultConfig.MaxDeletedHeapSize,
 			RowTrackerCapacity: defaultConfig.RowTrackerCapacity,
 		}
 	default:

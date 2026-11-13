@@ -29,7 +29,7 @@ Flags:
       --max-blob-length int                            Maximum blob length (default 10000)
       --max-clustering-keys int                        Maximum number of generated clustering keys (default 5)
       --max-columns int                                Maximum number of generated columns (default 12)
-      --max-deleted-heap-size int                      Maximum number of entries in the deleted-partitions heap, from 1 to 1000000 (default 1000000)
+      --max-deleted-heap-size int                      Maximum number of entries in the deleted-partitions heap. Gemini lowers a value above 3000000 to 3000000 (default 3000000)
       --max-errors-to-store int                        Maximum number of errors to store and show at the end. Gemini stops when read and write errors reach this number (default 10)
       --max-mutation-retries int                       Maximum number of attempts to apply a mutation (default 10)
       --max-mutation-retries-backoff duration          Duration between attempts to apply a mutation for example 10ms or 1s (default 10s)
