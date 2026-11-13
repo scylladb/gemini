@@ -38,7 +38,6 @@ func NewSimpleStrategy() Replication {
 func NewNetworkTopologyStrategy() Replication {
 	return Replication{
 		"class":              "NetworkTopologyStrategy",
-		"datacenter1":        1,
 		"replication_factor": 1,
 	}
 }
