@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -283,5 +284,37 @@ func TestNewVersionInfoFromMalformedFile(t *testing.T) {
 	_, err := NewVersionInfo(WithOutputVersionFile(file))
 	if err == nil {
 		t.Error("expected error for malformed JSON, got nil")
+	}
+}
+
+func TestValidateDeletedPartitions(t *testing.T) {
+	t.Parallel()
+
+	buckets := []time.Duration{30 * time.Second, 3 * time.Minute, 30 * time.Hour}
+
+	tests := map[string]struct {
+		buckets  []time.Duration
+		heapSize int
+		wantErr  bool
+	}{
+		"defaults":            {heapSize: MaxDeletedHeapSize, buckets: []time.Duration{time.Minute, 10 * time.Minute}},
+		"custom buckets":      {heapSize: 1, buckets: buckets},
+		"heap size zero":      {heapSize: 0, buckets: buckets, wantErr: true},
+		"heap size unlimited": {heapSize: -1, buckets: buckets, wantErr: true},
+		"heap size over cap":  {heapSize: MaxDeletedHeapSize + 1, buckets: buckets, wantErr: true},
+		"zero bucket":         {heapSize: 1, buckets: []time.Duration{0}, wantErr: true},
+		"negative bucket":     {heapSize: 1, buckets: []time.Duration{-time.Second}, wantErr: true},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateDeletedPartitions(tc.heapSize, tc.buckets)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("validateDeletedPartitions(%d, %v) error = %v, wantErr %v",
+					tc.heapSize, tc.buckets, err, tc.wantErr)
+			}
+		})
 	}
 }

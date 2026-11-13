@@ -105,7 +105,6 @@ func mixedConfig(partitionCount, seed uint64, duration time.Duration) *WorkloadC
 		RunningMode:           jobs.MixedMode,
 		PartitionDistribution: distributions.Uniform,
 		Seed:                  seed,
-		IOWorkerPoolSize:      64,
 		MaxErrorsToStore:      1,
 		WarmupDuration:        5 * time.Second,
 		Duration:              duration,

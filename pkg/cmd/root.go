@@ -168,6 +168,9 @@ func run(cmd *cobra.Command, _ []string) error {
 	if err = validateSeed(schemaSeed); err != nil {
 		return fmt.Errorf("failed to parse --schema-seed argument: %w", err)
 	}
+	if err = validateDeletedPartitions(maxDeletedHeapSize, deletedPartitionsTimeBucket); err != nil {
+		return err
+	}
 
 	statementRatio, err := parseStatementRatiosJSON(statementRatios)
 	if err != nil {
@@ -229,7 +232,6 @@ func run(cmd *cobra.Command, _ []string) error {
 		SummaryFile:           summaryFile,
 		PartitionDistribution: distributions.Distribution(partitionKeyDistribution),
 		PartitionCount:        partitionCount,
-		IOWorkerPoolSize:      iOWorkerPool,
 		Seed:                  intSeed,
 		MU:                    normalDistMean,
 		Sigma:                 normalDistSigma,
@@ -340,6 +342,20 @@ func RealRandom() uint64 {
 	return rand.New(random.Source).Uint64()
 }
 
+func validateDeletedPartitions(heapSize int, buckets []time.Duration) error {
+	if heapSize < 1 || heapSize > MaxDeletedHeapSize {
+		return fmt.Errorf("--max-deleted-heap-size is %d, it must be from 1 to %d", heapSize, MaxDeletedHeapSize)
+	}
+
+	for _, bucket := range buckets {
+		if bucket <= 0 {
+			return fmt.Errorf("--deleted-partitions-time-bucket has %s, every delay must be positive", bucket)
+		}
+	}
+
+	return nil
+}
+
 func validateSeed(seed string) error {
 	if seed == "random" {
 		return nil
@@ -359,16 +375,6 @@ func seedFromString(seed string) uint64 {
 func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 	rs := schema.GetReplicationStrategy(replicationStrategy, replication.NewNetworkTopologyStrategy(), logger)
 	ors := schema.GetReplicationStrategy(oracleReplicationStrategy, rs, logger)
-
-	deletedBuckets := make([]time.Duration, 0, len(deletedPartitionsTimeBucket))
-	for _, bucket := range deletedPartitionsTimeBucket {
-		dur, err := time.ParseDuration(bucket)
-		if err != nil {
-			logger.Fatal("failed to parse deleted partitions time bucket", zap.Error(err))
-		}
-
-		deletedBuckets = append(deletedBuckets, dur)
-	}
 
 	return typedef.SchemaConfig{
 		ReplicationStrategy:              rs,
@@ -393,7 +399,7 @@ func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 		UseMaterializedViews:             useMaterializedViews,
 		AsyncObjectStabilizationAttempts: asyncObjectStabilizationAttempts,
 		AsyncObjectStabilizationDelay:    asyncObjectStabilizationDelay,
-		DeleteBuckets:                    deletedBuckets,
+		DeleteBuckets:                    deletedPartitionsTimeBucket,
 		MaxDeletedHeapSize:               maxDeletedHeapSize,
 		RowTrackerCapacity:               rowTrackerCapacity,
 		MinPKStringLength:                minPKStringLength,

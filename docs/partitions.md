@@ -585,8 +585,8 @@ func (d *deletedPartitions) Delete(values *typedef.Values) {
 
 ### Admission Sampling
 
-When a delete-heap cap is configured (`--max-deleted-heap-size > 0`), the tracker
-**samples partitions before they enter the heap** so the steady-state size stays
+`--max-deleted-heap-size` sets the delete-heap cap, from 1 to 1000000. The default is
+1000000. The tracker **samples partitions before they enter the heap** so the steady-state size stays
 near the cap instead of relying solely on eviction once the cap is breached.
 This bounds memory under very high DELETE throughput, where the heap could
 otherwise accumulate millions of entries within a single bucket window.

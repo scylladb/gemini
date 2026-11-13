@@ -149,10 +149,9 @@ Low operations per second.
 
 **Solutions:**
 1. Increase concurrency: `--concurrency=50`
-2. Increase IO worker pool: `--io-worker-pool=256`
-3. Use token-aware policy (default)
-4. Check cluster resource utilization
-5. **Simplify schema** - some schema choices cause significant overhead:
+2. Use token-aware policy (default)
+3. Check cluster resource utilization
+4. **Simplify schema** - some schema choices cause significant overhead:
    - Reduce partition key count (`--max-partition-keys=2`)
    - Reduce clustering key count (`--max-clustering-keys=2`)
    - Avoid large column types (blobs, large text)
