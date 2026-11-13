@@ -35,7 +35,10 @@ Gemini writes to real ScyllaDB or Cassandra nodes. Three constraints control key
 
 1. **ScyllaDB 2026 turns tablets on by default and rejects `SimpleStrategy`.** The server answers
    "SimpleStrategy doesn't support tablet replication" and creates no keyspace. Use
-   `NetworkTopologyStrategy` in every default, test fixture and hardcoded `CREATE KEYSPACE`.
+   `NetworkTopologyStrategy` in every default, and in every fixture or hardcoded `CREATE KEYSPACE`
+   that runs against a cluster. Unit tests that check `SimpleStrategy` parsing or CQL output keep
+   `SimpleStrategy`, for example `pkg/replication/replication_test.go` and
+   `pkg/cmd/strategies_test.go`.
 2. **A replication default must not name a datacenter.** `replication.NewNetworkTopologyStrategy()`
    emits `{'class':'NetworkTopologyStrategy','replication_factor':1}`. A literal datacenter key makes
    `CREATE KEYSPACE` fail on every cluster with a different datacenter name. A user who needs a

@@ -16,6 +16,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -86,7 +87,9 @@ func preRun(cmd *cobra.Command, _ []string) {
 				ReadHeaderTimeout: 10 * time.Second,
 			}
 
-			log.Fatal(server.ListenAndServe())
+			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("pprof server on %s stopped: %v", server.Addr, err)
+			}
 		}()
 	}
 }
