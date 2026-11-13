@@ -42,7 +42,6 @@ type (
 		SummaryFile           string
 		MU                    float64
 		Seed                  uint64
-		IOWorkerPoolSize      int
 		MaxErrorsToStore      int
 		RandomStringBuffer    int
 		Sigma                 float64
@@ -77,7 +76,6 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 		zap.Uint64("partition_count", config.PartitionCount),
 		zap.Int("mutation_concurrency", config.MutationConcurrency),
 		zap.Int("read_concurrency", config.ReadConcurrency),
-		zap.Int("io_worker_pool", config.IOWorkerPoolSize),
 	)
 
 	randSrc, distFunc := distributions.New(
@@ -129,7 +127,6 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 
 	globalStatus := status.NewGlobalStatus(config.MaxErrorsToStore)
 	globalStatus.SetStatementFiles(storeConfig.TestStatementFile, storeConfig.OracleStatementFile)
-	logger.Debug("creating workpool", zap.Int("size", config.IOWorkerPoolSize))
 
 	logger.Debug("creating store")
 	st, err := store.New(
@@ -355,8 +352,6 @@ func (w *Workload) Close() error {
 
 	w.logger.Info("setting stop flag")
 	w.stopFlag.SetSoft(true)
-
-	w.logger.Info("closing workpool")
 
 	err := w.status.Errors.Close()
 

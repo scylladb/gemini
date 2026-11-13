@@ -15,12 +15,17 @@
 package main
 
 import (
+	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/scylladb/gemini/pkg/jobs"
 )
+
+// MaxDeletedHeapSize is the largest number of deleted partitions that wait for
+// re-validation at one time.
+const MaxDeletedHeapSize = 1_000_000
 
 var (
 	testClusterHost                  []string
@@ -79,7 +84,6 @@ var (
 	oracleStatementLogFile           string
 	statementLogFileCompression      string
 	versionFlag                      bool
-	iOWorkerPool                     int
 	randomStringBuffer               int
 
 	maxPKStringLength int
@@ -100,7 +104,7 @@ var (
 
 	statementRatios string
 
-	deletedPartitionsTimeBucket []string
+	deletedPartitionsTimeBucket []time.Duration
 
 	summaryFile string
 )
@@ -109,7 +113,6 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().IntVarP(&randomStringBuffer, "random-string-buffer-size", "", 100*1024*1024, "Size of the buffer used for random strings")
 	cmd.PersistentFlags().IntVarP(&mutationConcurrency, "mutation-concurrency", "", 0, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().IntVarP(&readConcurrency, "read-concurrency", "", 0, "Number of worker threads to use for IO operations")
-	cmd.PersistentFlags().IntVarP(&iOWorkerPool, "io-worker-pool", "", 128, "Number of worker threads to use for IO operations")
 	cmd.PersistentFlags().BoolVarP(&versionFlag, "version", "", false, "Print version information")
 	cmd.PersistentFlags().
 		BoolP("version-json", "", false, "Print version information in JSON format")
@@ -139,7 +142,8 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		StringVarP(&mode, "mode", "m", jobs.MixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	cmd.Flags().
-		IntVarP(&concurrency, "concurrency", "c", 10, "Number of threads per table to run concurrently")
+		IntVarP(&concurrency, "concurrency", "c", 4*runtime.GOMAXPROCS(0),
+			"Number of threads per table to run concurrently. The default is 4 per available CPU")
 	cmd.Flags().
 		StringVarP(&seed, "seed", "s", "random", "Statement seed value")
 	cmd.Flags().
@@ -200,13 +204,12 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		Uint64VarP(&partitionCount, "partition-count", "", 2_000_000, "Number of Scylla Partitions")
 	cmd.Flags().
-		IntVarP(&maxDeletedHeapSize, "max-deleted-heap-size", "", -1,
-			"Maximum number of entries in the deleted-partitions heap. "+
-				"-1 means unlimited (default, preserves old behaviour). "+
-				"Set to a positive value (e.g. partition-count * 5) to bound memory when DELETE throughput is high.")
+		IntVarP(&maxDeletedHeapSize, "max-deleted-heap-size", "", MaxDeletedHeapSize,
+			"Maximum number of entries in the deleted-partitions heap, from 1 to 1000000")
 	cmd.Flags().
-		StringArrayVarP(&deletedPartitionsTimeBucket, "deleted-partitions-time-bucket", "", []string{"1m", "10m", "1h"},
-			"Time after to check if data resurrection has occurred for the deleted partitions")
+		DurationSliceVarP(&deletedPartitionsTimeBucket, "deleted-partitions-time-bucket", "",
+			[]time.Duration{time.Minute, 10 * time.Minute},
+			"Comma-separated delays after which a deleted partition is checked for data resurrection, for example 30s,3m,30h")
 	cmd.Flags().
 		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform",
 			"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
@@ -242,7 +245,8 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		IntVarP(&profilingPort, "profiling-port", "", 6060, "If non-zero starts pprof profiler on given port at 'http://0.0.0.0:<port>/profile'")
 	cmd.Flags().
-		IntVarP(&maxErrorsToStore, "max-errors-to-store", "", 1000, "Maximum number of errors to store and output at the end")
+		IntVarP(&maxErrorsToStore, "max-errors-to-store", "", 10,
+			"Maximum number of errors to store and show at the end. Gemini stops when read and write errors reach this number")
 	cmd.Flags().
 		StringVarP(&testStatementLogFile, "test-statement-log-file", "", "", "File to write statements flow to")
 	cmd.Flags().
