@@ -530,6 +530,61 @@ func TestNewPartitionKeys(t *testing.T) {
 	require.Positive(t, pk.Values.Len())
 }
 
+// TestSplitPartitionValues_MixedWidthKeys puts a tuple key between two simple
+// keys, so every column has a different start offset in the flat values.
+func TestSplitPartitionValues_MixedWidthKeys(t *testing.T) {
+	t.Parallel()
+
+	cols := typedef.Columns{
+		{Name: "pk0", Type: typedef.TypeInt},
+		{Name: "pk1", Type: &typedef.TupleType{
+			ComplexType: typedef.TypeTuple,
+			ValueTypes:  []typedef.SimpleType{typedef.TypeInt, typedef.TypeText},
+		}},
+		{Name: "pk2", Type: typedef.TypeDate},
+	}
+	date := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
+	values := []any{int32(1), int32(2), "two", date}
+
+	out := splitPartitionValues(cols, values)
+
+	require.Equal(t, []any{int32(1)}, out["pk0"])
+	require.Equal(t, []any{int32(2), "two"}, out["pk1"])
+	require.Equal(t, []any{date}, out["pk2"])
+
+	values[1] = int32(99)
+	require.Equal(t, int32(2), out["pk1"][0], "the result must not alias the input slice")
+}
+
+// TestNewPartitionKeys_TupleKeyFirst generates values for a table whose first
+// partition key is wider than the second key.
+func TestNewPartitionKeys_TupleKeyFirst(t *testing.T) {
+	t.Parallel()
+
+	table := &typedef.Table{
+		Name: "tuple_first",
+		PartitionKeys: typedef.Columns{
+			{Name: "pk0", Type: &typedef.TupleType{
+				ComplexType: typedef.TypeTuple,
+				ValueTypes:  []typedef.SimpleType{typedef.TypeInt, typedef.TypeText},
+			}},
+			{Name: "pk1", Type: typedef.TypeDate},
+		},
+	}
+	config := typedef.PartitionRangeConfig{MaxStringLength: 50, MinStringLength: 5}
+
+	pk := NewPartitionKeys(rand.New(rand.NewPCG(1, 2)), table, &config)
+
+	tuple := pk.Values.Get("pk0")
+	require.Len(t, tuple, 2)
+	require.IsType(t, int32(0), tuple[0])
+	require.IsType(t, "", tuple[1])
+
+	date := pk.Values.Get("pk1")
+	require.Len(t, date, 1)
+	require.IsType(t, time.Time{}, date[0])
+}
+
 // TestPartitionSize verifies partition size calculation
 func TestPartitionSize(t *testing.T) {
 	t.Parallel()
