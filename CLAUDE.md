@@ -191,7 +191,8 @@ warm image cache:
 | `pkg/typedef` | 3 min |
 | `pkg/services` | 2 min 30 s |
 
-Give the whole suite at least 10 minutes. `make test` already passes `-timeout 10m`. A run that
+`make test` passes `-timeout 10m`. Go applies that limit to each test binary, not to the whole
+suite. A package that runs longer than 10 minutes fails, and the other packages continue. A run that
 appears to hang after two minutes is one of these packages, not a deadlock. Run one package when you
 only changed one package.
 
@@ -199,9 +200,9 @@ only changed one package.
 
 | Target | Action |
 |---|---|
-| `make check` | `golangci-lint run` |
-| `make fix` | `golangci-lint run --fix` |
-| `make fmt` | `golangci-lint fmt` |
+| `make check` | `golangci-lint run` at the pinned version |
+| `make fix` | `golangci-lint run --fix` at the pinned version |
+| `make fmt` | `golangci-lint fmt` at the pinned version |
 | `make test` | Full suite with race detector, coverage and `gotestfmt` output |
 | `make setup` | Start the two-node Docker environment and build the debug binary |
 | `make scylla-setup` / `make scylla-shutdown` | Start or stop the two-node environment |
@@ -214,22 +215,23 @@ before you keep it.
 
 ## Lint Gates That Change Code
 
-`golangci-lint` runs more than 60 linters. Five of them push toward a weaker program if you satisfy
+`golangci-lint` runs 74 linters. Five of them push toward a weaker program if you satisfy
 them without thought.
 
 - **`forcetypeassert`** bans `v := x.(T)`. Do not answer it with `if v, ok := x.(T); ok` and a silent
   fallthrough. Gemini generates its own values, so a failed assertion is a gemini bug, and a silent
-  fallthrough books that bug as a SUT failure. Panic with the concrete and the wanted type, as
-  `mustConvert` does in `pkg/statements/insert.go`.
+  fallthrough books that bug as a SUT failure. Panic with the concrete type, as the validation
+  worker does in `pkg/jobs/validation.go` when an error is not a `*joberror.JobError`.
 - **`errchkjson`** bans an unchecked `json.Marshal`. `String()`, `Error()` and `ToCQL()` cannot
-  return an error, so they call `utils.MarshalJSONUnchecked`, which puts the failure in the returned
-  JSON. Every other call site handles the error.
+  return an error, so they call `utils.MarshalJSON` or `utils.MarshalJSONIndent`. Both put the
+  failure in the returned JSON. Every other call site handles the error.
 - **`errname`** requires the `Error` suffix on an error type. This is why the list of job errors is
   `joberror.ListError`.
 - **`testifylint`** rejects `assert.Equal` on floats. A test that pins an exact constant compares
   with `!=` in plain Go. Do not weaken it to `InDelta`.
-- **`forbidigo`** bans `fmt.Print*`. Four files print by design and are named in `.golangci.yml`.
-  Everything else logs through `zap`.
+- **`forbidigo`** bans `fmt.Print*`. Three files print to stdout by design and are named in
+  `.golangci.yml`. Code that writes to an explicit `io.Writer` uses `fmt.Fprint*`, which the rule
+  allows. Everything else logs through `zap`.
 
 `gofumpt` uses `extra.group-params`. `extra-rules` is the deprecated spelling of the same rule.
 

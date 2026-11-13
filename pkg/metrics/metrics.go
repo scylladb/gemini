@@ -416,9 +416,10 @@ func StartMetricsServer(ctx context.Context, bind string) {
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},
-		WriteTimeout: 1 * time.Minute,
-		Handler:      mux,
-		Addr:         bind,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      1 * time.Minute,
+		Handler:           mux,
+		Addr:              bind,
 	}
 
 	go func() {

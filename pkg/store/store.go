@@ -36,12 +36,12 @@ import (
 )
 
 type loader interface {
-	load(context.Context, *typedef.Stmt) (Rows, error)
-	loadIter(context.Context, *typedef.Stmt) RowIterator
+	load(ctx context.Context, stmt *typedef.Stmt) (Rows, error)
+	loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 }
 
 type storer interface {
-	mutate(context.Context, *typedef.Stmt, mo.Option[time.Time]) error
+	mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[time.Time]) error
 }
 
 type storeLoader interface {
@@ -55,13 +55,13 @@ type storeLoader interface {
 type Store interface {
 	io.Closer
 
-	Create(context.Context, *typedef.Stmt, *typedef.Stmt) error
-	Mutate(context.Context, *typedef.Stmt) error
+	Create(ctx context.Context, testBuilder, oracleBuilder *typedef.Stmt) error
+	Mutate(ctx context.Context, stmt *typedef.Stmt) error
 	// Check validates a statement against both stores. It returns the number of
 	// matched rows, the raw test-store rows (used by the validation layer to
 	// sample rows for the row tracker without issuing a second SELECT), and any
 	// error.
-	Check(context.Context, *typedef.Table, *typedef.Stmt, int) (int, Rows, error)
+	Check(ctx context.Context, table *typedef.Table, stmt *typedef.Stmt, expectedRows int) (int, Rows, error)
 }
 
 type (
@@ -661,7 +661,6 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	maxAttempts := ds.mutationRetries + 1 // +1 for the initial attempt
 
 	for attempt := range maxAttempts {
-
 		// Determine which stores need to be tried/retried
 		retryTest := attempt == 0 || cumulativeResult.testErr != nil
 		retryOracle := (attempt == 0 || cumulativeResult.oracleErr != nil) && ds.oracleStore != nil

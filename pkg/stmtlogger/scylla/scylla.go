@@ -255,7 +255,7 @@ func (s *Logger) openSinks(oracleStatements, testStatements string) error {
 			s.closeSinks()
 			s.sinks = nil
 			s.fetchCancel()
-			s.fetchCtx, s.fetchCancel = nil, nil
+			s.fetchCtx, s.fetchCancel = nil, nil //nolint:fatcontext // clears the field, no context is derived
 
 			return err
 		}

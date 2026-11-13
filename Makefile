@@ -4,6 +4,9 @@ GO111MODULE := on
 GOOS := $(shell uname | tr '[:upper:]' '[:lower:]')
 GOARCH := $(shell go env GOARCH)
 
+GOLANGCI_LINT_VERSION := v2.15.0
+GOLANGCI_LINT := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
 DOCKER_COMPOSE_TESTING ?= scylla
 DOCKER_VERSION ?= latest
 
@@ -58,11 +61,11 @@ tidy:
 
 .PHONY: check
 check:
-	@golangci-lint run
+	@$(GOLANGCI_LINT) run
 
 .PHONY: fix
 fix:
-	@golangci-lint run --fix
+	@$(GOLANGCI_LINT) run --fix
 
 .PHONY: fieldalign
 fieldalign:
@@ -76,7 +79,11 @@ fieldalign-fix:
 
 .PHONY: fmt
 fmt:
-	@golangci-lint fmt
+	@$(GOLANGCI_LINT) fmt
+
+.PHONY: golangci-lint-version
+golangci-lint-version:
+	@echo $(GOLANGCI_LINT_VERSION)
 
 .PHONY: build
 build:

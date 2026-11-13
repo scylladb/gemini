@@ -109,7 +109,7 @@ func watchdogDump(log *zap.Logger) string {
 
 type Worker interface {
 	Name() string
-	Do(context.Context) error
+	Do(ctx context.Context) error
 }
 
 func New(

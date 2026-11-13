@@ -94,17 +94,17 @@ func (q SimpleQuery) ToCql() (stmt string, names []string) {
 
 type (
 	PartitionKeys struct {
-		Values      *Values
-		Release     func() `json:"-"`
-		ID          uuid.UUID
-		DeletedAtNS uint64
+		Values      *Values   `json:"Values"`
+		Release     func()    `json:"-"`
+		ID          uuid.UUID `json:"ID"`
+		DeletedAtNS uint64    `json:"DeletedAtNS"`
 	}
 
 	Stmt struct {
-		PartitionKeys []PartitionKeys
-		Query         string
-		Values        []any
-		QueryType     StatementType
+		PartitionKeys []PartitionKeys `json:"PartitionKeys"`
+		Query         string          `json:"Query"`
+		Values        []any           `json:"Values"`
+		QueryType     StatementType   `json:"QueryType"`
 	}
 )
 

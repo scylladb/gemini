@@ -52,9 +52,9 @@ func (m *IndexDef) MarshalJSON() ([]byte, error) {
 	}
 
 	data := struct {
-		Column     *ColumnDef
-		IndexName  string `json:"index_name"`
-		ColumnName string `json:"column_name"`
+		Column     *ColumnDef `json:"Column"`
+		IndexName  string     `json:"index_name"`
+		ColumnName string     `json:"column_name"`
 	}{
 		Column:     col,
 		IndexName:  m.IndexName,
@@ -66,9 +66,9 @@ func (m *IndexDef) MarshalJSON() ([]byte, error) {
 
 func (m *IndexDef) UnmarshalJSON(data []byte) error {
 	item := struct {
-		Column     *ColumnDef
-		IndexName  string `json:"index_name"`
-		ColumnName string `json:"column_name"`
+		Column     *ColumnDef `json:"Column"`
+		IndexName  string     `json:"index_name"`
+		ColumnName string     `json:"column_name"`
 	}{}
 
 	if err := json.Unmarshal(data, &item); err != nil {
