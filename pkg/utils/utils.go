@@ -212,18 +212,28 @@ func MarshalJSONUnchecked(v any) []byte {
 	return data
 }
 
+// goSyntaxKeyPrefix starts the key of a value that JSON cannot encode.
+// json.Marshal escapes every '<' as \u003c, so no encodable value gives a
+// key that contains a raw '<'.
+const goSyntaxKeyPrefix = "<go>"
+
 // MarshalJSONKey returns the JSON encoding of v for use as a hash input, a sort
 // key or a row in a report. JSON cannot encode every value, for example a NaN
-// float. For such a value, MarshalJSONKey returns v in Go syntax as a JSON
-// string. Two different values thus give two different results, and the
-// result is always valid JSON.
+// float. For such a value, MarshalJSONKey returns a JSON string that holds
+// goSyntaxKeyPrefix and v in Go syntax. Two different values thus give two
+// different results, and the result is always valid JSON.
 func MarshalJSONKey(v any) []byte {
 	data, err := json.Marshal(v)
 	if err == nil {
 		return data
 	}
 
-	return MarshalJSONUnchecked(fmt.Sprintf("%#v", v))
+	quoted := MarshalJSONUnchecked(fmt.Sprintf("%#v", v))
+	key := make([]byte, 0, len(quoted)+len(goSyntaxKeyPrefix))
+	key = append(key, '"')
+	key = append(key, goSyntaxKeyPrefix...)
+
+	return append(key, quoted[1:]...)
 }
 
 func marshalFailure(cause error) []byte {
