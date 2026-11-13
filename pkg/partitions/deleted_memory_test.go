@@ -25,7 +25,8 @@ import (
 // over-allocate: total backing capacity is bounded by ~2x the live count.
 func TestRingMemoryEfficiency(t *testing.T) {
 	buckets := []time.Duration{100 * time.Millisecond}
-	d := newDeleted(t.Context(), buckets, 0)
+	// No emitter: a due bucket would drain entries while the test counts them.
+	d := newDeleted(t.Context(), buckets, 0, false)
 	defer d.Close()
 
 	// Add many items
