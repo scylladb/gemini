@@ -55,18 +55,21 @@ type (
 
 	deletedPartitions struct {
 		//nolint:containedctx
-		ctx          context.Context
-		ch           chan typedef.PartitionKeys
-		cancel       context.CancelFunc
-		win          *window
-		buckets      []time.Duration
-		rate         rateEstimator
-		deleted      atomic.Uint64
-		evicted      atomic.Uint64
-		sampledOut   atomic.Uint64
-		residenceSec float64
-		batchSize    int
-		closeOnce    sync.Once
+		ctx        context.Context
+		ch         chan typedef.PartitionKeys
+		cancel     context.CancelFunc
+		win        *window
+		buckets    []time.Duration
+		rate       rateEstimator
+		deleted    atomic.Uint64
+		evicted    atomic.Uint64
+		sampledOut atomic.Uint64
+		// reportedPending is this tracker's share of the
+		// deleted_partitions_pending gauge, see publishPending.
+		reportedPending atomic.Int64
+		residenceSec    float64
+		batchSize       int
+		closeOnce       sync.Once
 	}
 )
 
@@ -191,6 +194,7 @@ func (d *deletedPartitions) start(checkInterval time.Duration) {
 func (d *deletedPartitions) trySend(keys typedef.PartitionKeys) bool {
 	select {
 	case d.ch <- keys:
+		metrics.DeletedPartitionsEmitted.Inc()
 		return true
 	default:
 		return false
@@ -209,13 +213,9 @@ func (d *deletedPartitions) processReady() time.Duration {
 		return time.Duration(nextNs - nowNs)
 	}
 
-	onDones, wait := d.win.drainReady(nowNs, d.batchSize, d.trySend)
-	// Run final-release callbacks outside the window lock.
-	for _, done := range onDones {
-		if done != nil {
-			done()
-		}
-	}
+	wait := d.win.drainReady(nowNs, d.batchSize, d.trySend)
+	d.publishPending()
+
 	return wait
 }
 
@@ -321,6 +321,7 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	d.runEvicted(evicted)
 
 	d.deleted.Add(1)
+	d.publishPending()
 }
 
 // DeleteBulk adds multiple deleted partitions under a single window operation.
@@ -385,6 +386,7 @@ func (d *deletedPartitions) DeleteBulk(keys []typedef.PartitionKeys) {
 	d.runEvicted(evicted)
 
 	d.deleted.Add(uint64(len(keys)))
+	d.publishPending()
 }
 
 // runEvicted invokes onDone callbacks for entries evicted by the hard cap and
@@ -433,4 +435,12 @@ func (d *deletedPartitions) Close() {
 // Len returns the number of partitions waiting for validation.
 func (d *deletedPartitions) Len() int {
 	return d.win.len()
+}
+
+// publishPending adds this tracker's change in pending partitions to the
+// deleted_partitions_pending gauge. Each table has its own tracker, so a
+// tracker that set the gauge to its own count would hide the other tables.
+func (d *deletedPartitions) publishPending() {
+	current := int64(d.win.len())
+	metrics.DeletedPartitionsPending.Add(float64(current - d.reportedPending.Swap(current)))
 }

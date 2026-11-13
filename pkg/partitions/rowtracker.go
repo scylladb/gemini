@@ -80,7 +80,9 @@ type RowTracker struct {
 	count        atomic.Uint64
 	invalidCount atomic.Uint64
 	capacity     uint64
-	mu           sync.Mutex
+	// peekCursor walks the live rows for Peek. mu guards it.
+	peekCursor uint64
+	mu         sync.Mutex
 }
 
 // NewRowTracker creates a new RowTracker with the given capacity.
@@ -172,6 +174,30 @@ func (rt *RowTracker) Pop() (TrackedRow, bool) {
 		}
 		rt.invalidCount.Add(^uint64(0)) // decrement
 	}
+}
+
+// Peek returns a live tracked row and leaves it in the tracker. Successive
+// calls walk the live rows in turn, so readers spread over them. Targeted
+// mutations take rows with Pop. A reader that only needs a row's keys uses
+// Peek, so it does not take rows away from those mutations.
+func (rt *RowTracker) Peek() (TrackedRow, bool) {
+	if rt.capacity == 0 {
+		return TrackedRow{}, false
+	}
+
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
+	n := rt.count.Load()
+	for range n {
+		rt.peekCursor++
+		i := (rt.head - n + rt.peekCursor%n) % rt.capacity
+		if !rt.testBit(i) {
+			return rt.buf[i], true
+		}
+	}
+
+	return TrackedRow{}, false
 }
 
 func (rt *RowTracker) Invalidate(id uuid.UUID) {

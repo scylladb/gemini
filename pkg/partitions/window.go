@@ -216,17 +216,16 @@ func (w *window) pushBulk(entries []bucketEntry) []bucketEntry {
 // drainReady emits entries whose readyAt has passed (as of nowNs), up to
 // batchSize, via send. send reports whether the entry was accepted by the
 // consumer; when it returns false (e.g. the channel is full) draining stops.
-// Entries that complete their final bucket have their onDone collected and
-// returned for the caller to run after the lock is released; entries with
-// buckets remaining are re-scheduled into the next bucket. The returned duration
+// An entry that completes its final bucket is emitted with its onDone as the
+// keys' Release, so the consumer releases it after re-validation. An entry with
+// buckets remaining is re-scheduled into the next bucket. The returned duration
 // is how long until the next entry is ready (a small value means keep draining).
-func (w *window) drainReady(nowNs int64, batchSize int, send func(typedef.PartitionKeys) bool) ([]func(), time.Duration) {
+func (w *window) drainReady(nowNs int64, batchSize int, send func(typedef.PartitionKeys) bool) time.Duration {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	w.maybeShrinkLocked(nowNs)
 
-	var onDones []func()
 	processed := 0
 	for processed < batchSize {
 		ri := w.soonestLocked()
@@ -237,24 +236,33 @@ func (w *window) drainReady(nowNs int64, batchSize int, send func(typedef.Partit
 		front, _ := w.rings[ri].peekFront()
 		if nowNs < front.readyAtNs {
 			w.nextReady.Store(front.readyAtNs)
-			return onDones, time.Duration(front.readyAtNs - nowNs)
+			return time.Duration(front.readyAtNs - nowNs)
 		}
 
-		if !send(front.keys) {
+		// On the final emission the consumer (validator) owns the release: we
+		// hand it the onDone callback as the keys' Release so the deleted
+		// partition's UUID is retired only after re-validation completes, not
+		// the instant the keys leave the tracker. Intermediate emissions keep
+		// Release nil — the entry is re-scheduled and stays referenced.
+		final := front.bucket+1 >= len(w.buckets)
+		emitKeys := front.keys
+		if final {
+			emitKeys.Release = front.onDone
+		}
+
+		if !send(emitKeys) {
 			// Consumer not ready (channel full); retry shortly.
 			w.refreshNextReadyLocked()
-			return onDones, 10 * time.Millisecond
+			return 10 * time.Millisecond
 		}
 
 		processed++
 		e, _ := w.rings[ri].popFront()
 
-		if e.bucket+1 >= len(w.buckets) {
-			// Final emission done; the original keys are released once, later.
+		if final {
+			// Final emission done; release ownership was transferred to the
+			// consumer via emitKeys.Release above, so nothing to run here.
 			w.live--
-			if e.onDone != nil {
-				onDones = append(onDones, e.onDone)
-			}
 			continue
 		}
 
@@ -272,13 +280,13 @@ func (w *window) drainReady(nowNs int64, batchSize int, send func(typedef.Partit
 		front, _ := w.rings[ri].peekFront()
 		w.nextReady.Store(front.readyAtNs)
 		if front.readyAtNs <= nowNs {
-			return onDones, time.Millisecond
+			return time.Millisecond
 		}
-		return onDones, time.Duration(front.readyAtNs - nowNs)
+		return time.Duration(front.readyAtNs - nowNs)
 	}
 
 	w.nextReady.Store(0)
-	return onDones, 0
+	return 0
 }
 
 // evictLocked enforces the global hard cap: while the total live count exceeds

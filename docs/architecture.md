@@ -26,8 +26,23 @@ Gemini has two primary job types:
 
 Gemini uses separate concurrency settings for mutations and reads:
 
-- `--concurrency` / `--mutation-concurrency`: Number of mutation workers
-- `--read-concurrency`: Number of validation workers
+- `--concurrency` / `--mutation-concurrency`: Maximum number of mutation workers per table
+- `--concurrency` / `--read-concurrency`: Maximum number of validation workers per table
+
+A value of 0, the default, sizes the pools from the clusters. Gemini reads the
+shard count of every node after it connects and takes the cluster with fewer
+shards. The maximum is 16 workers per shard, and the pools start at 8 per shard.
+When the clusters report no shards, as Cassandra does, the maximum is 4 workers
+per CPU.
+
+Each pool starts its maximum number of workers, but only the workers below the
+current limit run. The limiter in `pkg/concurrency` adjusts the limit every
+second from the mean operation latency. It compares that mean with a baseline,
+the lowest mean of the last two minutes. Below 2.5 times the baseline the limit
+grows by 10%. Above 4 times the baseline it shrinks to 80%. So the limit climbs
+toward the maximum while the clusters absorb the load, and falls while a node is
+slow, which keeps the queued requests, and their timeouts, low. The current
+limit is the `concurrency_limit` metric.
 
 In `mixed` mode, both mutation and validation workers run concurrently. Each worker operates on a shared partition pool but uses distribution functions to select partitions, avoiding direct conflicts.
 

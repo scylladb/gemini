@@ -248,7 +248,7 @@ func TestSameMsNoRowLoss(t *testing.T) {
 				totalWritten = workers * perWorker
 			)
 
-			// One partition, one ty, one pair of attempt counters for every item,
+			// One partition, one cluster, one pair of attempt counters for every item,
 			// so ts and seq are all that keep the rows apart.
 			items := make([]stmtlogger.Item, 0, totalWritten)
 			for i := range totalWritten {
@@ -302,15 +302,15 @@ func TestSameMsNoRowLoss(t *testing.T) {
 
 			var count int
 			require.NoError(t, session.Query(
-				fmt.Sprintf("SELECT COUNT(*) FROM %s.%s WHERE pk0 = ? AND ty = ?", keyspace, table),
-				"hot_partition", string(stmtlogger.TypeOracle),
+				fmt.Sprintf("SELECT COUNT(*) FROM %s.%s WHERE pk0 = ?", keyspace, table),
+				"hot_partition",
 			).Scan(&count))
 
 			assert.Equal(t, totalWritten, count, "no _logs row may be lost to a same-millisecond primary-key collision")
 
 			iter := session.Query(
-				fmt.Sprintf("SELECT ts, seq, statement FROM %s.%s WHERE pk0 = ? AND ty = ?", keyspace, table),
-				"hot_partition", string(stmtlogger.TypeOracle),
+				fmt.Sprintf("SELECT ts, seq, statement FROM %s.%s WHERE pk0 = ?", keyspace, table),
+				"hot_partition",
 			).Iter()
 
 			var (

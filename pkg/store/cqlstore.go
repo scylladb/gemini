@@ -61,6 +61,9 @@ type cqlStore struct {
 	cqlRequestsMetric         [typedef.StatementTypeCount]prometheus.Counter
 	cqlErrorRequestsMetric    [typedef.StatementTypeCount]prometheus.Counter
 	cqlTimeoutsRequestsMetric [typedef.StatementTypeCount]prometheus.Counter
+	rowsReturnedMetric        prometheus.Counter
+	rowsPerQueryMetric        prometheus.Observer
+	stmtTracker               *stmtTracker
 	cluster                   *gocql.ClusterConfig
 	session                   *gocql.Session
 	tracingDir                string
@@ -78,11 +81,12 @@ func newCQLStoreWithSession(
 	logger.Info("creating cql store with session", zap.String("system", system))
 
 	store := &cqlStore{
-		cluster:    cluster,
-		schema:     schema,
-		logger:     logger,
-		system:     system,
-		tracingDir: tracingDir,
+		cluster:     cluster,
+		schema:      schema,
+		logger:      logger,
+		system:      system,
+		tracingDir:  tracingDir,
+		stmtTracker: newStmtTracker(system, cluster.MaxPreparedStmts),
 	}
 
 	for i := range typedef.StatementTypeCount {
@@ -90,6 +94,9 @@ func newCQLStoreWithSession(
 		store.cqlErrorRequestsMetric[i] = metrics.CQLErrorRequests.WithLabelValues(system, i.String())
 		store.cqlTimeoutsRequestsMetric[i] = metrics.CQLQueryTimeouts.WithLabelValues(system, i.String())
 	}
+
+	store.rowsReturnedMetric = metrics.CQLRowsReturned.WithLabelValues(system)
+	store.rowsPerQueryMetric = metrics.CQLRowsPerQuery.WithLabelValues(system)
 
 	logger.Info("cql store created", zap.String("system", system))
 	return store
@@ -170,6 +177,25 @@ func (c *cqlStore) Init() error {
 	return err
 }
 
+// shardCount sums the shard counts the nodes reported at connection time. A
+// node that reports none, such as a Cassandra node, makes the total 0.
+func (c *cqlStore) shardCount() int {
+	if c.session == nil {
+		return 0
+	}
+
+	total := 0
+	for _, host := range c.session.GetHosts() {
+		shards := host.ScyllaShardCount()
+		if shards <= 0 {
+			return 0
+		}
+		total += shards
+	}
+
+	return total
+}
+
 func (c *cqlStore) getSession() (*gocql.Session, error) {
 	if c.session == nil {
 		return nil, errors.New("session not initialized")
@@ -194,6 +220,8 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 		return err
 	}
 
+	c.stmtTracker.Track(stmt.Query)
+
 	query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 	defer query.Release()
 
@@ -214,6 +242,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 
 	if errors.Is(mutateErr, context.Canceled) {
 		c.logger.Debug("mutation cancelled", zap.String("system", c.system))
+		metrics.ContextCancellations.WithLabelValues("mutation", "cancelled").Inc()
 		return context.Canceled
 	}
 
@@ -223,6 +252,7 @@ func (c *cqlStore) mutate(ctx context.Context, stmt *typedef.Stmt, ts mo.Option[
 			zap.String("query_type", stmt.QueryType.String()),
 		)
 		c.cqlTimeoutsRequestsMetric[stmt.QueryType].Inc()
+		metrics.ContextCancellations.WithLabelValues("mutation", "deadline").Inc()
 		return mutateErr // Return timeout error so delegating store can retry
 	}
 
@@ -253,6 +283,8 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 		return nil, err
 	}
 
+	c.stmtTracker.Track(stmt.Query)
+
 	query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 	defer func() {
 		query.Release()
@@ -262,6 +294,7 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	iter := query.Iter()
 
 	if iter.NumRows() == 0 {
+		c.rowsPerQueryMetric.Observe(0)
 		return nil, iter.Close()
 	}
 
@@ -273,7 +306,7 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 	if err != nil {
 		return nil, err
 	}
-	columns := firstRowData.Columns
+	columns := getColumnIndex(firstRowData.Columns)
 
 	// Scan the first row into the already-allocated destinations.
 	if !iter.Scan(firstRowData.Values...) {
@@ -282,7 +315,7 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 		}
 		return rows, err
 	}
-	rows = append(rows, NewRow(columns, firstRowData.Values))
+	rows = append(rows, newRowWithIndex(columns, firstRowData.Values))
 
 	// Each subsequent row gets its own fresh RowData so scan destinations are
 	// never shared between rows — no copying or reflection required.
@@ -294,7 +327,7 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 		if !iter.Scan(rowData.Values...) {
 			break
 		}
-		rows = append(rows, NewRow(columns, rowData.Values))
+		rows = append(rows, newRowWithIndex(columns, rowData.Values))
 	}
 
 	if err = iter.Close(); err != nil && !errors.Is(err, context.Canceled) {
@@ -303,6 +336,9 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 			zap.Error(err),
 		)
 	}
+
+	c.rowsReturnedMetric.Add(float64(len(rows)))
+	c.rowsPerQueryMetric.Observe(float64(len(rows)))
 
 	return rows, err
 }
@@ -315,6 +351,8 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			yield(Row{}, errors.New("failed to get cql session"))
 			return
 		}
+
+		c.stmtTracker.Track(stmt.Query)
 
 		query := session.QueryWithContext(ctx, stmt.Query, stmt.Values...)
 		defer query.Release()
@@ -340,7 +378,7 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			yield(Row{}, rdErr)
 			return
 		}
-		columns := firstRowData.Columns
+		columns := getColumnIndex(firstRowData.Columns)
 
 		// Scan the first row into the already-allocated destinations.
 		select {
@@ -352,7 +390,7 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 		if !iter.Scan(firstRowData.Values...) {
 			return
 		}
-		if !yield(NewRow(columns, firstRowData.Values), nil) {
+		if !yield(newRowWithIndex(columns, firstRowData.Values), nil) {
 			return
 		}
 
@@ -373,7 +411,7 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			if !iter.Scan(rowData.Values...) {
 				break
 			}
-			if !yield(NewRow(columns, rowData.Values), nil) {
+			if !yield(newRowWithIndex(columns, rowData.Values), nil) {
 				return
 			}
 		}

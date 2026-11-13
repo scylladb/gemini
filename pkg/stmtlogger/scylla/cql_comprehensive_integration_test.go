@@ -260,36 +260,43 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 			require.NoError(t, err, "Insert should succeed")
 
 			// Verify the data was inserted correctly
+			// The row holds this item's cluster in its own columns. The other
+			// cluster's columns stay null, because the item has no partner.
+			side, other := string(tt.item.Type), "oracle"
+			if side == "oracle" {
+				other = "test"
+			}
 			query := fmt.Sprintf(
-				"SELECT pk0, pk1, ty, statement, host, attempt, gemini_attempt, error, dur FROM %s.%s WHERE pk0 = ? AND pk1 = ? AND ty = ?",
-				keyspace, table,
+				"SELECT pk0, pk1, statement, %[3]s_host, attempt, gemini_attempt, %[3]s_error, %[3]s_dur, %[4]s_host "+
+					"FROM %[1]s.%[2]s WHERE pk0 = ? AND pk1 = ?",
+				keyspace, table, side, other,
 			)
 
 			var (
 				pk0           string
 				pk1           int32
-				ty            string
 				statement     string
 				host          string
 				attempt       int16
 				geminiAttempt int16
 				errorStr      string
 				dur           time.Duration
+				otherHost     *string
 			)
 
 			err = session.Query(
 				query,
 				tt.item.PartitionKeys.Values.Get("pk0")[0],
 				tt.item.PartitionKeys.Values.Get("pk1")[0],
-				tt.item.Type,
-			).Scan(&pk0, &pk1, &ty, &statement, &host, &attempt, &geminiAttempt, &errorStr, &dur)
+			).Scan(&pk0, &pk1, &statement, &host, &attempt, &geminiAttempt, &errorStr, &dur, &otherHost)
 
 			require.NoError(t, err, "Should be able to query inserted data")
 
 			// Verify all columns
 			assert.Equal(t, tt.expectedColumns["pk0"], pk0, "pk0 should match")
 			assert.Equal(t, tt.expectedColumns["pk1"], pk1, "pk1 should match")
-			assert.Equal(t, tt.expectedColumns["ty"], ty, "type should match")
+			assert.Equal(t, tt.expectedColumns["ty"], side, "type should match")
+			assert.Nil(t, otherHost, "the other cluster's columns should be null")
 			assert.Equal(t, tt.expectedColumns["statement"], statement, "statement should match")
 			assert.Equal(t, tt.expectedColumns["host"], host, "host should match")
 			assert.Equal(t, tt.expectedColumns["attempt"], attempt, "attempt should match")
@@ -300,10 +307,9 @@ func TestCQLStatements_Insert_Comprehensive(t *testing.T) {
 			// Verify values column
 			var values []string
 			err = session.Query(
-				fmt.Sprintf("SELECT values FROM %s.%s WHERE pk0 = ? AND pk1 = ? AND ty = ?", keyspace, table),
+				fmt.Sprintf("SELECT values FROM %s.%s WHERE pk0 = ? AND pk1 = ?", keyspace, table),
 				tt.item.PartitionKeys.Values.Get("pk0")[0],
 				tt.item.PartitionKeys.Values.Get("pk1")[0],
-				tt.item.Type,
 			).Scan(&values)
 
 			require.NoError(t, err, "Should be able to query values")
@@ -950,9 +956,8 @@ func TestCQLStatements_Fetch_WithVariousErrors(t *testing.T) {
 			var storedError string
 			// Use a new err variable to avoid racing on the outer 'err'
 			err := session.Query(
-				fmt.Sprintf("SELECT error FROM %s.%s WHERE pk0 = ? AND ty = ?", logsKS, logsTable),
+				fmt.Sprintf("SELECT oracle_error FROM %s.%s WHERE pk0 = ?", logsKS, logsTable),
 				pkValue,
-				stmtlogger.TypeOracle,
 			).Scan(&storedError)
 
 			require.NoError(t, err)

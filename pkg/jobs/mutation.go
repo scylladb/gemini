@@ -22,6 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scylladb/gemini/pkg/concurrency"
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/partitions"
@@ -42,6 +43,10 @@ type Mutation struct {
 	stopFlag  *stop.Flag
 	schema    *typedef.Schema
 	logger    *zap.Logger
+	// limiter parks this worker while workerIdx is at or above its limit.
+	// Nil runs the worker without a limit.
+	limiter   *concurrency.Limiter
+	workerIdx int
 	delete    bool
 }
 
@@ -93,6 +98,8 @@ func (m *Mutation) run(ctx context.Context) error {
 		return err
 	}
 
+	statementsGenerated[mutateStmt.QueryType].Inc()
+
 	// Ensure partition keys are released when we're done with the statement
 	defer func() {
 		for i := range mutateStmt.PartitionKeys {
@@ -102,7 +109,11 @@ func (m *Mutation) run(ctx context.Context) error {
 		}
 	}()
 
+	start := time.Now()
 	err = m.store.Mutate(ctx, mutateStmt)
+	if m.limiter != nil {
+		m.limiter.Observe(time.Since(start))
+	}
 
 	if err == nil {
 		m.status.WriteOp()
@@ -222,6 +233,15 @@ func (m *Mutation) Do(ctx context.Context) error {
 		default:
 		}
 
+		if m.limiter != nil {
+			if err := m.limiter.Wait(ctx, m.workerIdx, m.stopFlag.IsHardOrSoft); err != nil {
+				return nil
+			}
+			if m.stopFlag.IsHardOrSoft() {
+				break
+			}
+		}
+
 		err := executionTime.RunFuncE(func() error {
 			return m.run(ctx)
 		})
@@ -291,6 +311,7 @@ func (m *Mutation) Do(ctx context.Context) error {
 
 		if m.status.HasReachedErrorCount() {
 			m.stopFlag.SetSoft(true)
+			metrics.WorkerStopEvents.WithLabelValues("mutation", "error_budget").Inc()
 			return ErrMutationJobStopped
 		}
 	}

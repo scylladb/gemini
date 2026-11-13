@@ -41,6 +41,10 @@ type (
 	Type string
 
 	Item struct {
+		// Origin and PartitionIndex identify the gemini statement and the
+		// partition the item belongs to. The scylla logger pairs the test and
+		// oracle items of one execution by them and writes one _logs row.
+		Origin    *typedef.Stmt            `json:"-"`
 		Start     Time                     `json:"s"`
 		Error     mo.Either[error, string] `json:"e,omitzero"`
 		Type      Type                     `json:"-"`
@@ -61,6 +65,7 @@ type (
 		LastFailureNS  uint64                   `json:"lf,omitempty"`
 		Attempt        int                      `json:"d_a"`
 		GeminiAttempt  int                      `json:"g_a"`
+		PartitionIndex int                      `json:"-"`
 		StatementType  typedef.StatementType    `json:"-"`
 	}
 

@@ -49,12 +49,20 @@ func (m *mockPartitionsWithTracker) Next() typedef.PartitionKeys {
 	}
 }
 
+func (m *mockPartitionsWithTracker) NextForWrite() typedef.PartitionKeys {
+	return m.Next()
+}
+
 func (m *mockPartitionsWithTracker) ReplaceNext() typedef.PartitionKeys {
 	return m.Next()
 }
 
 func (m *mockPartitionsWithTracker) TrackRow(row partitions.TrackedRow) {
 	m.tracker.Push(row)
+}
+
+func (m *mockPartitionsWithTracker) PeekTrackedRow() (partitions.TrackedRow, bool) {
+	return m.tracker.Peek()
 }
 
 func (m *mockPartitionsWithTracker) PopTrackedRow() (partitions.TrackedRow, bool) {

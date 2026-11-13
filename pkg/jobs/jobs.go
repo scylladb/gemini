@@ -23,9 +23,11 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/scylladb/gemini/pkg/concurrency"
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/partitions"
@@ -44,6 +46,9 @@ const (
 )
 
 type Jobs struct {
+	// limiter sets how many workers of each pool run at a time. The pools
+	// start mutationConcurrency and readConcurrency workers, the maximums.
+	limiter              *concurrency.Limiter
 	store                store.Store
 	schema               *typedef.Schema
 	status               *status.GlobalStatus
@@ -121,6 +126,7 @@ func New(
 	logger *zap.Logger,
 	src *rand.ChaCha8,
 	ratios statements.Ratios,
+	limiter *concurrency.Limiter,
 ) *Jobs {
 	logger.Info("creating jobs",
 		zap.Int("mutation_concurrency", mutationConcurrency),
@@ -137,6 +143,7 @@ func New(
 		mutationConcurrency:  mutationConcurrency,
 		ratioController:      ratioController,
 		targetedConsumeRatio: ratios.TargetedConsumeRatio(),
+		limiter:              limiter,
 	}
 }
 
@@ -174,6 +181,14 @@ func (j *Jobs) Run(
 	defer cancel()
 
 	g, gCtx := errgroup.WithContext(timeoutCtx)
+
+	// The limiter runs outside the errgroup: g.Wait returns when the workers
+	// finish, and the limiter would keep it waiting.
+	if j.limiter != nil {
+		limiterCtx, stopLimiter := context.WithCancel(timeoutCtx)
+		defer stopLimiter()
+		go j.limiter.Run(limiterCtx, limiterInterval)
+	}
 
 	// Create exactly one soft-stop timer and one watchdog timer for this
 	// Run() invocation, regardless of how many tables are in the schema.
@@ -241,16 +256,20 @@ func (j *Jobs) Run(
 						newSrc,
 						log.Named("mutation").With(zap.String("table", table.Name), zap.Int("worker_id", i)),
 					)
+					mutation.limiter, mutation.workerIdx = j.limiter, i
 
 					workerID := i
 					g.Go(func() error {
 						metrics.WorkersCurrent.WithLabelValues("mutation").Inc()
 						defer metrics.WorkersCurrent.WithLabelValues("mutation").Dec()
 						log.Debug("mutation worker started", zap.Int("worker_id", workerID))
-						// Use the errgroup context so that mutation workers are
-						// canceled together with the rest of the job set (like validation)
-						// and respect error propagation uniformly in Mixed mode.
-						err := mutation.Do(gCtx)
+						// A child of the errgroup context, so mutation workers are
+						// canceled together with the rest of the job set (like
+						// validation) and respect error propagation uniformly in
+						// Mixed mode. See workerContext for why it is a child.
+						workerCtx, cancelWorker := workerContext(gCtx)
+						defer cancelWorker()
+						err := mutation.Do(workerCtx)
 						switch {
 						case err == nil || errors.Is(err, context.Canceled):
 							log.Debug("mutation worker finished", zap.Int("worker_id", workerID))
@@ -288,6 +307,7 @@ func (j *Jobs) Run(
 						newSrc,
 						j.targetedConsumeRatio,
 					)
+					validation.limiter, validation.workerIdx = j.limiter, i
 
 					workerID := i
 					g.Go(func() error {
@@ -295,7 +315,9 @@ func (j *Jobs) Run(
 						defer metrics.WorkersCurrent.WithLabelValues("validation").Dec()
 
 						log.Debug("validation worker started", zap.Int("worker_id", workerID))
-						err := validation.Do(gCtx)
+						workerCtx, cancelWorker := workerContext(gCtx)
+						defer cancelWorker()
+						err := validation.Do(workerCtx)
 						switch {
 						case err == nil || errors.Is(err, context.Canceled):
 							log.Debug("validation worker finished", zap.Int("worker_id", workerID))
@@ -324,3 +346,31 @@ func (j *Jobs) Run(
 	}
 	return err
 }
+
+// statementsGenerated holds statements_generated_total for every statement
+// type, resolved once. The type label is "select" or "mutation", and the
+// subtype label is the statement type.
+var statementsGenerated = func() [typedef.StatementTypeCount]prometheus.Counter {
+	var out [typedef.StatementTypeCount]prometheus.Counter
+	for ty := range typedef.StatementTypeCount {
+		category := "mutation"
+		if ty.IsSelect() {
+			category = "select"
+		}
+		out[ty] = metrics.StatementsGenerated.WithLabelValues(category, ty.String())
+	}
+
+	return out
+}()
+
+// workerContext gives a worker its own cancelable child of parent.
+// context.WithValue and errgroup share the parent's Done channel, and gocql
+// selects on ctx.Done() several times per query. With every worker on one
+// channel, those selects queue on that channel's lock. A child has its own
+// Done channel and still ends when parent ends.
+func workerContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithCancel(parent)
+}
+
+// limiterInterval is how often the limiter adjusts the worker count.
+const limiterInterval = time.Second

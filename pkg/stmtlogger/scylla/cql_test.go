@@ -48,8 +48,9 @@ func TestBuildCreateTableQuery(t *testing.T) {
 			replication:  replication.NewNetworkTopologyStrategy(),
 			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS test_logs WITH replication={'class':'NetworkTopologyStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS test_logs.test_statements(pk0 text," +
-				"ts bigint, seq bigint, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
-				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((pk0, ty), ts, attempt, gemini_attempt, seq)) " +
+				"ts bigint, seq bigint, statement text, values frozen<list<text>>, attempt smallint, gemini_attempt smallint, " +
+				"test_ts bigint, test_host text, test_error text, test_dur duration, " +
+				"oracle_ts bigint, oracle_host text, oracle_error text, oracle_dur duration, PRIMARY KEY ((pk0), ts, attempt, gemini_attempt, seq)) " +
 				"WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} " +
 				"AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';",
 		},
@@ -70,8 +71,9 @@ func TestBuildCreateTableQuery(t *testing.T) {
 			replication:  replication.NewNetworkTopologyStrategy(),
 			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS test_logs WITH replication={'class':'NetworkTopologyStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS test_logs.test_statements(pk0 text,pk1 int," +
-				"ts bigint, seq bigint, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
-				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((pk0,pk1, ty), ts, attempt, gemini_attempt, seq)) " +
+				"ts bigint, seq bigint, statement text, values frozen<list<text>>, attempt smallint, gemini_attempt smallint, " +
+				"test_ts bigint, test_host text, test_error text, test_dur duration, " +
+				"oracle_ts bigint, oracle_host text, oracle_error text, oracle_dur duration, PRIMARY KEY ((pk0,pk1), ts, attempt, gemini_attempt, seq)) " +
 				"WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} " +
 				"AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';",
 		},
@@ -88,8 +90,9 @@ func TestBuildCreateTableQuery(t *testing.T) {
 			replication:  replication.NewNetworkTopologyStrategy(),
 			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS ks_logs WITH replication={'class':'NetworkTopologyStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS ks_logs.tbl_statements(id uuid," +
-				"ts bigint, seq bigint, ty text, statement text, values frozen<list<text>>, host text, attempt smallint, " +
-				"gemini_attempt smallint, error text, dur duration, PRIMARY KEY ((id, ty), ts, attempt, gemini_attempt, seq)) " +
+				"ts bigint, seq bigint, statement text, values frozen<list<text>>, attempt smallint, gemini_attempt smallint, " +
+				"test_ts bigint, test_host text, test_error text, test_dur duration, " +
+				"oracle_ts bigint, oracle_host text, oracle_error text, oracle_dur duration, PRIMARY KEY ((id), ts, attempt, gemini_attempt, seq)) " +
 				"WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} " +
 				"AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';",
 		},
@@ -170,7 +173,11 @@ func TestPrepareValuesOptimized(t *testing.T) {
 func TestAdditionalColumns(t *testing.T) {
 	t.Parallel()
 
-	expected := []string{"ts", "seq", "ty", "statement", "values", "host", "attempt", "gemini_attempt", "error", "dur"}
+	expected := []string{
+		"ts", "seq", "statement", "values", "attempt", "gemini_attempt",
+		"test_ts", "test_host", "test_error", "test_dur",
+		"oracle_ts", "oracle_host", "oracle_error", "oracle_dur",
+	}
 
 	if len(additionalColumnsArr) != len(expected) {
 		t.Errorf("additionalColumnsArr length = %d, want %d", len(additionalColumnsArr), len(expected))

@@ -25,13 +25,14 @@ type RowIterator func(yield func(Row, error) bool)
 
 // ComparisonResult represents the result of comparing two row iterators
 type ComparisonResult struct {
-	Table          *typedef.Table
-	TestError      error
-	OracleError    error
-	TestOnlyRows   []Row
-	OracleOnlyRows []Row
-	DifferentRows  []RowDifference
-	MatchCount     int
+	Table             *typedef.Table
+	TestError         error
+	OracleError       error
+	TestOnlyRows      []Row
+	OracleOnlyRows    []Row
+	DifferentRows     []RowDifference
+	MatchCount        int
+	DeduplicatedCount int
 }
 
 // RowDifference represents a difference between two rows

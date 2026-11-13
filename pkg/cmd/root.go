@@ -25,6 +25,8 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"runtime"
+	"runtime/trace"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -72,6 +74,12 @@ func preRun(cmd *cobra.Command, _ []string) {
 	metrics.StartMetricsServer(cmd.Context(), metricsPort)
 
 	if profilingPort != 0 {
+		// Mutex and block profiles record a stack for every contended lock
+		// and blocking channel operation, so they run only when someone
+		// can read them.
+		runtime.SetMutexProfileFraction(1)
+		runtime.SetBlockProfileRate(1)
+
 		go func() {
 			mux := http.NewServeMux()
 
@@ -142,6 +150,11 @@ func run(cmd *cobra.Command, _ []string) error {
 
 	logger := createLogger(level)
 	defer utils.IgnoreError(logger.Sync)
+
+	if flightRecorderPath != "" {
+		writeTrace := startFlightRecorder(logger, flightRecorderPath)
+		defer writeTrace()
+	}
 
 	stopFlag := stop.NewFlag("main")
 	stop.StartOsSignalsTransmitter(logger, stopFlag)
@@ -322,7 +335,11 @@ func printSetup(schema *typedef.Schema, ratio statements.Ratios, seed, schemaSee
 	_, _ = fmt.Fprintf(tw, "Schema seed:\t%d\n", schemaSeed)
 	_, _ = fmt.Fprintf(tw, "Maximum duration:\t%s\n", duration)
 	_, _ = fmt.Fprintf(tw, "Warmup duration:\t%s\n", warmup)
-	_, _ = fmt.Fprintf(tw, "Concurrency:\t%d\n", concurrency)
+	if concurrency > 0 {
+		_, _ = fmt.Fprintf(tw, "Concurrency:\t%d\n", concurrency)
+	} else {
+		_, _ = fmt.Fprintf(tw, "Concurrency:\t%s\n", "auto")
+	}
 	_, _ = fmt.Fprintf(tw, "Test cluster:\t%s\n", testClusterHost)
 	_, _ = fmt.Fprintf(tw, "Oracle cluster:\t%s\n", oracleClusterHost)
 	if outFileArg == "" {
@@ -460,5 +477,40 @@ func createSchemaConfig(datasetSize string, logger *zap.Logger) typedef.SchemaCo
 		}
 	default:
 		return defaultConfig
+	}
+}
+
+// startFlightRecorder keeps a recent execution trace in memory, bounded by
+// 256 MiB. A busy run fills about 2 MiB per second, so the trace covers about
+// the last two minutes.
+// The returned function writes it to path and stops the recorder. run defers
+// it, so the trace is written on a normal exit and when run panics.
+func startFlightRecorder(logger *zap.Logger, path string) func() {
+	recorder := trace.NewFlightRecorder(trace.FlightRecorderConfig{
+		MaxBytes: 256 << 20,
+		MinAge:   time.Hour,
+	})
+
+	if err := recorder.Start(); err != nil {
+		logger.Warn("flight recorder did not start", zap.Error(err))
+		return func() {}
+	}
+
+	return func() {
+		defer recorder.Stop()
+
+		file, err := os.Create(path)
+		if err != nil {
+			logger.Error("cannot create the flight recorder file", zap.String("path", path), zap.Error(err))
+			return
+		}
+		defer utils.IgnoreError(file.Close)
+
+		if _, err = recorder.WriteTo(file); err != nil {
+			logger.Error("cannot write the flight recorder trace", zap.String("path", path), zap.Error(err))
+			return
+		}
+
+		logger.Info("flight recorder trace written", zap.String("path", path))
 	}
 }

@@ -36,7 +36,7 @@ import (
 //
 // Shared by single-row UPDATE, single-row DELETE, and clustering-prefix DELETE.
 func (g *Generator) appendTrackedKeys(dst []any, trackedRow partitions.TrackedRow, nCK int) ([]any, *typedef.Values, bool) {
-	pkLen := g.table.PartitionKeys.LenValues()
+	pkLen := g.table.PartitionKeysLenValues()
 	if len(trackedRow.PartitionValues) < pkLen {
 		return dst, nil, false
 	}
@@ -48,16 +48,9 @@ func (g *Generator) appendTrackedKeys(dst []any, trackedRow partitions.TrackedRo
 	dst = append(dst, trackedRow.PartitionValues[:pkLen]...)
 	dst = append(dst, trackedRow.ClusteringValues[:ckLen]...)
 
-	// Partition-key Values for the logger; the slices alias trackedRow, no copy.
-	m := make(map[string][]any, len(g.table.PartitionKeys))
-	idx := 0
-	for _, pk := range g.table.PartitionKeys {
-		lenVal := pk.Type.LenValue()
-		m[pk.Name] = trackedRow.PartitionValues[idx : idx+lenVal]
-		idx += lenVal
-	}
-
-	return dst, typedef.NewValuesFromMap(m), true
+	// Partition-key Values for the logger; the slices alias trackedRow (no copy),
+	// built map-free directly from the flat partition-value slice.
+	return dst, typedef.NewPartitionValues(g.table.PartitionKeys, trackedRow.PartitionValues), true
 }
 
 func (g *Generator) buildCachedDeleteQueries() {
@@ -157,7 +150,7 @@ func (g *Generator) deleteMultiplePartitions(_ context.Context) (*typedef.Stmt, 
 func (g *Generator) deleteSinglePartition(_ context.Context) (*typedef.Stmt, error) {
 	pks := g.generator.ReplaceNext()
 
-	values := make([]any, 0, g.table.PartitionKeys.LenValues())
+	values := make([]any, 0, g.table.PartitionKeysLenValues())
 	for _, pk := range g.table.PartitionKeys {
 		values = append(values, pks.Values.Get(pk.Name)...)
 	}
@@ -184,7 +177,7 @@ func (g *Generator) deleteSingleRow(ctx context.Context) (*typedef.Stmt, error) 
 	}
 
 	// Single-row delete binds every partition key AND every clustering key.
-	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues())
+	values := make([]any, 0, g.table.PartitionKeysLenValues()+g.table.ClusteringKeysLenValues())
 	values, pkVals, ok := g.appendTrackedKeys(values, trackedRow, len(g.table.ClusteringKeys))
 	if !ok {
 		g.trackedMisses.DeleteSingleRow++
@@ -219,7 +212,7 @@ func (g *Generator) deleteClusteringSubset(ctx context.Context) (*typedef.Stmt, 
 	// unbound so this is a cluster (prefix) delete rather than a single-row delete.
 	n := 1 + g.random.IntN(numCKs-1)
 
-	values := make([]any, 0, g.table.PartitionKeys.LenValues()+g.table.ClusteringKeys.LenValues())
+	values := make([]any, 0, g.table.PartitionKeysLenValues()+g.table.ClusteringKeysLenValues())
 	values, pkVals, ok := g.appendTrackedKeys(values, trackedRow, n)
 	if !ok {
 		g.trackedMisses.DeleteClusteringSubset++

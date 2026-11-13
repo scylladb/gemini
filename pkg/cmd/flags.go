@@ -15,7 +15,6 @@
 package main
 
 import (
-	"runtime"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -80,6 +79,7 @@ var (
 	requestTimeout                   time.Duration
 	connectTimeout                   time.Duration
 	profilingPort                    int
+	flightRecorderPath               string
 	testStatementLogFile             string
 	oracleStatementLogFile           string
 	statementLogFileCompression      string
@@ -111,8 +111,10 @@ var (
 
 func setupFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().IntVarP(&randomStringBuffer, "random-string-buffer-size", "", 100*1024*1024, "Size of the buffer used for random strings")
-	cmd.PersistentFlags().IntVarP(&mutationConcurrency, "mutation-concurrency", "", 0, "Number of worker threads to use for IO operations")
-	cmd.PersistentFlags().IntVarP(&readConcurrency, "read-concurrency", "", 0, "Number of worker threads to use for IO operations")
+	cmd.PersistentFlags().IntVarP(&mutationConcurrency, "mutation-concurrency", "", 0,
+		"Maximum number of mutation workers per table. 0 uses --concurrency")
+	cmd.PersistentFlags().IntVarP(&readConcurrency, "read-concurrency", "", 0,
+		"Maximum number of validation workers per table. 0 uses --concurrency")
 	cmd.PersistentFlags().BoolVarP(&versionFlag, "version", "", false, "Print version information")
 	// scylla-cluster-tests passes --io-worker-pool, so gemini must accept it.
 	cmd.PersistentFlags().Int("io-worker-pool", 0, "")
@@ -147,8 +149,9 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		StringVarP(&mode, "mode", "m", jobs.MixedMode, "Query operation mode. Mode options: write, read, mixed (default)")
 	cmd.Flags().
-		IntVarP(&concurrency, "concurrency", "c", 4*runtime.GOMAXPROCS(0),
-			"Number of threads per table to run concurrently. The default is 4 per available CPU")
+		IntVarP(&concurrency, "concurrency", "c", 0,
+			"Maximum number of workers of each kind per table. Gemini runs fewer while latency shows the clusters queue requests. "+
+				"0 sizes it from the clusters: 16 per shard of the cluster with fewer shards, or 4 per CPU when the clusters report no shards")
 	cmd.Flags().
 		StringVarP(&seed, "seed", "s", "random", "Statement seed value")
 	cmd.Flags().
@@ -231,8 +234,8 @@ func setupFlags(cmd *cobra.Command) {
 		IntVarP(&asyncObjectStabilizationAttempts, "async-objects-stabilization-attempts", "", 10,
 			"Maximum number of attempts to validate result sets from MV and SI")
 	cmd.Flags().
-		DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 1*time.Second,
-			"Duration between attempts to validate result sets from MV and SI for example 10ms or 1s")
+		DurationVarP(&asyncObjectStabilizationDelay, "async-objects-stabilization-backoff", "", 2*time.Second,
+			"Maximum backoff delay between validation retry attempts (exponential backoff starting at 100ms)")
 	cmd.Flags().
 		BoolVarP(&useLWT, "use-lwt", "", false, "Emit LWT based updates")
 	cmd.Flags().
@@ -248,7 +251,12 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		DurationVarP(&connectTimeout, "connect-timeout", "", 30*time.Second, "Duration of waiting connection established")
 	cmd.Flags().
-		IntVarP(&profilingPort, "profiling-port", "", 6060, "If non-zero starts pprof profiler on given port at 'http://0.0.0.0:<port>/profile'")
+		IntVarP(&profilingPort, "profiling-port", "", 0,
+			"If non-zero starts the pprof server on the given port at 'http://0.0.0.0:<port>/debug/pprof/' "+
+				"and records mutex and block profiles")
+	cmd.Flags().
+		StringVarP(&flightRecorderPath, "flight-recorder", "", "",
+			"If set, keeps a recent execution trace in memory and writes it to this path when gemini exits")
 	cmd.Flags().
 		IntVarP(&maxErrorsToStore, "max-errors-to-store", "", 10,
 			"Maximum number of errors to store and show at the end. Gemini stops when read and write errors reach this number")

@@ -94,9 +94,24 @@ type Partitions struct {
 - O(1) time complexity
 
 **Next() *typedef.Values**
-- Uses distribution function to select a partition
+- Uses distribution function to select a partition to validate
 - Supports various distributions: uniform, zipfian, sequential
-- Enables realistic workload patterns
+- Prefers a partition that a mutation has written. A SELECT on an unwritten
+  partition compares two empty results.
+- Draws up to 16 times to find a written partition, then takes the last draw.
+  If each draw lands on an unwritten partition with probability `p`, about
+  `p^16` of the reads still go to an unwritten partition, so gemini keeps
+  checking that no cluster returns rows for a key it never wrote. With the
+  uniform distribution `p` is the unwritten fraction of the pool. With zipfian
+  or sequential draws `p` is the distribution's weight on the unwritten
+  partitions, so the share differs from the unwritten fraction.
+
+**NextForWrite() *typedef.Values**
+- Uses distribution function to select a partition to mutate
+- Marks the partition as selected for a mutation, before the mutation runs. A
+  validation read can pick it before the mutation succeeds and then compare
+  two empty results.
+- A partition that `Replace` installs starts unmarked.
 
 **Extend() *typedef.Values**
 - Adds a new partition to the pool

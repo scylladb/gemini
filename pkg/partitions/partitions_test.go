@@ -21,10 +21,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/scylladb/gemini/pkg/distributions"
+	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
@@ -530,9 +533,9 @@ func TestNewPartitionKeys(t *testing.T) {
 	require.Positive(t, pk.Values.Len())
 }
 
-// TestSplitPartitionValues_MixedWidthKeys puts a tuple key between two simple
+// TestNewPartitionValues_MixedWidthKeys puts a tuple key between two simple
 // keys, so every column has a different start offset in the flat values.
-func TestSplitPartitionValues_MixedWidthKeys(t *testing.T) {
+func TestNewPartitionValues_MixedWidthKeys(t *testing.T) {
 	t.Parallel()
 
 	cols := typedef.Columns{
@@ -546,14 +549,11 @@ func TestSplitPartitionValues_MixedWidthKeys(t *testing.T) {
 	date := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
 	values := []any{int32(1), int32(2), "two", date}
 
-	out := splitPartitionValues(cols, values)
+	out := typedef.NewPartitionValues(cols, values)
 
-	require.Equal(t, []any{int32(1)}, out["pk0"])
-	require.Equal(t, []any{int32(2), "two"}, out["pk1"])
-	require.Equal(t, []any{date}, out["pk2"])
-
-	values[1] = int32(99)
-	require.Equal(t, int32(2), out["pk1"][0], "the result must not alias the input slice")
+	require.Equal(t, []any{int32(1)}, out.Get("pk0"))
+	require.Equal(t, []any{int32(2), "two"}, out.Get("pk1"))
+	require.Equal(t, []any{date}, out.Get("pk2"))
 }
 
 // TestNewPartitionKeys_TupleKeyFirst generates values for a table whose first
@@ -589,7 +589,7 @@ func TestNewPartitionKeys_TupleKeyFirst(t *testing.T) {
 func TestPartitionSize(t *testing.T) {
 	t.Parallel()
 
-	p := Partition{values: make([]any, 10)}
+	p := Partition{seed: 10}
 
 	// Current implementation returns 0
 	size := p.size()
@@ -646,4 +646,200 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 			}
 		})
 	}
+}
+
+// TestReplaceWithoutOld_BorrowedKeysStayReportable borrows keys, replaces the
+// slot through fill, and checks that a divergence on the borrowed keys is
+// still reported. The UUID mapping must stay until the borrow is released.
+func TestReplaceWithoutOld_BorrowedKeysStayReportable(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 10)
+
+	keys := parts.Get(3)
+	parts.ReplaceWithoutOld(3)
+
+	require.True(t, parts.MarkInvalid(&keys), "a divergence on borrowed keys must be reported")
+
+	keys.Release()
+
+	parts.validationMu.RLock()
+	_, mapped := parts.uuidToIdx[keys.ID]
+	parts.validationMu.RUnlock()
+	require.False(t, mapped, "the last release must remove the old UUID mapping")
+}
+
+// TestReplaceWithoutOld_UnborrowedPartitionCleanedAtOnce checks that fill
+// removes the old UUID immediately when nothing holds a reference.
+func TestReplaceWithoutOld_UnborrowedPartitionCleanedAtOnce(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 10)
+
+	keys := parts.Get(4)
+	keys.Release()
+	parts.ReplaceWithoutOld(4)
+
+	parts.validationMu.RLock()
+	_, mapped := parts.uuidToIdx[keys.ID]
+	parts.validationMu.RUnlock()
+	require.False(t, mapped)
+}
+
+// TestNext_PrefersWrittenPartitions marks half of the pool written. With 16
+// draws per pick, Next should land on an unwritten partition in about 0.5^16
+// of the picks.
+func TestNext_PrefersWrittenPartitions(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 100)
+	written := make(map[uuid.UUID]bool, 50)
+	for i := range uint64(50) {
+		part := parts.partition(i * 2)
+		part.written.Store(true)
+		written[part.id] = true
+	}
+
+	const picks = 2000
+	hits := 0
+	for range picks {
+		keys := parts.Next()
+		if written[keys.ID] {
+			hits++
+		}
+		keys.Release()
+	}
+
+	require.GreaterOrEqual(t, hits, picks*99/100, "Next must prefer written partitions")
+}
+
+// TestNext_TakesUnwrittenWhenNothingIsWritten checks that validation still
+// reads an empty pool instead of blocking.
+func TestNext_TakesUnwrittenWhenNothingIsWritten(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 10)
+	keys := parts.Next()
+	require.NotNil(t, keys.Values)
+	keys.Release()
+}
+
+func TestNextForWrite_MarksThePartitionWritten(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 10)
+	keys := parts.NextForWrite()
+	t.Cleanup(keys.Release)
+
+	parts.validationMu.RLock()
+	idx := parts.uuidToIdx[keys.ID]
+	parts.validationMu.RUnlock()
+
+	require.True(t, parts.isWritten(idx))
+}
+
+func TestReplace_StartsTheNewPartitionUnwritten(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 10)
+	parts.partition(5).written.Store(true)
+
+	old := parts.Replace(5)
+	t.Cleanup(old.Release)
+
+	require.False(t, parts.isWritten(5), "a replacement partition holds no data yet")
+}
+
+// TestPublishInvalid_SumsAcrossPools marks partitions invalid in two pools and
+// checks that partitions_invalid holds the sum. It is not parallel: the gauge
+// is global, and Go runs parallel tests only after the sequential ones.
+//
+//nolint:paralleltest
+func TestPublishInvalid_SumsAcrossPools(t *testing.T) {
+	before := testutil.ToFloat64(metrics.PartitionsInvalid)
+
+	first := createTestPartitions(t, 10)
+	second := createTestPartitions(t, 10)
+
+	for _, mark := range []struct {
+		parts *Partitions
+		idx   uint64
+	}{{first, 1}, {first, 2}, {second, 3}, {second, 4}, {second, 5}} {
+		keys := mark.parts.Get(mark.idx)
+		require.True(t, mark.parts.MarkInvalid(&keys))
+		keys.Release()
+	}
+
+	if got := testutil.ToFloat64(metrics.PartitionsInvalid); got != before+5 {
+		t.Fatalf("partitions_invalid = %v, want %v: the gauge must hold both pools, not the last writer", got, before+5)
+	}
+}
+
+// TestMarkInvalid_ReportsAReplacedPartitionOnce borrows keys, replaces the
+// slot, and checks that only the first report of the old partition counts.
+func TestMarkInvalid_ReportsAReplacedPartitionOnce(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 10)
+
+	keys := parts.Get(2)
+	old := parts.Replace(2)
+	t.Cleanup(old.Release)
+
+	require.True(t, parts.MarkInvalid(&keys), "the first report counts")
+	require.False(t, parts.MarkInvalid(&keys), "a second report of the same partition does not")
+
+	keys.Release()
+	old.Release()
+
+	_, tracked := parts.reportedRetired.Load(keys.ID)
+	require.False(t, tracked, "the last release forgets the reported UUID")
+}
+
+func TestBorrowByID_KeepsTheUUIDReportable(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 10)
+
+	keys := parts.Get(6)
+	id := keys.ID
+	keys.Release()
+
+	borrowed, ok := parts.BorrowByID(id)
+	require.True(t, ok)
+
+	parts.ReplaceWithoutOld(6)
+	require.True(t, parts.MarkInvalid(&borrowed), "the borrow keeps the UUID mapped")
+	borrowed.Release()
+
+	_, ok = parts.BorrowByID(id)
+	require.False(t, ok, "a replaced partition cannot be borrowed")
+}
+
+// TestBorrow_RegeneratesTheSameValues checks the seed contract: every borrow
+// of a partition regenerates its key values, gets the same ones, and gets its
+// own copy.
+func TestBorrow_RegeneratesTheSameValues(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 4)
+
+	first := parts.Get(1)
+	second := parts.Get(1)
+	t.Cleanup(first.Release)
+	t.Cleanup(second.Release)
+
+	require.Equal(t, first.Values.Get("pk1"), second.Values.Get("pk1"))
+	require.Equal(t, first.Values.Get("pk2"), second.Values.Get("pk2"))
+
+	first.Values.Get("pk1")[0] = int32(-1)
+	require.NotEqual(t, int32(-1), second.Values.Get("pk1")[0], "borrows must not share a backing slice")
+
+	old := parts.Replace(1)
+	t.Cleanup(old.Release)
+	replaced := parts.Get(1)
+	t.Cleanup(replaced.Release)
+	// pk2 is text, and this package does not fill the random string buffer, so
+	// every text key is empty. The int key tells the two partitions apart.
+	require.NotEqual(t, second.Values.Get("pk1"), replaced.Values.Get("pk1"), "a replacement gets new values")
 }

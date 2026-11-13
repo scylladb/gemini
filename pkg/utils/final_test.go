@@ -15,6 +15,8 @@
 package utils
 
 import (
+	"encoding/binary"
+	"math/rand/v2"
 	"testing"
 )
 
@@ -100,4 +102,21 @@ func TestExecuteFinalizersEmpty(t *testing.T) {
 
 	// Should not panic on empty slice
 	ExecuteFinalizers()
+}
+
+// TestFillRandomBytes_UsesEveryBitOfEachNumber checks that each 8-byte group
+// is the little-endian encoding of one random number, so neighbouring bytes do
+// not share bits.
+func TestFillRandomBytes_UsesEveryBitOfEachNumber(t *testing.T) {
+	t.Parallel()
+
+	data := make([]byte, 64)
+	fillRandomBytes(rand.New(rand.NewPCG(1, 2)), data)
+
+	want := rand.New(rand.NewPCG(1, 2))
+	for i := 0; i < len(data); i += 8 {
+		if got, expected := binary.LittleEndian.Uint64(data[i:]), want.Uint64(); got != expected {
+			t.Fatalf("bytes %d..%d = %#x, want %#x", i, i+7, got, expected)
+		}
+	}
 }

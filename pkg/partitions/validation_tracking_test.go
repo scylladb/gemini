@@ -33,7 +33,7 @@ func TestValidationTracking_SuccessAndFailure(t *testing.T) {
 	before := uint64(time.Now().UTC().UnixNano())
 	parts.ValidationSuccess(&v0)
 
-	fs, ls, lf, recent, sc := parts.ValidationStats(v0.ID)
+	fs, ls, lf, recent, sc := parts.ValidationStats(&v0)
 	require.NotZero(t, fs)
 	require.GreaterOrEqual(t, ls, fs)
 	require.Zero(t, lf)
@@ -44,7 +44,7 @@ func TestValidationTracking_SuccessAndFailure(t *testing.T) {
 
 	// Second success keeps firstSuccessNS and updates lastSuccessNS
 	parts.ValidationSuccess(&v0)
-	fs2, ls2, _, _, sc2 := parts.ValidationStats(v0.ID)
+	fs2, ls2, _, _, sc2 := parts.ValidationStats(&v0)
 	require.Equal(t, fs, fs2)
 	require.GreaterOrEqual(t, ls2, ls)
 	require.EqualValues(t, 2, sc2)
@@ -55,8 +55,8 @@ func TestValidationTracking_SuccessAndFailure(t *testing.T) {
 	parts.ValidationFailure(&v0)
 	parts.ValidationFailure(&v1)
 
-	_, _, lf0, _, _ := parts.ValidationStats(v0.ID)
-	_, _, lf1, _, _ := parts.ValidationStats(v1.ID)
+	_, _, lf0, _, _ := parts.ValidationStats(&v0)
+	_, _, lf1, _, _ := parts.ValidationStats(&v1)
 	require.GreaterOrEqual(t, lf0, before)
 	require.GreaterOrEqual(t, lf1, before)
 }
@@ -72,7 +72,7 @@ func TestValidationTracking_RecentRingWrap(t *testing.T) {
 		parts.ValidationSuccess(&key)
 	}
 
-	first, last, failure, recent, sc := parts.ValidationStats(key.ID)
+	first, last, failure, recent, sc := parts.ValidationStats(&key)
 	require.NotZero(t, first)
 	require.GreaterOrEqual(t, last, first)
 	require.Zero(t, failure)
@@ -97,11 +97,34 @@ func TestValidationTracking_MissingAndRelease(t *testing.T) {
 	parts.ValidationSuccess(&key)
 	key.Release()
 
+	// The partition at slot 0 is still live (never replaced), so releasing the
+	// last reference must NOT wipe its validation data: a live partition whose
+	// refCount transiently reaches zero between borrows keeps its history. Its
+	// mappings are removed only once it is retired (replaced) and its final
+	// reference is released.
 	parts.ValidationFailure(&key)
-	first, last, failure, recent, sc := parts.ValidationStats(key.ID)
-	require.Zero(t, first)
-	require.Zero(t, last)
-	require.Zero(t, failure)
-	require.Empty(t, recent)
-	require.Zero(t, sc)
+	first, last, failure, recent, sc := parts.ValidationStats(&key)
+	require.NotZero(t, first, "live partition keeps its recorded first-success across a transient release")
+	require.NotZero(t, last)
+	require.NotZero(t, failure)
+	require.Len(t, recent, 1)
+	require.EqualValues(t, 1, sc)
+}
+
+func TestValidationTracking_BorrowsShareOneSlot(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 3)
+
+	require.Nil(t, parts.partition(2).validation.Data(), "a partition never validated holds no stats")
+
+	first := parts.Get(2)
+	parts.ValidationSuccess(&first)
+	first.Release()
+
+	second := parts.Get(2)
+	t.Cleanup(second.Release)
+
+	_, _, _, _, successCount := parts.ValidationStats(&second)
+	require.EqualValues(t, 1, successCount, "a later borrow sees the stats of an earlier one")
 }

@@ -219,24 +219,26 @@ func pks(t *typedef.Table, rows Rows) *strset.Set {
 	sb.Grow(64)
 
 	for _, row := range rows {
-		// Reset string builder for each row to build composite key
 		sb.Reset()
-
-		// Build composite key from all partition and clustering keys
-		for _, pk := range t.PartitionKeys {
-			formatRows(&sb, pk.Name, row.Get(pk.Name))
-			sb.WriteByte(',')
-		}
-
-		for _, ck := range t.ClusteringKeys {
-			formatRows(&sb, ck.Name, row.Get(ck.Name))
-			sb.WriteByte(',')
-		}
-
-		// Add the composite key (trimming trailing comma)
-		compositeKey := strings.TrimRight(sb.String(), ",")
-		keySet.Add(compositeKey)
+		writeRowKey(&sb, t, row)
+		keySet.Add(sb.String())
 	}
 
 	return keySet
+}
+
+// writeRowKey writes the composite primary key for a row into sb.
+// Shared by pks(), buildRowMap(), and rowKeyString() to avoid
+// duplicating key-building logic and its allocations.
+func writeRowKey(sb *strings.Builder, t *typedef.Table, row Row) {
+	for i, pk := range t.PartitionKeys {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		formatRows(sb, pk.Name, row.Get(pk.Name))
+	}
+	for _, ck := range t.ClusteringKeys {
+		sb.WriteByte(',')
+		formatRows(sb, ck.Name, row.Get(ck.Name))
+	}
 }

@@ -15,6 +15,7 @@
 package utils
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -119,11 +120,39 @@ func IgnoreError(fn func() error) {
 	_ = fn()
 }
 
+// uuidTimeBase is the start of the version 1 UUID clock, 15 October 1582.
+var uuidTimeBase = time.Date(1582, time.October, 15, 0, 0, 0, 0, time.UTC).Unix()
+
+// UUIDFromTime returns a version 1 UUID for a random date. Every part comes
+// from rnd: the clock sequence and the node are random instead of a global
+// counter and the host's MAC address. The partition pool regenerates key values
+// from a seed, so the same rnd state must give the same UUID.
 func UUIDFromTime(rnd Random) gocql.UUID {
 	if testutils.IsUnderTest() {
 		return gocql.TimeUUIDWith(rnd.Int64(), 0, []byte("127.0.0.1"))
 	}
-	return gocql.UUIDFromTime(RandDate(rnd))
+
+	date := RandDate(rnd)
+	ts := (date.Unix()-uuidTimeBase)*1e7 + int64(date.Nanosecond()/100)
+	clock := uint32(rnd.Uint64N(1 << 14))
+
+	var node [8]byte
+	binary.LittleEndian.PutUint64(node[:], rnd.Uint64())
+
+	return gocql.TimeUUIDWith(ts, clock, node[:6])
+}
+
+// RandomUUID returns a version 4 UUID whose bits all come from rnd. The
+// partition pool regenerates key values from a seed, so the same rnd state
+// must give the same UUID.
+func RandomUUID(rnd Random) gocql.UUID {
+	var u gocql.UUID
+	binary.LittleEndian.PutUint64(u[:8], rnd.Uint64())
+	binary.LittleEndian.PutUint64(u[8:], rnd.Uint64())
+	u[6] = u[6]&0x0F | 0x40 // version 4
+	u[8] = u[8]&0x3F | 0x80 // IETF variant
+
+	return u
 }
 
 func CreateFile(input string, closeOnExit bool, def ...io.Writer) (io.Writer, error) {

@@ -28,6 +28,26 @@ curl http://localhost:9090/metrics
 | `cql_query_errors` | Counter | Query errors with error type |
 | `cql_batches` | Counter | Batch operations |
 | `cql_batched_queries` | Counter | Queries within batches |
+| `cql_rows_returned_total` | Counter | Rows returned by read queries, by system |
+| `cql_rows_per_query` | Histogram | Rows returned per read query, by system |
+| `cql_prepared_stmts_unique` | Gauge | Unique prepared statement strings seen, by system |
+| `cql_prepared_stmts_ratio` | Gauge | Unique prepared statements divided by the driver cache size, capped at 1.0 |
+| `cql_prepared_stmts_new_total` | Counter | Prepared statement strings seen for the first time, by system |
+| `context_cancellations_total` | Counter | Mutations and loads that ended on a cancelled or expired context, by operation and reason |
+
+### Driver
+
+The cluster observer records these metrics. Gemini installs the observer only
+when statement logging is on (`--test-statement-log-file` or
+`--oracle-statement-log-file`). Without it, these metrics stay at zero.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `cql_driver_retry_attempts` | Histogram | Driver attempt number per query, by cluster and query type. Attempt 0 means no retry |
+| `cql_driver_query_latency_by_attempt` | Histogram | Query latency in microseconds, by cluster and attempt (`0` to `3`, then `4+`) |
+| `cql_driver_query_rows` | Histogram | Rows per page of a read query, by cluster |
+| `cql_driver_errors_by_type_total` | Counter | Driver errors by cluster and category, for example `write_timeout` or `connect_host_down` |
+| `cql_driver_host_up` | Gauge | 1 when the driver considers a host up, 0 when down, by cluster and host |
 
 ### Query Timing
 
@@ -50,6 +70,38 @@ curl http://localhost:9090/metrics
 |--------|------|-------------|
 | `validated_rows` | Counter | Successfully validated rows by table |
 | `execution_errors` | Counter | Execution errors by type |
+| `validation_rows_matched_total` | Counter | Rows equal on test and oracle |
+| `validation_rows_missing_in_test_total` | Counter | Rows on the oracle that the test cluster does not return |
+| `validation_rows_missing_in_oracle_total` | Counter | Rows on the test cluster that the oracle does not return |
+| `validation_rows_different_total` | Counter | Rows on both clusters with different values |
+| `validation_rows_deduplicated_total` | Counter | Duplicate list values removed before comparison, counted on the first attempt only |
+| `validation_retries_scheduled_total` | Counter | Validations put in the retry queue |
+| `validation_retries_exhausted_total` | Counter | Validations that used all retry attempts |
+| `validation_retries_pending` | Gauge | Validations waiting in the retry queue |
+| `validation_retries_abandoned_total` | Counter | Retries left unrun because validation stopped hard or its context ended. After a soft stop, the workers run the queued retries first |
+| `validation_retries_dropped_total` | Counter | Retries dropped because the retry queue was full. These do not count as validation failures |
+| `mutation_retries_total` | Counter | Mutation retries, by outcome (`success` adds the retries before success, `exhausted` adds one per failed mutation) |
+
+The four row-comparison counters add up on every validation attempt. A row
+that differs on the first attempt and matches after a retry counts in both
+`validation_rows_different_total` and `validation_rows_matched_total`.
+
+### Partitions
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `partitions_extended_total` | Counter | Partition slots added to the pool |
+| `partitions_replaced_total` | Counter | Partition slots replaced after a whole-partition delete |
+| `partitions_invalid` | Gauge | Partitions marked invalid and skipped by validation |
+| `deleted_partitions_pending` | Gauge | Deleted partitions that wait for re-validation |
+| `deleted_partitions_emitted_total` | Counter | Deleted partitions sent to the validators, once per time bucket |
+
+### Statements
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `statements_generated_total` | Counter | Generated statements, by type (`select` or `mutation`) and subtype (the statement type) |
+| `statement_ratio_configured` | Gauge | Configured statement ratios, set once at startup |
 
 ### Dual-Write Divergence
 
@@ -130,6 +182,7 @@ sum(rate(gemini_mutation_compensation_failures_total[5m])) by (store) > 0
 | `statement_logger_dequeued_total` | Counter | Items processed by statement logger |
 | `statement_logger_items` | Gauge | Current items in logger |
 | `statement_logger_flushes_total` | Counter | File flush operations |
+| `statement_logger_unpaired_total` | Counter | `_logs` rows written with only one cluster, because the other cluster's item did not arrive within 2 seconds |
 | `stmt_error_last_timestamp_seconds` | Gauge | Last error timestamp per partition |
 
 ### Workers
@@ -137,6 +190,8 @@ sum(rate(gemini_mutation_compensation_failures_total[5m])) by (store) > 0
 | Metric | Type | Description |
 |--------|------|-------------|
 | `workers_current` | Gauge | Active workers by job type |
+| `concurrency_limit` | Gauge | Workers of each pool that run at a time. The limiter lowers it while latency shows the clusters queue requests |
+| `worker_stop_events_total` | Counter | Worker stops, by job and reason |
 
 ### Go Runtime
 
@@ -177,12 +232,17 @@ rate(validated_rows[1m])
 
 ### Grafana Dashboard
 
-A pre-built Grafana dashboard is available at `docker/monitoring/Gemini.json`. Import it to visualize:
-- Request rates and errors
-- Query latencies
-- Connection status
-- Worker activity
-- Memory usage
+A pre-built Grafana dashboard is available at `docker/monitoring/Gemini.json`. It has a panel for every
+metric in this document, in these rows:
+- Overview: errors, workers, requests and the running workers per pool
+- Throughput: operations, requests and execution time
+- Concurrency: the worker limit, the mean query latency it follows, and the started workers
+- Validation & Data Correctness: compared rows, rows per query, asymmetric writes and compensation
+- CQL Driver: query time, errors, connections, prepared statements, retries, host state and batches
+- Statement Ratios: configured and actual statement ratios
+- Partitions & Retries: invalid, replaced and deleted partitions, and mutation and validation retries
+- Statement Logger: unpaired rows, malformed items, the overflow ring and file flushes
+- Go Runtime and Go Process: memory, goroutines, GC and CPU
 
 ## Setting Up Monitoring
 

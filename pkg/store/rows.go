@@ -20,7 +20,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"net"
+	"reflect"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gocql/gocql"
@@ -28,22 +32,71 @@ import (
 )
 
 type (
+	// columnIndex maps column names to their position in a Row's value slice.
+	// It is cached and shared *by pointer* across every row with the same column
+	// layout, so all rows from one query reference the same *columnIndex. That
+	// lets callers test layout identity with a pointer comparison (a == b)
+	// instead of reflecting on the underlying map — see uniformKeyIndices.
+	columnIndex struct {
+		byName map[string]int
+	}
+
 	// Row represents a database row with column values stored as a slice
-	// and a mapping from column names to indices for efficient access
+	// and a shared mapping from column names to indices for efficient access.
 	Row struct {
-		columns map[string]int
+		columns *columnIndex
 		values  []any
 	}
 
 	Rows []Row
 )
 
-// NewRow creates a new Row with the given column names and values
-func NewRow(columnNames []string, values []any) Row {
-	columns := make(map[string]int, len(columnNames))
-	for i, name := range columnNames {
-		columns[name] = i
+// columnIndexCache caches the column-name→index mapping for a given set
+// of columns. Since gocql always returns the same column order for a
+// given query, we build the layout once and share it (by pointer) across
+// all rows from the same iterator.
+var columnIndexCache sync.Map // key: joined column names, value: *columnIndex
+
+func getColumnIndex(columnNames []string) *columnIndex {
+	// Build a cache key from column names. Using a simple join since
+	// column names don't contain null bytes.
+	key := strings.Join(columnNames, "\x00")
+
+	if cached, ok := columnIndexCache.Load(key); ok {
+		return mustColumnIndex(cached)
 	}
+
+	byName := make(map[string]int, len(columnNames))
+	for i, name := range columnNames {
+		byName[name] = i
+	}
+	// LoadOrStore so concurrent first-builders converge on a single shared pointer.
+	actual, _ := columnIndexCache.LoadOrStore(key, &columnIndex{byName: byName})
+	return mustColumnIndex(actual)
+}
+
+// mustColumnIndex returns v as a *columnIndex. columnIndexCache stores only
+// *columnIndex values, so any other type is a gemini bug.
+func mustColumnIndex(v any) *columnIndex {
+	ci, ok := v.(*columnIndex)
+	if !ok {
+		panic(fmt.Sprintf("columnIndexCache holds %T, want *columnIndex", v))
+	}
+
+	return ci
+}
+
+// NewRow creates a new Row with the given column names and values.
+// The column-name→index layout is cached and shared across rows with the
+// same column layout, eliminating per-row map allocation.
+func NewRow(columnNames []string, values []any) Row {
+	return newRowWithIndex(getColumnIndex(columnNames), values)
+}
+
+// newRowWithIndex creates a Row from a column index that the caller resolved
+// once for a whole result set. The scan loops use it, so a row costs no key
+// build and no cache lookup.
+func newRowWithIndex(columns *columnIndex, values []any) Row {
 	return Row{
 		values:  values,
 		columns: columns,
@@ -52,7 +105,10 @@ func NewRow(columnNames []string, values []any) Row {
 
 // Get returns the value for the given column name
 func (r Row) Get(columnName string) any {
-	if idx, ok := r.columns[columnName]; ok {
+	if r.columns == nil {
+		return nil
+	}
+	if idx, ok := r.columns.byName[columnName]; ok {
 		return r.values[idx]
 	}
 	return nil
@@ -61,13 +117,19 @@ func (r Row) Get(columnName string) any {
 // hasColumn reports whether the row has a column with the given name.
 // Unlike Get, it distinguishes "column absent" from "column present with nil value".
 func (r Row) hasColumn(columnName string) bool {
-	_, ok := r.columns[columnName]
+	if r.columns == nil {
+		return false
+	}
+	_, ok := r.columns.byName[columnName]
 	return ok
 }
 
 // Set sets the value for the given column name
 func (r Row) Set(columnName string, value any) {
-	if idx, ok := r.columns[columnName]; ok {
+	if r.columns == nil {
+		return
+	}
+	if idx, ok := r.columns.byName[columnName]; ok {
 		r.values[idx] = value
 	}
 }
@@ -93,10 +155,13 @@ func (r Rows) Less(i, j int) bool {
 // This custom marshaler converts the internal representation into a
 // map[columnName]value so logs and errors include meaningful row content.
 func (r Row) MarshalJSON() ([]byte, error) {
+	if r.columns == nil {
+		return json.Marshal(map[string]any{})
+	}
 	// Build a temporary map to serialize column values by name.
 	// Pre-size the map for efficiency.
-	out := make(map[string]any, len(r.columns))
-	for name, idx := range r.columns {
+	out := make(map[string]any, len(r.columns.byName))
+	for name, idx := range r.columns.byName {
 		// Guard against out-of-range indexes in case of malformed rows
 		if idx >= 0 && idx < len(r.values) {
 			out[name] = r.values[idx]
@@ -575,7 +640,120 @@ func compareValues(a, b any) int {
 			}
 			return av.Cmp(bv)
 		}
+	case net.IP:
+		if bv, ok := b.(net.IP); ok {
+			return compareIP(av, bv)
+		}
+	case *net.IP:
+		if bv, ok := b.(*net.IP); ok {
+			if av == nil || bv == nil {
+				return comparePresence(av == nil, bv == nil)
+			}
+			return compareIP(*av, *bv)
+		}
+	case gocql.Duration:
+		if bv, ok := b.(gocql.Duration); ok {
+			return compareDuration(av, bv)
+		}
+	case *gocql.Duration:
+		if bv, ok := b.(*gocql.Duration); ok {
+			if av == nil || bv == nil {
+				return comparePresence(av == nil, bv == nil)
+			}
+			return compareDuration(*av, *bv)
+		}
 	}
-	// Fallback to string representation when types differ or are not handled
+
+	// Collections and UDTs arrive as pointers to slices and maps.
+	if c, ok := compareStructured(reflect.ValueOf(a), reflect.ValueOf(b)); ok {
+		return c
+	}
+
+	// Values of different types never come from the two clusters for one
+	// column. They keep an order by string representation.
 	return strings.Compare(fmt.Sprint(a), fmt.Sprint(b))
+}
+
+// compareStructured compares two values of the same type that are pointers,
+// slices, arrays or maps, element by element through compareValues. It reports
+// false when the types differ or the kind is not one of those.
+//
+// Slices and arrays compare element by element, then by length. Maps compare by
+// length, then by their sorted keys, then by the values in key order. A nil
+// pointer orders before a non-nil one.
+func compareStructured(a, b reflect.Value) (int, bool) {
+	if a.Type() != b.Type() {
+		return 0, false
+	}
+
+	switch a.Kind() {
+	case reflect.Pointer:
+		if a.IsNil() || b.IsNil() {
+			return comparePresence(a.IsNil(), b.IsNil()), true
+		}
+		return compareValues(a.Elem().Interface(), b.Elem().Interface()), true
+	case reflect.Slice, reflect.Array:
+		n := min(a.Len(), b.Len())
+		for i := range n {
+			if c := compareValues(a.Index(i).Interface(), b.Index(i).Interface()); c != 0 {
+				return c, true
+			}
+		}
+		return cmp.Compare(a.Len(), b.Len()), true
+	case reflect.Map:
+		if c := cmp.Compare(a.Len(), b.Len()); c != 0 {
+			return c, true
+		}
+		aKeys, bKeys := sortedKeys(a), sortedKeys(b)
+		for i := range aKeys {
+			if c := compareValues(aKeys[i].Interface(), bKeys[i].Interface()); c != 0 {
+				return c, true
+			}
+		}
+		for _, key := range aKeys {
+			if c := compareValues(a.MapIndex(key).Interface(), b.MapIndex(key).Interface()); c != 0 {
+				return c, true
+			}
+		}
+		return 0, true
+	default:
+		return 0, false
+	}
+}
+
+func sortedKeys(m reflect.Value) []reflect.Value {
+	keys := m.MapKeys()
+	slices.SortFunc(keys, func(x, y reflect.Value) int {
+		return compareValues(x.Interface(), y.Interface())
+	})
+	return keys
+}
+
+// comparePresence orders a nil pointer before a non-nil one. Both nil compare
+// equal.
+func comparePresence(aNil, bNil bool) int {
+	switch {
+	case aNil && bNil:
+		return 0
+	case aNil:
+		return -1
+	default:
+		return 1
+	}
+}
+
+// compareIP orders addresses by their 16-byte form, so the 4-byte and the
+// 16-byte encoding of one IPv4 address compare equal.
+func compareIP(a, b net.IP) int {
+	return bytes.Compare(a.To16(), b.To16())
+}
+
+func compareDuration(a, b gocql.Duration) int {
+	if c := cmp.Compare(a.Months, b.Months); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.Days, b.Days); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.Nanoseconds, b.Nanoseconds)
 }

@@ -80,15 +80,16 @@ Each line in the log file represents a partition that had a validation error. Th
 
 ### Mutations Array Format
 
-Each entry in the `statements` array is one row of the `_logs` table, as
-returned by `SELECT JSON`. The partition key columns of the original table
-appear next to the fields below.
+Each entry in the `statements` array is one execution on the cluster of the
+file, as returned by `SELECT JSON`. Gemini reads that cluster's columns of the
+`_logs` row under the names below and skips the rows that hold only the other
+cluster. The partition key columns of the original table appear next to the
+fields below.
 
 ```json
 {
   "ts": 1768903440000000000,
   "seq": 41,
-  "ty": "test",
   "statement": "INSERT INTO ks.table1 (col1, col2, val) VALUES (?, ?, ?)",
   "values": ["5", "\"value\"", "\"data\""],
   "host": "192.168.1.10",
@@ -100,9 +101,8 @@ appear next to the fields below.
 
 | Field | Description |
 |-------|-------------|
-| `ts` | Time the statement ran, as UTC nanoseconds. Not a CQL timestamp |
+| `ts` | Time the statement started on this cluster, as UTC nanoseconds. Not a CQL timestamp |
 | `seq` | Per-writer counter. It keeps two statements apart that share the same `ts`, `attempt` and `gemini_attempt` |
-| `ty` | Cluster the statement ran on: `oracle` or `test` |
 | `statement` | The CQL query |
 | `values` | Bound parameter values (as strings) |
 | `host` | Host that executed the query |
@@ -116,27 +116,33 @@ appear next to the fields below.
 Mutations are stored in ScyllaDB for direct querying:
 
 ```bash
-# Find all mutations for a specific partition
+# Find all mutations for a specific partition, on both clusters
 cqlsh -e "SELECT * FROM ks_logs.table1_statements WHERE col1 = 5 AND col2 = 'value';"
 
-# Filter by type (oracle or test)
-cqlsh -e "SELECT * FROM ks_logs.table1_statements WHERE col1 = 5 AND col2 = 'value' AND ty = 'test';"
+# Read one cluster's side
+cqlsh -e "SELECT ts, statement, test_host, test_error, test_dur FROM ks_logs.table1_statements WHERE col1 = 5 AND col2 = 'value';"
 ```
+
+One row holds one execution of a statement on both clusters. The committer
+pairs the test and the oracle observation of the same statement, partition,
+gemini attempt and driver attempt, and writes them as one row. A cluster with
+no observation within 2 seconds leaves its columns null, and
+`statement_logger_unpaired_total` counts that row.
 
 The logs table schema includes:
 - Partition key columns (matching the original table)
-- `ty` - Type: 'oracle' or 'test'
-- `ts` - Time the statement ran, as UTC nanoseconds (`bigint`)
+- `ts` - Earlier start of the two clusters, as UTC nanoseconds (`bigint`)
 - `seq` - Per-writer counter that keeps statements of the same `ts` apart
 - `statement` - The CQL query
 - `values` - Bound parameters
-- `host` - Executing host
 - `attempt` - Driver attempt
 - `gemini_attempt` - Gemini attempt
-- `error` - Error message
-- `dur` - Duration
+- `test_ts`, `oracle_ts` - Start on each cluster, as UTC nanoseconds
+- `test_host`, `oracle_host` - Executing host on each cluster
+- `test_error`, `oracle_error` - Error message on each cluster
+- `test_dur`, `oracle_dur` - Duration on each cluster
 
-The primary key is `((<partition key columns>, ty), ts, attempt, gemini_attempt, seq)`.
+The primary key is `((<partition key columns>), ts, attempt, gemini_attempt, seq)`.
 `seq` is the last clustering column. Without it, two statements that share every
 other key column overwrite each other, and the history loses rows.
 

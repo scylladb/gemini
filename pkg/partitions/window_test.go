@@ -204,9 +204,9 @@ func TestWindow_DrainEmitsAndReschedules(t *testing.T) {
 	var got []typedef.PartitionKeys
 	send := func(k typedef.PartitionKeys) bool { got = append(got, k); return true }
 
-	onDones, _ := w.drainReady(100, 64, send) // now=100 > 50 → ready
+	w.drainReady(100, 64, send) // now=100 > 50 → ready
 	assert.Len(t, got, 1, "entry should be emitted")
-	assert.Empty(t, onDones, "not final yet — bucket 1 remains")
+	assert.Nil(t, got[0].Release, "not final yet — bucket 1 remains, so the window keeps the reference")
 	assert.Equal(t, 1, w.len(), "entry stays tracked, moved to the next bucket")
 
 	front, ok := w.peekSoonestForTest()
@@ -217,18 +217,24 @@ func TestWindow_DrainEmitsAndReschedules(t *testing.T) {
 
 func TestWindow_DrainFinalizesLastBucket(t *testing.T) {
 	t.Parallel()
-	// Single bucket: a due entry is emitted and finalized (onDone returned).
+	// Single bucket: a due entry is emitted and finalized. On the final emission
+	// the onDone is handed to the consumer as the emitted keys' Release (so the
+	// consumer, not the drainer, decides when the partition is retired). The
+	// drainer must not run it.
 	w := newWindow([]time.Duration{time.Millisecond}, 0, 0)
 	called := false
 	w.push(bucketEntry{readyAtNs: 50, bucket: 0, onDone: func() { called = true }})
 
-	send := func(typedef.PartitionKeys) bool { return true }
-	onDones, _ := w.drainReady(100, 64, send)
+	var got []typedef.PartitionKeys
+	send := func(k typedef.PartitionKeys) bool { got = append(got, k); return true }
+	w.drainReady(100, 64, send)
 
-	require.Len(t, onDones, 1, "final-bucket entry must return its onDone")
+	assert.False(t, called, "the drainer must not run the final-bucket onDone")
 	assert.Equal(t, 0, w.len(), "finalized entry is removed")
-	onDones[0]()
-	assert.True(t, called, "returned callback is the entry's onDone")
+	require.Len(t, got, 1, "entry should be emitted")
+	require.NotNil(t, got[0].Release, "final-bucket keys carry onDone as their Release")
+	got[0].Release()
+	assert.True(t, called, "the emitted keys' Release is the entry's onDone")
 }
 
 func TestWindow_DrainStopsWhenSendFull(t *testing.T) {
@@ -238,8 +244,7 @@ func TestWindow_DrainStopsWhenSendFull(t *testing.T) {
 	w.push(bucketEntry{readyAtNs: 50, bucket: 0})
 
 	send := func(typedef.PartitionKeys) bool { return false } // consumer full
-	onDones, wait := w.drainReady(100, 64, send)
-	assert.Empty(t, onDones)
+	wait := w.drainReady(100, 64, send)
 	assert.Equal(t, 1, w.len(), "entry must remain tracked when the consumer is full")
 	assert.Positive(t, wait, "should ask to retry shortly")
 }

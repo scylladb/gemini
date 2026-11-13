@@ -67,20 +67,29 @@ const (
 const MutationStatementsCount = 3
 
 type Generator struct {
-	generator                     partitions.Interface
-	random                        utils.Random
-	table                         *typedef.Table
-	valueRangeConfig              *typedef.ValueRangeConfig
-	ratioController               *RatioController
-	keyspace                      string
-	keyspaceAndTable              string
-	deleteWholePartitionQuery     string
-	deleteSingleRowQuery          string
-	selectColumns                 []string
-	deleteClusteringSubsetQueries []string
-	updateVariants                []updateVariant
-	trackedMisses                 TrackedMissCounts
-	useLWT                        bool
+	generator                      partitions.Interface
+	random                         utils.Random
+	table                          *typedef.Table
+	valueRangeConfig               *typedef.ValueRangeConfig
+	ratioController                *RatioController
+	keyspace                       string
+	keyspaceAndTable               string
+	deleteWholePartitionQuery      string
+	deleteSingleRowQuery           string
+	insertQuery                    string
+	insertQueryLWT                 string
+	insertJSONQuery                string
+	selectSinglePartitionQuery     string
+	selectMultiplePartitionQueries []string
+	selectColumns                  []string
+	deleteClusteringSubsetQueries  []string
+	updateVariants                 []updateVariant
+	trackedMisses                  TrackedMissCounts
+	useLWT                         bool
+	// rangeReadable is true when every clustering key binds one value. The
+	// clustering-range SELECTs index the tracked row's flat clustering
+	// values by column, which a tuple clustering key would break.
+	rangeReadable bool
 }
 
 func New(
@@ -102,9 +111,12 @@ func New(
 		generator:        valueGenerator,
 		ratioController:  ratioController,
 		selectColumns:    table.SelectColumnNames(),
+		rangeReadable:    singleValueColumns(table.ClusteringKeys),
 	}
 	g.buildCachedDeleteQueries()
 	g.buildCachedUpdateQueries()
+	g.buildCachedInsertQueries()
+	g.buildCachedSelectQueries()
 	return g
 }
 
@@ -162,7 +174,6 @@ func (g *Generator) getMultiplePartitionKeys() int {
 	return max(1, maximum)
 }
 
-//nolint:unused
 func (g *Generator) getMultipleClusteringKeys() int {
 	l := g.table.ClusteringKeys.Len()
 	if l == 0 {
@@ -191,4 +202,15 @@ func TotalCartesianProductCount(initial, pkLen float64) int {
 	}
 
 	return 1
+}
+
+// singleValueColumns reports whether every column binds exactly one value.
+func singleValueColumns(cols typedef.Columns) bool {
+	for _, col := range cols {
+		if col.Type.LenValue() != 1 {
+			return false
+		}
+	}
+
+	return true
 }

@@ -63,7 +63,9 @@ type (
 		fetchCtx context.Context
 		logger   *zap.Logger
 		channel  <-chan stmtlogger.Item
-		logs     logSession
+		// pairs carries the rows from the pairing stage to the committers.
+		pairs chan logPair
+		logs  logSession
 		// statements holds one *cqlStatements per source table, keyed by
 		// "keyspace.table". The logger is shared across every table in the
 		// schema, so each item is routed to its own table's _logs table whose
@@ -198,10 +200,7 @@ func New(
 	// Start a fixed-size worker pool to insert statement logs into Scylla.
 	l.Debug("starting committer worker pool")
 	workerCount := max(runtime.GOMAXPROCS(0), 2)
-	for range workerCount {
-		logger.wg.Add(1)
-		go logger.insertWorker()
-	}
+	logger.startCommitters(workerCount)
 	logger.curWorkers.Store(int32(workerCount))
 
 	if logFiles {
@@ -456,24 +455,111 @@ func (s *Logger) maxArgsCap() int {
 // returns false when the item must be skipped: schema and SELECT statements are
 // skipped silently, while unknown-table or partition-key bind-arity mismatches
 // are additionally counted as malformed (and warned once) before being dropped.
-func (s *Logger) bind(it stmtlogger.Item, dst []any) (*cqlStatements, []any, bool) {
+func (s *Logger) bind(pair logPair, dst []any) (*cqlStatements, []any, bool) {
+	it := pair.shared()
 	if it.StatementType.IsSchema() || it.StatementType.IsSelect() {
 		return nil, dst[:0], false
 	}
 
-	cql := s.statementsFor(it)
+	cql := s.statementsFor(*it)
 	if cql == nil {
-		s.recordMalformed(it)
+		s.recordMalformed(*it)
 		return nil, dst[:0], false
 	}
 
-	args, ok := cql.fillArgs(dst, it)
+	args, ok := cql.fillPairArgs(dst, pair)
 	if !ok {
-		s.recordMalformed(it)
+		s.recordMalformed(*it)
 		return nil, dst[:0], false
 	}
 
 	return cql, args, true
+}
+
+// startCommitters starts the pairing stage and workerCount committers that
+// read its pairs.
+func (s *Logger) startCommitters(workerCount int) {
+	s.pairs = make(chan logPair, committerBatchSize*workerCount)
+
+	s.wg.Add(1)
+	go s.pairWorker()
+
+	for range workerCount {
+		s.wg.Add(1)
+		go s.insertWorker()
+	}
+}
+
+// pendingPair is a pair that waits for its second cluster's item.
+type pendingPair struct {
+	since time.Time
+	pair  logPair
+}
+
+// pairWorker joins the test and oracle items of one execution into one row. It
+// is the only reader of the item channel, so both items of an execution meet
+// here whichever committer writes the row. Schema and SELECT items are not
+// logged, so they are dropped here instead of waiting for a partner.
+func (s *Logger) pairWorker() {
+	defer s.wg.Done()
+	defer close(s.pairs)
+
+	pending := make(map[pairKey]*pendingPair)
+	ticker := time.NewTicker(pairWindow / 4)
+	defer ticker.Stop()
+
+	emit := func(pair logPair) {
+		if !pair.complete() {
+			metrics.StatementLoggerUnpairedTotal.Inc()
+		}
+		s.pairs <- pair
+	}
+
+	for {
+		select {
+		case it, ok := <-s.channel:
+			if !ok {
+				for _, p := range pending {
+					emit(p.pair)
+				}
+				return
+			}
+
+			metrics.StatementLoggerItems.Dec()
+			metrics.StatementLoggerDequeuedTotal.Inc()
+
+			if it.StatementType.IsSchema() || it.StatementType.IsSelect() {
+				continue
+			}
+
+			if it.Origin == nil {
+				emit(pairOf(it))
+				continue
+			}
+
+			key := keyOf(it)
+			p, held := pending[key]
+			switch {
+			case !held:
+				pending[key] = &pendingPair{pair: pairOf(it), since: time.Now()}
+			case !p.pair.set(it):
+				// The same cluster reported this execution twice. Write the
+				// held pair and wait for a partner for the new item.
+				emit(p.pair)
+				p.pair, p.since = pairOf(it), time.Now()
+			case p.pair.complete():
+				emit(p.pair)
+				delete(pending, key)
+			}
+		case now := <-ticker.C:
+			for key, p := range pending {
+				if now.Sub(p.since) >= pairWindow {
+					emit(p.pair)
+					delete(pending, key)
+				}
+			}
+		}
+	}
 }
 
 // logSession writes the committer's batches and single rows to the _logs
@@ -578,8 +664,8 @@ func (s *Logger) insertWorker() {
 	idx := 0
 
 	for {
-		// Block until an item arrives or the channel is closed.
-		first, ok := <-s.channel
+		// Block until a row arrives or the pairing stage closes its channel.
+		first, ok := <-s.pairs
 		if !ok {
 			return
 		}
@@ -592,15 +678,12 @@ func (s *Logger) insertWorker() {
 		batch := s.logs.makeBatch(ctx)
 
 		// Helper to add an item to the batch
-		addItem := func(it stmtlogger.Item) {
-			// decrement queue metric on consumption regardless of schema
-			metrics.StatementLoggerItems.Dec()
-			metrics.StatementLoggerDequeuedTotal.Inc()
-			// Route the item to its own table's _logs statements and bind its
-			// args. bind() drops (and counts) schema/select, unknown-table, and
-			// arity-mismatched items instead of poisoning the batch — a single
-			// bad item would make gocql reject the whole batch client-side.
-			cql, args, valid := s.bind(it, held[idx])
+		addItem := func(pair logPair) {
+			// Route the row to its own table's _logs statements and bind its
+			// args. bind() drops (and counts) unknown-table and arity-mismatched
+			// rows instead of poisoning the batch — a single bad row would make
+			// gocql reject the whole batch client-side.
+			cql, args, valid := s.bind(pair, held[idx])
 			held[idx] = args // retain any grown backing array for reuse
 			if !valid {
 				return
@@ -617,7 +700,7 @@ func (s *Logger) insertWorker() {
 		draining := true
 		for draining && idx < committerBatchSize {
 			select {
-			case it, chOpen := <-s.channel:
+			case it, chOpen := <-s.pairs:
 				if !chOpen {
 					// channel closed, process what we have then exit after this batch
 					exiting = true
@@ -650,7 +733,11 @@ func (s *Logger) insert(it stmtlogger.Item) {
 	// Route to the item's table statements and bind its args. bind() skips
 	// schema/select silently and drops (counts) unknown-table/arity-mismatch
 	// items. Safe even when statements is nil (as in some unit tests).
-	cql, args, ok := s.bind(it, make([]any, 0, s.maxArgsCap()))
+	if it.StatementType.IsSchema() || it.StatementType.IsSelect() {
+		return
+	}
+
+	cql, args, ok := s.bind(pairOf(it), make([]any, 0, s.maxArgsCap()))
 	if !ok {
 		return
 	}
