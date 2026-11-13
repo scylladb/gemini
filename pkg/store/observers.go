@@ -84,7 +84,22 @@ type ClusterObserver struct {
 	goCQLQueries      *observer[prometheus.Counter]
 	goCQLQueryTime    *observer[prometheus.Observer]
 	goCQLConnections  *observer[prometheus.Gauge]
-	clusterName       stmtlogger.Type
+	goCQLHostUp       *observer[prometheus.Gauge]
+	// retryAttempts holds one histogram per statement type, and
+	// latencyByAttempt one per attempt label, all resolved at construction so
+	// a query observation does no label lookup.
+	rowsObserved     prometheus.Observer
+	retryAttempts    [typedef.StatementTypeCount]prometheus.Observer
+	latencyByAttempt [len(attemptLabels)]prometheus.Observer
+	clusterName      stmtlogger.Type
+}
+
+// attemptLabels are the values of the attempt label on
+// cql_driver_query_latency_by_attempt. Attempt 4 and later share "4+".
+var attemptLabels = [...]string{"0", "1", "2", "3", "4+"}
+
+func attemptLabelIndex(attempt int) int {
+	return min(max(attempt, 0), len(attemptLabels)-1)
 }
 
 func NewClusterObserver(
@@ -122,9 +137,87 @@ func NewClusterObserver(
 			func(host string, _ typedef.StatementType) prometheus.Gauge {
 				return metrics.GoCQLConnections.WithLabelValues(string(clusterName), host)
 			}),
+		goCQLHostUp: newObserver[prometheus.Gauge](
+			func(host string, _ typedef.StatementType) prometheus.Gauge {
+				return metrics.GoCQLHostState.WithLabelValues(string(clusterName), host)
+			}),
+		rowsObserved: metrics.GoCQLQueryRowsObserved.WithLabelValues(string(clusterName)),
+	}
+
+	for ty := range typedef.StatementTypeCount {
+		c.retryAttempts[ty] = metrics.GoCQLRetryAttempts.WithLabelValues(string(clusterName), ty.String())
+	}
+
+	for i, label := range attemptLabels {
+		c.latencyByAttempt[i] = metrics.GoCQLQueryLatencyByAttempt.WithLabelValues(string(clusterName), label)
 	}
 
 	return c
+}
+
+// classifyError maps a gocql error to a short, low-cardinality category for
+// cql_driver_errors_by_type_total.
+func classifyError(err error) string {
+	switch {
+	case errors.Is(err, gocql.ErrTimeoutNoResponse):
+		return "timeout_no_response"
+	case errors.Is(err, gocql.ErrConnectionClosed):
+		return "connection_closed"
+	case errors.Is(err, gocql.ErrHostDown):
+		return "host_down"
+	case errors.Is(err, gocql.ErrNoConnections):
+		return "no_connections"
+	case errors.Is(err, gocql.ErrSessionClosed):
+		return "session_closed"
+	case errors.Is(err, gocql.ErrNoStreams):
+		return "no_streams"
+	}
+
+	reqErr, ok := errors.AsType[gocql.RequestError](err)
+	if !ok {
+		return "other"
+	}
+
+	switch reqErr.Code() {
+	case gocql.ErrCodeReadTimeout:
+		return "read_timeout"
+	case gocql.ErrCodeWriteTimeout:
+		return "write_timeout"
+	case gocql.ErrCodeReadFailure:
+		return "read_failure"
+	case gocql.ErrCodeWriteFailure:
+		return "write_failure"
+	case gocql.ErrCodeUnavailable:
+		return "unavailable"
+	case gocql.ErrCodeOverloaded:
+		return "overloaded"
+	case gocql.ErrCodeSyntax:
+		return "syntax_error"
+	case gocql.ErrCodeInvalid:
+		return "invalid_query"
+	case gocql.ErrCodeUnprepared:
+		return "unprepared"
+	case gocql.ErrCodeServer:
+		return "server_error"
+	default:
+		return "request_error"
+	}
+}
+
+// observeDriverError counts err by category and marks the host down when the
+// error shows a lost connection.
+func (c *ClusterObserver) observeDriverError(instance string, err error) {
+	metrics.GoCQLErrorsByType.WithLabelValues(string(c.clusterName), classifyError(err)).Inc()
+
+	switch {
+	case errors.Is(err, gocql.ErrConnectionClosed) || errors.Is(err, gocql.ErrHostDown):
+		c.goCQLConnections.Get(instance, 0).Dec()
+		c.goCQLHostUp.Get(instance, 0).Set(0)
+	case errors.Is(err, gocql.ErrNoConnections):
+		c.goCQLConnections.Get(instance, 0).Set(0)
+		c.goCQLHostUp.Get(instance, 0).Set(0)
+	default:
+	}
 }
 
 func (c *ClusterObserver) incGoCQLQueryError(instance string, err error) {
@@ -168,9 +261,11 @@ func (c *ClusterObserver) logStatement(stmt *typedef.Stmt, base stmtlogger.Item)
 	// same approach the asymmetric-write compensation uses). Parsed once here
 	// rather than per-partition or per-item in the committer hot path.
 	base.Table = utils.KeyspaceTableFromQuery(stmt.Query)
+	base.Origin = stmt
 	for i := range stmt.PartitionKeys {
 		item := base
 		item.PartitionKeys = stmt.PartitionKeys[i]
+		item.PartitionIndex = i
 		if err := c.logger.LogStmt(item); err != nil {
 			c.appLogger.Error("failed to log statement", zap.Error(err))
 		}
@@ -189,14 +284,7 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 	if batch.Err != nil {
 		errStr = batch.Err.Error()
 		c.incGoCQLQueryError(instance, batch.Err)
-
-		switch {
-		case errors.Is(batch.Err, gocql.ErrConnectionClosed) || errors.Is(batch.Err, gocql.ErrHostDown):
-			c.goCQLConnections.Get(instance, 0).Dec()
-		case errors.Is(batch.Err, gocql.ErrNoConnections):
-			c.goCQLConnections.Get(instance, 0).Set(0)
-		default:
-		}
+		c.observeDriverError(instance, batch.Err)
 	}
 
 	// NOTE: this loops over batch.Statements AND logStatement loops over the
@@ -242,12 +330,24 @@ func (c *ClusterObserver) ObserveQueryWithAttemptMetrics(
 // hostAttempts counts the attempts that went to host. observeQuery reads
 // query.Host before it calls the attempt function, so host is never nil here.
 func hostAttempts(metrics gocql.AttemptMetrics, host *gocql.HostInfo) int {
-	hostID := host.HostID()
+	// The attempts nearly always point to the same *HostInfo. Comparing the
+	// pointers first skips building HostID strings; a different pointer for
+	// the same host falls back to the ID.
+	var hostID string
 	attempts := 0
 
 	metrics.ForEachAttempt(func(attempt gocql.AttemptMetric) bool {
-		if attempt.Host != nil && attempt.Host.HostID() == hostID {
+		switch attempt.Host {
+		case nil:
+		case host:
 			attempts++
+		default:
+			if hostID == "" {
+				hostID = host.HostID()
+			}
+			if attempt.Host.HostID() == hostID {
+				attempts++
+			}
 		}
 
 		return true
@@ -272,17 +372,16 @@ func (c *ClusterObserver) observeQuery(
 	if query.Err != nil {
 		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, query.Err.Error()).Inc()
 		errStr = query.Err.Error()
-
-		switch {
-		case errors.Is(query.Err, gocql.ErrConnectionClosed) || errors.Is(query.Err, gocql.ErrHostDown):
-			c.goCQLConnections.Get(instance, 0).Dec()
-		case errors.Is(query.Err, gocql.ErrNoConnections):
-			c.goCQLConnections.Get(instance, 0).Set(0)
-		default:
-		}
+		c.observeDriverError(instance, query.Err)
 	}
 
 	duration := query.End.Sub(query.Start)
+
+	c.retryAttempts[data.Statement.QueryType].Observe(float64(query.Attempt))
+	c.latencyByAttempt[attemptLabelIndex(query.Attempt)].Observe(float64(duration) / 1e3)
+	if data.Statement.QueryType.IsSelect() {
+		c.rowsObserved.Observe(float64(query.Rows))
+	}
 
 	if c.logger != nil && !data.Statement.QueryType.IsSelect() {
 		c.logStatement(data.Statement, stmtlogger.Item{
@@ -312,11 +411,14 @@ func (c *ClusterObserver) ObserveConnect(connect gocql.ObservedConnect) {
 			instance,
 			connect.Err.Error(),
 		).Inc()
+		metrics.GoCQLErrorsByType.WithLabelValues(string(c.clusterName), "connect_"+classifyError(connect.Err)).Inc()
 		metrics.GoCQLConnections.WithLabelValues(string(c.clusterName), instance).Dec()
+		c.goCQLHostUp.Get(instance, 0).Set(0)
 		return
 	}
 
 	c.goCQLConnections.Get(instance, 0).Inc()
+	c.goCQLHostUp.Get(instance, 0).Set(1)
 	metrics.GoCQLConnectTime.
 		WithLabelValues(string(c.clusterName), instance).
 		Observe(float64(connect.End.Sub(connect.Start) / 1e3))

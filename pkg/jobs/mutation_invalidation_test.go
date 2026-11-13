@@ -65,6 +65,7 @@ func (g *invalidationRecorder) keys() typedef.PartitionKeys {
 }
 
 func (g *invalidationRecorder) Next() typedef.PartitionKeys            { return g.keys() }
+func (g *invalidationRecorder) NextForWrite() typedef.PartitionKeys    { return g.keys() }
 func (g *invalidationRecorder) Get(_ uint64) typedef.PartitionKeys     { return g.keys() }
 func (g *invalidationRecorder) Extend() typedef.PartitionKeys          { return g.keys() }
 func (g *invalidationRecorder) ReplaceNext() typedef.PartitionKeys     { return g.keys() }
@@ -76,13 +77,21 @@ func (g *invalidationRecorder) ReplaceNextWithoutOld()                     {}
 func (g *invalidationRecorder) Deleted() <-chan typedef.PartitionKeys      { return nil }
 func (g *invalidationRecorder) ValidationSuccess(_ *typedef.PartitionKeys) {}
 func (g *invalidationRecorder) ValidationFailure(_ *typedef.PartitionKeys) {}
-func (g *invalidationRecorder) ValidationStats(_ uuid.UUID) (uint64, uint64, uint64, []uint64, uint64) {
+func (g *invalidationRecorder) ValidationStats(_ *typedef.PartitionKeys) (uint64, uint64, uint64, []uint64, uint64) {
 	return 0, 0, 0, nil, 0
 }
 func (g *invalidationRecorder) IsInvalid(_ uint64) bool          { return false }
 func (g *invalidationRecorder) InvalidCount() uint64             { return 0 }
 func (g *invalidationRecorder) TrackRow(_ partitions.TrackedRow) {}
 func (g *invalidationRecorder) RowTrackerFillRatio() float64     { return 0 }
+func (g *invalidationRecorder) PeekTrackedRow() (partitions.TrackedRow, bool) {
+	return partitions.TrackedRow{}, false
+}
+
+func (g *invalidationRecorder) BorrowByID(id uuid.UUID) (typedef.PartitionKeys, bool) {
+	return typedef.PartitionKeys{ID: id}, true
+}
+
 func (g *invalidationRecorder) PopTrackedRow() (partitions.TrackedRow, bool) {
 	return partitions.TrackedRow{}, false
 }

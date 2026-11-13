@@ -12,3 +12,6 @@ buildkitd.toml
 
 # Local agent/editor state (not shared).
 .claude/settings.local.json
+
+# Binary that `go build ./pkg/cmd` writes without -o.
+/cmd

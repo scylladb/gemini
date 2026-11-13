@@ -54,8 +54,9 @@ func distinctItem(idx int) stmtlogger.Item {
 
 // checkCoherent verifies the bound row's partition-key, statement and values
 // columns all belong to the SAME item (idx) — the invariant that makes _logs
-// triage trustworthy. Layout (see cqlStatements.fillArgs):
-// [pk values...][ts][seq][Type][Statement][Values][Host]...
+// triage trustworthy. Layout (see cqlStatements.fillPairArgs):
+// [pk values...][ts][seq][Statement][Values][attempt][gemini_attempt]
+// [test ts, host, error, dur][oracle ts, host, error, dur]
 //
 // It reports a failure as an error rather than failing the test directly, so it
 // is safe to call from a worker goroutine: testify's require calls t.FailNow,
@@ -68,18 +69,18 @@ func checkCoherent(out []any, pkLen, idx int) error {
 		return fmt.Errorf("idx %d: partition key bled from another item: got %v, want %q", idx, out[0], wantPK)
 	}
 
-	gotStmt, ok := out[pkLen+3].(string)
+	gotStmt, ok := out[pkLen+2].(string)
 	if !ok {
-		return fmt.Errorf("idx %d: statement column has type %T, want string", idx, out[pkLen+3])
+		return fmt.Errorf("idx %d: statement column has type %T, want string", idx, out[pkLen+2])
 	}
 
 	if gotStmt != want.Statement {
 		return fmt.Errorf("idx %d: statement column bled from another item: got %q, want %q", idx, gotStmt, want.Statement)
 	}
 
-	gotValues, ok := out[pkLen+4].([]string)
+	gotValues, ok := out[pkLen+3].([]string)
 	if !ok {
-		return fmt.Errorf("idx %d: values column has type %T, want []string", idx, out[pkLen+4])
+		return fmt.Errorf("idx %d: values column has type %T, want []string", idx, out[pkLen+3])
 	}
 
 	if wantValues := prepareValuesOptimized(want.Values); !slices.Equal(gotValues, wantValues) {
@@ -202,11 +203,11 @@ func (r *recorderAtExecTime) record(insertStmt string, args []any) {
 		return
 	}
 
-	geminiStmt, ok := args[r.pkLen+3].(string)
+	geminiStmt, ok := args[r.pkLen+2].(string)
 	if !ok {
 		r.incoherenceErrs = append(
 			r.incoherenceErrs,
-			fmt.Errorf("statement column has type %T, want string", args[r.pkLen+3]),
+			fmt.Errorf("statement column has type %T, want string", args[r.pkLen+2]),
 		)
 
 		return
@@ -304,9 +305,7 @@ func committerItem(idx int) stmtlogger.Item {
 func runCommitter(tb testing.TB, logger *Logger, ch chan stmtlogger.Item, items []stmtlogger.Item) {
 	tb.Helper()
 
-	logger.wg.Add(1)
-
-	go logger.insertWorker()
+	logger.startCommitters(1)
 
 	for _, it := range items {
 		ch <- it

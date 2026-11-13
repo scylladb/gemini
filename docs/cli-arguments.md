@@ -18,9 +18,11 @@ at all and simply execute a lot of queries against the ___SUT___.
 
 2. ___---mode___, ___-m___: This is a string parameter with the acceptable values "mixed","read" and "write".
 
-3. ___--concurrency___, ___-c___: An int describing the number of concurrent jobs in the case of "read"
-or "write" mode. In the case of "mixed" mode it represents half of the number of jobs that will be executed
-concurrently.
+3. ___--concurrency___, ___-c___: The maximum number of workers of each kind per table. In "mixed"
+mode gemini starts this many mutation workers and this many validation workers. Only the workers below
+the current limit run, and the limit follows latency (see `docs/architecture.md`). 0, the default,
+sizes the maximum from the clusters: 16 per shard of the cluster with fewer shards, or 4 per CPU when
+the clusters report no shards.
 
 4. ___--schema___: The path to a file containing a JSON representation of the schema to be
 used during a run.

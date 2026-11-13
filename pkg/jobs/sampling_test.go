@@ -58,6 +58,8 @@ func (g *trackingGenerator) Get(_ uint64) typedef.PartitionKeys { return typedef
 
 func (g *trackingGenerator) Next() typedef.PartitionKeys { return typedef.PartitionKeys{} }
 
+func (g *trackingGenerator) NextForWrite() typedef.PartitionKeys { return typedef.PartitionKeys{} }
+
 func (g *trackingGenerator) Extend() typedef.PartitionKeys { return typedef.PartitionKeys{} }
 
 func (g *trackingGenerator) ReplaceNext() typedef.PartitionKeys { return typedef.PartitionKeys{} }
@@ -68,12 +70,20 @@ func (g *trackingGenerator) ReplaceNextWithoutOld()                     {}
 func (g *trackingGenerator) Deleted() <-chan typedef.PartitionKeys      { return nil }
 func (g *trackingGenerator) ValidationSuccess(_ *typedef.PartitionKeys) {}
 func (g *trackingGenerator) ValidationFailure(_ *typedef.PartitionKeys) {}
-func (g *trackingGenerator) ValidationStats(_ uuid.UUID) (uint64, uint64, uint64, []uint64, uint64) {
+func (g *trackingGenerator) ValidationStats(_ *typedef.PartitionKeys) (uint64, uint64, uint64, []uint64, uint64) {
 	return 0, 0, 0, nil, 0
 }
 func (g *trackingGenerator) MarkInvalid(_ *typedef.PartitionKeys) bool { return false }
 func (g *trackingGenerator) IsInvalid(_ uint64) bool                   { return false }
 func (g *trackingGenerator) InvalidCount() uint64                      { return 0 }
+func (g *trackingGenerator) PeekTrackedRow() (partitions.TrackedRow, bool) {
+	return partitions.TrackedRow{}, false
+}
+
+func (g *trackingGenerator) BorrowByID(id uuid.UUID) (typedef.PartitionKeys, bool) {
+	return typedef.PartitionKeys{ID: id}, true
+}
+
 func (g *trackingGenerator) PopTrackedRow() (partitions.TrackedRow, bool) {
 	return partitions.TrackedRow{}, false
 }

@@ -12,9 +12,9 @@ Available Commands:
 
 Flags:
       --async-objects-stabilization-attempts int       Maximum number of attempts to validate result sets from MV and SI (default 10)
-      --async-objects-stabilization-backoff duration   Duration between attempts to validate result sets from MV and SI for example 10ms or 1s (default 1s)
+      --async-objects-stabilization-backoff duration   Maximum backoff delay between validation retry attempts (exponential backoff starting at 100ms) (default 2s)
   -b, --bind string                                    Specify the interface and port which to bind prometheus metrics on. Default is ':2112' (default "0.0.0.0:2112")
-  -c, --concurrency int                                Number of threads per table to run concurrently. The default is 4 per available CPU
+  -c, --concurrency int                                Maximum number of workers of each kind per table. Gemini runs fewer while latency shows the clusters queue requests. 0 sizes it from the clusters: 16 per shard of the cluster with fewer shards, or 4 per CPU when the clusters report no shards
       --connect-timeout duration                       Duration of waiting connection established (default 30s)
       --consistency string                             Specify the desired consistency as ANY|ONE|TWO|THREE|QUORUM|LOCAL_QUORUM|EACH_QUORUM|LOCAL_ONE (default "QUORUM")
       --cql-features string                            Specify the type of cql features to use, basic|normal|all (default "normal")
@@ -23,6 +23,7 @@ Flags:
   -d, --drop-schema                                    Drop schema before starting tests run (default true)
       --duration duration                               (default 30s)
   -f, --fail-fast                                      Stop on the first failure
+      --flight-recorder string                         If set, keeps a recent execution trace in memory and writes it to this path when gemini exits
   -h, --help                                           help for gemini
       --level string                                   Specify the logging level, debug|info|warn|error|dpanic|panic|fatal (default "info")
       --materialized-views                             Run gemini with materialized views support
@@ -47,7 +48,7 @@ Flags:
       --min-string-length int                          Minimum string length (default 1)
       --minimum-delay duration                         Minimum delay between mutations (default 25µs)
   -m, --mode string                                    Query operation mode. Mode options: write, read, mixed (default) (default "mixed")
-      --mutation-concurrency int                       Number of worker threads to use for IO operations
+      --mutation-concurrency int                       Maximum number of mutation workers per table. 0 uses --concurrency
       --normal-dist-mean float                         Mean of the normal distribution (default 9.223372036854776e+18)
       --normal-dist-sigma float                        Sigma of the normal distribution, defaults to one standard deviation ~0.341 (default 6.290339729134958e+18)
   -o, --oracle-cluster strings                         Host names or IPs of the oracle cluster that provides correct answers. If omitted no oracle will be used
@@ -59,9 +60,9 @@ Flags:
       --outfile string                                 Specify the name of the file where the results should go
       --partition-count uint                           Number of Scylla Partitions (default 2000000)
       --partition-key-distribution string              Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf (default "uniform")
-      --profiling-port int                             If non-zero starts pprof profiler on given port at 'http://0.0.0.0:<port>/profile' (default 6060)
+      --profiling-port int                             If non-zero starts the pprof server on the given port at 'http://0.0.0.0:<port>/debug/pprof/' and records mutex and block profiles
       --random-string-buffer-size int                  Size of the buffer used for random strings (default 104857600)
-      --read-concurrency int                           Number of worker threads to use for IO operations
+      --read-concurrency int                           Maximum number of validation workers per table. 0 uses --concurrency
       --replication-strategy string                    Specify the desired replication strategy as either the coded short hand simple|network to get the default for each type or provide the entire specification in the form {'class':'....'} (default "network")
       --request-timeout duration                       Duration of waiting request execution (default 30s)
       --row-tracker-capacity int                       Maximum capacity for the row tracker used by targeted delete operations. N > 0 (default 100000): auto-sized from deletion ratios, clamped to N. -1: fully auto-sized (no cap). 0: disable row tracking. (default 100000)

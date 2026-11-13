@@ -28,7 +28,7 @@ Common Gemini commands and options for everyday use.
 | Option | Example | Description |
 |--------|---------|-------------|
 | `--duration` | `1h`, `30m`, `24h` | How long to run |
-| `--concurrency` | `10`, `50`, `100` | Parallel workers |
+| `--concurrency` | `0` (sized from shards), `50`, `100` | Maximum parallel workers |
 | `--mode` | `mixed`, `write`, `read` | Operation mode |
 | `--seed` | `12345` | Reproducible randomness |
 | `--schema-seed` | `67890` | Reproducible schema |

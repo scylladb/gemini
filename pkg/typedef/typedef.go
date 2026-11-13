@@ -18,9 +18,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"maps"
+	"slices"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -94,10 +93,14 @@ func (q SimpleQuery) ToCql() (stmt string, names []string) {
 
 type (
 	PartitionKeys struct {
-		Values      *Values   `json:"Values"`
-		Release     func()    `json:"-"`
-		ID          uuid.UUID `json:"ID"`
-		DeletedAtNS uint64    `json:"DeletedAtNS"`
+		Values  *Values `json:"Values"`
+		Release func()  `json:"-"`
+		// Validation points to the validation stats of the partition the
+		// keys were borrowed from. It is nil for keys built without a
+		// partition, and their results are not recorded.
+		Validation  *ValidationSlot `json:"-"`
+		ID          uuid.UUID       `json:"ID"`
+		DeletedAtNS uint64          `json:"DeletedAtNS"`
 	}
 
 	Stmt struct {
@@ -286,10 +289,32 @@ func (st StatementType) PossibleAsyncOperation() bool {
 	}
 }
 
+// Values holds the bind values for a set of named columns. It uses parallel
+// name/value slices rather than a map: the column sets are tiny (a handful of
+// partition keys), so a linear scan beats map hashing while avoiding the map
+// allocation that dominated the partition hot path. names[i] owns vals[i].
+//
+// Values is NOT safe for concurrent mutation. By construction it never needs to
+// be: a Values is built (NewPartitionValues / NewValuesFromMap / Merge into a
+// goroutine-local target) and thereafter only read. The one Values that is
+// shared across goroutines — the old partition keys handed from Replace to the
+// deleted-partitions heap and later to a validation worker — is read-only on
+// every holder, and concurrent reads of immutable data need no lock. Do not
+// introduce a path that mutates (Merge/UnmarshalJSON) a Values after it has
+// escaped to another goroutine.
 type Values struct {
-	data map[string][]any
+	names []string
+	vals  [][]any
+}
 
-	mu sync.RWMutex
+// index returns the position of name, or -1.
+func (v *Values) index(name string) int {
+	for i, n := range v.names {
+		if n == name {
+			return i
+		}
+	}
+	return -1
 }
 
 type ValidationData struct {
@@ -301,46 +326,126 @@ type ValidationData struct {
 	SuccessCount   atomic.Uint64
 }
 
+// ValidationSlot holds one partition's validation stats. The stats are
+// allocated on the first recorded result, so a partition that was never
+// validated costs one pointer instead of a ValidationData.
+type ValidationSlot struct {
+	data atomic.Pointer[ValidationData]
+}
+
+func (s *ValidationSlot) getOrCreate() *ValidationData {
+	if data := s.data.Load(); data != nil {
+		return data
+	}
+
+	created := &ValidationData{}
+	if s.data.CompareAndSwap(nil, created) {
+		return created
+	}
+
+	return s.data.Load()
+}
+
+// Data returns the stats, or nil when no result was recorded yet.
+func (s *ValidationSlot) Data() *ValidationData {
+	return s.data.Load()
+}
+
+// RecordSuccess records a successful validation at nowNS.
+func (s *ValidationSlot) RecordSuccess(nowNS uint64) {
+	data := s.getOrCreate()
+	data.FirstSuccessNS.CompareAndSwap(0, nowNS)
+	data.LastSuccessNS.Store(nowNS)
+	data.SuccessCount.Add(1)
+	pos := data.RecentIdx.Add(1) - 1
+	data.Recent[pos%uint64(len(data.Recent))].Store(nowNS)
+}
+
+// RecordFailure records a failed validation at nowNS.
+func (s *ValidationSlot) RecordFailure(nowNS uint64) {
+	s.getOrCreate().LastFailureNS.Store(nowNS)
+}
+
+// Stats returns the recorded stats. A slot with no recorded result returns
+// zeros and a nil recent list.
+func (s *ValidationSlot) Stats() (first, last, failure uint64, recent []uint64, successCount uint64) {
+	data := s.data.Load()
+	if data == nil {
+		return 0, 0, 0, nil, 0
+	}
+
+	first = data.FirstSuccessNS.Load()
+	last = data.LastSuccessNS.Load()
+	failure = data.LastFailureNS.Load()
+	successCount = data.SuccessCount.Load()
+	recent = make([]uint64, 0, len(data.Recent))
+	for i := range data.Recent {
+		if val := data.Recent[i].Load(); val != 0 {
+			recent = append(recent, val)
+		}
+	}
+
+	return first, last, failure, recent, successCount
+}
+
 func NewValues(initial int) *Values {
 	return &Values{
-		data: make(map[string][]any, initial),
+		names: make([]string, 0, initial),
+		vals:  make([][]any, 0, initial),
 	}
 }
 
 func NewValuesFromMap(m map[string][]any) *Values {
-	return &Values{
-		data: m,
+	v := &Values{
+		names: make([]string, 0, len(m)),
+		vals:  make([][]any, 0, len(m)),
 	}
+	for k, val := range m {
+		v.names = append(v.names, k)
+		v.vals = append(v.vals, val)
+	}
+	return v
+}
+
+// NewPartitionValues builds a Values directly from a contiguous flat value slice
+// and a column layout, skipping the intermediate map the partition hot path used
+// to allocate per Get. Columns are laid out consecutively in src in the same
+// order GenValueOut emits them, so each column's values are the next
+// col.Type.LenValue() entries — a capped sub-slice of src (no copy). src must
+// remain immutable for the lifetime of the returned Values; the cap forces any
+// later append (e.g. via Merge) to reallocate rather than clobber the shared
+// backing array.
+func NewPartitionValues(cols Columns, src []any) *Values {
+	names := make([]string, len(cols))
+	vals := make([][]any, len(cols))
+	off := 0
+	for i, col := range cols {
+		end := off + col.Type.LenValue()
+		names[i] = col.Name
+		vals[i] = src[off:end:end]
+		off = end
+	}
+	return &Values{names: names, vals: vals}
 }
 
 func (v *Values) Get(name string) []any {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-	if values, ok := v.data[name]; ok {
-		return values
+	if i := v.index(name); i >= 0 {
+		return v.vals[i]
 	}
 
 	return nil
 }
 
 func (v *Values) Keys() []string {
-	keys := make([]string, 0, len(v.data))
-
-	v.mu.RLock()
-	for k := range v.data {
-		keys = append(keys, k)
-	}
-	v.mu.RUnlock()
+	keys := make([]string, len(v.names))
+	copy(keys, v.names)
 
 	sort.Strings(keys)
 	return keys
 }
 
 func (v *Values) Len() int {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
-	return len(v.data)
+	return len(v.names)
 }
 
 func (v *Values) ToCQLValues(pks Columns) []any {
@@ -348,13 +453,19 @@ func (v *Values) ToCQLValues(pks Columns) []any {
 		return []any{}
 	}
 
-	v.mu.RLock()
-	values := make([]any, 0, len(v.data)*len(v.data[pks[0].Name]))
-
-	for _, pk := range pks {
-		values = append(values, v.data[pk.Name]...)
+	n := 0
+	if len(pks) > 0 {
+		if i := v.index(pks[0].Name); i >= 0 {
+			n = len(v.names) * len(v.vals[i])
+		}
 	}
-	v.mu.RUnlock()
+
+	values := make([]any, 0, n)
+	for _, pk := range pks {
+		if i := v.index(pk.Name); i >= 0 {
+			values = append(values, v.vals[i]...)
+		}
+	}
 
 	return values
 }
@@ -369,31 +480,37 @@ func (v *Values) AppendCQLValues(dst []any, pks Columns) []any {
 		return dst
 	}
 
-	v.mu.RLock()
 	for _, pk := range pks {
-		dst = append(dst, v.data[pk.Name]...)
+		if i := v.index(pk.Name); i >= 0 {
+			dst = append(dst, v.vals[i]...)
+		}
 	}
-	v.mu.RUnlock()
 
 	return dst
 }
 
+// Merge appends every entry from values into v. v must be owned by the calling
+// goroutine (see the Values doc comment); neither v nor values may be mutated
+// concurrently.
 func (v *Values) Merge(values *Values) {
-	// Lock receiver first, then argument — consistent ordering prevents ABBA deadlock
-	// when two Values merge into each other concurrently.
-	v.mu.Lock()
-	values.mu.RLock()
-	defer values.mu.RUnlock()
-	defer v.mu.Unlock()
-
-	for k, value := range values.data {
-		v.data[k] = append(v.data[k], value...)
+	for i, name := range values.names {
+		if j := v.index(name); j >= 0 {
+			v.vals[j] = append(v.vals[j], values.vals[i]...)
+		} else {
+			v.names = append(v.names, name)
+			// Copy rather than alias the source slice, so a later append to
+			// this key does not write into the source Values.
+			v.vals = append(v.vals, append([]any(nil), values.vals[i]...))
+		}
 	}
 }
 
 func (v *Values) ToMap() map[string][]any {
-	n := v.Copy()
-	return n.data
+	m := make(map[string][]any, len(v.names))
+	for i, name := range v.names {
+		m[name] = v.vals[i]
+	}
+	return m
 }
 
 func (v *Values) MemoryFootprint() uint64 {
@@ -405,10 +522,12 @@ func (v *Values) MarshalJSON() ([]byte, error) {
 		return []byte("null"), nil
 	}
 
-	v.mu.RLock()
-	defer v.mu.RUnlock()
+	m := make(map[string][]any, len(v.names))
+	for i, name := range v.names {
+		m[name] = v.vals[i]
+	}
 
-	return json.Marshal(v.data)
+	return json.Marshal(m)
 }
 
 func (v *Values) UnmarshalJSON(data []byte) error {
@@ -420,19 +539,19 @@ func (v *Values) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	if v.data == nil {
-		v.data = make(map[string][]any)
-	}
-
 	var m map[string][]any
 	if err := json.Unmarshal(data, &m); err != nil {
 		return fmt.Errorf("unmarshal values: %w", err)
 	}
 
-	maps.Copy(v.data, m)
+	for k, value := range m {
+		if i := v.index(k); i >= 0 {
+			v.vals[i] = value
+		} else {
+			v.names = append(v.names, k)
+			v.vals = append(v.vals, value)
+		}
+	}
 
 	return nil
 }
@@ -450,35 +569,25 @@ func (v *Values) Copy() *Values {
 		return nil
 	}
 
-	v.mu.RLock()
-	m := maps.Clone(v.data)
-	v.mu.RUnlock()
-
-	return &Values{data: m}
+	// Shallow clone: the name/value-header slices are copied, and the inner
+	// []any backing arrays are shared.
+	return &Values{
+		names: slices.Clone(v.names),
+		vals:  slices.Clone(v.vals),
+	}
 }
 
 func (v *Values) Data() []any {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
-	values := make([]any, 0, len(v.data))
-
-	keys := make([]string, 0, len(v.data))
-	for k := range v.data {
-		keys = append(keys, k)
+	// Emit values in column-name order for deterministic output.
+	order := make([]int, len(v.names))
+	for i := range order {
+		order[i] = i
 	}
+	sort.Slice(order, func(a, b int) bool { return v.names[order[a]] < v.names[order[b]] })
 
-	// Sort keys to ensure deterministic order
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[i] > keys[j] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
-
-	for _, k := range keys {
-		values = append(values, v.data[k]...)
+	values := make([]any, 0, len(v.names))
+	for _, i := range order {
+		values = append(values, v.vals[i]...)
 	}
 
 	return values

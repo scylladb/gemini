@@ -247,5 +247,21 @@ func TestKeyspaceTableFromQuery(t *testing.T) {
 	}
 	for query, want := range cases {
 		assert.Equalf(t, want, utils.KeyspaceTableFromQuery(query), "query: %q", query)
+		assert.Equalf(t, want, utils.KeyspaceTableFromQuery(query), "cached query: %q", query)
+	}
+}
+
+// TestHexOfHalfIsPrefixOfFullHex pins the identity PreallocateRandomString
+// relies on: the hex of the first n/2 bytes is the first n hex characters.
+func TestHexOfHalfIsPrefixOfFullHex(t *testing.T) {
+	t.Parallel()
+
+	data := []byte{0x00, 0x1f, 0xa0, 0xff, 0x42, 0x07}
+	full := hex.EncodeToString(data)
+
+	for n := 0; n <= 2*len(data); n += 2 {
+		if got := hex.EncodeToString(data[:n/2]); got != full[:n] {
+			t.Fatalf("hex of %d bytes = %q, want prefix %q", n/2, got, full[:n])
+		}
 	}
 }

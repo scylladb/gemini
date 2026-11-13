@@ -196,8 +196,7 @@ func (st SimpleType) genValue(r utils.Random, p RangeConfig) any {
 	case TypeSmallint:
 		return int16(r.Uint64N(math.MaxUint16))
 	case TypeUUID:
-		uuid, _ := gocql.RandomUUID()
-		return uuid
+		return utils.RandomUUID(r)
 	case TypeTimeuuid:
 		return utils.UUIDFromTime(r)
 	case TypeTinyint:

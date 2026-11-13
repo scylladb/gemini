@@ -17,13 +17,19 @@
 package typedef_test
 
 import (
+	"math/rand/v2"
 	"os"
 	"testing"
 
 	"github.com/scylladb/gemini/pkg/testutils"
+	"github.com/scylladb/gemini/pkg/utils"
 )
 
 func TestMain(m *testing.M) {
+	// Fill the random string buffer before any test runs. RandString reads it
+	// without synchronization, so filling it from a parallel test races.
+	utils.PreallocateRandomString(rand.New(rand.NewPCG(7, 7)), 1<<16)
+
 	code := m.Run()
 	// Tear down the shared, reusable ScyllaDB node pool so its containers do not
 	// keep running after the test binary exits.

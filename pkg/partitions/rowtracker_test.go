@@ -595,3 +595,30 @@ func TestRowTracker_BitsetWordBoundary(t *testing.T) {
 	}
 	assert.Equal(t, capacity-2, valid, "expected cap-2 valid rows after invalidating 2 word-boundary slots")
 }
+
+func TestRowTracker_PeekLeavesRows(t *testing.T) {
+	t.Parallel()
+
+	rt := NewRowTracker(8)
+	ids := []uuid.UUID{uuid.New(), uuid.New(), uuid.New()}
+	for _, id := range ids {
+		rt.Push(TrackedRow{PartitionID: id})
+	}
+
+	seen := make(map[uuid.UUID]bool, len(ids))
+	for range ids {
+		row, ok := rt.Peek()
+		require.True(t, ok)
+		seen[row.PartitionID] = true
+	}
+
+	assert.Len(t, seen, len(ids), "successive peeks walk every live row")
+	assert.Equal(t, uint64(len(ids)), rt.count.Load(), "peek removes nothing")
+
+	rt.Invalidate(ids[0])
+	for range 2 * len(ids) {
+		row, ok := rt.Peek()
+		require.True(t, ok)
+		assert.NotEqual(t, ids[0], row.PartitionID, "peek skips invalidated rows")
+	}
+}

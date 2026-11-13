@@ -233,9 +233,8 @@ func TestCQLStatements_Insert_Integration(t *testing.T) {
 			// Verify data was inserted
 			var count int
 			err = session.Query(
-				fmt.Sprintf("SELECT COUNT(*) FROM %s.%s WHERE pk0 = ? AND ty = ?", keyspace, table),
+				fmt.Sprintf("SELECT COUNT(*) FROM %s.%s WHERE pk0 = ?", keyspace, table),
 				tt.item.PartitionKeys.Values.Get("pk0")[0],
-				tt.item.Type,
 			).Scan(&count)
 			require.NoError(t, err)
 			assert.Equal(t, 1, count)

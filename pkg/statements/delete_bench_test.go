@@ -33,6 +33,14 @@ type constPopPartitions struct {
 	row partitions.TrackedRow
 }
 
+func (m *constPopPartitions) PeekTrackedRow() (partitions.TrackedRow, bool) {
+	return partitions.TrackedRow{}, false
+}
+
+func (m *constPopPartitions) BorrowByID(id uuid.UUID) (typedef.PartitionKeys, bool) {
+	return typedef.PartitionKeys{ID: id}, true
+}
+
 func (m *constPopPartitions) PopTrackedRow() (partitions.TrackedRow, bool) {
 	return m.row, true
 }

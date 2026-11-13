@@ -37,8 +37,8 @@ import (
 // dominated the resident memory growth observed during the first 2-3 hours
 // of the run.
 //
-// After the fix, deleteValidation cleans up uuidToIdx as well as
-// validationMap, so the map size remains bounded by the
+// After the fix, deleteValidation cleans up uuidToIdx, so the map size
+// remains bounded by the
 // deleted-partitions heap occupancy (which itself drains as buckets
 // expire).
 func TestReplaceDoesNotLeakUUIDToIdx(t *testing.T) {
@@ -111,26 +111,20 @@ func TestReplaceDoesNotLeakUUIDToIdx(t *testing.T) {
 
 		parts.validationMu.RLock()
 		uuidToIdxLen := len(parts.uuidToIdx)
-		validationMapLen := len(parts.validationMap)
 		parts.validationMu.RUnlock()
 
-		// Once the heap has fully drained, both maps must shrink back to roughly
+		// Once the heap has fully drained, the map must shrink back to roughly
 		// the live partition count (one entry per live slot).
 		assert.LessOrEqual(t, uuidToIdxLen, int(count)*2,
-			"uuidToIdx/validationMap should shrink after the deleted-partition heap drains; "+
+			"uuidToIdx should shrink after the deleted-partition heap drains; "+
 				"this is the regression guard for the 2026-04-30 leak")
-		assert.LessOrEqual(t, validationMapLen, int(count)*2,
-			"validationMap should shrink after the deleted-partition heap drains")
 
-		// Hard upper bound: under no circumstance should the maps hold one
+		// Hard upper bound: under no circumstance should the map hold one
 		// entry per Replace call. Before the fix this was exactly the
 		// failure mode (uuidToIdxLen would be ~replacePass).
 		assert.Less(t, uuidToIdxLen, int(count)*4,
 			"uuidToIdx leaks one entry per Replace; got %d entries after %d replaces",
 			uuidToIdxLen, replacePass)
-		assert.Less(t, validationMapLen, int(count)*4,
-			"validationMap leaks one entry per Replace; got %d entries after %d replaces",
-			validationMapLen, replacePass)
 
 		// Tear down all bubble goroutines before returning.
 		cancel()

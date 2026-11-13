@@ -35,6 +35,10 @@ func (m *mockStoreLoader) Init() error {
 	return nil
 }
 
+func (m *mockStoreLoader) shardCount() int {
+	return 0
+}
+
 func (m *mockStoreLoader) mutate(ctx context.Context, stmt *typedef.Stmt, _ mo.Option[time.Time]) error {
 	args := m.Called(ctx, stmt)
 	return args.Error(0)

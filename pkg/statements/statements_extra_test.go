@@ -74,6 +74,10 @@ func (m *mockPartitions) Extend() typedef.PartitionKeys {
 	return typedef.PartitionKeys{ID: uuid.New()}
 }
 
+func (m *mockPartitions) NextForWrite() typedef.PartitionKeys {
+	return m.Next()
+}
+
 func (m *mockPartitions) ReplaceNext() typedef.PartitionKeys {
 	return typedef.PartitionKeys{ID: uuid.New()}
 }
@@ -94,7 +98,7 @@ func (m *mockPartitions) ValidationSuccess(_ *typedef.PartitionKeys) {}
 
 func (m *mockPartitions) ValidationFailure(_ *typedef.PartitionKeys) {}
 
-func (m *mockPartitions) ValidationStats(_ uuid.UUID) (first, last, failure uint64, recent []uint64, successCount uint64) {
+func (m *mockPartitions) ValidationStats(_ *typedef.PartitionKeys) (first, last, failure uint64, recent []uint64, successCount uint64) {
 	return 0, 0, 0, nil, 0
 }
 
@@ -112,6 +116,14 @@ func (m *mockPartitions) InvalidCount() uint64 {
 }
 
 func (m *mockPartitions) TrackRow(_ partitions.TrackedRow) {}
+
+func (m *mockPartitions) PeekTrackedRow() (partitions.TrackedRow, bool) {
+	return partitions.TrackedRow{}, false
+}
+
+func (m *mockPartitions) BorrowByID(id uuid.UUID) (typedef.PartitionKeys, bool) {
+	return typedef.PartitionKeys{ID: id}, true
+}
 
 func (m *mockPartitions) PopTrackedRow() (partitions.TrackedRow, bool) {
 	return partitions.TrackedRow{}, false

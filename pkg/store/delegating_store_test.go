@@ -87,6 +87,8 @@ func (f *fakeStore) Init() error  { return nil }
 func (f *fakeStore) Close() error { return nil }
 func (f *fakeStore) name() string { return f.nameStr }
 
+func (f *fakeStore) shardCount() int { return 0 }
+
 func TestDelegatingStore_Create_CallsMutateOnBothStores(t *testing.T) {
 	t.Parallel()
 	test := &fakeStore{nameStr: "test"}

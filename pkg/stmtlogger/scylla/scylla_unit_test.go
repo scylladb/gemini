@@ -109,7 +109,9 @@ func TestBuildCreateTableQueryUnit(t *testing.T) {
 				"pk0 text",
 				"ts bigint",
 				"seq bigint",
-				"PRIMARY KEY ((pk0, ty), ts, attempt, gemini_attempt, seq)",
+				"PRIMARY KEY ((pk0), ts, attempt, gemini_attempt, seq)",
+				"test_host text",
+				"oracle_host text",
 			},
 		},
 		{
@@ -124,7 +126,7 @@ func TestBuildCreateTableQueryUnit(t *testing.T) {
 			wantContains: []string{
 				"pk0 text",
 				"pk1 int",
-				"PRIMARY KEY ((pk0,pk1, ty)",
+				"PRIMARY KEY ((pk0,pk1), ts",
 			},
 		},
 		{
@@ -210,7 +212,11 @@ func TestPrepareValuesOptimizedUnit(t *testing.T) {
 func TestAdditionalColumnsUnit(t *testing.T) {
 	t.Parallel()
 
-	expected := []string{"ts", "seq", "ty", "statement", "values", "host", "attempt", "gemini_attempt", "error", "dur"}
+	expected := []string{
+		"ts", "seq", "statement", "values", "attempt", "gemini_attempt",
+		"test_ts", "test_host", "test_error", "test_dur",
+		"oracle_ts", "oracle_host", "oracle_error", "oracle_dur",
+	}
 
 	assert.Len(t, additionalColumnsArr, len(expected))
 	for i, col := range expected {

@@ -15,10 +15,13 @@
 package utils
 
 import (
+	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/shirou/gopsutil/v4/mem"
@@ -33,6 +36,41 @@ import (
 // routing) must derive the table from the statement's own query — the only
 // thing that identifies which table it hit.
 func KeyspaceTableFromQuery(query string) string {
+	if kt, ok := keyspaceTableCache.Load(query); ok {
+		return mustString(kt)
+	}
+
+	kt := parseKeyspaceTable(query)
+	if keyspaceTableCacheSize.Load() < keyspaceTableCacheLimit {
+		if _, loaded := keyspaceTableCache.LoadOrStore(query, kt); !loaded {
+			keyspaceTableCacheSize.Add(1)
+		}
+	}
+
+	return kt
+}
+
+// keyspaceTableCache maps a query to its "keyspace.table". Gemini binds its
+// values, so a run has only a few dozen distinct query strings, and every
+// logged statement looks one up. keyspaceTableCacheLimit stops it from growing
+// when queries carry literals, as DDL statements do.
+var (
+	keyspaceTableCache     sync.Map
+	keyspaceTableCacheSize atomic.Int64
+)
+
+const keyspaceTableCacheLimit = 4096
+
+func mustString(v any) string {
+	s, ok := v.(string)
+	if !ok {
+		panic(fmt.Sprintf("keyspaceTableCache holds %T, want string", v))
+	}
+
+	return s
+}
+
+func parseKeyspaceTable(query string) string {
 	fields := strings.Fields(query)
 	for i, f := range fields {
 		switch strings.ToUpper(f) {
@@ -78,13 +116,7 @@ func PreallocateRandomString(rnd Random, ln int) {
 		}
 
 		data := make([]byte, length)
-
-		for i := 0; i < length; i += uint64Size {
-			number := rnd.Uint64()
-			for j := range uint64Size {
-				data[i+j] = byte(number >> j & 0xFF)
-			}
-		}
+		fillRandomBytes(rnd, data)
 
 		data = data[:ln]
 
@@ -94,8 +126,21 @@ func PreallocateRandomString(rnd Random, ln int) {
 			ln++ // Ensure the length is even
 		}
 
-		randomString = hex.EncodeToString(data)[:ln]
+		// Encode only the bytes the string needs. Slicing a full-length
+		// encoding would keep its whole backing array, twice the buffer size,
+		// alive for the run. The result is the same: ln/2 bytes give the
+		// first ln hex characters.
+		randomString = hex.EncodeToString(data[:ln/2])
 	})
+}
+
+// fillRandomBytes fills data, whose length is a multiple of 8, with the
+// little-endian bytes of successive rnd.Uint64 values, so every byte carries
+// 8 fresh random bits.
+func fillRandomBytes(rnd Random, data []byte) {
+	for i := 0; i < len(data); i += uint64Size {
+		binary.LittleEndian.PutUint64(data[i:], rnd.Uint64())
+	}
 }
 
 func RandString(rnd Random, ln int, even bool) string {
