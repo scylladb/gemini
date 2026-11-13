@@ -175,12 +175,7 @@ func (p *Partitions) partition(idx uint64) *Partition {
 }
 
 func (p *Partitions) valuesNoLock(part *Partition) typedef.PartitionKeys {
-	out := make(map[string][]any, p.parts.partitionValuesLen)
-
-	for i, col := range p.table.PartitionKeys {
-		// Copy the slice to avoid data races when the underlying array is modified
-		out[col.Name] = append(out[col.Name], part.values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
-	}
+	out := splitPartitionValues(p.table.PartitionKeys, part.values)
 
 	part.refCount.Add(1)
 	return typedef.PartitionKeys{
@@ -223,10 +218,7 @@ func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
 	part.mu.RUnlock()
 
 	// Build the result outside the lock to minimize contention
-	out := make(map[string][]any, p.parts.partitionValuesLen)
-	for i, col := range p.table.PartitionKeys {
-		out[col.Name] = append(out[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
-	}
+	out := splitPartitionValues(p.table.PartitionKeys, values)
 
 	part.refCount.Add(1)
 	var once sync.Once
@@ -251,10 +243,7 @@ func (p *Partitions) valuesCopy(idx uint64) typedef.PartitionKeys {
 	part.mu.RUnlock()
 
 	// Build result outside lock
-	m := make(map[string][]any, p.parts.partitionValuesLen)
-	for i, col := range p.table.PartitionKeys {
-		m[col.Name] = append(m[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
-	}
+	m := splitPartitionValues(p.table.PartitionKeys, values)
 
 	part.refCount.Add(1)
 	var once sync.Once
@@ -689,13 +678,24 @@ func generateValue(r utils.Random, table *typedef.Table, config typedef.RangeCon
 func NewPartitionKeys(r utils.Random, table *typedef.Table, config typedef.RangeConfig) typedef.PartitionKeys {
 	values := generateValue(r, table, config)
 
-	m := make(map[string][]any, table.PartitionKeys.LenValues())
-
-	for i, col := range table.PartitionKeys {
-		m[col.Name] = append(m[col.Name], values[i*col.Type.LenValue():(i+1)*col.Type.LenValue()]...)
-	}
-
 	return typedef.PartitionKeys{
-		Values: typedef.NewValuesFromMap(m),
+		Values: typedef.NewValuesFromMap(splitPartitionValues(table.PartitionKeys, values)),
 	}
+}
+
+// splitPartitionValues maps each partition key column to its own values in the
+// flat values slice. Column widths differ: a tuple key takes one value per
+// element. Each column starts where the previous column ends. Every slice is a
+// copy, so a later change to values does not reach the result.
+func splitPartitionValues(cols typedef.Columns, values []any) map[string][]any {
+	out := make(map[string][]any, len(cols))
+	offset := 0
+
+	for _, col := range cols {
+		width := col.Type.LenValue()
+		out[col.Name] = append([]any(nil), values[offset:offset+width]...)
+		offset += width
+	}
+
+	return out
 }
