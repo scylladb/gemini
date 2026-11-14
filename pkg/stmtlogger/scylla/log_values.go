@@ -15,7 +15,7 @@
 package scylla
 
 import (
-	"cmp"
+	"bytes"
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -39,9 +39,13 @@ import (
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 )
 
-// logDataSizeHint is the expected encoded size of the data cell of one row,
-// used to size its buffer before encoding.
-const logDataSizeHint = 256
+const (
+	// logDataSizeHint is the expected encoded size of the data cell of one
+	// row, used to size its buffer before encoding.
+	logDataSizeHint = 512
+	// logValueSizeHint is the expected encoded size of one map key or value.
+	logValueSizeHint = 24
+)
 
 // querySeed hashes CQL text to a query id. The _logs keyspace is created fresh
 // for every run, so an id only has to be stable within one process.
@@ -368,49 +372,107 @@ func appendJSONList(buf []byte, rv reflect.Value) []byte {
 		if i > 0 {
 			buf = append(buf, ',')
 		}
-		buf = appendJSONValue(buf, rv.Index(i).Interface())
+		buf = appendJSONReflectValue(buf, rv.Index(i))
 	}
 
 	return append(buf, ']')
 }
 
-// appendJSONMap appends a typed CQL map as an object. A JSON object key is a
-// string, so a key whose JSON form is not a string becomes the string of that
-// JSON text. Keys are sorted by their string.
-func appendJSONMap(buf []byte, rv reflect.Value) []byte {
-	type entry struct {
-		val any
-		key string
+// appendJSONReflectValue appends rv as appendJSONValue appends its value. The
+// basic kinds are read from rv directly, which skips boxing every element of a
+// typed map or slice into an interface.
+func appendJSONReflectValue(buf []byte, rv reflect.Value) []byte {
+	switch rv.Kind() {
+	case reflect.String:
+		return appendJSONString(buf, rv.String())
+	case reflect.Bool:
+		return strconv.AppendBool(buf, rv.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.AppendInt(buf, rv.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.AppendUint(buf, rv.Uint(), 10)
+	case reflect.Float32:
+		return appendJSONFloat(buf, rv.Float(), 32)
+	case reflect.Float64:
+		return appendJSONFloat(buf, rv.Float(), 64)
+	default:
+		// Every other kind needs its Go type, read below.
 	}
 
-	entries := make([]entry, 0, rv.Len())
+	// An addressable value (a map entry holder or a slice element) is read
+	// through a pointer, which boxes without an allocation.
+	if rv.CanAddr() {
+		switch p := rv.Addr().Interface().(type) {
+		case *gocql.UUID:
+			return append(appendUUID(append(buf, '"'), *p), '"')
+		case *time.Time:
+			return append(p.AppendFormat(append(buf, '"'), time.RFC3339Nano), '"')
+		case *[]byte:
+			return appendJSONValue(buf, *p)
+		}
+	}
+
+	return appendJSONValue(buf, rv.Interface())
+}
+
+// appendJSONMap appends a typed CQL map as an object. A JSON object key is a
+// string, so a key whose JSON form is not a string becomes the string of that
+// JSON text. Entries are sorted by their encoded key.
+//
+// Keys and values are encoded into two buffers as the map is read, so a map
+// costs a fixed number of allocations whatever its size.
+func appendJSONMap(buf []byte, rv reflect.Value) []byte {
+	type entry struct {
+		keyStart, keyEnd int
+		valStart, valEnd int
+	}
+
+	n := rv.Len()
+	entries := make([]entry, 0, n)
+	keys := make([]byte, 0, n*logValueSizeHint)
+	vals := make([]byte, 0, n*logValueSizeHint)
+
+	key := reflect.New(rv.Type().Key()).Elem()
+	val := reflect.New(rv.Type().Elem()).Elem()
+
 	var scratch []byte
 
 	iter := rv.MapRange()
 	for iter.Next() {
-		scratch = appendJSONValue(scratch[:0], iter.Key().Interface())
+		key.SetIterKey(iter)
+		val.SetIterValue(iter)
 
-		key := string(scratch)
-		if len(scratch) > 0 && scratch[0] == '"' {
-			var unquoted string
-			if err := json.Unmarshal(scratch, &unquoted); err == nil {
-				key = unquoted
-			}
+		e := entry{keyStart: len(keys), valStart: len(vals)}
+
+		scratch = appendJSONReflectValue(scratch[:0], key)
+		switch {
+		case len(scratch) > 0 && scratch[0] == '"':
+			keys = append(keys, scratch...)
+		case len(scratch) > 0 && (scratch[0] == '[' || scratch[0] == '{'):
+			// A frozen collection key holds quotes of its own.
+			keys = appendJSONString(keys, string(scratch))
+		default:
+			// A number, true, false or null needs no escaping.
+			keys = append(append(append(keys, '"'), scratch...), '"')
 		}
 
-		entries = append(entries, entry{key: key, val: iter.Value().Interface()})
+		vals = appendJSONReflectValue(vals, val)
+		e.keyEnd, e.valEnd = len(keys), len(vals)
+		entries = append(entries, e)
 	}
 
-	slices.SortFunc(entries, func(a, b entry) int { return cmp.Compare(a.key, b.key) })
+	slices.SortFunc(entries, func(a, b entry) int {
+		return bytes.Compare(keys[a.keyStart:a.keyEnd], keys[b.keyStart:b.keyEnd])
+	})
 
 	buf = append(buf, '{')
 	for i, e := range entries {
 		if i > 0 {
 			buf = append(buf, ',')
 		}
-		buf = appendJSONString(buf, e.key)
+		buf = append(buf, keys[e.keyStart:e.keyEnd]...)
 		buf = append(buf, ':')
-		buf = appendJSONValue(buf, e.val)
+		buf = append(buf, vals[e.valStart:e.valEnd]...)
 	}
 
 	return append(buf, '}')
