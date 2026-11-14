@@ -496,6 +496,14 @@ type mutationChanRes struct {
 }
 
 // executeParallelMutations executes mutations on stores that need to be retried
+// runInline runs f on the calling goroutine and counts it in ds.inflight, so
+// Close waits for it the same way it waits for a spawned call.
+func (ds delegatingStore) runInline(f func()) {
+	ds.inflight.Add(1)
+	defer ds.inflight.Done()
+	f()
+}
+
 func (ds delegatingStore) executeParallelMutations(
 	ctx context.Context,
 	stmt *typedef.Stmt,
@@ -520,21 +528,31 @@ func (ds delegatingStore) executeParallelMutations(
 	// all goroutines after ctx fires without the risk of a blocked send.
 	ch := make(chan mutationChanRes, 2)
 
+	runOracle := retryOracle && ds.oracleStore != nil
+
 	expected := 0
 	if retryTest {
 		expected++
-		ds.inflight.Go(func() {
+		mutateTest := func() {
 			err := ds.testStore.mutate(doCtx, stmt, timestamp)
 			// Unconditional send: the channel always has capacity so this
 			// never blocks.  Dropping the "case <-doCtx.Done()" branch
 			// means the goroutine always delivers its result, which lets
 			// waitForMutationResults drain it even after ctx is cancelled.
 			ch <- mutationChanRes{oracle: false, err: err}
-		})
+		}
+		if runOracle {
+			ds.inflight.Go(mutateTest)
+		} else {
+			ds.runInline(mutateTest)
+		}
 	}
-	if retryOracle && ds.oracleStore != nil {
+	if runOracle {
 		expected++
-		ds.inflight.Go(func() {
+		// The oracle write runs on the calling goroutine. A new goroutine per
+		// side costs a spawn, a stack growth and a scheduler handoff on every
+		// mutation, which is a large share of gemini's CPU at full load.
+		ds.runInline(func() {
 			err := ds.oracleStore.mutate(doCtx, stmt, timestamp)
 			ch <- mutationChanRes{oracle: true, err: err}
 		})
@@ -849,51 +867,31 @@ func (ds delegatingStore) CheckOnce(
 		return len(testRows), testRows, nil
 	}
 
-	// Run iterators in parallel using a single channel (size 2).
-	// Goroutines are tracked by ds.inflight so Close() can wait for them.
+	// The test read runs on a goroutine tracked by ds.inflight, so Close() can
+	// wait for it. The oracle read runs on the calling goroutine, which saves a
+	// spawn, a stack growth and a scheduler handoff on every validation.
 	type rowsTagged struct {
-		err    error
-		rows   Rows
-		oracle bool
+		err  error
+		rows Rows
 	}
 
-	ch := make(chan rowsTagged, 2)
+	ch := make(chan rowsTagged, 1)
 
-	ds.inflight.Add(2)
-	go func() {
-		defer ds.inflight.Done()
+	ds.inflight.Go(func() {
 		rows, err := ds.testStore.load(doCtx, stmt)
-		select {
-		case ch <- rowsTagged{oracle: false, rows: rows, err: err}:
-		case <-doCtx.Done():
-		}
-	}()
-
-	go func() {
-		defer ds.inflight.Done()
-		rows, err := ds.oracleStore.load(doCtx, stmt)
-		select {
-		case ch <- rowsTagged{oracle: true, rows: rows, err: err}:
-		case <-doCtx.Done():
-		}
-	}()
+		ch <- rowsTagged{rows: rows, err: err}
+	})
 
 	var tRes, oRes rowsTagged
-	// Wait for both results or context cancellation
-	received := 0
-	for received < 2 {
-		select {
-		case r := <-ch:
-			if r.oracle {
-				oRes = r
-			} else {
-				tRes = r
-			}
-			received++
-		case <-doCtx.Done():
-			metrics.ContextCancellations.WithLabelValues("load", contextEndReason(doCtx.Err())).Inc()
-			return 0, nil, doCtx.Err()
-		}
+	ds.runInline(func() {
+		oRes.rows, oRes.err = ds.oracleStore.load(doCtx, stmt)
+	})
+
+	select {
+	case tRes = <-ch:
+	case <-doCtx.Done():
+		metrics.ContextCancellations.WithLabelValues("load", contextEndReason(doCtx.Err())).Inc()
+		return 0, nil, doCtx.Err()
 	}
 
 	// Extract results

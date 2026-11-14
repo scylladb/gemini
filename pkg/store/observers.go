@@ -409,7 +409,7 @@ func (c *ClusterObserver) observeQuery(
 	}
 
 	c.goCQLQueries.Get(instance, data.Statement.QueryType).Inc()
-	c.goCQLQueryTime.Get(instance, data.Statement.QueryType).Observe(float64(duration) / 1e3)
+	c.goCQLQueryTime.Get(instance, data.Statement.QueryType).Observe(duration.Seconds())
 }
 
 func (c *ClusterObserver) ObserveConnect(connect gocql.ObservedConnect) {

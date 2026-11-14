@@ -15,10 +15,10 @@
 package scylla
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -78,12 +78,12 @@ func checkCoherent(out []any, pkLen, idx int) error {
 		return fmt.Errorf("idx %d: statement column bled from another item: got %q, want %q", idx, gotStmt, want.Statement)
 	}
 
-	gotValues, ok := out[pkLen+3].([]string)
+	gotValues, ok := out[pkLen+3].(logValues)
 	if !ok {
-		return fmt.Errorf("idx %d: values column has type %T, want []string", idx, out[pkLen+3])
+		return fmt.Errorf("idx %d: values column has type %T, want logValues", idx, out[pkLen+3])
 	}
 
-	if wantValues := prepareValuesOptimized(want.Values); !slices.Equal(gotValues, wantValues) {
+	if wantValues := encodeLogValues(want.Values); !bytes.Equal(gotValues, wantValues) {
 		return fmt.Errorf("idx %d: values column bled from another item: got %v, want %v", idx, gotValues, wantValues)
 	}
 

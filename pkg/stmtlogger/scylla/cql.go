@@ -17,14 +17,11 @@ package scylla
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,7 +30,6 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/samber/mo"
 	"github.com/scylladb/gocqlx/v3/qb"
-	"gopkg.in/inf.v0"
 
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
@@ -252,7 +248,7 @@ func (c *cqlStatements) fillPairArgs(dst []any, pair logPair) ([]any, bool) {
 		logTS(pair.start()),
 		nextLogSeq(),
 		shared.Statement,
-		prepareValuesOptimized(shared.Values),
+		encodeLogValues(shared.Values),
 		shared.Attempt,
 		shared.GeminiAttempt,
 	)
@@ -569,41 +565,5 @@ func prepareValuesOptimized(values mo.Either[[]any, []byte]) []string {
 // formatValueFast converts a value to string without reflection.
 // Handles the common CQL types directly instead of using fmt.Sprintf("%#v").
 func formatValueFast(val any) string {
-	if val == nil {
-		return "<nil>"
-	}
-	switch v := val.(type) {
-	case string:
-		return strconv.Quote(v)
-	case []byte:
-		return "0x" + hex.EncodeToString(v)
-	case bool:
-		return strconv.FormatBool(v)
-	case int:
-		return strconv.Itoa(v)
-	case int8:
-		return strconv.FormatInt(int64(v), 10)
-	case int16:
-		return strconv.FormatInt(int64(v), 10)
-	case int32:
-		return strconv.FormatInt(int64(v), 10)
-	case int64:
-		return strconv.FormatInt(v, 10)
-	case float32:
-		return strconv.FormatFloat(float64(v), 'g', -1, 32)
-	case float64:
-		return strconv.FormatFloat(v, 'g', -1, 64)
-	case gocql.UUID:
-		return v.String()
-	case time.Duration:
-		return strconv.FormatInt(int64(v), 10)
-	case time.Time:
-		return v.GoString()
-	case *big.Int:
-		return v.String()
-	case *inf.Dec:
-		return v.String()
-	default:
-		return fmt.Sprintf("%#v", v)
-	}
+	return string(appendValueFast(nil, val))
 }

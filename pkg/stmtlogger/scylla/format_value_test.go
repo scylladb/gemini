@@ -17,14 +17,17 @@ package scylla
 import (
 	"fmt"
 	"math/big"
+	"net"
 	"testing"
 	"time"
 
+	"github.com/gocql/gocql"
 	"gopkg.in/inf.v0"
 )
 
 // TestFormatValueFast_MatchesGoSyntax pins the _logs values text: the direct
-// cases must print exactly what fmt.Sprintf("%#v") printed for these types.
+// cases, lists and sets among them, must print exactly what fmt.Sprintf("%#v")
+// printed for these types.
 func TestFormatValueFast_MatchesGoSyntax(t *testing.T) {
 	t.Parallel()
 
@@ -39,6 +42,13 @@ func TestFormatValueFast_MatchesGoSyntax(t *testing.T) {
 		inf.NewDec(12345, 3),
 		inf.NewDec(-1, 0),
 		(*inf.Dec)(nil),
+		[]any{"a\"b", int64(-2), int32(3), int16(4), int8(5), 6, true, nil},
+		[]any{3 * time.Second, time.Date(2026, 1, 2, 3, 4, 5, 6, time.UTC)},
+		[]any{[]byte{1, 2}, 1.5, float32(2.5), gocql.TimeUUID(), big.NewInt(7), inf.NewDec(1, 2)},
+		[]any{[]any{"nested", nil}, map[string]any{"k": 1}},
+		[]any{[]byte(nil), []byte{}, []byte{0, 0xff, 0x10}, net.IP{10, 0, 0, 1}},
+		[]any{},
+		[]any(nil),
 	}
 
 	for _, v := range values {

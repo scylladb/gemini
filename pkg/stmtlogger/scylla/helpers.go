@@ -64,7 +64,6 @@ func newSession(hosts []string, port int, dockerMode bool, username, password st
 		Max:        10 * time.Second,
 		NumRetries: 5,
 	}
-	cluster.Compressor = &gocql.SnappyCompressor{}
 
 	if port > 0 {
 		cluster.Port = port

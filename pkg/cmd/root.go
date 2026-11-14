@@ -55,6 +55,14 @@ import (
 const (
 	stdDistMean = math.MaxUint64 / 2
 	oneStdDev   = 0.341 * math.MaxUint64
+
+	// mutexProfileFraction records one contended-lock event in 100.
+	mutexProfileFraction = 100
+	// blockProfileRateNs records on average one blocking event per 100ms of
+	// blocked time, summed over all goroutines. A block that lasts longer than
+	// the rate is always recorded, and every CQL query blocks on the network
+	// for milliseconds. A lower rate records nearly every query.
+	blockProfileRateNs = int(100 * time.Millisecond)
 )
 
 var rootCmd = &cobra.Command{
@@ -75,11 +83,13 @@ func preRun(cmd *cobra.Command, _ []string) {
 	metrics.StartMetricsServer(cmd.Context(), metricsPort)
 
 	if profilingPort != 0 {
-		// Mutex and block profiles record a stack for every contended lock
-		// and blocking channel operation, so they run only when someone
-		// can read them.
-		runtime.SetMutexProfileFraction(1)
-		runtime.SetBlockProfileRate(1)
+		// Mutex and block profiles run only when someone can read them.
+		// Each recorded event captures a stack. Recording every event costs
+		// about 5% of the CPU of a run at full load and slows contended
+		// locks enough to queue the workers behind them, so both profiles
+		// sample.
+		runtime.SetMutexProfileFraction(mutexProfileFraction)
+		runtime.SetBlockProfileRate(blockProfileRateNs)
 
 		go func() {
 			mux := http.NewServeMux()
