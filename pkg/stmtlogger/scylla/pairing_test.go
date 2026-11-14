@@ -47,22 +47,24 @@ func pairItem(origin *typedef.Stmt, ty stmtlogger.Type, host string) stmtlogger.
 func TestPairWorker_JoinsBothClustersIntoOneRow(t *testing.T) {
 	t.Parallel()
 
-	ch := make(chan stmtlogger.Item, 4)
-	s := startPairWorker(ch)
+	synctest.Test(t, func(t *testing.T) {
+		ch := make(chan stmtlogger.Item, 4)
+		s := startPairWorker(ch)
 
-	stmt := &typedef.Stmt{}
-	ch <- pairItem(stmt, stmtlogger.TypeTest, "test-host")
-	ch <- pairItem(stmt, stmtlogger.TypeOracle, "oracle-host")
+		stmt := &typedef.Stmt{}
+		ch <- pairItem(stmt, stmtlogger.TypeTest, "test-host")
+		ch <- pairItem(stmt, stmtlogger.TypeOracle, "oracle-host")
 
-	pair := <-s.pairs
-	require.True(t, pair.complete())
-	require.Equal(t, "test-host", pair.test.Host)
-	require.Equal(t, "oracle-host", pair.oracle.Host)
+		pair := <-s.pairs
+		require.True(t, pair.complete())
+		require.Equal(t, "test-host", pair.test.Host)
+		require.Equal(t, "oracle-host", pair.oracle.Host)
 
-	close(ch)
-	s.wg.Wait()
-	_, open := <-s.pairs
-	require.False(t, open, "nothing else is written")
+		close(ch)
+		s.wg.Wait()
+		_, open := <-s.pairs
+		require.False(t, open, "nothing else is written")
+	})
 }
 
 func TestPairWorker_WritesALoneItemAfterTheWindow(t *testing.T) {
@@ -92,24 +94,26 @@ func TestPairWorker_WritesALoneItemAfterTheWindow(t *testing.T) {
 func TestPairWorker_SplitsARepeatedCluster(t *testing.T) {
 	t.Parallel()
 
-	ch := make(chan stmtlogger.Item, 4)
-	s := startPairWorker(ch)
+	synctest.Test(t, func(t *testing.T) {
+		ch := make(chan stmtlogger.Item, 4)
+		s := startPairWorker(ch)
 
-	stmt := &typedef.Stmt{}
-	ch <- pairItem(stmt, stmtlogger.TypeTest, "first")
-	ch <- pairItem(stmt, stmtlogger.TypeTest, "second")
-	ch <- pairItem(stmt, stmtlogger.TypeOracle, "oracle-host")
+		stmt := &typedef.Stmt{}
+		ch <- pairItem(stmt, stmtlogger.TypeTest, "first")
+		ch <- pairItem(stmt, stmtlogger.TypeTest, "second")
+		ch <- pairItem(stmt, stmtlogger.TypeOracle, "oracle-host")
 
-	first := <-s.pairs
-	require.False(t, first.complete())
-	require.Equal(t, "first", first.test.Host)
+		first := <-s.pairs
+		require.False(t, first.complete())
+		require.Equal(t, "first", first.test.Host)
 
-	second := <-s.pairs
-	require.True(t, second.complete())
-	require.Equal(t, "second", second.test.Host)
+		second := <-s.pairs
+		require.True(t, second.complete())
+		require.Equal(t, "second", second.test.Host)
 
-	close(ch)
-	s.wg.Wait()
+		close(ch)
+		s.wg.Wait()
+	})
 }
 
 func TestPairWorker_FlushesPendingItemsOnClose(t *testing.T) {

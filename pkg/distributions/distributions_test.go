@@ -58,7 +58,7 @@ func TestNew(t *testing.T) {
 			size:          10000,
 			mu:            1.0,
 			sigma:         0.5,
-			maxSameValues: 10000, // LogNormal with large float params overflows uint64; just verify it runs
+			maxSameValues: 3500, // exp(N(1, 0.5)) truncates to a few small integers, so about 20% of pairs match
 		},
 	}
 
@@ -66,7 +66,7 @@ func TestNew(t *testing.T) {
 		t.Run("test-"+string(item.dist), func(t *testing.T) {
 			t.Parallel()
 
-			_, distFunc := New(item.dist, item.size, item.seed, stdDistMean, oneStdDev)
+			_, distFunc := New(item.dist, item.size, item.seed, item.mu, item.sigma)
 
 			same := 0
 

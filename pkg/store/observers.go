@@ -204,20 +204,30 @@ func classifyError(err error) string {
 	}
 }
 
-// observeDriverError counts err by category and marks the host down when the
-// error shows a lost connection.
-func (c *ClusterObserver) observeDriverError(instance string, err error) {
+// observeDriverError counts err by category. When the error shows a lost
+// connection, it updates the connection count and takes the host-up value
+// from the driver's host state.
+func (c *ClusterObserver) observeDriverError(host *gocql.HostInfo, instance string, err error) {
 	metrics.GoCQLErrorsByType.WithLabelValues(string(c.clusterName), classifyError(err)).Inc()
 
 	switch {
 	case errors.Is(err, gocql.ErrConnectionClosed) || errors.Is(err, gocql.ErrHostDown):
 		c.goCQLConnections.Get(instance, 0).Dec()
-		c.goCQLHostUp.Get(instance, 0).Set(0)
+		c.goCQLHostUp.Get(instance, 0).Set(hostUpValue(host))
 	case errors.Is(err, gocql.ErrNoConnections):
 		c.goCQLConnections.Get(instance, 0).Set(0)
-		c.goCQLHostUp.Get(instance, 0).Set(0)
+		c.goCQLHostUp.Get(instance, 0).Set(hostUpValue(host))
 	default:
 	}
+}
+
+// hostUpValue returns 1 when the driver reports host as up, and 0 otherwise.
+func hostUpValue(host *gocql.HostInfo) float64 {
+	if host != nil && host.IsUp() {
+		return 1
+	}
+
+	return 0
 }
 
 func (c *ClusterObserver) incGoCQLQueryError(instance string, err error) {
@@ -284,7 +294,7 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 	if batch.Err != nil {
 		errStr = batch.Err.Error()
 		c.incGoCQLQueryError(instance, batch.Err)
-		c.observeDriverError(instance, batch.Err)
+		c.observeDriverError(batch.Host, instance, batch.Err)
 	}
 
 	// NOTE: this loops over batch.Statements AND logStatement loops over the
@@ -372,7 +382,7 @@ func (c *ClusterObserver) observeQuery(
 	if query.Err != nil {
 		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, query.Err.Error()).Inc()
 		errStr = query.Err.Error()
-		c.observeDriverError(instance, query.Err)
+		c.observeDriverError(query.Host, instance, query.Err)
 	}
 
 	duration := query.End.Sub(query.Start)
@@ -413,7 +423,9 @@ func (c *ClusterObserver) ObserveConnect(connect gocql.ObservedConnect) {
 		).Inc()
 		metrics.GoCQLErrorsByType.WithLabelValues(string(c.clusterName), "connect_"+classifyError(connect.Err)).Inc()
 		metrics.GoCQLConnections.WithLabelValues(string(c.clusterName), instance).Dec()
-		c.goCQLHostUp.Get(instance, 0).Set(0)
+		// One failed dial does not take a host down while its other
+		// connections serve requests. The driver's host state decides.
+		c.goCQLHostUp.Get(instance, 0).Set(hostUpValue(connect.Host))
 		return
 	}
 

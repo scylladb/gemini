@@ -263,13 +263,14 @@ var (
 		},
 	)
 
-	// StatementLoggerUnpairedTotal counts the _logs rows written with one cluster's
-	// columns null, because the other cluster's item did not arrive within the
-	// pairing window.
+	// StatementLoggerUnpairedTotal counts the statement log pairs that the
+	// pairing stage emits with only one cluster's item: the other item did not
+	// arrive within the pairing window, the same cluster reported the execution
+	// twice, or the logger shut down first.
 	StatementLoggerUnpairedTotal = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "statement_logger_unpaired_total",
-			Help: "Total _logs rows written with only one cluster's item.",
+			Help: "Total statement log pairs emitted with only one cluster's item.",
 		},
 	)
 
