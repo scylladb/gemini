@@ -78,7 +78,7 @@ func NewValidation(
 	delay := schema.Config.AsyncObjectStabilizationDelay
 	vc := schema.Config.GetValueRangeConfig()
 
-	if maxAttempts <= 1 {
+	if maxAttempts <= 0 {
 		maxAttempts = 10
 	}
 
@@ -764,6 +764,7 @@ func (v *Validation) handleRunResult(result runResult, rq *retryQueue) error {
 
 	if v.status.HasReachedErrorCount() {
 		v.stopFlag.SetSoft(true)
+		metrics.WorkerStopEvents.WithLabelValues("validation", "error_budget").Inc()
 		return ErrValidationJobStopped
 	}
 

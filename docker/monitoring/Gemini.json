@@ -430,7 +430,7 @@
         {
           "editorMode": "code",
           "exemplar": false,
-          "expr": "gemini_stmt_error_last_timestamp_seconds{table=\"$table\", partition_hash=~\"$partitions\", stmt_storage=~\"$stmt_storage\"}\n",
+          "expr": "gemini_stmt_error_last_timestamp_seconds{table=~\"$table\", partition_hash=~\"$partitions\", stmt_storage=~\"$stmt_storage\"}\n",
           "instant": false,
           "legendFormat": "",
           "range": true,
@@ -719,7 +719,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_cql_requests{system=~\"$cluster\", method=~\"InsertStatement|InsertJSONStatement|UpdateStatement|DeleteWholePartition|DeleteSingleRow|DeleteSingleColumn|DeleteMultiplePartitions\"}[$interval]))",
+          "expr": "sum(rate(gemini_cql_requests{system=~\"$cluster\", method=~\"InsertStatement|InsertJSONStatement|UpdateStatement|DeleteWholePartition|DeleteSingleRow|DeleteClusteringSubset|DeleteMultiplePartitions\"}[$interval]))",
           "legendFormat": "writes/s",
           "range": true,
           "refId": "B"
@@ -912,7 +912,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_cql_requests{system=~\"$cluster\", method=~\"SelectStatement|SelectMultiPartition.*\"}[$interval])) / sum(rate(gemini_cql_requests{system=~\"$cluster\", method=~\"InsertStatement|InsertJSON.*|UpdateStatement|Delete.*\"}[$interval]))",
+          "expr": "sum(rate(gemini_cql_requests{system=~\"$cluster\", method=~\"SelectStatement|SelectMultiPartition.*|SelectRangeStatement|SelectByIndexStatement|SelectFromMaterializedViewStatement\"}[$interval])) / sum(rate(gemini_cql_requests{system=~\"$cluster\", method=~\"InsertStatement|InsertJSON.*|UpdateStatement|Delete.*\"}[$interval]))",
           "legendFormat": "read/write ratio",
           "range": true,
           "refId": "A"
@@ -1828,7 +1828,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "gemini_cql_queries{cluster=\"oracle\", query_type=~\"SelectStatement|SelectMultiPartition|SelectRangeStatement|SelectMultiPartitionRangeStatement|SelectByIndexStatement|SelectFromMaterializedViewStatement\"} > 0",
+          "expr": "gemini_cql_queries{cluster=\"oracle\", query_type=~\"SelectStatement|SelectMultiPartitionType|SelectRangeStatement|SelectMultiPartitionRangeStatementType|SelectByIndexStatement|SelectFromMaterializedViewStatement\"} > 0",
           "hide": false,
           "instant": false,
           "legendFormat": "{{query_type}}",
@@ -2031,7 +2031,7 @@
       ],
       "title": "Validation Row Results/s",
       "type": "timeseries",
-      "description": "Breakdown of validation comparison results. 'missing in test' = data bug in Scylla under test. 'different values' = data corruption."
+      "description": "Breakdown of validation comparison results. 'missing in test' and 'different values' are per-attempt discrepancies. A retry can still match, so they are not confirmed Scylla bugs or corruption."
     },
     {
       "datasource": {
@@ -2153,7 +2153,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "rate(gemini_cql_rows_returned_total{system=\"test\"}[$interval]) / rate(gemini_cql_requests{system=\"test\", method=~\"SelectStatement|SelectMultiPartition.*\"}[$interval])",
+          "expr": "rate(gemini_cql_rows_per_query_sum{system=\"test\"}[$interval]) / rate(gemini_cql_rows_per_query_count{system=\"test\"}[$interval])",
           "legendFormat": "test",
           "range": true,
           "refId": "A"
@@ -2164,7 +2164,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "rate(gemini_cql_rows_returned_total{system=\"oracle\"}[$interval]) / rate(gemini_cql_requests{system=\"oracle\", method=~\"SelectStatement|SelectMultiPartition.*\"}[$interval])",
+          "expr": "rate(gemini_cql_rows_per_query_sum{system=\"oracle\"}[$interval]) / rate(gemini_cql_rows_per_query_count{system=\"oracle\"}[$interval])",
           "legendFormat": "oracle",
           "range": true,
           "refId": "B"
@@ -2637,7 +2637,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "100 * rate(gemini_cql_rows_per_query_bucket{le=\"0\"}[$interval]) / rate(gemini_cql_rows_per_query_count[$interval])",
+          "expr": "100 * rate(gemini_cql_rows_per_query_bucket{le=\"0\"}[$interval]) / ignoring(le) rate(gemini_cql_rows_per_query_count[$interval])",
           "legendFormat": "{{system}}",
           "range": true,
           "refId": "A"
@@ -2740,7 +2740,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "rate(gemini_cql_rows_returned_total{system=\"test\"}[$interval]) - rate(gemini_cql_rows_returned_total{system=\"oracle\"}[$interval])",
+          "expr": "rate(gemini_cql_rows_returned_total{system=\"test\"}[$interval]) - ignoring(system) rate(gemini_cql_rows_returned_total{system=\"oracle\"}[$interval])",
           "legendFormat": "test - oracle",
           "range": true,
           "refId": "A"
@@ -2893,7 +2893,7 @@
       ],
       "title": "Deduplication & Errors",
       "type": "timeseries",
-      "description": "Row deduplication rate indicates eventual consistency duplicates. Rising discrepancies = Scylla data bug."
+      "description": "Row deduplication rate indicates eventual consistency duplicates. Discrepancies are per-attempt and can clear on retry, so they are not confirmed Scylla bugs."
     },
     {
       "datasource": {
@@ -3676,7 +3676,7 @@
       "targets": [
         {
           "editorMode": "code",
-          "expr": "gemini_cql_connections{cluster=~\"$cluster\"} > 0",
+          "expr": "gemini_cql_connections{cluster=~\"$cluster\"}",
           "legendFormat": "Per host {{cluster}} {{host}}",
           "range": true,
           "refId": "A"
@@ -3687,7 +3687,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum by(cluster) (gemini_cql_connections{cluster=~\"$cluster\"}) > 0",
+          "expr": "sum by(cluster) (gemini_cql_connections{cluster=~\"$cluster\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "Connections per cluster {{cluster}}",
@@ -3897,7 +3897,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, \n  sum by(cluster, host, le) (\n    rate(gemini_cql_connect_time_bucket{cluster=\"$cluster\"}[$interval])\n  )\n)\n",
+          "expr": "histogram_quantile(0.95, \n  sum by(cluster, host, le) (\n    rate(gemini_cql_connect_time_bucket{cluster=~\"$cluster\"}[$interval])\n  )\n)\n",
           "hide": false,
           "instant": false,
           "legendFormat": "P95 {{host}} {{cluster}}",
@@ -4357,7 +4357,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "rate(gemini_cql_driver_retry_attempts_bucket{le=\"1\",cluster=~\"$cluster\"}[$interval]) - rate(gemini_cql_driver_retry_attempts_bucket{le=\"0\",cluster=~\"$cluster\"}[$interval])",
+          "expr": "rate(gemini_cql_driver_retry_attempts_bucket{le=\"1\",cluster=~\"$cluster\"}[$interval]) - ignoring(le) rate(gemini_cql_driver_retry_attempts_bucket{le=\"0\",cluster=~\"$cluster\"}[$interval])",
           "legendFormat": "1 retry",
           "range": true,
           "refId": "B"
@@ -4368,7 +4368,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "rate(gemini_cql_driver_retry_attempts_bucket{le=\"2\",cluster=~\"$cluster\"}[$interval]) - rate(gemini_cql_driver_retry_attempts_bucket{le=\"1\",cluster=~\"$cluster\"}[$interval])",
+          "expr": "rate(gemini_cql_driver_retry_attempts_bucket{le=\"2\",cluster=~\"$cluster\"}[$interval]) - ignoring(le) rate(gemini_cql_driver_retry_attempts_bucket{le=\"1\",cluster=~\"$cluster\"}[$interval])",
           "legendFormat": "2 retries",
           "range": true,
           "refId": "C"
@@ -4379,7 +4379,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "rate(gemini_cql_driver_retry_attempts_bucket{le=\"3\",cluster=~\"$cluster\"}[$interval]) - rate(gemini_cql_driver_retry_attempts_bucket{le=\"2\",cluster=~\"$cluster\"}[$interval])",
+          "expr": "rate(gemini_cql_driver_retry_attempts_bucket{le=\"3\",cluster=~\"$cluster\"}[$interval]) - ignoring(le) rate(gemini_cql_driver_retry_attempts_bucket{le=\"2\",cluster=~\"$cluster\"}[$interval])",
           "legendFormat": "3 retries",
           "range": true,
           "refId": "D"
@@ -4390,7 +4390,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "rate(gemini_cql_driver_retry_attempts_count{cluster=~\"$cluster\"}[$interval]) - rate(gemini_cql_driver_retry_attempts_bucket{le=\"3\",cluster=~\"$cluster\"}[$interval])",
+          "expr": "rate(gemini_cql_driver_retry_attempts_count{cluster=~\"$cluster\"}[$interval]) - ignoring(le) rate(gemini_cql_driver_retry_attempts_bucket{le=\"3\",cluster=~\"$cluster\"}[$interval])",
           "legendFormat": "4+ retries",
           "range": true,
           "refId": "E"
@@ -4540,7 +4540,7 @@
       ],
       "title": "Driver Retry Rate",
       "type": "timeseries",
-      "description": "Rate of queries that succeeded on first attempt vs required driver retries."
+      "description": "Rate of first attempts vs retry attempts. Each driver attempt is counted once."
     },
     {
       "datasource": {
@@ -5044,9 +5044,9 @@
           "refId": "A"
         }
       ],
-      "title": "Driver Retry Percentage",
+      "title": "Driver Retry Share of Attempts",
       "type": "timeseries",
-      "description": "Percentage of queries that required at least one driver-level retry. Above 5% indicates systematic pressure."
+      "description": "Percentage of driver attempts that are retries (attempt > 0). Each attempt is counted, so this is not the share of queries that needed a retry. Above 5% indicates systematic pressure."
     },
     {
       "datasource": {
@@ -5411,7 +5411,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"mutation\", subtype=~\"insert|insert_json\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"mutation\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"mutation\", subtype=~\"InsertStatement|InsertJSONStatement\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"mutation\"}[$interval]))",
           "legendFormat": "insert",
           "range": true,
           "refId": "A"
@@ -5422,7 +5422,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"mutation\", subtype=\"counter_update\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"mutation\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"mutation\", subtype=\"UpdateStatement\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"mutation\"}[$interval]))",
           "legendFormat": "update (counter)",
           "range": true,
           "refId": "B"
@@ -5433,7 +5433,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"mutation\", subtype=\"delete\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"mutation\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"mutation\", subtype=~\"Delete.*\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"mutation\"}[$interval]))",
           "legendFormat": "delete",
           "range": true,
           "refId": "C"
@@ -5441,7 +5441,7 @@
       ],
       "title": "Actual Mutation Ratios",
       "type": "gauge",
-      "description": "Actual mutation ratios computed from executed statements. Insert includes both regular and JSON inserts. Update shows counter_update only (regular updates fall through to insert)."
+      "description": "Actual mutation ratios computed from executed statements. Insert includes both regular and JSON inserts. Update counts UpdateStatement. Delete counts every Delete subtype."
     },
     {
       "datasource": {
@@ -5617,7 +5617,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"select\", subtype=\"single_partition\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"select\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"select\", subtype=\"SelectStatement\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"select\"}[$interval]))",
           "legendFormat": "single partition",
           "range": true,
           "refId": "A"
@@ -5628,7 +5628,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"select\", subtype=\"multi_partition\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"select\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"select\", subtype=\"SelectMultiPartitionType\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"select\"}[$interval]))",
           "legendFormat": "multi partition",
           "range": true,
           "refId": "B"
@@ -5639,7 +5639,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"select\", subtype=\"index\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"select\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"select\", subtype=\"SelectByIndexStatement\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"select\"}[$interval]))",
           "legendFormat": "index",
           "range": true,
           "refId": "C"
@@ -5929,7 +5929,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "gemini_statement_ratio_configured{type=\"mutation_delete\", subtype=\"single_column\"}",
+          "expr": "gemini_statement_ratio_configured{type=\"mutation_delete\", subtype=\"clustering_subset\"}",
           "legendFormat": "single column",
           "range": true,
           "refId": "C"
@@ -6039,7 +6039,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"intended\", subtype=\"insert\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"intended\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"intended\", subtype=~\"InsertStatement|InsertJSONStatement\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"intended\"}[$interval]))",
           "legendFormat": "intended insert %",
           "range": true,
           "refId": "A"
@@ -6050,7 +6050,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"intended\", subtype=\"update\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"intended\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"intended\", subtype=\"UpdateStatement\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"intended\"}[$interval]))",
           "legendFormat": "intended update %",
           "range": true,
           "refId": "B"
@@ -6061,7 +6061,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"intended\", subtype=\"delete\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"intended\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"intended\", subtype=~\"Delete.*\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"intended\"}[$interval]))",
           "legendFormat": "intended delete %",
           "range": true,
           "refId": "C"
@@ -6072,7 +6072,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"mutation\", subtype=~\"insert|insert_json\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"mutation\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"mutation\", subtype=~\"InsertStatement|InsertJSONStatement\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"mutation\"}[$interval]))",
           "legendFormat": "actual insert %",
           "range": true,
           "refId": "D"
@@ -6083,7 +6083,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"mutation\", subtype=\"delete\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"mutation\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"mutation\", subtype=~\"Delete.*\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"mutation\"}[$interval]))",
           "legendFormat": "actual delete %",
           "range": true,
           "refId": "E"
@@ -6182,7 +6182,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"select\", subtype=\"single_partition\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"select\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"select\", subtype=\"SelectStatement\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"select\"}[$interval]))",
           "legendFormat": "single partition %",
           "range": true,
           "refId": "A"
@@ -6193,7 +6193,7 @@
             "uid": "P1809F7CD0C75ACF3"
           },
           "editorMode": "code",
-          "expr": "sum(rate(gemini_statements_generated_total{type=\"select\", subtype=\"multi_partition\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"select\"}[$interval]))",
+          "expr": "sum(rate(gemini_statements_generated_total{type=\"select\", subtype=\"SelectMultiPartitionType\"}[$interval])) / sum(rate(gemini_statements_generated_total{type=\"select\"}[$interval]))",
           "legendFormat": "multi partition %",
           "range": true,
           "refId": "B"
@@ -9446,7 +9446,7 @@
               }
             ]
           },
-          "unit": "percentunit"
+          "unit": "percent"
         },
         "overrides": []
       },

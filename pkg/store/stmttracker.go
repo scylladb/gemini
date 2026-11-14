@@ -37,6 +37,9 @@ type stmtTracker struct {
 	seed         maphash.Seed
 	uniqueCount  atomic.Int64
 	maxPrepared  int
+	// publishMu orders the gauge updates, so a worker with an older count
+	// cannot overwrite the value a newer worker set.
+	publishMu sync.Mutex
 }
 
 type stmtShard struct {
@@ -74,7 +77,10 @@ func (t *stmtTracker) Track(query string) bool {
 	shard.mu.Unlock()
 
 	if !exists {
-		count := t.uniqueCount.Add(1)
+		t.uniqueCount.Add(1)
+
+		t.publishMu.Lock()
+		count := t.uniqueCount.Load()
 		t.uniqueGauge.Set(float64(count))
 
 		// uniqueCount only grows (no eviction), while gocql's actual prepared
@@ -85,6 +91,7 @@ func (t *stmtTracker) Track(query string) bool {
 		if t.maxPrepared > 0 {
 			t.ratioGauge.Set(min(float64(count)/float64(t.maxPrepared), 1.0))
 		}
+		t.publishMu.Unlock()
 
 		t.newStmtCount.Inc()
 	}

@@ -38,8 +38,8 @@ curl http://localhost:9090/metrics
 ### Driver
 
 The cluster observer records these metrics. Gemini installs the observer only
-when statement logging is on (`--test-statement-log-file` or
-`--oracle-statement-log-file`). Without it, these metrics stay at zero.
+when an oracle is configured and both `--test-statement-log-file` and
+`--oracle-statement-log-file` are set. Without it, these metrics stay at zero.
 
 | Metric | Type | Description |
 |--------|------|-------------|
@@ -182,7 +182,7 @@ sum(rate(gemini_mutation_compensation_failures_total[5m])) by (store) > 0
 | `statement_logger_dequeued_total` | Counter | Items processed by statement logger |
 | `statement_logger_items` | Gauge | Current items in logger |
 | `statement_logger_flushes_total` | Counter | File flush operations |
-| `statement_logger_unpaired_total` | Counter | `_logs` rows written with only one cluster, because the other cluster's item did not arrive within 2 seconds |
+| `statement_logger_unpaired_total` | Counter | Statement log pairs emitted with only one cluster. This occurs when the other cluster's item does not arrive within 2 seconds, when one cluster reports the same execution twice, or when the logger shuts down before the other cluster's item arrives |
 | `stmt_error_last_timestamp_seconds` | Gauge | Last error timestamp per partition |
 
 ### Workers

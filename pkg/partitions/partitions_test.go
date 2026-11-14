@@ -796,6 +796,26 @@ func TestMarkInvalid_ReportsAReplacedPartitionOnce(t *testing.T) {
 	require.False(t, tracked, "the last release forgets the reported UUID")
 }
 
+// TestMarkInvalid_SkipsAReplacedInvalidPartition marks a partition invalid,
+// replaces its slot, and checks that a held borrow does not report it again.
+func TestMarkInvalid_SkipsAReplacedInvalidPartition(t *testing.T) {
+	t.Parallel()
+
+	parts := createTestPartitions(t, 10)
+
+	keys := parts.Get(3)
+	require.True(t, parts.MarkInvalid(&keys), "the first report counts")
+
+	old := parts.Replace(3)
+	require.False(t, parts.MarkInvalid(&keys), "the replaced partition was already reported")
+
+	keys.Release()
+	old.Release()
+
+	_, tracked := parts.reportedRetired.Load(keys.ID)
+	require.False(t, tracked, "the last release forgets the reported UUID")
+}
+
 func TestBorrowByID_KeepsTheUUIDReportable(t *testing.T) {
 	t.Parallel()
 

@@ -384,13 +384,11 @@ func TestListError_GetChannel(t *testing.T) {
 	}
 
 	// AddError should send to the channel
-	go func() {
-		el.AddError(JobError{
-			Timestamp: time.Now(),
-			Message:   "channel test",
-			StmtType:  typedef.SelectStatementType,
-		})
-	}()
+	el.AddError(JobError{
+		Timestamp: time.Now(),
+		Message:   "channel test",
+		StmtType:  typedef.SelectStatementType,
+	})
 
 	select {
 	case jerr := <-ch:
@@ -400,8 +398,8 @@ func TestListError_GetChannel(t *testing.T) {
 		if jerr.Message != "channel test" {
 			t.Errorf("received message %q; want %q", jerr.Message, "channel test")
 		}
-	case <-time.After(time.Second):
-		t.Error("timed out waiting for error on channel")
+	default:
+		t.Error("AddError did not send the error to the channel")
 	}
 }
 

@@ -66,10 +66,11 @@ type (
 		sampledOut atomic.Uint64
 		// reportedPending is this tracker's share of the
 		// deleted_partitions_pending gauge, see publishPending.
-		reportedPending atomic.Int64
+		reportedPending int64
 		residenceSec    float64
 		batchSize       int
 		closeOnce       sync.Once
+		pendingMu       sync.Mutex
 	}
 )
 
@@ -440,7 +441,13 @@ func (d *deletedPartitions) Len() int {
 // publishPending adds this tracker's change in pending partitions to the
 // deleted_partitions_pending gauge. Each table has its own tracker, so a
 // tracker that set the gauge to its own count would hide the other tables.
+// pendingMu orders the snapshot with the gauge update, so a delayed publisher
+// cannot replace a newer count with an older one.
 func (d *deletedPartitions) publishPending() {
+	d.pendingMu.Lock()
+	defer d.pendingMu.Unlock()
+
 	current := int64(d.win.len())
-	metrics.DeletedPartitionsPending.Add(float64(current - d.reportedPending.Swap(current)))
+	metrics.DeletedPartitionsPending.Add(float64(current - d.reportedPending))
+	d.reportedPending = current
 }

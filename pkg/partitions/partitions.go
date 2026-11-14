@@ -362,6 +362,11 @@ func (p *Partitions) installPartition(idx uint64, part *Partition) *Partition {
 	if _, wasInvalid := p.invalidByIdx.LoadAndDelete(idx); wasInvalid {
 		p.invalidCount.Add(^uint64(0)) // atomic decrement
 		p.publishInvalid()
+		// The old partition was already reported. Record its UUID so that
+		// MarkInvalid on keys still borrowed from it does not report it again.
+		if old != nil && old.id != (uuid.UUID{}) {
+			p.reportedRetired.Store(old.id, struct{}{})
+		}
 	}
 
 	return old
