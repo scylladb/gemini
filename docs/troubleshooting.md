@@ -204,7 +204,7 @@ zstd -d -c test.json.zst | jq '.'
 2. Statement logs contain error context, not all statements
 3. Query ScyllaDB logs table directly:
    ```bash
-   cqlsh -e "SELECT * FROM ks_logs.table1_statements LIMIT 10;"
+   cqlsh -e "SELECT ts, data FROM ks_logs.table1_statements LIMIT 10;"
    ```
 
 ## Docker Issues

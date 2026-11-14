@@ -57,7 +57,7 @@ func TestCQLStatements_FillArgsAndArgsCap(t *testing.T) {
 	c := makeTestCQL(pks)
 
 	// argsCap should be pk.LenValues + additional columns
-	expectedCap := pks.LenValues() + len(additionalColumnsArr)
+	expectedCap := pks.LenValues() + len(logColumns)
 	assert.Equal(t, expectedCap, c.argsCap())
 
 	// fillArgs should append in proper order and preserve capacity
@@ -81,7 +81,7 @@ func TestCQLStatements_FillArgsAndArgsCap(t *testing.T) {
 // BenchmarkFillArgs measures the per-item committer binding cost. With the
 // pooled dst reused across iterations, the partition-key binding is
 // allocation-free (AppendCQLValues writes straight into dst); the remaining
-// allocations come from prepareValuesOptimized formatting the values column.
+// allocations come from encodeLogData building the data cell.
 func BenchmarkFillArgs(b *testing.B) {
 	pks := typedef.Columns{
 		{Name: "pk0", Type: typedef.TypeText},

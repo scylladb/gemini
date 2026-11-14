@@ -15,9 +15,8 @@
 package scylla
 
 import (
+	"slices"
 	"testing"
-
-	"github.com/samber/mo"
 
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -48,10 +47,8 @@ func TestBuildCreateTableQuery(t *testing.T) {
 			replication:  replication.NewNetworkTopologyStrategy(),
 			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS test_logs WITH replication={'class':'NetworkTopologyStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS test_logs.test_statements(pk0 text," +
-				"ts bigint, seq bigint, statement text, values frozen<list<text>>, attempt smallint, gemini_attempt smallint, " +
-				"test_ts bigint, test_host text, test_error text, test_dur duration, " +
-				"oracle_ts bigint, oracle_host text, oracle_error text, oracle_dur duration, PRIMARY KEY ((pk0), ts, attempt, gemini_attempt, seq)) " +
-				"WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} " +
+				"ts bigint, attempt smallint, gemini_attempt smallint, seq bigint, data text, PRIMARY KEY ((pk0), ts, attempt, gemini_attempt, seq))" +
+				" WITH caching={'enabled':'false'} AND compression={'sstable_compression':'LZ4Compressor'} " +
 				"AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';",
 		},
 		{
@@ -71,10 +68,8 @@ func TestBuildCreateTableQuery(t *testing.T) {
 			replication:  replication.NewNetworkTopologyStrategy(),
 			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS test_logs WITH replication={'class':'NetworkTopologyStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS test_logs.test_statements(pk0 text,pk1 int," +
-				"ts bigint, seq bigint, statement text, values frozen<list<text>>, attempt smallint, gemini_attempt smallint, " +
-				"test_ts bigint, test_host text, test_error text, test_dur duration, " +
-				"oracle_ts bigint, oracle_host text, oracle_error text, oracle_dur duration, PRIMARY KEY ((pk0,pk1), ts, attempt, gemini_attempt, seq)) " +
-				"WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} " +
+				"ts bigint, attempt smallint, gemini_attempt smallint, seq bigint, data text, PRIMARY KEY ((pk0,pk1), ts, attempt, gemini_attempt, seq))" +
+				" WITH caching={'enabled':'false'} AND compression={'sstable_compression':'LZ4Compressor'} " +
 				"AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';",
 		},
 		{
@@ -90,10 +85,8 @@ func TestBuildCreateTableQuery(t *testing.T) {
 			replication:  replication.NewNetworkTopologyStrategy(),
 			wantKeyspace: "CREATE KEYSPACE IF NOT EXISTS ks_logs WITH replication={'class':'NetworkTopologyStrategy','replication_factor':1} AND durable_writes = true;",
 			wantTable: "CREATE TABLE IF NOT EXISTS ks_logs.tbl_statements(id uuid," +
-				"ts bigint, seq bigint, statement text, values frozen<list<text>>, attempt smallint, gemini_attempt smallint, " +
-				"test_ts bigint, test_host text, test_error text, test_dur duration, " +
-				"oracle_ts bigint, oracle_host text, oracle_error text, oracle_dur duration, PRIMARY KEY ((id), ts, attempt, gemini_attempt, seq)) " +
-				"WITH caching={'enabled':'true'} AND compression={'sstable_compression':'ZstdCompressor'} " +
+				"ts bigint, attempt smallint, gemini_attempt smallint, seq bigint, data text, PRIMARY KEY ((id), ts, attempt, gemini_attempt, seq))" +
+				" WITH caching={'enabled':'false'} AND compression={'sstable_compression':'LZ4Compressor'} " +
 				"AND tombstone_gc={'mode':'immediate'} AND comment='Table to store logs from Oracle and Test statements';",
 		},
 	}
@@ -115,77 +108,27 @@ func TestBuildCreateTableQuery(t *testing.T) {
 	}
 }
 
-func TestPrepareValuesOptimized(t *testing.T) {
+// TestLogColumns pins the column order that fillPairArgs binds after the
+// partition key.
+func TestLogColumns(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name   string
-		values mo.Either[[]any, []byte]
-		want   []string
-	}{
-		{
-			name:   "nil left values",
-			values: mo.Left[[]any, []byte](nil),
-			want:   nil,
-		},
-		{
-			name:   "empty slice",
-			values: mo.Left[[]any, []byte]([]any{}),
-			want:   []string{},
-		},
-		{
-			name:   "single string value",
-			values: mo.Left[[]any, []byte]([]any{"test"}),
-			want:   []string{`"test"`},
-		},
-		{
-			name:   "multiple values",
-			values: mo.Left[[]any, []byte]([]any{"test", 123, true}),
-			want:   []string{`"test"`, `123`, `true`},
-		},
-		{
-			name:   "right byte value",
-			values: mo.Right[[]any, []byte]([]byte("test data")),
-			want:   []string{"test data"},
-		},
-	}
+	expected := []string{"ts", "attempt", "gemini_attempt", "seq", "data"}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := prepareValuesOptimized(tt.values)
-
-			if len(got) != len(tt.want) {
-				t.Errorf("prepareValuesOptimized() length mismatch, got %d, want %d", len(got), len(tt.want))
-				return
-			}
-
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Errorf("prepareValuesOptimized()[%d] = %q, want %q", i, got[i], tt.want[i])
-				}
-			}
-		})
+	if !slices.Equal(logColumns, expected) {
+		t.Errorf("logColumns = %v, want %v", logColumns, expected)
 	}
 }
 
-func TestAdditionalColumns(t *testing.T) {
+func TestBuildCreateQueriesTableQuery(t *testing.T) {
 	t.Parallel()
 
-	expected := []string{
-		"ts", "seq", "statement", "values", "attempt", "gemini_attempt",
-		"test_ts", "test_host", "test_error", "test_dur",
-		"oracle_ts", "oracle_host", "oracle_error", "oracle_dur",
-	}
+	want := "CREATE TABLE IF NOT EXISTS ks_logs.queries (id bigint PRIMARY KEY, statement text)" +
+		" WITH caching={'enabled':'false'} AND compression={'sstable_compression':'LZ4Compressor'}" +
+		" AND tombstone_gc={'mode':'immediate'}" +
+		" AND comment='CQL text of the query ids in the statement log tables';"
 
-	if len(additionalColumnsArr) != len(expected) {
-		t.Errorf("additionalColumnsArr length = %d, want %d", len(additionalColumnsArr), len(expected))
-	}
-
-	for i, col := range additionalColumnsArr {
-		if col != expected[i] {
-			t.Errorf("additionalColumnsArr[%d] = %q, want %q", i, col, expected[i])
-		}
+	if got := buildCreateQueriesTableQuery("ks_logs"); got != want {
+		t.Errorf("buildCreateQueriesTableQuery()\ngot:  %q\nwant: %q", got, want)
 	}
 }

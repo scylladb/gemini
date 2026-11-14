@@ -86,6 +86,9 @@ func TestNextLogSeqIsUniqueUnderConcurrency(t *testing.T) {
 func TestFillArgsBindsTSAndSeq(t *testing.T) {
 	t.Parallel()
 
+	// seqColumn is the position of seq after the partition key (logColumns).
+	const seqColumn = 3
+
 	start := time.Date(2026, 8, 3, 12, 0, 0, 123_456_789, time.UTC)
 	partitionKeys := typedef.Columns{{Name: "pk0", Type: typedef.TypeText}}
 
@@ -101,15 +104,15 @@ func TestFillArgsBindsTSAndSeq(t *testing.T) {
 
 	args, ok := c.fillArgs(nil, item)
 	require.True(t, ok)
-	require.Len(t, args, partitionKeys.LenValues()+len(additionalColumnsArr))
+	require.Len(t, args, partitionKeys.LenValues()+len(logColumns))
 	assert.Equal(t, start.UTC().UnixNano(), args[partitionKeys.LenValues()])
 
-	firstSeq, ok := args[partitionKeys.LenValues()+1].(int64)
+	firstSeq, ok := args[partitionKeys.LenValues()+seqColumn].(int64)
 	require.True(t, ok, "seq must bind as int64")
 
 	next, ok := c.fillArgs(nil, item)
 	require.True(t, ok)
-	seq, ok := next[partitionKeys.LenValues()+1].(int64)
+	seq, ok := next[partitionKeys.LenValues()+seqColumn].(int64)
 	require.True(t, ok)
 	assert.Greater(t, seq, firstSeq)
 }
@@ -310,24 +313,27 @@ func TestSameMsNoRowLoss(t *testing.T) {
 			assert.Equal(t, totalWritten, count, "no _logs row may be lost to a same-millisecond primary-key collision")
 
 			iter := session.Query(
-				fmt.Sprintf("SELECT ts, seq, statement FROM %s.%s WHERE pk0 = ?", keyspace, table),
+				fmt.Sprintf("SELECT ts, seq, data FROM %s.%s WHERE pk0 = ?", keyspace, table),
 				"hot_partition",
 			).Iter()
 
 			var (
-				ts        int64
-				seq       int64
-				statement string
-				seenSeq   = make(map[int64]struct{}, totalWritten)
-				seenStmt  = make(map[string]struct{}, totalWritten)
-				prevTS    = int64(-1)
+				ts       int64
+				seq      int64
+				data     []byte
+				seenSeq  = make(map[int64]struct{}, totalWritten)
+				seenStmt = make(map[int64]struct{}, totalWritten)
+				prevTS   = int64(-1)
 			)
 
-			for iter.Scan(&ts, &seq, &statement) {
+			for iter.Scan(&ts, &seq, &data) {
+				var record logRecord
+				require.NoError(t, json.Unmarshal(data, &record))
+
 				_, dup := seenSeq[seq]
 				assert.False(t, dup, "seq %d appeared twice", seq)
 				seenSeq[seq] = struct{}{}
-				seenStmt[statement] = struct{}{}
+				seenStmt[record.Query] = struct{}{}
 
 				assert.GreaterOrEqual(t, ts, prevTS, "rows must come back in ts order")
 				prevTS = ts
@@ -415,7 +421,7 @@ func TestFetchPagesBeyondFirstPage(t *testing.T) {
 	var buf bytes.Buffer
 
 	e := newLineEncoder(&buf)
-	require.NoError(t, streamStatements(t.Context(), e, session, cqlStmts.oracleSelect, []any{"paged_partition"}))
+	require.NoError(t, cqlStmts.streamStatements(t.Context(), e, stmtlogger.TypeOracle, []any{"paged_partition"}))
 
 	_, err = e.Close()
 	require.NoError(t, err)

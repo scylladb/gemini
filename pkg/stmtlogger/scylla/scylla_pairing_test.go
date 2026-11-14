@@ -17,6 +17,7 @@ package scylla
 import (
 	"bytes"
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -52,11 +53,10 @@ func distinctItem(idx int) stmtlogger.Item {
 	}
 }
 
-// checkCoherent verifies the bound row's partition-key, statement and values
-// columns all belong to the SAME item (idx) — the invariant that makes _logs
-// triage trustworthy. Layout (see cqlStatements.fillPairArgs):
-// [pk values...][ts][seq][Statement][Values][attempt][gemini_attempt]
-// [test ts, host, error, dur][oracle ts, host, error, dur]
+// checkCoherent verifies the bound row's partition-key columns and its data
+// cell (query id and values) all belong to the SAME item (idx) — the invariant
+// that makes _logs triage trustworthy. Layout (see cqlStatements.fillPairArgs):
+// [pk values...][ts][attempt][gemini_attempt][seq][data]
 //
 // It reports a failure as an error rather than failing the test directly, so it
 // is safe to call from a worker goroutine: testify's require calls t.FailNow,
@@ -69,22 +69,22 @@ func checkCoherent(out []any, pkLen, idx int) error {
 		return fmt.Errorf("idx %d: partition key bled from another item: got %v, want %q", idx, out[0], wantPK)
 	}
 
-	gotStmt, ok := out[pkLen+2].(string)
+	data, ok := out[pkLen+len(logColumns)-1].(logData)
 	if !ok {
-		return fmt.Errorf("idx %d: statement column has type %T, want string", idx, out[pkLen+2])
+		return fmt.Errorf("idx %d: data column has type %T, want logData", idx, out[pkLen+len(logColumns)-1])
 	}
 
-	if gotStmt != want.Statement {
-		return fmt.Errorf("idx %d: statement column bled from another item: got %q, want %q", idx, gotStmt, want.Statement)
+	var record logRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return fmt.Errorf("idx %d: data column is not valid JSON: %w: %s", idx, err, data)
 	}
 
-	gotValues, ok := out[pkLen+3].(logValues)
-	if !ok {
-		return fmt.Errorf("idx %d: values column has type %T, want logValues", idx, out[pkLen+3])
+	if record.Query != queryID(want.Statement) {
+		return fmt.Errorf("idx %d: query id bled from another item: got %d, want %d", idx, record.Query, queryID(want.Statement))
 	}
 
-	if wantValues := encodeLogValues(want.Values); !bytes.Equal(gotValues, wantValues) {
-		return fmt.Errorf("idx %d: values column bled from another item: got %v, want %v", idx, gotValues, wantValues)
+	if wantValues := appendLogValues(nil, want.Values); !bytes.Equal(record.Values, wantValues) {
+		return fmt.Errorf("idx %d: values bled from another item: got %s, want %s", idx, record.Values, wantValues)
 	}
 
 	return nil
@@ -197,25 +197,22 @@ func (r *recorderAtExecTime) record(insertStmt string, args []any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if want := r.pkLen + len(additionalColumnsArr); len(args) != want {
+	if want := r.pkLen + len(logColumns); len(args) != want {
 		r.incoherenceErrs = append(r.incoherenceErrs, fmt.Errorf("bound %d args, want %d", len(args), want))
 
 		return
 	}
 
-	geminiStmt, ok := args[r.pkLen+2].(string)
+	pk, ok := args[0].(string)
 	if !ok {
-		r.incoherenceErrs = append(
-			r.incoherenceErrs,
-			fmt.Errorf("statement column has type %T, want string", args[r.pkLen+2]),
-		)
+		r.incoherenceErrs = append(r.incoherenceErrs, fmt.Errorf("partition key column has type %T, want string", args[0]))
 
 		return
 	}
 
 	var idx int
-	if _, err := fmt.Sscanf(geminiStmt, "UPDATE ks.tbl SET c%d=?", &idx); err != nil {
-		r.incoherenceErrs = append(r.incoherenceErrs, fmt.Errorf("unparsable statement %q: %w", geminiStmt, err))
+	if _, err := fmt.Sscanf(pk, "k%d", &idx); err != nil {
+		r.incoherenceErrs = append(r.incoherenceErrs, fmt.Errorf("unparsable partition key %q: %w", pk, err))
 
 		return
 	}
@@ -283,7 +280,7 @@ func newCommitterLogger(tb testing.TB, ch <-chan stmtlogger.Item) (*Logger, *rec
 
 	pks := committerTestPartitionKeys()
 	cql := makeTestCQL(pks)
-	cql.insertStmt = "INSERT INTO ks_logs.tbl(pk0,pk1," + additionalColumns + ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+	cql.insertStmt = "INSERT INTO ks_logs.tbl(pk0,pk1," + strings.Join(logColumns, ",") + ") VALUES (?,?,?,?,?,?,?)"
 
 	committed := newRecorderAtExecTime(pks.LenValues())
 

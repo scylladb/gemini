@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"slices"
 	"strconv"
 	"sync"
 
@@ -76,6 +75,8 @@ func (o *observer[T]) Get(host string, ty typedef.StatementType) T {
 }
 
 type ClusterObserver struct {
+	// addrs caches the host:port label of each *gocql.HostInfo (hostAddr).
+	addrs             sync.Map
 	logger            *stmtlogger.Logger
 	appLogger         *zap.Logger
 	goCQLBatchQueries *observer[prometheus.Counter]
@@ -264,6 +265,36 @@ func (c *ClusterObserver) incGoCQLQueryError(instance string, err error) {
 // back to a single-partition delete), so in practice every logged statement
 // touches exactly one partition. Revisit the per-row Values slicing here if
 // multi-partition mutations are ever re-enabled.
+// cachedAddr is the host:port label of a host with the address it was made from.
+type cachedAddr struct {
+	label string
+	ip    net.IP
+	port  int
+}
+
+// hostAddr returns the host:port label of h. Formatting it costs three
+// allocations, and every query on every cluster needs it. gocql can update a
+// HostInfo in place, so the cached label is used only while the address and
+// port it came from still match.
+func (c *ClusterObserver) hostAddr(h *gocql.HostInfo) string {
+	ip, port := h.ConnectAddress(), h.Port()
+
+	if v, ok := c.addrs.Load(h); ok {
+		//nolint:forcetypeassert // hostAddr is the only writer and stores cachedAddr
+		if cached := v.(cachedAddr); cached.port == port && cached.ip.Equal(ip) {
+			return cached.label
+		}
+	}
+
+	label := net.JoinHostPort(ip.String(), strconv.Itoa(port))
+	c.addrs.Store(h, cachedAddr{label: label, ip: ip, port: port})
+
+	return label
+}
+
+// logStatement sends one item per partition of stmt to the statement logger.
+// The item shares stmt.Values: a statement builds its own values and nothing
+// changes them after the statement runs.
 func (c *ClusterObserver) logStatement(stmt *typedef.Stmt, base stmtlogger.Item) {
 	// Tag every emitted item with the source "keyspace.table" so the statement
 	// logger can route it to that table's own _logs table. The store is shared
@@ -287,7 +318,7 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 	if data == nil {
 		return
 	}
-	instance := net.JoinHostPort(batch.Host.ConnectAddress().String(), strconv.Itoa(batch.Host.Port()))
+	instance := c.hostAddr(batch.Host)
 
 	var errStr string
 
@@ -309,7 +340,7 @@ func (c *ClusterObserver) ObserveBatch(ctx context.Context, batch gocql.Observed
 			c.logStatement(data.Statement, stmtlogger.Item{
 				Error:         mo.Right[error, string](errStr),
 				Statement:     query,
-				Values:        mo.Left[[]any, []byte](slices.Clone(batch.Values[i])),
+				Values:        mo.Left[[]any, []byte](batch.Values[i]),
 				Start:         stmtlogger.Time{Time: batch.Start},
 				Duration:      stmtlogger.Duration{Duration: batch.End.Sub(batch.Start)},
 				Host:          instance,
@@ -376,7 +407,7 @@ func (c *ClusterObserver) observeQuery(
 		return
 	}
 
-	instance := net.JoinHostPort(query.Host.ConnectAddress().String(), strconv.Itoa(query.Host.Port()))
+	instance := c.hostAddr(query.Host)
 
 	var errStr string
 	if query.Err != nil {
@@ -397,7 +428,7 @@ func (c *ClusterObserver) observeQuery(
 		c.logStatement(data.Statement, stmtlogger.Item{
 			Error:         mo.Right[error, string](errStr),
 			Statement:     query.Statement,
-			Values:        mo.Left[[]any, []byte](slices.Clone(query.Values)),
+			Values:        mo.Left[[]any, []byte](query.Values),
 			Start:         stmtlogger.Time{Time: query.Start},
 			Duration:      stmtlogger.Duration{Duration: duration},
 			Host:          instance,

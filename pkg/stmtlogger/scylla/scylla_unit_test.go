@@ -34,7 +34,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	dto "github.com/prometheus/client_model/go"
-	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zaptest"
@@ -111,8 +110,7 @@ func TestBuildCreateTableQueryUnit(t *testing.T) {
 				"ts bigint",
 				"seq bigint",
 				"PRIMARY KEY ((pk0), ts, attempt, gemini_attempt, seq)",
-				"test_host text",
-				"oracle_host text",
+				"data text",
 			},
 		},
 		{
@@ -162,66 +160,6 @@ func TestBuildCreateTableQueryUnit(t *testing.T) {
 				assert.Contains(t, gotTable, want)
 			}
 		})
-	}
-}
-
-func TestPrepareValuesOptimizedUnit(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		values   mo.Either[[]any, []byte]
-		expected []string
-	}{
-		{
-			name:     "nil left values",
-			values:   mo.Left[[]any, []byte](nil),
-			expected: nil,
-		},
-		{
-			name:     "empty left slice",
-			values:   mo.Left[[]any, []byte]([]any{}),
-			expected: []string{},
-		},
-		{
-			name:     "single string value",
-			values:   mo.Left[[]any, []byte]([]any{"test"}),
-			expected: []string{`"test"`},
-		},
-		{
-			name:     "mixed types",
-			values:   mo.Left[[]any, []byte]([]any{"str", 123, true, 45.67}),
-			expected: []string{`"str"`, `123`, `true`, `45.67`},
-		},
-		{
-			name:     "right byte array",
-			values:   mo.Right[[]any, []byte]([]byte("serialized")),
-			expected: []string{"serialized"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			result := prepareValuesOptimized(tt.values)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-func TestAdditionalColumnsUnit(t *testing.T) {
-	t.Parallel()
-
-	expected := []string{
-		"ts", "seq", "statement", "values", "attempt", "gemini_attempt",
-		"test_ts", "test_host", "test_error", "test_dur",
-		"oracle_ts", "oracle_host", "oracle_error", "oracle_dur",
-	}
-
-	assert.Len(t, additionalColumnsArr, len(expected))
-	for i, col := range expected {
-		assert.Equal(t, col, additionalColumnsArr[i])
 	}
 }
 
@@ -932,15 +870,6 @@ func TestFetchErrors_CancelledOnClose(t *testing.T) {
 }
 
 // Benchmarks
-
-func BenchmarkPrepareValuesOptimized(b *testing.B) {
-	values := mo.Left[[]any, []byte]([]any{"test", 123, true, "another", 456})
-
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = prepareValuesOptimized(values)
-	}
-}
 
 func BenchmarkGetScyllaStatementLogsKeyspace(b *testing.B) {
 	keyspace := "test_keyspace"

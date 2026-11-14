@@ -72,13 +72,13 @@ func TestLogger_PerTableRouting_NoDrops(t *testing.T) {
 	before := testutil.ToFloat64(metrics.StatementLoggerMalformedTotal)
 
 	// Both items route to their own table's statements and bind cleanly.
-	gotA, _, okA := lg.bind(pairOf(itemA), make([]any, 0, lg.maxArgsCap()))
+	rowA, okA := lg.bind(pairOf(itemA), make([]any, 0, lg.maxArgsCap()))
 	require.True(t, okA, "table A item must bind")
-	require.Same(t, cqlA, gotA, "table A item must route to table A statements")
+	require.Same(t, cqlA, rowA.cql, "table A item must route to table A statements")
 
-	gotB, _, okB := lg.bind(pairOf(itemB), make([]any, 0, lg.maxArgsCap()))
+	rowB, okB := lg.bind(pairOf(itemB), make([]any, 0, lg.maxArgsCap()))
 	require.True(t, okB, "table B item must bind (regression: it used to be dropped)")
-	require.Same(t, cqlB, gotB, "table B item must route to table B statements")
+	require.Same(t, cqlB, rowB.cql, "table B item must route to table B statements")
 
 	assert.InDelta(t, before, testutil.ToFloat64(metrics.StatementLoggerMalformedTotal), 1e-9,
 		"no statement-log items should be dropped for any table")
@@ -94,7 +94,7 @@ func TestLogger_PerTableRouting_NoDrops(t *testing.T) {
 	// genuinely unroutable items remain visible via the metric.
 	itemUnknown := makeItem(pksB, map[string][]any{"pk0": {"x"}}, stmtlogger.TypeTest, 2)
 	itemUnknown.Table = "ks.missing"
-	_, _, okUnknown := lg.bind(pairOf(itemUnknown), make([]any, 0, lg.maxArgsCap()))
+	_, okUnknown := lg.bind(pairOf(itemUnknown), make([]any, 0, lg.maxArgsCap()))
 	assert.False(t, okUnknown, "unknown-table item must be dropped")
 	assert.InDelta(t, before+1, testutil.ToFloat64(metrics.StatementLoggerMalformedTotal), 1e-9,
 		"only the unknown-table item should be counted as malformed")

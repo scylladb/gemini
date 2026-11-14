@@ -73,6 +73,8 @@ type (
 		// fixed table's columns (the old behavior) mis-bound and dropped every
 		// statement from tables other than Tables[0].
 		statements map[string]*cqlStatements
+		// queries holds the CQL text of every query id the committers wrote.
+		queries *queryDict
 		// sinks holds the statements file per cluster side, or is empty when file
 		// logging is off.
 		sinks       map[stmtlogger.Type]*lineSink
@@ -147,6 +149,13 @@ func New(
 		return nil, err
 	}
 
+	if err = session.Query(buildCreateQueriesTableQuery(keyspace)).Exec(); err != nil {
+		session.Close()
+		return nil, err
+	}
+
+	queries := &queryDict{}
+
 	// Build one _logs table + cqlStatements per source table. Binding each
 	// item's partition keys against its own table's columns is what keeps
 	// statements from tables other than Tables[0] from being mis-bound and
@@ -168,6 +177,7 @@ func New(
 			return nil, stmtsErr
 		}
 
+		cqlStmts.queries = queries
 		statements[originalKeyspace+"."+sourceTable.Name] = cqlStmts
 	}
 
@@ -183,6 +193,7 @@ func New(
 		logger:     l,
 		logs:       gocqlLogSession{session: session},
 		statements: statements,
+		queries:    queries,
 	}
 
 	// Open the sinks before any worker exists. A failure here returns no logger,
@@ -441,7 +452,7 @@ func (s *Logger) statementsForQuery(query string) *cqlStatements {
 // maxArgsCap returns the largest per-table insert arity so committer buffers are
 // sized to fit any table's bind values without re-growing.
 func (s *Logger) maxArgsCap() int {
-	maxCap := len(additionalColumnsArr)
+	maxCap := len(logColumns)
 	for _, c := range s.statements {
 		if n := c.argsCap(); n > maxCap {
 			maxCap = n
@@ -450,30 +461,47 @@ func (s *Logger) maxArgsCap() int {
 	return maxCap
 }
 
+// boundRow is a row that bind made ready for a batch.
+type boundRow struct {
+	// statement is the CQL text of a query id that no committer wrote yet. The
+	// caller writes its queries row with the row. It is empty otherwise.
+	statement string
+	cql       *cqlStatements
+	args      []any
+	id        int64
+}
+
 // bind routes it to its table's _logs statements and binds its arguments into
-// dst. It returns (cql, args, true) when the item is ready to enqueue. It
-// returns false when the item must be skipped: schema and SELECT statements are
-// skipped silently, while unknown-table or partition-key bind-arity mismatches
-// are additionally counted as malformed (and warned once) before being dropped.
-func (s *Logger) bind(pair logPair, dst []any) (*cqlStatements, []any, bool) {
+// dst. It returns true when the row is ready to enqueue. It returns false when
+// the item must be skipped: schema and SELECT statements are skipped silently,
+// while unknown-table or partition-key bind-arity mismatches are additionally
+// counted as malformed (and warned once) before being dropped.
+func (s *Logger) bind(pair logPair, dst []any) (boundRow, bool) {
 	it := pair.shared()
 	if it.StatementType.IsSchema() || it.StatementType.IsSelect() {
-		return nil, dst[:0], false
+		return boundRow{args: dst[:0]}, false
 	}
 
 	cql := s.statementsFor(*it)
 	if cql == nil {
 		s.recordMalformed(*it)
-		return nil, dst[:0], false
+		return boundRow{args: dst[:0]}, false
 	}
 
-	args, ok := cql.fillPairArgs(dst, pair)
+	id := queryID(it.Statement)
+
+	args, ok := cql.fillPairArgs(dst, pair, id)
 	if !ok {
 		s.recordMalformed(*it)
-		return nil, dst[:0], false
+		return boundRow{args: dst[:0]}, false
 	}
 
-	return cql, args, true
+	row := boundRow{cql: cql, args: args, id: id}
+	if s.queries != nil && s.queries.remember(id, it.Statement) {
+		row.statement = it.Statement
+	}
+
+	return row, true
 }
 
 // startCommitters starts the pairing stage and workerCount committers that
@@ -654,10 +682,12 @@ func (s *Logger) insertWorker() {
 
 	s.logger.Debug("committer worker started")
 	argsCap := s.maxArgsCap()
-	held := make([][]any, committerBatchSize)
+	// One spare slot: the last row of a batch can bring the queries row of its
+	// statement with it.
+	held := make([][]any, committerBatchSize+1)
 	// heldInsert[i] records which per-table _logs INSERT held[i] was bound for,
 	// so the row-by-row fallback re-executes each row against the right table.
-	heldInsert := make([]string, committerBatchSize)
+	heldInsert := make([]string, len(held))
 	for i := range held {
 		held[i] = make([]any, 0, argsCap)
 	}
@@ -683,14 +713,21 @@ func (s *Logger) insertWorker() {
 			// args. bind() drops (and counts) unknown-table and arity-mismatched
 			// rows instead of poisoning the batch — a single bad row would make
 			// gocql reject the whole batch client-side.
-			cql, args, valid := s.bind(pair, held[idx])
-			held[idx] = args // retain any grown backing array for reuse
+			row, valid := s.bind(pair, held[idx])
+			held[idx] = row.args // retain any grown backing array for reuse
 			if !valid {
 				return
 			}
-			heldInsert[idx] = cql.insertStmt
-			batch.Query(cql.insertStmt, held[idx]...)
+			heldInsert[idx] = row.cql.insertStmt
+			batch.Query(row.cql.insertStmt, held[idx]...)
 			idx++
+
+			if row.statement != "" {
+				held[idx] = append(held[idx][:0], row.id, row.statement)
+				heldInsert[idx] = row.cql.queriesInsert
+				batch.Query(row.cql.queriesInsert, held[idx]...)
+				idx++
+			}
 		}
 
 		addItem(first)
@@ -737,11 +774,14 @@ func (s *Logger) insert(it stmtlogger.Item) {
 		return
 	}
 
-	cql, args, ok := s.bind(pairOf(it), make([]any, 0, s.maxArgsCap()))
+	row, ok := s.bind(pairOf(it), make([]any, 0, s.maxArgsCap()))
 	if !ok {
 		return
 	}
-	_ = s.logs.execQuery(context.Background(), cql.insertStmt, args...)
+	if row.statement != "" {
+		_ = s.logs.execQuery(context.Background(), row.cql.queriesInsert, row.id, row.statement)
+	}
+	_ = s.logs.execQuery(context.Background(), row.cql.insertStmt, row.args...)
 }
 
 // recordMalformed counts a dropped log item whose partition-key bind arity did

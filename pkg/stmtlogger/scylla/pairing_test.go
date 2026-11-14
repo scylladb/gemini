@@ -144,11 +144,3 @@ func TestPairWorker_DropsSchemaAndSelect(t *testing.T) {
 	_, open := <-s.pairs
 	require.False(t, open)
 }
-
-func TestSideObserved(t *testing.T) {
-	t.Parallel()
-
-	require.True(t, sideObserved([]byte(`{"pk0":"a","host":"127.0.0.1","ts":1}`)))
-	require.False(t, sideObserved([]byte(`{"pk0":"a","host":null,"ts":1}`)))
-	require.True(t, sideObserved([]byte(`not json`)), "an unreadable row stays in the file")
-}

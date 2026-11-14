@@ -100,8 +100,9 @@ func TestNewStatements_Integration(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, cqlStmts)
 		assert.NotEmpty(t, cqlStmts.insertStmt)
-		assert.NotEmpty(t, cqlStmts.oracleSelect)
-		assert.NotEmpty(t, cqlStmts.testSelect)
+		assert.NotEmpty(t, cqlStmts.selectStmt)
+		assert.NotEmpty(t, cqlStmts.queriesInsert)
+		assert.NotEmpty(t, cqlStmts.queriesSelect)
 		assert.NotEmpty(t, cqlStmts.mutationFragmentsSelect)
 
 		// Cleanup
