@@ -193,7 +193,6 @@ func BenchmarkRandString(b *testing.B) {
 				rand := randv1.New(randv1.NewSource(1))
 
 				b.ReportAllocs()
-				b.ResetTimer()
 				for b.Loop() {
 					RandomStringGeminiV186(rand, size)
 				}
@@ -208,7 +207,6 @@ func BenchmarkRandString(b *testing.B) {
 			b.Run("Size_"+strconv.FormatInt(int64(size), 10), func(b *testing.B) {
 				rand := randv2.New(randv2.NewChaCha8([32]byte{}))
 				b.ReportAllocs()
-				b.ResetTimer()
 				for b.Loop() {
 					CurrentImplementation(rand, size)
 				}
@@ -224,7 +222,6 @@ func BenchmarkRandString(b *testing.B) {
 			b.Run("Size_"+strconv.FormatInt(int64(size), 10), func(b *testing.B) {
 				rand := randv2.New(randv2.NewChaCha8([32]byte{}))
 				b.ReportAllocs()
-				b.ResetTimer()
 				for b.Loop() {
 					utils.RandString(rand, size, false)
 				}

@@ -410,8 +410,7 @@ func TestDeletedPartitionsChannelBehavior(t *testing.T) {
 			}
 
 			// Wait for processing
-			time.Sleep(100 * time.Millisecond)
-			synctest.Wait()
+			synctest.Sleep(100 * time.Millisecond)
 
 			// Should still have items in heap (some requeued when channel was full)
 			assert.Positive(t, d.Len())
@@ -610,8 +609,7 @@ func BenchmarkDeletedPartitions(b *testing.B) {
 		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			values := typedef.NewValues(1)
 			d.Delete(typedef.PartitionKeys{Values: values})
 		}
@@ -629,8 +627,7 @@ func BenchmarkDeletedPartitions(b *testing.B) {
 			}
 		}()
 
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			values := typedef.NewValues(1)
 			d.Delete(typedef.PartitionKeys{Values: values})
 		}

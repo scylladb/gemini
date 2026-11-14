@@ -18,7 +18,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -297,7 +298,7 @@ func streamStatements(ctx context.Context, e *lineEncoder, session *gocql.Sessio
 	// reach it, and a hot partition would otherwise page millions of rows into a
 	// writer that drops them, all while holding the sink.
 	for !e.failed() {
-		var it json.RawMessage
+		var it jsontext.Value
 		if !iter.Scan(&it) {
 			break
 		}
@@ -319,7 +320,7 @@ func streamStatements(ctx context.Context, e *lineEncoder, session *gocql.Sessio
 
 // sideObserved reports whether a per-cluster JSON row holds an observation of
 // that cluster. A missing cluster leaves host null.
-func sideObserved(row json.RawMessage) bool {
+func sideObserved(row jsontext.Value) bool {
 	var side struct {
 		Host *string `json:"host"`
 	}
@@ -367,13 +368,13 @@ func streamFragments(ctx context.Context, e *lineEncoder, session *gocql.Session
 //   - []byte values are encoded as base64 strings
 //   - numeric values are encoded as JSON numbers
 //
-// The returned slice is safe to store as json.RawMessage.
-func encodeRowToJSON(row map[string]any) (json.RawMessage, error) {
-	bs, err := json.Marshal(row)
+// The returned slice is safe to store as jsontext.Value.
+func encodeRowToJSON(row map[string]any) (jsontext.Value, error) {
+	bs, err := json.Marshal(row, json.Deterministic(true))
 	if err != nil {
 		return nil, err
 	}
-	return json.RawMessage(bs), nil
+	return jsontext.Value(bs), nil
 }
 
 // FetchTo streams the statement history of a job error's partitions to w as

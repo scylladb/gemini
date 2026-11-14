@@ -240,8 +240,7 @@ func TestDeleteEdgeCases(t *testing.T) {
 			}
 
 			// Let the background processor run a few bucket cycles.
-			time.Sleep(50 * time.Millisecond)
-			synctest.Wait()
+			synctest.Sleep(50 * time.Millisecond)
 
 			// Cancel context and close; the background goroutine must observe
 			// the cancellation, drain, and close d.ch.
@@ -296,8 +295,7 @@ func BenchmarkDeletePerformance(b *testing.B) {
 			}
 		}()
 
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		}
 	})
@@ -355,8 +353,7 @@ func BenchmarkDeletePerformance(b *testing.B) {
 
 		// No consumer - heap will grow
 
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		}
 	})

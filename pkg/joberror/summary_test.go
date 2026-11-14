@@ -16,15 +16,16 @@ package joberror
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"flag"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -47,7 +48,7 @@ func writeStmtFile(t *testing.T, lines ...string) string {
 
 func stmtLine(t *testing.T, pkMap map[string]any, stmts []map[string]any) string {
 	t.Helper()
-	raws := make([]json.RawMessage, 0, len(stmts))
+	raws := make([]jsontext.Value, 0, len(stmts))
 	for _, s := range stmts {
 		b, err := json.Marshal(s)
 		require.NoError(t, err)
@@ -57,7 +58,7 @@ func stmtLine(t *testing.T, pkMap map[string]any, stmts []map[string]any) string
 	require.NoError(t, err)
 	line := map[string]any{
 		"partitionKeys": []map[string]any{{"partitionKeys": pkMap}},
-		"statements":    json.RawMessage(stmtsJSON),
+		"statements":    jsontext.Value(stmtsJSON),
 		"query":         "SELECT pk0 FROM ks.tbl WHERE pk0=?",
 		"message":       "test",
 	}
@@ -66,9 +67,9 @@ func stmtLine(t *testing.T, pkMap map[string]any, stmts []map[string]any) string
 	return string(b)
 }
 
-func rawEntries(t *testing.T, entries []stmtLogEntry) []json.RawMessage {
+func rawEntries(t *testing.T, entries []stmtLogEntry) []jsontext.Value {
 	t.Helper()
-	out := make([]json.RawMessage, len(entries))
+	out := make([]jsontext.Value, len(entries))
 	for i, e := range entries {
 		b, err := json.Marshal(e)
 		require.NoError(t, err)
@@ -77,9 +78,9 @@ func rawEntries(t *testing.T, entries []stmtLogEntry) []json.RawMessage {
 	return out
 }
 
-func mustMarshalRawSlice(t *testing.T, items []map[string]any) json.RawMessage {
+func mustMarshalRawSlice(t *testing.T, items []map[string]any) jsontext.Value {
 	t.Helper()
-	raws := make([]json.RawMessage, 0, len(items))
+	raws := make([]jsontext.Value, 0, len(items))
 	for _, item := range items {
 		b, err := json.Marshal(item)
 		require.NoError(t, err)
@@ -97,14 +98,13 @@ func TestUuidv7Time_ZeroUUID(t *testing.T) {
 
 func TestUuidv7Time_V4UUID(t *testing.T) {
 	t.Parallel()
-	assert.True(t, uuidv7Time(uuid.Must(uuid.NewRandom())).IsZero())
+	assert.True(t, uuidv7Time(uuid.NewV4()).IsZero())
 }
 
 func TestUuidv7Time_V7UUID(t *testing.T) {
 	t.Parallel()
 	before := time.Now().UTC().Truncate(time.Millisecond)
-	id, err := uuid.NewV7()
-	require.NoError(t, err)
+	id := uuid.NewV7()
 	after := time.Now().UTC().Add(time.Millisecond)
 	got := uuidv7Time(id)
 	assert.False(t, got.IsZero())
@@ -130,14 +130,14 @@ func TestErrorKindFromResults_Nil(t *testing.T) {
 func TestErrorKindFromResults_MissingInTest(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "missing in test", errorKindFromResults(
-		&ComparisonResults{OracleOnlyRows: []json.RawMessage{[]byte(`{}`)}},
+		&ComparisonResults{OracleOnlyRows: []jsontext.Value{[]byte(`{}`)}},
 	))
 }
 
 func TestErrorKindFromResults_MissingInOracle(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "missing in oracle", errorKindFromResults(
-		&ComparisonResults{TestOnlyRows: []json.RawMessage{[]byte(`{}`)}},
+		&ComparisonResults{TestOnlyRows: []jsontext.Value{[]byte(`{}`)}},
 	))
 }
 
@@ -152,8 +152,8 @@ func TestErrorKindFromResults_BothMissing(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "missing rows in test and oracle", errorKindFromResults(
 		&ComparisonResults{
-			OracleOnlyRows: []json.RawMessage{[]byte(`{}`)},
-			TestOnlyRows:   []json.RawMessage{[]byte(`{}`)},
+			OracleOnlyRows: []jsontext.Value{[]byte(`{}`)},
+			TestOnlyRows:   []jsontext.Value{[]byte(`{}`)},
 		},
 	))
 }
@@ -199,14 +199,14 @@ func TestMergeHosts_BothEmpty(t *testing.T) {
 func TestStmtFileKeyFromRaw_Empty(t *testing.T) {
 	t.Parallel()
 	assert.Empty(t, stmtFileKeyFromRaw(nil))
-	assert.Empty(t, stmtFileKeyFromRaw(map[string]json.RawMessage{}))
+	assert.Empty(t, stmtFileKeyFromRaw(map[string]jsontext.Value{}))
 }
 
 func TestStmtFileKeyFromRaw_Sorted(t *testing.T) {
 	t.Parallel()
-	m := map[string]json.RawMessage{
-		"pk1": json.RawMessage(`"v1"`),
-		"pk0": json.RawMessage(`"v0"`),
+	m := map[string]jsontext.Value{
+		"pk1": jsontext.Value(`"v1"`),
+		"pk0": jsontext.Value(`"v0"`),
 	}
 	assert.Equal(t, `pk0="v0",pk1="v1"`, stmtFileKeyFromRaw(m))
 }
@@ -503,8 +503,8 @@ func TestParseStatements_ScyllaTimestampFormat(t *testing.T) {
 	t.Parallel()
 	// Simulate the exact JSON format that Scylla's SELECT JSON produces
 	// for a timestamp column: space-separated date/time with +0000 offset.
-	raw := json.RawMessage(`{"ts":"2026-04-05 16:19:27.000+0000","statement":"INSERT INTO ks.t (pk0) VALUES (?)","host":"10.0.0.1"}`)
-	lines := []stmtLogLine{{Statements: []json.RawMessage{raw}}}
+	raw := jsontext.Value(`{"ts":"2026-04-05 16:19:27.000+0000","statement":"INSERT INTO ks.t (pk0) VALUES (?)","host":"10.0.0.1"}`)
+	lines := []stmtLogLine{{Statements: []jsontext.Value{raw}}}
 	entries := parseStatements(lines)
 	require.Len(t, entries, 1)
 	assert.Equal(t, "INSERT INTO ks.t (pk0) VALUES (?)", entries[0].Statement)
@@ -514,9 +514,9 @@ func TestParseStatements_ScyllaTimestampFormat(t *testing.T) {
 func TestSummariseStatements_ScyllaTimestampFormat(t *testing.T) {
 	t.Parallel()
 	// Verify that statement entries with Scylla timestamp format are counted.
-	raw1 := json.RawMessage(`{"ts":"2026-04-05 16:19:27.000+0000","statement":"INSERT INTO ks.t (pk0) VALUES (?)","host":"10.0.0.1"}`)
-	raw2 := json.RawMessage(`{"ts":"2026-04-05 16:20:00.000+0000","statement":"DELETE FROM ks.t WHERE pk0=?","host":"10.0.0.2"}`)
-	s := summariseStatements([]stmtLogLine{{Statements: []json.RawMessage{raw1, raw2}}})
+	raw1 := jsontext.Value(`{"ts":"2026-04-05 16:19:27.000+0000","statement":"INSERT INTO ks.t (pk0) VALUES (?)","host":"10.0.0.1"}`)
+	raw2 := jsontext.Value(`{"ts":"2026-04-05 16:20:00.000+0000","statement":"DELETE FROM ks.t WHERE pk0=?","host":"10.0.0.2"}`)
+	s := summariseStatements([]stmtLogLine{{Statements: []jsontext.Value{raw1, raw2}}})
 	assert.Equal(t, 1, s.WriteCount, "should count 1 write")
 	assert.Equal(t, 1, s.DeleteCount, "should count 1 delete")
 	require.NotNil(t, s.FirstWriteTime, "first write time should be set")
@@ -531,8 +531,7 @@ func TestBuildCorruptionEntries_Empty(t *testing.T) {
 
 func TestBuildCorruptionEntries_InsertionTimeFromUUIDv7(t *testing.T) {
 	t.Parallel()
-	id, err := uuid.NewV7()
-	require.NoError(t, err)
+	id := uuid.NewV7()
 	entries := BuildCorruptionEntries([]JobError{{
 		Timestamp:     time.Now().UTC(),
 		PartitionIDs:  []uuid.UUID{id},
@@ -594,7 +593,7 @@ func TestBuildCorruptionEntries_DiffFields(t *testing.T) {
 		Timestamp:     time.Now().UTC(),
 		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"pk0": {int32(1)}}),
 		Results: &ComparisonResults{
-			OracleOnlyRows: []json.RawMessage{[]byte(`{}`)},
+			OracleOnlyRows: []jsontext.Value{[]byte(`{}`)},
 			DifferentRows:  []RowDiff{{Diff: "- col: a\n+ col: b"}},
 		},
 	}}, nil, nil)
@@ -816,7 +815,7 @@ func TestCorruptionEntry_ZeroTimesOmittedFromJSON(t *testing.T) {
 		CorruptionDetectedAt: time.Date(2026, 2, 23, 10, 0, 0, 0, time.UTC),
 	})
 	require.NoError(t, err)
-	var m map[string]json.RawMessage
+	var m map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(b, &m))
 	_, hasInserted := m["inserted_at"]
 	_, hasDeleted := m["deleted_at"]
@@ -835,7 +834,7 @@ func TestCorruptionEntry_JSONHasExpectedKeys(t *testing.T) {
 		WriteToCorruptionGap: "1m0s",
 	})
 	require.NoError(t, err)
-	var m map[string]json.RawMessage
+	var m map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal(b, &m))
 	for _, key := range []string{
 		"partition_keys", "error_kind", "corruption_detected_at",
@@ -861,7 +860,7 @@ func TestBuildStmtIndex_RoundTripWithBuildCorruptionEntries(t *testing.T) {
 	entries := BuildCorruptionEntries([]JobError{{
 		Timestamp:     detectedAt,
 		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"pk0": {pkVal}}),
-		Results:       &ComparisonResults{OracleOnlyRows: []json.RawMessage{[]byte(`{}`)}},
+		Results:       &ComparisonResults{OracleOnlyRows: []jsontext.Value{[]byte(`{}`)}},
 		Message:       "row missing in test",
 		Query:         "SELECT pk0 FROM ks.t WHERE pk0=?",
 	}}, buildStmtIndex(testFile), nil)
@@ -900,7 +899,7 @@ func TestBuildStmtIndex_RoundTripMultiColumnPK(t *testing.T) {
 	entries := BuildCorruptionEntries([]JobError{{
 		Timestamp:     detectedAt,
 		PartitionKeys: typedef.NewValuesFromMap(map[string][]any{"pk0": {int32(10)}, "pk1": {"foo"}}),
-		Results:       &ComparisonResults{OracleOnlyRows: []json.RawMessage{[]byte(`{}`)}},
+		Results:       &ComparisonResults{OracleOnlyRows: []jsontext.Value{[]byte(`{}`)}},
 	}}, buildStmtIndex(testFile), nil)
 
 	require.Len(t, entries, 1)
@@ -970,7 +969,7 @@ func buildSnapshotErrors(t *testing.T) ([]JobError, string, string) {
 				},
 			},
 			Results: &ComparisonResults{
-				OracleOnlyRows: []json.RawMessage{[]byte(`{"pk0":101,"pk1":"session-alpha","col":1}`)},
+				OracleOnlyRows: []jsontext.Value{[]byte(`{"pk0":101,"pk1":"session-alpha","col":1}`)},
 			},
 		},
 		{
@@ -989,8 +988,8 @@ func buildSnapshotErrors(t *testing.T) ([]JobError, string, string) {
 				DifferentRows: []RowDiff{
 					{
 						Diff:      "- col: 42\n+ col: 99",
-						TestRow:   json.RawMessage(`{"pk0":202,"pk1":"session-beta","col":42}`),
-						OracleRow: json.RawMessage(`{"pk0":202,"pk1":"session-beta","col":99}`),
+						TestRow:   jsontext.Value(`{"pk0":202,"pk1":"session-beta","col":42}`),
+						OracleRow: jsontext.Value(`{"pk0":202,"pk1":"session-beta","col":99}`),
 					},
 				},
 			},
@@ -1009,7 +1008,7 @@ func buildSnapshotErrors(t *testing.T) ([]JobError, string, string) {
 				},
 			},
 			Results: &ComparisonResults{
-				TestOnlyRows: []json.RawMessage{[]byte(`{"pk0":303,"pk1":"session-gamma","col":7}`)},
+				TestOnlyRows: []jsontext.Value{[]byte(`{"pk0":303,"pk1":"session-gamma","col":7}`)},
 			},
 		},
 	}
@@ -1055,7 +1054,7 @@ func TestPrintCorruptionSummary_SnapshotJSON(t *testing.T) {
 	entries := ComputeSummary(errors, testFile, oracleFile)
 	require.NotEmpty(t, entries)
 
-	b, err := json.MarshalIndent(entries, "", "  ")
+	b, err := json.Marshal(entries, jsontext.WithIndent("  "), json.Deterministic(true))
 	require.NoError(t, err)
 	got := string(b)
 

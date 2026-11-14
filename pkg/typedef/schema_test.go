@@ -15,7 +15,8 @@
 package typedef
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"os"
 	"testing"
@@ -120,7 +121,7 @@ func TestSchemaMarshalUnmarshalNotChanged(t *testing.T) {
 		t.Fatalf("failed to open schema json file %s, error:%s", expectedFilePath, err)
 	}
 
-	fullSchemaMarshaled, err := json.MarshalIndent(fullSchema, "", "  ")
+	fullSchemaMarshaled, err := json.Marshal(fullSchema, jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		t.Fatalf("unable to marshal schema json, error=%s\n", err)
 	}

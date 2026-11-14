@@ -15,7 +15,8 @@
 package benchmarks
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"os"
 	"time"
@@ -66,7 +67,7 @@ func (br *BenchmarkRun) Save(filepath string) error {
 	history.Runs = append(history.Runs, *br)
 
 	// Save to file
-	data, err := json.MarshalIndent(history, "", "  ")
+	data, err := json.Marshal(history, jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		return fmt.Errorf("failed to marshal history: %w", err)
 	}

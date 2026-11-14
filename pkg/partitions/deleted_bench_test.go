@@ -32,8 +32,7 @@ func BenchmarkWindowRing(b *testing.B) {
 			r.pushBack(bucketEntry{readyAtNs: i})
 		}
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := range b.N {
+		for i := 0; b.Loop(); i++ {
 			r.pushBack(bucketEntry{readyAtNs: int64(i)})
 			_, _ = r.popFront()
 		}
@@ -45,8 +44,7 @@ func BenchmarkWindowRing(b *testing.B) {
 			r.pushBack(bucketEntry{readyAtNs: i})
 		}
 		b.ReportAllocs()
-		b.ResetTimer()
-		for i := range b.N {
+		for i := 0; b.Loop(); i++ {
 			r.pushBack(bucketEntry{readyAtNs: int64(i)})
 			_, _ = r.popBack()
 		}
@@ -68,8 +66,7 @@ func BenchmarkEvictAtCap(b *testing.B) {
 				r.pushBack(bucketEntry{readyAtNs: base + int64(i)})
 			}
 			b.ReportAllocs()
-			b.ResetTimer()
-			for i := range b.N {
+			for i := 0; b.Loop(); i++ {
 				r.pushBack(bucketEntry{readyAtNs: base + int64(capSize+i)})
 				_, _ = r.popBack()
 			}
@@ -84,8 +81,7 @@ func BenchmarkBulkOperations(b *testing.B) {
 		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			values := typedef.NewValues(1)
 			d.Delete(typedef.PartitionKeys{Values: values})
 		}
@@ -96,8 +92,7 @@ func BenchmarkBulkOperations(b *testing.B) {
 		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			batch := make([]typedef.PartitionKeys, 10)
 			for i := range batch {
 				batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
@@ -111,8 +106,7 @@ func BenchmarkBulkOperations(b *testing.B) {
 		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			batch := make([]typedef.PartitionKeys, 50)
 			for i := range batch {
 				batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
@@ -126,8 +120,7 @@ func BenchmarkBulkOperations(b *testing.B) {
 		d := newDeleted(b.Context(), buckets, 0)
 		defer d.Close()
 
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			batch := make([]typedef.PartitionKeys, 100)
 			for i := range batch {
 				batch[i] = typedef.PartitionKeys{Values: typedef.NewValues(1)}
@@ -147,8 +140,7 @@ func BenchmarkFastPath(b *testing.B) {
 		d.Delete(typedef.PartitionKeys{Values: typedef.NewValues(1)})
 		time.Sleep(10 * time.Millisecond) // Let it settle
 
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			// This should hit the fast path (no lock needed)
 			_ = d.win.nextReadyNs()
 		}
@@ -164,8 +156,7 @@ func BenchmarkFastPath(b *testing.B) {
 		}
 		time.Sleep(10 * time.Millisecond)
 
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			d.processReady()
 		}
 	})
@@ -177,7 +168,7 @@ func BenchmarkUnixNanoComparison(b *testing.B) {
 	future := now.Add(1 * time.Second)
 
 	b.Run("time_before", func(b *testing.B) {
-		for range b.N {
+		for b.Loop() {
 			_ = now.Before(future)
 		}
 	})
@@ -185,7 +176,7 @@ func BenchmarkUnixNanoComparison(b *testing.B) {
 	b.Run("unixnano_comparison", func(b *testing.B) {
 		nowNs := now.UnixNano()
 		futureNs := future.UnixNano()
-		for range b.N {
+		for b.Loop() {
 			_ = nowNs < futureNs
 		}
 	})

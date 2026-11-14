@@ -15,7 +15,7 @@
 package store
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -86,7 +86,7 @@ func (ve *ValidationError) MarshalJSON() ([]byte, error) {
 		FinalError    string        `json:"final_error"`
 		Statement     *typedef.Stmt `json:"statement,omitempty"`
 		Operation     string        `json:"operation,omitempty"`
-		TotalAttempts uint64        `json:"total_attempts,omitempty"`
+		TotalAttempts uint64        `json:"total_attempts,omitzero"`
 	}{
 		StartTime:     ve.StartTime,
 		EndTime:       ve.EndTime,
@@ -96,7 +96,7 @@ func (ve *ValidationError) MarshalJSON() ([]byte, error) {
 		TotalAttempts: ve.TotalAttempts.Load(),
 	}
 
-	return json.Marshal(payload)
+	return json.Marshal(payload, json.Deterministic(true))
 }
 
 // Unwrap implements error unwrapping for proper error chain support

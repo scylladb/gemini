@@ -18,8 +18,6 @@ import (
 	"os"
 	"runtime/debug"
 
-	"github.com/google/uuid"
-
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
@@ -28,8 +26,6 @@ func main() {
 }
 
 func execute() int {
-	uuid.EnableRandPool()
-
 	status := 0
 
 	if err := rootCmd.Execute(); err != nil {

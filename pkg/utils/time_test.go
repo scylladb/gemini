@@ -78,7 +78,6 @@ func BenchmarkTimeDurationToScyllaDuration(b *testing.B) {
 	for _, tc := range testCases {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
-			b.ResetTimer()
 			for b.Loop() {
 				_ = utils.TimeDurationToScyllaDuration(tc.duration)
 			}
@@ -100,7 +99,6 @@ func BenchmarkTimeDurationToScyllaDuration_AllUnits(b *testing.B) {
 		100*time.Nanosecond // 100 nanoseconds
 
 	b.ReportAllocs()
-	b.ResetTimer()
 	for b.Loop() {
 		_ = utils.TimeDurationToScyllaDuration(duration)
 	}

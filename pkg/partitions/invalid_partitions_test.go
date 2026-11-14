@@ -19,8 +19,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -78,7 +78,7 @@ func TestMarkInvalid_UnknownUUID(t *testing.T) {
 	t.Parallel()
 
 	parts := createTestPartitions(t, 5)
-	ghost := typedef.PartitionKeys{ID: uuid.Must(uuid.NewV7())}
+	ghost := typedef.PartitionKeys{ID: uuid.NewV7()}
 	assert.False(t, parts.MarkInvalid(&ghost))
 	assert.Equal(t, uint64(0), parts.InvalidCount())
 }

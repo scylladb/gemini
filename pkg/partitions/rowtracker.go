@@ -17,8 +17,7 @@ package partitions
 import (
 	"sync"
 	"sync/atomic"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // Fill-zone thresholds that govern when sampling is performed.

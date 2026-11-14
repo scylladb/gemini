@@ -118,8 +118,7 @@ func testSignals(
 	// The root must sleep so the fake clock advances past the workers' poll
 	// interval (synctest.Wait alone does not advance the clock — it only waits
 	// for quiescence). synctest.Wait() then confirms every worker has exited.
-	time.Sleep(50 * time.Millisecond)
-	synctest.Wait()
+	synctest.Sleep(50 * time.Millisecond)
 
 	setFuncName := runtime.FuncForPC(reflect.ValueOf(setFunc).Pointer()).Name()
 	setFuncName, _ = strings.CutSuffix(setFuncName, "-fm")

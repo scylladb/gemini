@@ -17,7 +17,8 @@ package scylla
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"os"
 	"path/filepath"
@@ -60,10 +61,10 @@ func TestStatementSink_JSONLRegression(t *testing.T) {
 			e := newLineEncoder(w)
 			e.head(reorganizePartitionKeys(item.PartitionKeys.ToMap(), item), item.Timestamp, "", item.Query, item.Message)
 			e.array("mutationFragments")
-			e.row(true, json.RawMessage(`{"fragment":1}`))
+			e.row(true, jsontext.Value(`{"fragment":1}`))
 			e.endArray(false)
 			e.array("statements")
-			e.row(true, json.RawMessage(`{"statement":1}`))
+			e.row(true, jsontext.Value(`{"statement":1}`))
 			e.endArray(true)
 			e.end(false)
 

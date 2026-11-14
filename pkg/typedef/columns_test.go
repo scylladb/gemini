@@ -15,7 +15,8 @@
 package typedef_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"log"
 	"math/rand/v2"
@@ -147,7 +148,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}, mo.Option[typedef.ColumnDef]{}),
 	}
 
-	b, err := json.MarshalIndent(s1, "  ", "  ")
+	b, err := json.Marshal(s1, jsontext.WithIndentPrefix("  "), jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		t.Fatalf("unable to marshal json, error=%s\n", err)
 	}

@@ -16,8 +16,7 @@ package statements
 
 import (
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/scylladb/gemini/pkg/partitions"
 	"github.com/scylladb/gemini/pkg/typedef"

@@ -205,7 +205,6 @@ func BenchmarkBloomHashFunctions(b *testing.B) {
 		b.Run(FuncName(h), func(b *testing.B) {
 			filter := NewBloom(mBits)
 
-			b.ResetTimer()
 			for i := 0; b.Loop(); i++ {
 				v := uint64(i)
 				filter.AddIfNotPresent(v)

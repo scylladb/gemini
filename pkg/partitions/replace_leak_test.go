@@ -106,8 +106,7 @@ func TestReplaceDoesNotLeakUUIDToIdx(t *testing.T) {
 		// Let the background processor flush every bucket. In the bubble this
 		// fast-forwards instantly; synctest.Wait() then blocks until the
 		// processor and drainer have caught up and gone idle.
-		time.Sleep(5 * time.Second)
-		synctest.Wait()
+		synctest.Sleep(5 * time.Second)
 
 		parts.validationMu.RLock()
 		uuidToIdxLen := len(parts.uuidToIdx)

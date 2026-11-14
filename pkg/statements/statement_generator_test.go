@@ -16,7 +16,8 @@ package statements_test
 
 import (
 	"crypto/sha256"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"math/rand/v2"
 	"strconv"
 	"testing"
@@ -225,7 +226,7 @@ func transformAndDiff(t *testing.T, testSchema *typedef.Schema) {
 		cmpopts.EquateEmpty(),
 	}
 
-	testSchemaMarshaled, err := json.MarshalIndent(testSchema, "  ", "  ")
+	testSchemaMarshaled, err := json.Marshal(testSchema, jsontext.WithIndentPrefix("  "), jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		t.Fatalf("unable to marshal schema example json, error=%s\n", err)
 	}

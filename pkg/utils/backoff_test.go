@@ -324,27 +324,26 @@ func BenchmarkExponentialBackoffCapped(b *testing.B) {
 	minDelay := 10 * time.Millisecond
 	maxDelay := 5 * time.Second
 
-	b.ResetTimer()
-	for i := range b.N {
+	for i := 0; b.Loop(); i++ {
 		_ = ExponentialBackoff(i%20, maxDelay, minDelay)
 	}
 }
 
 func BenchmarkExponentialBackoffCapped_EdgeCases(b *testing.B) {
 	b.Run("ZeroMaxDelay", func(b *testing.B) {
-		for range b.N {
+		for b.Loop() {
 			_ = ExponentialBackoff(5, 0, 10*time.Millisecond)
 		}
 	})
 
 	b.Run("ZeroMinDelay", func(b *testing.B) {
-		for range b.N {
+		for b.Loop() {
 			_ = ExponentialBackoff(5, time.Second, 0)
 		}
 	})
 
 	b.Run("LargeAttempt", func(b *testing.B) {
-		for range b.N {
+		for b.Loop() {
 			_ = ExponentialBackoff(50, time.Minute, time.Millisecond)
 		}
 	})

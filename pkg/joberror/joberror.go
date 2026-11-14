@@ -17,15 +17,15 @@ package joberror
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 	"github.com/scylladb/gemini/pkg/utils"
@@ -33,27 +33,27 @@ import (
 
 // RowDiff represents a difference between test and oracle rows
 type RowDiff struct {
-	Diff      string          `json:"diff,omitempty"`
-	TestRow   json.RawMessage `json:"testRow,omitempty"`
-	OracleRow json.RawMessage `json:"oracleRow,omitempty"`
+	Diff      string         `json:"diff,omitempty"`
+	TestRow   jsontext.Value `json:"testRow,omitempty"`
+	OracleRow jsontext.Value `json:"oracleRow,omitempty"`
 }
 
 // ComparisonResults stores the results from both test and oracle for debugging
 type ComparisonResults struct {
-	TestRows       []json.RawMessage `json:"testRows,omitempty"`
-	OracleRows     []json.RawMessage `json:"oracleRows,omitempty"`
-	TestOnlyRows   []json.RawMessage `json:"testOnlyRows,omitempty"`
-	OracleOnlyRows []json.RawMessage `json:"oracleOnlyRows,omitempty"`
-	DifferentRows  []RowDiff         `json:"differentRows,omitempty"`
+	TestRows       []jsontext.Value `json:"testRows,omitempty"`
+	OracleRows     []jsontext.Value `json:"oracleRows,omitempty"`
+	TestOnlyRows   []jsontext.Value `json:"testOnlyRows,omitempty"`
+	OracleOnlyRows []jsontext.Value `json:"oracleOnlyRows,omitempty"`
+	DifferentRows  []RowDiff        `json:"differentRows,omitempty"`
 }
 
 // PartitionValidation stores validation timing data for a specific partition.
 type PartitionValidation struct {
 	Recent         []uint64 `json:"recent,omitempty"`
-	FirstSuccessNS uint64   `json:"firstSuccessNS,omitempty"`
-	LastSuccessNS  uint64   `json:"lastSuccessNS,omitempty"`
-	LastFailureNS  uint64   `json:"lastFailureNS,omitempty"`
-	SuccessCount   uint64   `json:"successCount,omitempty"`
+	FirstSuccessNS uint64   `json:"firstSuccessNS,omitzero"`
+	LastSuccessNS  uint64   `json:"lastSuccessNS,omitzero"`
+	LastFailureNS  uint64   `json:"lastFailureNS,omitzero"`
+	SuccessCount   uint64   `json:"successCount,omitzero"`
 }
 
 type JobError struct {
@@ -66,7 +66,7 @@ type JobError struct {
 	Query           string                         `json:"query"`
 	Values          []any                          `json:"values,omitempty"`
 	PartitionIDs    []uuid.UUID                    `json:"partitionIds,omitempty"`
-	DeletionTimeNS  uint64                         `json:"deletionTimeNS,omitempty"`
+	DeletionTimeNS  uint64                         `json:"deletionTimeNS,omitzero"`
 	hash            [32]byte
 	StmtType        typedef.StatementType `json:"stmt-type"`
 }
@@ -149,7 +149,7 @@ func (el *ListError) Errors() []JobError {
 }
 
 func (el *ListError) MarshalJSON() ([]byte, error) {
-	return json.Marshal(el.Errors())
+	return json.Marshal(el.Errors(), json.Deterministic(true))
 }
 
 func (el *ListError) Cap() int {

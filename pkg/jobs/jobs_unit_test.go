@@ -15,10 +15,9 @@
 package jobs
 
 import (
-	"encoding/json"
 	"testing"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -40,11 +39,11 @@ func TestCollectPartitionIDs_Empty(t *testing.T) {
 func TestCollectPartitionIDs_AllNil(t *testing.T) {
 	t.Parallel()
 	pks := []typedef.PartitionKeys{
-		{ID: uuid.Nil},
-		{ID: uuid.Nil},
+		{ID: uuid.Nil()},
+		{ID: uuid.Nil()},
 	}
 	ids := collectPartitionIDs(pks)
-	// uuid.Nil entries are skipped
+	// uuid.Nil() entries are skipped
 	assert.Empty(t, ids)
 }
 
@@ -53,9 +52,9 @@ func TestCollectPartitionIDs_Mixed(t *testing.T) {
 	id1 := uuid.New()
 	id2 := uuid.New()
 	pks := []typedef.PartitionKeys{
-		{ID: uuid.Nil},
+		{ID: uuid.Nil()},
 		{ID: id1},
-		{ID: uuid.Nil},
+		{ID: uuid.Nil()},
 		{ID: id2},
 	}
 	ids := collectPartitionIDs(pks)
@@ -159,7 +158,7 @@ func TestMarshalRows_Valid(t *testing.T) {
 	require.Len(t, result, 2)
 	// Each element must be valid JSON
 	for _, raw := range result {
-		assert.True(t, json.Valid(raw))
+		assert.True(t, raw.IsValid())
 	}
 }
 
@@ -191,8 +190,8 @@ func TestMarshalDifferentRows_Valid(t *testing.T) {
 	result := marshalDifferentRows(diffs)
 	require.Len(t, result, 1)
 	assert.Equal(t, "pk: 1 != 2", result[0].Diff)
-	assert.True(t, json.Valid(result[0].TestRow))
-	assert.True(t, json.Valid(result[0].OracleRow))
+	assert.True(t, result[0].TestRow.IsValid())
+	assert.True(t, result[0].OracleRow.IsValid())
 }
 
 // ---------------------------------------------------------------------------

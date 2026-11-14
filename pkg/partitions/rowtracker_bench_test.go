@@ -17,8 +17,7 @@ package partitions
 import (
 	"strconv"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 func BenchmarkRowTracker_PushPop(b *testing.B) {

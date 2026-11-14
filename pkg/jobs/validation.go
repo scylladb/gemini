@@ -16,13 +16,14 @@ package jobs
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"math/rand/v2"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/scylladb/gocqlx/v3/qb"
 
@@ -372,7 +373,7 @@ func (v *Validation) handleCheckFailure(err error, stmt *typedef.Stmt) error {
 }
 
 // extractComparisonResults extracts comparison results from a store.ValidationError
-// and converts store.Rows to json.RawMessage for the joberror format.
+// and converts store.Rows to jsontext.Value for the joberror format.
 func extractComparisonResults(err error) *joberror.ComparisonResults {
 	var valErr *store.ValidationError
 	if !errors.As(err, &valErr) || valErr.ComparisonResults == nil {
@@ -390,13 +391,13 @@ func extractComparisonResults(err error) *joberror.ComparisonResults {
 	}
 }
 
-func marshalRows(rows store.Rows) []json.RawMessage {
+func marshalRows(rows store.Rows) []jsontext.Value {
 	if len(rows) == 0 {
 		return nil
 	}
-	result := make([]json.RawMessage, 0, len(rows))
+	result := make([]jsontext.Value, 0, len(rows))
 	for _, row := range rows {
-		data, err := json.Marshal(row)
+		data, err := json.Marshal(row, json.Deterministic(true))
 		if err != nil {
 			continue
 		}

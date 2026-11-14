@@ -17,7 +17,7 @@ package scylla
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"io"
@@ -94,15 +94,15 @@ type (
 	}
 
 	Line struct {
-		PartitionKeys     []PartitionInfo   `json:"partitionKeys"`
-		Timestamp         time.Time         `json:"timestamp"`
-		Err               string            `json:"err,omitempty"`
-		Query             string            `json:"query"`
-		Message           string            `json:"message"`
-		MutationFragments []json.RawMessage `json:"mutationFragments"`
-		Statements        []json.RawMessage `json:"statements"`
+		PartitionKeys     []PartitionInfo  `json:"partitionKeys"`
+		Timestamp         time.Time        `json:"timestamp"`
+		Err               string           `json:"err,omitempty"`
+		Query             string           `json:"query"`
+		Message           string           `json:"message"`
+		MutationFragments []jsontext.Value `json:"mutationFragments"`
+		Statements        []jsontext.Value `json:"statements"`
 		// Partial marks a line whose history was cut short by a read failure.
-		Partial bool `json:"partial,omitempty"`
+		Partial bool `json:"partial,omitzero"`
 	}
 )
 

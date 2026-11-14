@@ -17,16 +17,16 @@ package statements
 import (
 	"bytes"
 	"encoding/hex"
-	"encoding/json"
+	"encoding/json/v2"
 	"math/big"
 	"math/rand/v2"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/gocql/gocql"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/inf.v0"
 

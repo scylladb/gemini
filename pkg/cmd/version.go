@@ -16,7 +16,8 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -110,7 +111,7 @@ func NewVersionInfo(options ...VersionOption) (VersionInfo, error) {
 
 	var v VersionInfo
 
-	if err = json.NewDecoder(f).Decode(&v); err != nil {
+	if err = json.UnmarshalRead(f, &v); err != nil {
 		return VersionInfo{}, fmt.Errorf("failed to decode %s: %w", opts.outputVersionFile, err)
 	}
 
@@ -149,7 +150,7 @@ func fetchAndSaveVersionInfo(
 		return VersionInfo{}, err
 	}
 
-	if err = json.NewEncoder(f).Encode(v); err != nil {
+	if err = json.MarshalEncode(jsontext.NewEncoder(f), v); err != nil {
 		return VersionInfo{}, err
 	}
 

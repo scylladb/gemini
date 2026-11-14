@@ -19,7 +19,8 @@ package scylla
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"os"
@@ -819,10 +820,10 @@ func TestLogger_StatementSink_Integration(t *testing.T) {
 			e := newLineEncoder(w)
 			e.head(nil, item.Timestamp, "", item.Query, item.Message)
 			e.array("mutationFragments")
-			e.row(true, json.RawMessage(`{"data":"oracle"}`))
+			e.row(true, jsontext.Value(`{"data":"oracle"}`))
 			e.endArray(false)
 			e.array("statements")
-			e.row(true, json.RawMessage(`{"stmt":"SELECT"}`))
+			e.row(true, jsontext.Value(`{"stmt":"SELECT"}`))
 			e.endArray(true)
 			e.end(false)
 

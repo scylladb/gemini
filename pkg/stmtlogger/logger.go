@@ -60,9 +60,9 @@ type (
 		RecentSuccess  []uint64                 `json:"rs,omitempty"`
 		PartitionKeys  typedef.PartitionKeys    `json:"partitionKeys"`
 		Duration       Duration                 `json:"d"`
-		FirstSuccessNS uint64                   `json:"fs,omitempty"`
-		LastSuccessNS  uint64                   `json:"ls,omitempty"`
-		LastFailureNS  uint64                   `json:"lf,omitempty"`
+		FirstSuccessNS uint64                   `json:"fs,omitzero"`
+		LastSuccessNS  uint64                   `json:"ls,omitzero"`
+		LastFailureNS  uint64                   `json:"lf,omitzero"`
 		Attempt        int                      `json:"d_a"`
 		GeminiAttempt  int                      `json:"g_a"`
 		PartitionIndex int                      `json:"-"`
@@ -104,9 +104,9 @@ type (
 		done         chan struct{}
 		overflowSig  chan struct{}
 		overflowCond *sync.Cond
+		closeFn      func() error
 		overflow     overflowRing
 		drainerWG    sync.WaitGroup
-		closeOnce    sync.Once
 		overflowMu   sync.Mutex
 		// sendMu guards sends to l.ch against Close() closing it. Producers take
 		// the read lock for the duration of a non-blocking enqueue; Close takes
@@ -176,6 +176,7 @@ func NewLogger(opts ...Option) (*Logger, error) {
 		overflowSig: make(chan struct{}, 1),
 	}
 	l.overflowCond = sync.NewCond(&l.overflowMu)
+	l.closeFn = sync.OnceValue(l.shutdown)
 
 	l.drainerWG.Add(1)
 	go l.drainOverflow()
@@ -418,6 +419,7 @@ func (l *Logger) flushRemainingOverflow() {
 }
 
 // Close shuts the logger down and closes the inner committer. It is idempotent.
+// Every call returns the error of the first call.
 //
 // Close is self-defending: it takes sendMu.Lock before closing l.ch, so a
 // LogStmt call that races Close can never send on a closed channel (it either
@@ -426,46 +428,47 @@ func (l *Logger) flushRemainingOverflow() {
 // calling Close, though in gemini the store still closes its in-flight barrier
 // first as defense in depth.
 func (l *Logger) Close() error {
-	var innerErr error
+	return l.closeFn()
+}
 
-	l.closeOnce.Do(func() {
-		// Signal all in-flight and future LogStmt calls to bail out.
-		// The drainer (drainOverflow) keeps running after this: it will
-		// forward every remaining overflow item to l.ch with blocking
-		// sends before it exits.
-		close(l.done)
+// shutdown does the work of Close. closeFn runs it at most once.
+func (l *Logger) shutdown() error {
+	// Signal all in-flight and future LogStmt calls to bail out.
+	// The drainer (drainOverflow) keeps running after this: it will
+	// forward every remaining overflow item to l.ch with blocking
+	// sends before it exits.
+	close(l.done)
 
-		// Wake any producer blocked on a full overflow ring so it observes
-		// l.done and returns instead of waiting forever. Acquiring overflowMu
-		// before broadcasting closes the lost-wakeup window: a producer either
-		// already holds the lock (and will see l.done on its next check) or is
-		// parked in Wait (and will be woken here).
-		l.overflowMu.Lock()
-		l.overflowCond.Broadcast()
-		l.overflowMu.Unlock()
+	// Wake any producer blocked on a full overflow ring so it observes
+	// l.done and returns instead of waiting forever. Acquiring overflowMu
+	// before broadcasting closes the lost-wakeup window: a producer either
+	// already holds the lock (and will see l.done on its next check) or is
+	// parked in Wait (and will be woken here).
+	l.overflowMu.Lock()
+	l.overflowCond.Broadcast()
+	l.overflowMu.Unlock()
 
-		// Wait for the drainer to finish draining all overflow.
-		// Only after this point is it safe to close l.ch, because the
-		// drainer is the sole remaining sender.
-		l.drainerWG.Wait()
+	// Wait for the drainer to finish draining all overflow.
+	// Only after this point is it safe to close l.ch, because the
+	// drainer is the sole remaining sender.
+	l.drainerWG.Wait()
 
-		// Close the data channel so downstream consumers see EOF. Taking
-		// sendMu.Lock first guarantees no producer is mid fast-path send: any
-		// trySend either finished (RUnlocked) or will observe l.done before it
-		// reaches the send. Producers parked in the overflow ring do NOT hold
-		// sendMu, so they cannot deadlock this — they were already woken above.
-		l.sendMu.Lock()
-		if l.ch != nil {
-			close(l.ch)
-		}
-		l.sendMu.Unlock()
+	// Close the data channel so downstream consumers see EOF. Taking
+	// sendMu.Lock first guarantees no producer is mid fast-path send: any
+	// trySend either finished (RUnlocked) or will observe l.done before it
+	// reaches the send. Producers parked in the overflow ring do NOT hold
+	// sendMu, so they cannot deadlock this — they were already woken above.
+	l.sendMu.Lock()
+	if l.ch != nil {
+		close(l.ch)
+	}
+	l.sendMu.Unlock()
 
-		if l.closer != nil {
-			innerErr = l.closer.Close()
-		}
-	})
+	if l.closer != nil {
+		return l.closer.Close()
+	}
 
-	return innerErr
+	return nil
 }
 
 func (i Item) MemoryFootprint() uint64 {

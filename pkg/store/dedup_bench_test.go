@@ -144,8 +144,7 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 			b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
 				b.ReportAllocs()
 				orig := makeDupInt64Slice(n)
-				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					// Restore the slice length each iteration so we always
 					// feed the full duplicated input.
 					s := make([]int64, n)
@@ -164,8 +163,7 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 			b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
 				b.ReportAllocs()
 				orig := makeUniqueInt64Slice(n)
-				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					s := make([]int64, n)
 					copy(s, *orig)
 					ptr := &s
@@ -181,8 +179,7 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 			b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
 				b.ReportAllocs()
 				orig := makeStringSlice(n/2, n/2)
-				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					s := make([]string, len(orig))
 					copy(s, orig)
 					_, _, _ = deduplicateSlice(s)
@@ -197,8 +194,7 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 			b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
 				b.ReportAllocs()
 				orig := makeAnyInt64Slice(n/2, n/2)
-				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					s := make([]any, len(orig))
 					copy(s, orig)
 					_, _, _ = deduplicateSlice(s)
@@ -218,8 +214,7 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 					uuids[i] = gocql.MustRandomUUID()
 					uuids[i+half] = uuids[i]
 				}
-				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					s := make([]gocql.UUID, n)
 					copy(s, uuids)
 					_, _, _ = deduplicateSlice(s)
@@ -240,8 +235,7 @@ func BenchmarkDeduplicateSlice(b *testing.B) {
 					times[i] = base.Add(time.Duration(i) * time.Second)
 					times[i+half] = times[i]
 				}
-				b.ResetTimer()
-				for range b.N {
+				for b.Loop() {
 					s := make([]time.Time, n)
 					copy(s, times)
 					_, _, _ = deduplicateSlice(s)
@@ -276,8 +270,7 @@ func BenchmarkDeduplicateListValues(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
 			table := makeListTable(bc.cols)
-			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				rows := makeListRows(bc.rows, bc.cols, bc.listLen, bc.dups)
 				deduplicateListValues(table, rows)
 			}
@@ -308,8 +301,7 @@ func BenchmarkCompareCollectedRows_WithListCols(b *testing.B) {
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
 			table := makeListTable(bc.cols)
-			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				test, oracle := makeCompareRows(bc.rows, bc.cols, bc.listLen, bc.dups)
 				result := CompareCollectedRows(table, test, oracle)
 				if result.ToError() != nil {

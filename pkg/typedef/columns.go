@@ -15,7 +15,7 @@
 package typedef
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -46,7 +46,11 @@ func (cd *ColumnDef) MarshalJSON() ([]byte, error) {
 		return json.Marshal(nil)
 	}
 
-	return json.Marshal(*cd)
+	// columnDefFields has the fields of ColumnDef but not its methods, so the
+	// encoder does not call MarshalJSON again on the copy.
+	type columnDefFields ColumnDef
+
+	return json.Marshal((*columnDefFields)(cd), json.Deterministic(true))
 }
 
 func (cd *ColumnDef) UnmarshalJSON(data []byte) error {

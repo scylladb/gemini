@@ -16,7 +16,8 @@ package status_test
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"strings"
 	"testing"
 	"time"
@@ -177,7 +178,7 @@ func TestPrintResultAsJSON(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.True(t, json.Valid([]byte(out)), "output must be valid JSON")
+	assert.True(t, jsontext.Value([]byte(out)).IsValid(), "output must be valid JSON")
 	assert.Contains(t, out, "gemini_version")
 	assert.Contains(t, out, "v1.0.0")
 	assert.Contains(t, out, "result")
@@ -195,7 +196,7 @@ func TestPrintResultAsJSONWithSummary(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.True(t, json.Valid([]byte(out)))
+	assert.True(t, jsontext.Value([]byte(out)).IsValid())
 	assert.Contains(t, out, "corruption_summary")
 }
 
@@ -210,7 +211,7 @@ func TestPrintResultAsJSONWithSummary_NoSummary(t *testing.T) {
 	require.NoError(t, err)
 
 	out := buf.String()
-	assert.True(t, json.Valid([]byte(out)))
+	assert.True(t, jsontext.Value([]byte(out)).IsValid())
 	assert.NotContains(t, out, "corruption_summary")
 }
 

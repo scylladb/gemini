@@ -16,7 +16,7 @@ package schema
 
 import (
 	"crypto/sha256"
-	"encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"math/rand/v2"
 	"os"

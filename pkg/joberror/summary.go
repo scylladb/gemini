@@ -16,18 +16,20 @@ package joberror
 
 import (
 	"bufio"
-	"encoding/json"
+	"encoding/binary"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/scylladb/gemini/pkg/utils"
 )
@@ -103,13 +105,13 @@ func (ct *cqlTimestamp) UnmarshalJSON(data []byte) error {
 }
 
 type stmtLogLine struct {
-	Query      string            `json:"query,omitempty"`
-	Message    string            `json:"message,omitempty"`
-	Err        string            `json:"err,omitempty"`
-	Statements []json.RawMessage `json:"statements,omitempty"`
+	Query      string           `json:"query,omitempty"`
+	Message    string           `json:"message,omitempty"`
+	Err        string           `json:"err,omitempty"`
+	Statements []jsontext.Value `json:"statements,omitempty"`
 	// Partial marks a line the writer cut short. The counts below it are a
 	// lower bound, never the whole history of the partition.
-	Partial bool `json:"partial,omitempty"`
+	Partial bool `json:"partial,omitzero"`
 }
 type (
 	stmtIndex          map[string][]stmtLogLine
@@ -125,7 +127,7 @@ type (
 		DeleteErrors    int        `json:"delete_errors"`
 		// Partial is true when at least one line was cut short. Every count and
 		// every time window here is then a lower bound.
-		Partial bool `json:"partial,omitempty"`
+		Partial bool `json:"partial,omitzero"`
 	}
 )
 
@@ -143,9 +145,9 @@ type CorruptionEntry struct {
 	TestCluster              StmtClusterSummary `json:"test_cluster"`
 	OracleCluster            StmtClusterSummary `json:"oracle_cluster"`
 	SuccessfulValidations    uint64             `json:"successful_validations"`
-	DiffOracleOnlyRows       int                `json:"diff_oracle_only_rows,omitempty"`
-	DiffTestOnlyRows         int                `json:"diff_test_only_rows,omitempty"`
-	DiffFieldMismatches      int                `json:"diff_field_mismatches,omitempty"`
+	DiffOracleOnlyRows       int                `json:"diff_oracle_only_rows,omitzero"`
+	DiffTestOnlyRows         int                `json:"diff_test_only_rows,omitzero"`
+	DiffFieldMismatches      int                `json:"diff_field_mismatches,omitzero"`
 }
 type partitionKeyReader interface {
 	Keys() []string
@@ -202,7 +204,7 @@ func indexStmtLine(idx stmtIndex, raw string) bool {
 		return true
 	}
 
-	var top map[string]json.RawMessage
+	var top map[string]jsontext.Value
 	if err := json.Unmarshal([]byte(raw), &top); err != nil {
 		return false
 	}
@@ -213,7 +215,7 @@ func indexStmtLine(idx stmtIndex, raw string) bool {
 	}
 
 	var partInfos []struct {
-		PartitionKeys map[string]json.RawMessage `json:"partitionKeys"`
+		PartitionKeys map[string]jsontext.Value `json:"partitionKeys"`
 	}
 
 	if err := json.Unmarshal(pkRaw, &partInfos); err != nil || len(partInfos) == 0 {
@@ -234,7 +236,7 @@ func indexStmtLine(idx stmtIndex, raw string) bool {
 		_ = json.Unmarshal(p, &line.Partial)
 	}
 	if stmts, ok2 := top["statements"]; ok2 {
-		var arr []json.RawMessage
+		var arr []jsontext.Value
 		if err := json.Unmarshal(stmts, &arr); err == nil {
 			line.Statements = arr
 		}
@@ -248,15 +250,11 @@ func indexStmtLine(idx stmtIndex, raw string) bool {
 	return true
 }
 
-func stmtFileKeyFromRaw(m map[string]json.RawMessage) string {
+func stmtFileKeyFromRaw(m map[string]jsontext.Value) string {
 	if len(m) == 0 {
 		return ""
 	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(m))
 	var sb strings.Builder
 	for i, k := range keys {
 		if i > 0 {
@@ -277,7 +275,7 @@ func buildStmtKeyFromValues(v partitionKeyReader) string {
 	// Values.Keys() already returns sorted keys, but we sort here explicitly to
 	// match the contract of stmtFileKeyFromRaw and guard against future
 	// partitionKeyReader implementations that may not guarantee order.
-	sort.Strings(keys)
+	slices.Sort(keys)
 	if len(keys) == 0 {
 		return ""
 	}
@@ -301,12 +299,12 @@ func buildStmtKeyFromValues(v partitionKeyReader) string {
 		// (which marshals the original int32/int64 directly).
 		// Example: float64(4200000000000000) → json.Marshal → "4.2e+15"
 		//          int64(4200000000000000)   → json.Marshal → "4200000000000000"
-		// Using json.Number("4200000000000000") makes both paths produce
+		// Using jsontext.Value("4200000000000000") makes both paths produce
 		// identical bytes.
 		val := vals[0]
 		if f, ok := val.(float64); ok {
 			if i64 := int64(f); float64(i64) == f {
-				val = json.Number(strconv.FormatInt(i64, 10))
+				val = jsontext.Value(strconv.FormatInt(i64, 10))
 			}
 		}
 		b := utils.MarshalJSONKey(val)
@@ -392,7 +390,7 @@ func summariseStatements(lines []stmtLogLine) StmtClusterSummary {
 		}
 		trackHost(seen, &s.Hosts, entry.Host)
 	}
-	sort.Strings(s.Hosts)
+	slices.Sort(s.Hosts)
 	return s
 }
 
@@ -648,11 +646,12 @@ func nsToTime(ns uint64) time.Time {
 }
 
 func uuidv7Time(id uuid.UUID) time.Time {
-	if id == uuid.Nil || id[6]>>4 != 7 {
+	if id == uuid.Nil() || id[6]>>4 != 7 {
 		return time.Time{}
 	}
 
-	return time.Unix(id.Time().UnixTime())
+	// RFC 9562 section 5.7: the first 48 bits hold the Unix time in milliseconds.
+	return time.UnixMilli(int64(binary.BigEndian.Uint64(id[:8]) >> 16))
 }
 
 func errorKindFromResults(r *ComparisonResults) string {
@@ -736,10 +735,5 @@ func mergeHosts(a, b []string) []string {
 	for _, h := range b {
 		seen[h] = struct{}{}
 	}
-	out := make([]string, 0, len(seen))
-	for h := range seen {
-		out = append(out, h)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(seen))
 }

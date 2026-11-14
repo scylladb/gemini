@@ -17,7 +17,9 @@ package scylla
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
 	"io"
 	"testing"
 
@@ -31,14 +33,14 @@ import (
 func parseLines(tb testing.TB, data []byte) []Line {
 	tb.Helper()
 
-	dec := json.NewDecoder(bytes.NewReader(data))
+	dec := jsontext.NewDecoder(bytes.NewReader(data))
 	lines := make([]Line, 0, 1)
 
 	for {
 		var l Line
 
-		err := dec.Decode(&l)
-		if err == io.EOF {
+		err := json.UnmarshalDecode(dec, &l)
+		if errors.Is(err, io.EOF) {
 			break
 		}
 

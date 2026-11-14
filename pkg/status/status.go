@@ -15,7 +15,8 @@
 package status
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -93,10 +94,8 @@ func (gs *GlobalStatus) PrintResultAsJSONWithSummary(
 	if len(summary) > 0 {
 		result["corruption_summary"] = summary
 	}
-	encoder := json.NewEncoder(w)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent(" ", "    ")
-	if err = encoder.Encode(result); err != nil {
+	encoder := jsontext.NewEncoder(w, jsontext.WithIndentPrefix(" "), jsontext.WithIndent("    "))
+	if err = json.MarshalEncode(encoder, result, json.Deterministic(true)); err != nil {
 		return fmt.Errorf("unable to create json from result: %w", err)
 	}
 
@@ -148,7 +147,7 @@ func (gs *GlobalStatus) PrintResult(
 		for i, err := range gs.Errors.Errors() {
 			fmt.Printf("Error %d: %v\n", i, err)
 		}
-		jsonSchema, schemaErr := json.MarshalIndent(schema, "", "    ")
+		jsonSchema, schemaErr := json.Marshal(schema, jsontext.WithIndent("    "), json.Deterministic(true))
 		if schemaErr != nil {
 			fmt.Printf("Schema: cannot encode as JSON: %v\n", schemaErr)
 		} else {

@@ -15,7 +15,7 @@
 package tableopts
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 

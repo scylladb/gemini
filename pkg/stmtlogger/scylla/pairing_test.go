@@ -79,8 +79,7 @@ func TestPairWorker_WritesALoneItemAfterTheWindow(t *testing.T) {
 		synctest.Wait()
 		require.Empty(t, s.pairs, "the item waits for its partner")
 
-		time.Sleep(pairWindow + pairWindow/4)
-		synctest.Wait()
+		synctest.Sleep(pairWindow + pairWindow/4)
 
 		pair := <-s.pairs
 		require.True(t, pair.hasOracle)

@@ -20,8 +20,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -640,7 +640,6 @@ func BenchmarkMemoryAllocation(b *testing.B) {
 			}
 
 			b.ReportAllocs()
-			b.ResetTimer()
 			for b.Loop() {
 				_ = New(b.Context(), rand.New(src), fn, table, config, size, 0)
 			}

@@ -15,7 +15,7 @@
 package scylla
 
 import (
-	"sort"
+	"slices"
 
 	"github.com/scylladb/gemini/pkg/joberror"
 )
@@ -57,7 +57,7 @@ func reorganizePartitionKeys(flatKeys map[string][]any, jobErr *joberror.JobErro
 	for k := range flatKeys {
 		keyNames = append(keyNames, k)
 	}
-	sort.Strings(keyNames)
+	slices.Sort(keyNames)
 
 	result := make([]PartitionInfo, numPartitions)
 	for i := range numPartitions {

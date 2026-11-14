@@ -402,8 +402,7 @@ func BenchmarkRowIterator_Collect(b *testing.B) {
 		})
 	}
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		rows, err := iter().Collect()
 		if err != nil {
 			b.Fatal(err)
@@ -426,8 +425,7 @@ func BenchmarkRowIterator_Count(b *testing.B) {
 		})
 	}
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		count, err := iter().Count()
 		if err != nil {
 			b.Fatal(err)
@@ -453,8 +451,7 @@ func BenchmarkCompareCollectedRows(b *testing.B) {
 		oracleRows[i] = NewRow([]string{"pk0", "col1"}, []any{i, i * 2})
 	}
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		result := CompareCollectedRows(table, testRows, oracleRows)
 		if result.MatchCount != 100 {
 			b.Fatalf("expected 100 matches, got %d", result.MatchCount)

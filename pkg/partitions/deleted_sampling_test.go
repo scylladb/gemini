@@ -261,8 +261,7 @@ func TestSamplingBoundsHeapUnderSustainedOverloadIntegration(t *testing.T) {
 		// Let the admission-rate estimate warm up before measuring. synctest.Wait
 		// then blocks until the producer and drain goroutines have caught up to
 		// the current fake time, giving a clean, settled snapshot.
-		time.Sleep(warmup)
-		synctest.Wait()
+		synctest.Sleep(warmup)
 
 		// Snapshot counters at the start of the steady-state window. After
 		// synctest.Wait() the producer is durably blocked, so these are stable.
@@ -273,8 +272,7 @@ func TestSamplingBoundsHeapUnderSustainedOverloadIntegration(t *testing.T) {
 		// Sample heap length across the steady-state window.
 		lens := make([]int, 0, steps)
 		for range steps {
-			time.Sleep(sampleEvery)
-			synctest.Wait()
+			synctest.Sleep(sampleEvery)
 			lens = append(lens, d.Len())
 		}
 

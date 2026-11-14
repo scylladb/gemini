@@ -17,8 +17,7 @@ package statements
 import (
 	"math/rand/v2"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/scylladb/gemini/pkg/partitions"
 	"github.com/scylladb/gemini/pkg/typedef"

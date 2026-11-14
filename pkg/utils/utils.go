@@ -16,7 +16,8 @@ package utils
 
 import (
 	"encoding/binary"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -233,7 +234,7 @@ func Sizeof(v any) uint64 {
 // holds the marshal error. Call it only from String, Error and ToCQL, which
 // cannot return an error.
 func MarshalJSONUnchecked(v any) []byte {
-	data, err := json.Marshal(v)
+	data, err := json.Marshal(v, json.Deterministic(true))
 	if err != nil {
 		return marshalFailure(err)
 	}
@@ -252,7 +253,7 @@ const goSyntaxKeyPrefix = "<go>"
 // goSyntaxKeyPrefix and v in Go syntax. Two different values thus give two
 // different results, and the result is always valid JSON.
 func MarshalJSONKey(v any) []byte {
-	data, err := json.Marshal(v)
+	data, err := json.Marshal(v, json.Deterministic(true), jsontext.EscapeForHTML(true))
 	if err == nil {
 		return data
 	}

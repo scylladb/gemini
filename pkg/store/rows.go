@@ -17,7 +17,7 @@ package store
 import (
 	"bytes"
 	"cmp"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"math/big"
 	"net"
@@ -156,7 +156,7 @@ func (r Rows) Less(i, j int) bool {
 // map[columnName]value so logs and errors include meaningful row content.
 func (r Row) MarshalJSON() ([]byte, error) {
 	if r.columns == nil {
-		return json.Marshal(map[string]any{})
+		return json.Marshal(map[string]any{}, json.Deterministic(true))
 	}
 	// Build a temporary map to serialize column values by name.
 	// Pre-size the map for efficiency.
@@ -169,7 +169,7 @@ func (r Row) MarshalJSON() ([]byte, error) {
 			out[name] = nil
 		}
 	}
-	return json.Marshal(out)
+	return json.Marshal(out, json.Deterministic(true))
 }
 
 // ValuesEqual reports whether two values are semantically equal, handling

@@ -317,10 +317,7 @@ func pool() *scyllaPool {
 				maxNodes = n
 			}
 		}
-		if maxNodes < 2 {
-			maxNodes = 2
-		}
-		scyllaPoolInst = &scyllaPool{cap: maxNodes, idle: make(map[string][]*scyllaNode)}
+		scyllaPoolInst = &scyllaPool{cap: max(maxNodes, 2), idle: make(map[string][]*scyllaNode)}
 		installSignalCleanup()
 	})
 	return scyllaPoolInst

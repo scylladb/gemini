@@ -21,8 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/metrics"
@@ -313,7 +312,7 @@ func (p *Partitions) valuesCopy(idx uint64) typedef.PartitionKeys {
 }
 
 func (p *Partitions) fill(idx uint64) {
-	id, _ := uuid.NewV7()
+	id := uuid.NewV7()
 
 	p.validationMu.Lock()
 	p.uuidToIdx[id] = idx
@@ -325,7 +324,7 @@ func (p *Partitions) fill(idx uint64) {
 	}
 
 	// During initial population the old *Partition is the zero-value struct
-	// with uuid.Nil, which is never in the maps.
+	// with uuid.Nil(), which is never in the maps.
 	if oldPart.id == (uuid.UUID{}) {
 		return
 	}
@@ -485,7 +484,7 @@ func (p *Partitions) isWritten(idx uint64) bool {
 }
 
 func (p *Partitions) Extend() typedef.PartitionKeys {
-	id, _ := uuid.NewV7()
+	id := uuid.NewV7()
 
 	// Hold lock while extending slice AND initializing the new partition
 	// to prevent other goroutines from accessing it during reallocation
@@ -507,7 +506,7 @@ func (p *Partitions) Extend() typedef.PartitionKeys {
 }
 
 func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
-	id, _ := uuid.NewV7()
+	id := uuid.NewV7()
 	p.validationMu.Lock()
 	p.uuidToIdx[id] = idx
 	p.validationMu.Unlock()

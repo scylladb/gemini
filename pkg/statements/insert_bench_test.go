@@ -71,7 +71,6 @@ func BenchmarkInsertWide(b *testing.B) {
 	var stmt *typedef.Stmt
 
 	b.ReportAllocs()
-	b.ResetTimer()
 	for b.Loop() {
 		stmt, err = g.Insert(ctx)
 		if err != nil {

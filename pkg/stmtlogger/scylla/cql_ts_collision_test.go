@@ -18,7 +18,8 @@ package scylla
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"sync"
 	"testing"
@@ -420,7 +421,7 @@ func TestFetchPagesBeyondFirstPage(t *testing.T) {
 	require.NoError(t, err)
 
 	var streamed struct {
-		Statements []json.RawMessage `json:"statements"`
+		Statements []jsontext.Value `json:"statements"`
 	}
 
 	require.NoError(t, json.Unmarshal([]byte("{"+buf.String()+"}"), &streamed))

@@ -126,8 +126,7 @@ func BenchmarkScanVsMapScan(b *testing.B) {
 		for i := range columnNames {
 			columnNames[i] = "col" + string(rune('0'+i))
 		}
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			values := make([]any, colCount)
 			_ = NewRow(columnNames, values)
 		}
@@ -135,8 +134,7 @@ func BenchmarkScanVsMapScan(b *testing.B) {
 
 	b.Run("slice_allocation", func(b *testing.B) {
 		colCount := 10
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			_ = make([]any, colCount)
 		}
 	})
@@ -144,8 +142,7 @@ func BenchmarkScanVsMapScan(b *testing.B) {
 	b.Run("slice_reuse", func(b *testing.B) {
 		colCount := 10
 		scanDest := make([]any, colCount)
-		b.ResetTimer()
-		for range b.N {
+		for b.Loop() {
 			// Simulate reusing the slice
 			for i := range scanDest {
 				scanDest[i] = i

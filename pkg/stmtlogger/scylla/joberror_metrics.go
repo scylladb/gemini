@@ -15,8 +15,9 @@
 package scylla
 
 import (
+	"maps"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -72,11 +73,7 @@ func partitionHashFromValues(v *typedef.Values) string {
 	}
 	// Canonicalize map: keys sorted, values JSON-marshaled
 	m := v.ToMap()
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(m))
 	// Build a deterministic JSON string
 	b := strings.Builder{}
 	b.WriteByte('{')

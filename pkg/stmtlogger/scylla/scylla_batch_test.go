@@ -92,7 +92,7 @@ func BenchmarkFillArgs(b *testing.B) {
 	dst := make([]any, 0, c.argsCap())
 
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		var ok bool
 		dst, ok = c.fillArgs(dst, item)
 		if !ok {

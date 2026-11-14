@@ -15,7 +15,7 @@
 package utils_test
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"io"
 	"math"
@@ -427,12 +427,12 @@ func TestMarshalJSONKey(t *testing.T) {
 	nan := utils.MarshalJSONKey([]any{math.NaN()})
 	inf := utils.MarshalJSONKey([]any{math.Inf(1)})
 
-	require.True(t, json.Valid(nan), "the result must stay valid JSON: %s", nan)
-	require.True(t, json.Valid(inf), "the result must stay valid JSON: %s", inf)
+	require.True(t, jsontext.Value(nan).IsValid(), "the result must stay valid JSON: %s", nan)
+	require.True(t, jsontext.Value(inf).IsValid(), "the result must stay valid JSON: %s", inf)
 	require.NotEqual(t, string(nan), string(inf), "two values that JSON cannot encode must not share one key")
 
 	bareNaN := string(utils.MarshalJSONKey(math.NaN()))
-	require.True(t, json.Valid([]byte(bareNaN)), "the result must stay valid JSON: %s", bareNaN)
+	require.True(t, jsontext.Value([]byte(bareNaN)).IsValid(), "the result must stay valid JSON: %s", bareNaN)
 	for _, s := range []string{"NaN", "<go>NaN", bareNaN} {
 		require.NotEqual(t, bareNaN, string(utils.MarshalJSONKey(s)),
 			"a NaN key must differ from the key of the string %q", s)

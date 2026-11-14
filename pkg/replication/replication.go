@@ -15,7 +15,7 @@
 package replication
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"strings"
 
 	"github.com/scylladb/gemini/pkg/utils"
@@ -43,7 +43,7 @@ func NewNetworkTopologyStrategy() Replication {
 }
 
 func (r Replication) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]any(r))
+	return json.Marshal(map[string]any(r), json.Deterministic(true))
 }
 
 func (r *Replication) UnmarshalJSON(data []byte) error {

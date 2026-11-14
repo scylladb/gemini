@@ -15,7 +15,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -75,7 +76,7 @@ func TestReadExampleSchema(t *testing.T) {
 		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}),
 	}
 
-	testSchemaMarshaled, err := json.MarshalIndent(testSchema, "  ", "  ")
+	testSchemaMarshaled, err := json.Marshal(testSchema, jsontext.WithIndentPrefix("  "), jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		t.Fatalf("unable to marshal schema example json, error=%s\n", err)
 	}

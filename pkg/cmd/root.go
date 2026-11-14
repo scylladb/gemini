@@ -15,7 +15,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log"
@@ -354,7 +355,7 @@ func printSetup(schema *typedef.Schema, ratio statements.Ratios, seed, schemaSee
 }
 
 func printJSON(label string, v any) {
-	data, err := json.MarshalIndent(v, "", "    ")
+	data, err := json.Marshal(v, jsontext.WithIndent("    "), json.Deterministic(true))
 	if err != nil {
 		fmt.Printf("%s: cannot encode as JSON: %v\n", label, err)
 		return

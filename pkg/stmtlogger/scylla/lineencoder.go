@@ -16,7 +16,8 @@ package scylla
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"io"
 	"time"
 )
@@ -52,7 +53,7 @@ func (e *lineEncoder) value(v any) {
 		return
 	}
 
-	bs, err := json.Marshal(v)
+	bs, err := json.Marshal(v, json.Deterministic(true))
 	if err != nil {
 		e.err = err
 		return
@@ -110,7 +111,7 @@ func (e *lineEncoder) array(name string) {
 	e.raw(`"` + name + `":[`)
 }
 
-func (e *lineEncoder) row(first bool, raw json.RawMessage) {
+func (e *lineEncoder) row(first bool, raw jsontext.Value) {
 	if !first {
 		e.raw(`,`)
 	}

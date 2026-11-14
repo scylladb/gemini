@@ -16,8 +16,7 @@ package jobs
 
 import (
 	"errors"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/scylladb/gemini/pkg/typedef"
 )
@@ -35,7 +34,7 @@ func collectPartitionIDs(pks []typedef.PartitionKeys) []uuid.UUID {
 	ids := make([]uuid.UUID, 0, len(pks))
 
 	for i := range pks {
-		if pks[i].ID != uuid.Nil {
+		if pks[i].ID != uuid.Nil() {
 			ids = append(ids, pks[i].ID)
 		}
 	}

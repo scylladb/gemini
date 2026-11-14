@@ -15,7 +15,7 @@
 package typedef_test
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"math/rand/v2"
 	"testing"
 

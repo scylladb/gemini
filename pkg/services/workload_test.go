@@ -18,7 +18,8 @@ package services
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -440,9 +441,9 @@ func TestWorkloadWithFailedValidation(t *testing.T) {
 			}
 
 			var loggedStmt struct {
-				Query      string            `json:"query"`
-				Fragments  []json.RawMessage `json:"mutationFragments"`
-				Statements []json.RawMessage `json:"statements"`
+				Query      string           `json:"query"`
+				Fragments  []jsontext.Value `json:"mutationFragments"`
+				Statements []jsontext.Value `json:"statements"`
 			}
 			err = json.Unmarshal([]byte(line), &loggedStmt)
 			assert.NoError(err, "failed to unmarshal line %d in file %s", i, file)

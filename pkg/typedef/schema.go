@@ -15,7 +15,7 @@
 package typedef
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"strconv"
 
 	"github.com/samber/mo"
@@ -61,7 +61,7 @@ func (m *IndexDef) MarshalJSON() ([]byte, error) {
 		ColumnName: m.ColumnName,
 	}
 
-	return json.Marshal(data)
+	return json.Marshal(data, json.Deterministic(true))
 }
 
 func (m *IndexDef) UnmarshalJSON(data []byte) error {
@@ -132,7 +132,7 @@ func (m *MaterializedView) MarshalJSON() ([]byte, error) {
 }
 
 func (s *Schema) GetHash() string {
-	out, err := json.Marshal(s)
+	out, err := json.Marshal(s, json.Deterministic(true))
 	if err != nil {
 		panic(err)
 	}

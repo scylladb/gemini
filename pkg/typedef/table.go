@@ -29,7 +29,7 @@ type ListColInfo struct {
 
 type Table struct {
 	schema            *Schema
-	KnownIssues       KnownIssues `json:"known_issues"`
+	KnownIssues       KnownIssues `json:"known_issues,omitzero"`
 	Name              string      `json:"name"`
 	listCols          []ListColInfo
 	PartitionKeys     Columns            `json:"partition_keys"`

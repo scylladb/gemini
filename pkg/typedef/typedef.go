@@ -16,15 +16,15 @@ package typedef
 
 import (
 	"bytes"
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"slices"
-	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/scylladb/gocqlx/v3/qb"
 
 	"github.com/scylladb/gemini/pkg/replication"
@@ -440,7 +440,7 @@ func (v *Values) Keys() []string {
 	keys := make([]string, len(v.names))
 	copy(keys, v.names)
 
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys
 }
 
@@ -527,7 +527,7 @@ func (v *Values) MarshalJSON() ([]byte, error) {
 		m[name] = v.vals[i]
 	}
 
-	return json.Marshal(m)
+	return json.Marshal(m, json.Deterministic(true))
 }
 
 func (v *Values) UnmarshalJSON(data []byte) error {
@@ -583,7 +583,7 @@ func (v *Values) Data() []any {
 	for i := range order {
 		order[i] = i
 	}
-	sort.Slice(order, func(a, b int) bool { return v.names[order[a]] < v.names[order[b]] })
+	slices.SortFunc(order, func(a, b int) int { return strings.Compare(v.names[a], v.names[b]) })
 
 	values := make([]any, 0, len(v.names))
 	for _, i := range order {

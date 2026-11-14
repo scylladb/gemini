@@ -165,7 +165,7 @@ func BenchmarkNewRow(b *testing.B) {
 
 		b.Run(fmt.Sprintf("cols=%d", nCols), func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				r := NewRow(names, vals)
 				_ = r
 			}
@@ -181,35 +181,35 @@ func BenchmarkCompareValues(b *testing.B) {
 	b.Run("int32/equal", func(b *testing.B) {
 		b.ReportAllocs()
 		var a, bv any = int32(42), int32(42)
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
 	b.Run("int32/different", func(b *testing.B) {
 		b.ReportAllocs()
 		var a, bv any = int32(1), int32(2)
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
 	b.Run("int64/equal", func(b *testing.B) {
 		b.ReportAllocs()
 		var a, bv any = int64(100), int64(100)
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
 	b.Run("string/equal", func(b *testing.B) {
 		b.ReportAllocs()
 		var a, bv any = "hello-world", "hello-world"
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
 	b.Run("string/different", func(b *testing.B) {
 		b.ReportAllocs()
 		var a, bv any = "aaa", "zzz"
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
@@ -217,7 +217,7 @@ func BenchmarkCompareValues(b *testing.B) {
 		b.ReportAllocs()
 		u := gocql.MustRandomUUID()
 		var a, bv any = u, u
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
@@ -225,14 +225,14 @@ func BenchmarkCompareValues(b *testing.B) {
 		b.ReportAllocs()
 		t0 := time.Now()
 		var a, bv any = t0, t0
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
 	b.Run("float64/equal", func(b *testing.B) {
 		b.ReportAllocs()
 		var a, bv any = float64(3.14), float64(3.14)
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
@@ -240,7 +240,7 @@ func BenchmarkCompareValues(b *testing.B) {
 		b.ReportAllocs()
 		blob := []byte("some-binary-data")
 		var a, bv any = blob, blob
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
@@ -248,7 +248,7 @@ func BenchmarkCompareValues(b *testing.B) {
 		b.ReportAllocs()
 		n := big.NewInt(123456789)
 		var a, bv any = n, n
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
@@ -256,7 +256,7 @@ func BenchmarkCompareValues(b *testing.B) {
 		b.ReportAllocs()
 		d := inf.NewDec(12345, 2)
 		var a, bv any = d, d
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
@@ -264,14 +264,14 @@ func BenchmarkCompareValues(b *testing.B) {
 		// Exercises the fmt.Sprint fallback branch (mismatched/unknown types).
 		b.ReportAllocs()
 		var a, bv any = int32(1), int64(1) // same number, different concrete types
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
 	b.Run("nil/nil", func(b *testing.B) {
 		b.ReportAllocs()
 		var a, bv any
-		for range b.N {
+		for b.Loop() {
 			_ = compareValues(a, bv)
 		}
 	})
@@ -289,13 +289,13 @@ func BenchmarkRowsCmp(b *testing.B) {
 
 		b.Run(fmt.Sprintf("cols=%d/equal", nCols), func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				_ = rowsCmp(r1, r2)
 			}
 		})
 		b.Run(fmt.Sprintf("cols=%d/different", nCols), func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				_ = rowsCmp(r1, r3)
 			}
 		})
@@ -362,8 +362,7 @@ func BenchmarkSortRows(b *testing.B) {
 			}
 
 			dst := make(Rows, tc.nRows)
-			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				copy(dst, src)
 				slices.SortStableFunc(dst, cmpFn)
 			}
@@ -379,28 +378,28 @@ func BenchmarkCanonicalValueString(b *testing.B) {
 	b.Run("int32", func(b *testing.B) {
 		b.ReportAllocs()
 		var v any = int32(42)
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalValueString(v)
 		}
 	})
 	b.Run("int64", func(b *testing.B) {
 		b.ReportAllocs()
 		var v any = int64(9876543210)
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalValueString(v)
 		}
 	})
 	b.Run("string", func(b *testing.B) {
 		b.ReportAllocs()
 		var v any = "some-text-value"
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalValueString(v)
 		}
 	})
 	b.Run("bool", func(b *testing.B) {
 		b.ReportAllocs()
 		var v any = true
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalValueString(v)
 		}
 	})
@@ -408,28 +407,28 @@ func BenchmarkCanonicalValueString(b *testing.B) {
 		b.ReportAllocs()
 		u := gocql.MustRandomUUID()
 		var v any = u
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalValueString(v)
 		}
 	})
 	b.Run("time.Time", func(b *testing.B) {
 		b.ReportAllocs()
 		var v any = time.Now()
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalValueString(v)
 		}
 	})
 	b.Run("blob", func(b *testing.B) {
 		b.ReportAllocs()
 		var v any = []byte("binary-data-here")
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalValueString(v)
 		}
 	})
 	b.Run("float64", func(b *testing.B) {
 		b.ReportAllocs()
 		var v any = float64(3.141592653589793)
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalValueString(v)
 		}
 	})
@@ -437,14 +436,14 @@ func BenchmarkCanonicalValueString(b *testing.B) {
 		b.ReportAllocs()
 		n := int64(42)
 		var v any = &n
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalValueString(v)
 		}
 	})
 	b.Run("nil", func(b *testing.B) {
 		b.ReportAllocs()
 		var v any
-		for range b.N {
+		for b.Loop() {
 			_ = canonicalValueString(v)
 		}
 	})
@@ -467,7 +466,7 @@ func BenchmarkCanonicalizeRow(b *testing.B) {
 
 		b.Run(fmt.Sprintf("cols=%d", nCols), func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				_ = diffRows(table, oracleRow, testRow)
 			}
 		})
@@ -506,7 +505,7 @@ func BenchmarkDiffRows(b *testing.B) {
 
 		b.Run(tc.desc, func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				_ = diffRows(table, oracleRow, testRow)
 			}
 		})
@@ -526,7 +525,7 @@ func BenchmarkBuildRowMap(b *testing.B) {
 
 		b.Run(fmt.Sprintf("rows=%d", nRows), func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				_ = buildRowMap(table, rows)
 			}
 		})
@@ -546,7 +545,7 @@ func BenchmarkPks(b *testing.B) {
 
 		b.Run(fmt.Sprintf("rows=%d", nRows), func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				_ = pks(table, rows)
 			}
 		})
@@ -577,7 +576,7 @@ func BenchmarkRowKeyString(b *testing.B) {
 
 		b.Run(fmt.Sprintf("keyWidth=%d", nKeys), func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				_ = rowKeyString(table, row)
 			}
 		})
@@ -594,7 +593,7 @@ func BenchmarkRowsToKeyStrings(b *testing.B) {
 
 		b.Run(fmt.Sprintf("rows=%d", nRows), func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				_ = rowsToKeyStrings(table, rows)
 			}
 		})
@@ -630,8 +629,7 @@ func BenchmarkCompareCollectedRows_AllMatch(b *testing.B) {
 			b.ReportAllocs()
 			// Pre-build the rows; regenerate each iteration to give the sort
 			// a realistic unsorted input.
-			b.ResetTimer()
-			for range b.N {
+			for b.Loop() {
 				test, oracle := makeScalarRows(table, tc.nRows)
 				result := CompareCollectedRows(table, test, oracle)
 				if result.MatchCount != tc.nRows {
@@ -660,7 +658,7 @@ func BenchmarkCompareCollectedRows_SomeDiff(b *testing.B) {
 		name := fmt.Sprintf("rows=%d/extra=%d/diffs=%d", tc.nRows, tc.nExtra, tc.nDiff)
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				test, oracle := makeScalarRowsWithDiffs(table, tc.nRows, tc.nDiff)
 				result := CompareCollectedRows(table, test, oracle)
 				if len(result.DifferentRows) != tc.nDiff {
@@ -688,7 +686,7 @@ func BenchmarkCompareCollectedRows_CountMismatch(b *testing.B) {
 		name := fmt.Sprintf("rows=%d/missing=%d", tc.nRows, tc.nMissing)
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				test, oracle := makeScalarRowsCountMismatch(table, tc.nRows, tc.nMissing)
 				result := CompareCollectedRows(table, test, oracle)
 				if len(result.TestOnlyRows) != tc.nMissing {
@@ -722,7 +720,7 @@ func BenchmarkZipAndCompare(b *testing.B) {
 		name := fmt.Sprintf("rows=%d/extra=%d/%s", tc.nRows, tc.nExtra, tc.scenario)
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()
-			for range b.N {
+			for b.Loop() {
 				test, oracle := makeScalarRows(table, tc.nRows)
 				result := ZipAndCompare(ctx, table, makeRowIterator(test), makeRowIterator(oracle))
 				if result.MatchCount != tc.nRows {
@@ -742,7 +740,7 @@ func BenchmarkComparisonResult_ToError(b *testing.B) {
 	b.Run("noError", func(b *testing.B) {
 		b.ReportAllocs()
 		result := ComparisonResult{Table: table, MatchCount: 10}
-		for range b.N {
+		for b.Loop() {
 			_ = result.ToError()
 		}
 	})
@@ -757,7 +755,7 @@ func BenchmarkComparisonResult_ToError(b *testing.B) {
 			Table:        table,
 			TestOnlyRows: rows,
 		}
-		for range b.N {
+		for b.Loop() {
 			_ = result.ToError()
 		}
 	})
@@ -778,7 +776,7 @@ func BenchmarkComparisonResult_ToError(b *testing.B) {
 			Table:         table,
 			DifferentRows: diffs,
 		}
-		for range b.N {
+		for b.Loop() {
 			_ = result.ToError()
 		}
 	})

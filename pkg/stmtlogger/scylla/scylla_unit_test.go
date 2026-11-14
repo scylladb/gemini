@@ -17,7 +17,8 @@ package scylla
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -245,11 +246,11 @@ func TestLine_JSONMarshaling(t *testing.T) {
 				Timestamp: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
 				Query:     "SELECT * FROM test",
 				Message:   "test message",
-				MutationFragments: []json.RawMessage{
-					json.RawMessage(`{"data":"test"}`),
+				MutationFragments: []jsontext.Value{
+					jsontext.Value(`{"data":"test"}`),
 				},
-				Statements: []json.RawMessage{
-					json.RawMessage(`{"stmt":"test"}`),
+				Statements: []jsontext.Value{
+					jsontext.Value(`{"stmt":"test"}`),
 				},
 			},
 		},
@@ -397,7 +398,7 @@ func TestStatementSink_WritesAndFlushes(t *testing.T) {
 			e.array("mutationFragments")
 			e.endArray(false)
 			e.array("statements")
-			e.row(true, json.RawMessage(`{"x":1}`))
+			e.row(true, jsontext.Value(`{"x":1}`))
 			e.endArray(true)
 			e.end(false)
 
@@ -475,7 +476,7 @@ func TestStatementSink_NoInterleaving(t *testing.T) {
 			// Write the rows one at a time with a yield between them: without the
 			// sink lock another writer would slip its own rows in here.
 			for i := range 8 {
-				e.row(i == 0, json.RawMessage(`{"x":1}`))
+				e.row(i == 0, jsontext.Value(`{"x":1}`))
 				runtime.Gosched()
 			}
 
@@ -936,7 +937,6 @@ func BenchmarkPrepareValuesOptimized(b *testing.B) {
 	values := mo.Left[[]any, []byte]([]any{"test", 123, true, "another", 456})
 
 	b.ReportAllocs()
-	b.ResetTimer()
 	for b.Loop() {
 		_ = prepareValuesOptimized(values)
 	}
@@ -945,8 +945,7 @@ func BenchmarkPrepareValuesOptimized(b *testing.B) {
 func BenchmarkGetScyllaStatementLogsKeyspace(b *testing.B) {
 	keyspace := "test_keyspace"
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		_ = GetScyllaStatementLogsKeyspace(keyspace)
 	}
 }
@@ -954,8 +953,7 @@ func BenchmarkGetScyllaStatementLogsKeyspace(b *testing.B) {
 func BenchmarkGetScyllaStatementLogsTable(b *testing.B) {
 	table := "test_table"
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		_ = GetScyllaStatementLogsTable(table)
 	}
 }
@@ -967,8 +965,7 @@ func BenchmarkBuildCreateTableQuery(b *testing.B) {
 	}
 	repl := replication.NewNetworkTopologyStrategy()
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		_, _ = buildCreateTableQuery("test_logs", "test_statements", partitionKeys, repl)
 	}
 }
@@ -986,16 +983,15 @@ func BenchmarkLine_Marshal(b *testing.B) {
 		Timestamp: time.Now(),
 		Query:     "SELECT * FROM test",
 		Message:   "test message",
-		MutationFragments: []json.RawMessage{
-			json.RawMessage(`{"data":"test"}`),
+		MutationFragments: []jsontext.Value{
+			jsontext.Value(`{"data":"test"}`),
 		},
-		Statements: []json.RawMessage{
-			json.RawMessage(`{"stmt":"test"}`),
+		Statements: []jsontext.Value{
+			jsontext.Value(`{"stmt":"test"}`),
 		},
 	}
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		_ = utils.MarshalJSONUnchecked(line)
 	}
 }
