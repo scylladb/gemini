@@ -50,6 +50,8 @@ dockers:
     build_flag_templates:
       - '--platform=linux/amd64'
       - '--target=production-goreleaser'
+      - '--provenance=false'
+      - '--sbom=false'
 
   - image_templates:
       - scylladb/gemini:{{ .Version }}-arm64v8
@@ -59,6 +61,8 @@ dockers:
     build_flag_templates:
       - '--platform=linux/arm64/v8'
       - '--target=production-goreleaser'
+      - '--provenance=false'
+      - '--sbom=false'
 
 docker_manifests:
   - name_template: 'scylladb/gemini:{{ .Version }}'
