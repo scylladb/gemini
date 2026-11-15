@@ -314,8 +314,11 @@ type Values struct {
 	vals  [][]any
 }
 
-// index returns the position of name, or -1.
+// index returns the position of name, or -1. A nil *Values holds no names.
 func (v *Values) index(name string) int {
+	if v == nil {
+		return -1
+	}
 	for i, n := range v.names {
 		if n == name {
 			return i
@@ -487,7 +490,12 @@ func (v *Values) Get(name string) []any {
 	return nil
 }
 
+// Keys returns the sorted column names. A nil *Values has no keys. A JobError
+// of an index query holds a nil *Values, because the query has no partition.
 func (v *Values) Keys() []string {
+	if v == nil {
+		return nil
+	}
 	keys := make([]string, len(v.names))
 	copy(keys, v.names)
 
@@ -496,6 +504,9 @@ func (v *Values) Keys() []string {
 }
 
 func (v *Values) Len() int {
+	if v == nil {
+		return 0
+	}
 	return len(v.names)
 }
 

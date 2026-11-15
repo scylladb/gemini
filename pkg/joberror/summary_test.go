@@ -1081,3 +1081,24 @@ func TestPrintCorruptionSummary_SnapshotJSON(t *testing.T) {
 	require.NoError(t, json.Unmarshal(golden, &goldenParsed))
 	assert.Equal(t, goldenParsed, gotParsed, "JSON output changed – run with -update to accept new output")
 }
+
+// TestBuildCorruptionEntriesIndexQuery: the JobError of an index SELECT holds
+// a nil *typedef.Values, because the query has no partition keys. The summary
+// must show the error and must not panic.
+func TestBuildCorruptionEntriesIndexQuery(t *testing.T) {
+	t.Parallel()
+
+	errs := []JobError{{
+		Timestamp: time.Now(),
+		StmtType:  typedef.SelectByIndexStatementType,
+		Message:   "index query diverged",
+		Query:     "SELECT * FROM ks1.table1 WHERE col0=?",
+	}}
+
+	var entries []CorruptionEntry
+	require.NotPanics(t, func() {
+		entries = BuildCorruptionEntries(errs, nil, nil)
+	})
+	require.Len(t, entries, 1)
+	assert.Equal(t, notAvailable, entries[0].PartitionKeys)
+}
