@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/scylladb/gemini/pkg/joberror"
+	"github.com/scylladb/gemini/pkg/partitions"
 	"github.com/scylladb/gemini/pkg/status"
 	"github.com/scylladb/gemini/pkg/stop"
 	"github.com/scylladb/gemini/pkg/store"
@@ -303,4 +304,75 @@ func TestValidateDeletedPartition_ClassifiesTheCheckResult(t *testing.T) {
 			require.Contains(t, jobErr.Message, tc.wantMessage)
 		})
 	}
+}
+
+// claimingGenerator answers ClaimDivergedKey like partitions.Partitions: true
+// for the first claim of a fingerprint.
+type claimingGenerator struct {
+	knownInvalidGenerator
+
+	claimed map[string]bool
+}
+
+func (g *claimingGenerator) ClaimDivergedKey(fp string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.claimed[fp] {
+		return false
+	}
+	g.claimed[fp] = true
+
+	return true
+}
+
+func pkFingerprint(t *testing.T, pk int32) string {
+	t.Helper()
+
+	fp, ok := partitions.KeyFingerprint(divergenceTable().PartitionKeys, makeRowForPartition(pk).Get)
+	require.True(t, ok)
+
+	return fp
+}
+
+// TestIndexDivergence_ReportsOnlyNewPartitions: an index query names no
+// partition, so its differing rows are attributed to partitions by their key
+// fingerprint. A partition that gemini already knows differs is left out, and
+// each new partition is reported once.
+func TestIndexDivergence_ReportsOnlyNewPartitions(t *testing.T) {
+	t.Parallel()
+
+	indexStmt := func() *typedef.Stmt {
+		return &typedef.Stmt{
+			QueryType: typedef.SelectByIndexStatementType,
+			Query:     "SELECT * FROM ks.t WHERE col0=? ALLOW FILTERING",
+		}
+	}
+
+	gen := &claimingGenerator{claimed: map[string]bool{pkFingerprint(t, 1): true}}
+	v := &Validation{
+		table:        divergenceTable(),
+		keyspaceName: "ks",
+		generator:    gen,
+		store:        &mockStore{},
+		status:       status.NewGlobalStatus(100),
+		stopFlag:     stop.NewFlag("index-divergence"),
+		maxAttempts:  3,
+	}
+
+	stmt := indexStmt()
+	err := v.handleCheckFailure(attemptHistory{divergence: diffOn(stmt, 1)}, stmt)
+	require.NoError(t, err, "a partition that gemini made diverge is not a SUT bug")
+
+	stmt = indexStmt()
+	err = v.handleCheckFailure(attemptHistory{divergence: diffOn(stmt, 1, 2)}, stmt)
+	jobErr, ok := errors.AsType[*joberror.JobError](err)
+	require.True(t, ok, "a new partition is reported")
+	require.NotNil(t, jobErr.Results)
+	require.Len(t, jobErr.Results.TestOnlyRows, 1, "the rows of the known partition are left out")
+	require.Contains(t, string(jobErr.Results.TestOnlyRows[0]), `"pk1":2`)
+	require.Len(t, jobErr.Results.TestRows, 1)
+
+	stmt = indexStmt()
+	err = v.handleCheckFailure(attemptHistory{divergence: diffOn(stmt, 2)}, stmt)
+	require.NoError(t, err, "a partition is reported once")
 }

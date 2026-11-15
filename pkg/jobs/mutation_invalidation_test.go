@@ -50,6 +50,8 @@ func (g *invalidationRecorder) MarkInvalid(keys *typedef.PartitionKeys) bool {
 	return true
 }
 
+func (g *invalidationRecorder) ClaimDivergedKey(_ string) bool { return true }
+
 func (g *invalidationRecorder) count() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()

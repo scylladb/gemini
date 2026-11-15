@@ -433,10 +433,7 @@ func (v *Validation) reportDivergence(err error, stmt *typedef.Stmt, prefix stri
 	var je *joberror.JobError
 	switch {
 	case len(stmt.PartitionKeys) == 0:
-		// An index query names no partition: its rows come from any
-		// partition the index matches. There is nothing to mark and nothing
-		// to deduplicate by, so its failure is reported every time.
-		je = v.buildJobError(err, stmt, prefix+err.Error())
+		je = v.indexDivergence(err, stmt, prefix)
 	case newCount == 0:
 	case newCount == len(stmt.PartitionKeys):
 		je = v.buildJobError(err, stmt, prefix+err.Error())
@@ -569,6 +566,62 @@ func (v *Validation) buildPartialJobError(err error, stmt *typedef.Stmt, newly [
 		}
 		je.Results = comparisonResults(filtered)
 	}
+
+	return je
+}
+
+// indexDivergence returns the JobError of an index query, or nil. An index
+// query names no partition: its rows come from any partition that the index
+// matches. Each differing row is attributed to its partition by
+// partitions.KeyFingerprint. A row is reported only when ClaimDivergedKey
+// reports its partition as new. A partition that gemini made diverge, for
+// example with an asymmetric write, was named by MarkInvalid, and a partition
+// that an earlier report named was claimed. Neither is reported again. A row
+// without a fingerprint is always reported.
+func (v *Validation) indexDivergence(err error, stmt *typedef.Stmt, prefix string) *joberror.JobError {
+	ve, ok := errors.AsType[*store.ValidationError](err)
+	if !ok || ve.ComparisonResults == nil {
+		return v.buildJobError(err, stmt, prefix+err.Error())
+	}
+
+	claims := make(map[string]bool)
+	isNew := func(row store.Row) bool {
+		fp, hasFP := partitions.KeyFingerprint(v.table.PartitionKeys, row.Get)
+		if !hasFP {
+			return true
+		}
+		claimed, seen := claims[fp]
+		if !seen {
+			claimed = v.generator.ClaimDivergedKey(fp)
+			claims[fp] = claimed
+		}
+		return claimed
+	}
+
+	cr := ve.ComparisonResults
+	filtered := &store.ComparisonResults{
+		TestOnlyRows:   filterRows(cr.TestOnlyRows, isNew),
+		OracleOnlyRows: filterRows(cr.OracleOnlyRows, isNew),
+	}
+	for _, d := range cr.DifferentRows {
+		if isNew(d.TestRow) {
+			filtered.DifferentRows = append(filtered.DifferentRows, d)
+		}
+	}
+	if len(filtered.TestOnlyRows)+len(filtered.OracleOnlyRows)+len(filtered.DifferentRows) == 0 {
+		return nil
+	}
+	if len(claims) > 0 {
+		reported := func(row store.Row) bool {
+			fp, hasFP := partitions.KeyFingerprint(v.table.PartitionKeys, row.Get)
+			return !hasFP || claims[fp]
+		}
+		filtered.TestRows = filterRows(cr.TestRows, reported)
+		filtered.OracleRows = filterRows(cr.OracleRows, reported)
+	}
+
+	je := v.buildJobError(err, stmt, prefix+err.Error())
+	je.Results = comparisonResults(filtered)
 
 	return je
 }

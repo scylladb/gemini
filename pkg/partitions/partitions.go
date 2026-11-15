@@ -62,6 +62,10 @@ type (
 		// the limit it still returns true for the first caller, but it leaves
 		// the slot unmarked.
 		MarkInvalid(keys *typedef.PartitionKeys) bool
+		// ClaimDivergedKey records a differing partition that an index query
+		// found by its KeyFingerprint. It reports true when no earlier claim
+		// and no MarkInvalid named the partition.
+		ClaimDivergedKey(fp string) bool
 		// IsInvalid reports whether the partition at idx is invalid.
 		IsInvalid(idx uint64) bool
 		// InvalidCount returns the current number of permanently invalid partitions.
@@ -158,10 +162,15 @@ type (
 		// reported at the maxInvalid limit. Each partition is then reported
 		// once. deleteValidation removes the entry.
 		reportedUnmarked sync.Map
-		r                random.GoRoutineSafeRandom
-		parts            partitions
-		config           typedef.PartitionRangeConfig
-		invalidCount     atomic.Uint64
+		// diverged holds the KeyFingerprint of every partition that
+		// MarkInvalid or ClaimDivergedKey named. An index query finds a
+		// partition by its rows, not by its slot, so it looks the partition
+		// up here.
+		diverged     sync.Map
+		r            random.GoRoutineSafeRandom
+		parts        partitions
+		config       typedef.PartitionRangeConfig
+		invalidCount atomic.Uint64
 		// reportedInvalid is this pool's share of the partitions_invalid
 		// gauge, see publishInvalid.
 		reportedInvalid atomic.Int64
@@ -749,7 +758,9 @@ func (p *Partitions) MarkInvalid(keys *typedef.PartitionKeys) bool {
 	p.validationMu.RUnlock()
 	if !ok {
 		// UUID no longer tracked (slot replaced and fully retired) — nothing to
-		// report.
+		// report. The rows of the partition can still differ, so an index
+		// query must not report them.
+		p.recordDiverged(keys)
 		return false
 	}
 
@@ -761,6 +772,19 @@ func (p *Partitions) MarkInvalid(keys *typedef.PartitionKeys) bool {
 	defer p.invalidMu.Unlock()
 
 	s := p.slotAt(idx)
+
+	// An index query that already reported the partition leaves only the
+	// slot mark to do. The record and the mark both hold invalidMu, so of
+	// two concurrent calls on one partition exactly one reports it.
+	if p.recordDiverged(keys) {
+		if s.part.Load().id == keys.ID && !s.invalid.Load() &&
+			(p.maxInvalid == 0 || p.invalidCount.Load() < p.maxInvalid) {
+			s.invalid.Store(true)
+			p.invalidCount.Add(1)
+			p.publishInvalid()
+		}
+		return false
+	}
 
 	// The slot may have been replaced (via Replace/fill) since our uuidToIdx
 	// lookup — or, for a deleted partition, was replaced by design. If it no

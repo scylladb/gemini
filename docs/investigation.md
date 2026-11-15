@@ -170,6 +170,11 @@ A multi-partition SELECT reports only the partitions whose rows differ and that
 were not already invalid. The `partitionIds` and the rows in `results` belong
 to those partitions.
 
+An index query names no partition. Its error has no `partitionIds`, and its
+partition keys show as not available. The rows in `results` belong only to
+partitions that no earlier error named and that gemini did not mark invalid.
+Each partition is reported one time.
+
 ### Oracle Write Failures
 
 A write that the test cluster applied and the oracle cluster rejected is not a

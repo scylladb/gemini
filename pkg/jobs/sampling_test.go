@@ -74,6 +74,7 @@ func (g *trackingGenerator) ValidationStats(_ *typedef.PartitionKeys) (uint64, u
 	return 0, 0, 0, nil, 0
 }
 func (g *trackingGenerator) MarkInvalid(_ *typedef.PartitionKeys) bool { return false }
+func (g *trackingGenerator) ClaimDivergedKey(_ string) bool            { return true }
 func (g *trackingGenerator) IsInvalid(_ uint64) bool                   { return false }
 func (g *trackingGenerator) InvalidCount() uint64                      { return 0 }
 func (g *trackingGenerator) PeekTrackedRow() (partitions.TrackedRow, bool) {

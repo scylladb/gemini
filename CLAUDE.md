@@ -317,6 +317,10 @@ type Interface interface {
 - **Invalid partitions**: `MarkInvalid()` returns true once per partition. It marks the slot only
   while fewer than `maxInvalid` slots are invalid. At the cap it still returns true, so the caller
   reports the divergence, and the slot stays unmarked. `reportedUnmarked` stops a second report.
+- **Diverged keys** (`diverged.go`): `MarkInvalid` records the `KeyFingerprint` of every partition
+  it sees, the CQL wire bytes of the partition key columns. An index query names no partition, so
+  validation finds the partition of each differing row by its fingerprint. `ClaimDivergedKey`
+  reports it only the first time. A partition that gemini made diverge is not reported again.
 - **Reference counting**: Each borrow gets a `keysRef`. Its `release` drops `refCount` once. The
   UUID mapping is removed when `refCount` reaches zero on a retired partition.
 

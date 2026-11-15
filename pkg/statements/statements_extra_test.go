@@ -106,6 +106,8 @@ func (m *mockPartitions) MarkInvalid(_ *typedef.PartitionKeys) bool {
 	return true
 }
 
+func (m *mockPartitions) ClaimDivergedKey(_ string) bool { return true }
+
 func (m *mockPartitions) IsInvalid(_ uint64) bool {
 	return false
 }
