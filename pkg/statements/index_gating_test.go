@@ -65,3 +65,23 @@ func TestIndexesAreCreatedWithoutMaterializedViews(t *testing.T) {
 		})
 	}
 }
+
+// TestIndexesSkipTinyintColumns: an index query on a tinyint column reads
+// about 1/256 of the table. No generated schema indexes a tinyint column.
+func TestIndexesSkipTinyintColumns(t *testing.T) {
+	t.Parallel()
+
+	sc := testSchemaConfig
+	sc.CQLFeature = typedef.CQLFeatureAll
+	sc.MinColumns = 10
+	sc.MaxColumns = 20
+
+	for seed := range uint64(50) {
+		schema := statements.GenSchema(sc, rand.NewPCG(seed, seed))
+		for _, table := range schema.Tables {
+			for _, idx := range table.Indexes {
+				assert.NotEqual(t, typedef.TypeTinyint, idx.Column.Type, "seed %d indexes %s", seed, idx.ColumnName)
+			}
+		}
+	}
+}

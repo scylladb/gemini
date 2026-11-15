@@ -47,7 +47,7 @@ By default, Gemini generates a random schema based on CLI parameters:
 ### CQL Feature Levels
 
 - **basic** - Simple types only (int, text, boolean, etc.)
-- **normal** - Adds collections (list, set, map), tuples and secondary indexes on regular columns
+- **normal** - Adds collections (list, set, map), tuples and secondary indexes on regular columns of type `int`, `smallint`, `varint`, `float`, `double` or `decimal`
 - **all** - Adds UDTs (User-Defined Types) and complex nested types
 
 ### Reproducible Schemas

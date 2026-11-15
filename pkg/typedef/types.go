@@ -73,13 +73,17 @@ var (
 		TypeDecimal:  {},
 	}
 
+	// TypesForIndex are the column types that get a secondary index. An index
+	// query compares a random value, so every type here has a large value
+	// space. A tinyint has 256 values: its query reads about 1/256 of the
+	// table, and concurrent writes change that slice between the reads of
+	// the two clusters.
 	TypesForIndex = SimpleTypes{
 		TypeDecimal,
 		TypeDouble,
 		TypeFloat,
 		TypeInt,
 		TypeSmallint,
-		TypeTinyint,
 		TypeVarint,
 	}
 
