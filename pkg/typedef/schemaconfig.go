@@ -50,8 +50,11 @@ type SchemaConfig struct {
 	AsyncObjectStabilizationAttempts int
 	CQLFeature                       CQLFeature
 	UseMaterializedViews             bool
-	UseLWT                           bool
-	UseCounters                      bool
+	// UseSecondaryIndexes creates secondary indexes on regular columns of a
+	// generated schema with CQLFeatureAll.
+	UseSecondaryIndexes bool
+	UseLWT              bool
+	UseCounters         bool
 }
 
 func (sc *SchemaConfig) Valid() error {

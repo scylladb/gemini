@@ -68,6 +68,7 @@ Flags:
       --row-tracker-capacity int                       Maximum capacity for the row tracker used by targeted delete operations. N > 0 (default 100000): auto-sized from deletion ratios, clamped to N. -1: fully auto-sized (no cap). 0: disable row tracking. (default 100000)
       --schema string                                  Schema JSON config file
       --schema-seed string                             Schema seed value (default "random")
+      --secondary-indexes                              Create secondary indexes on regular columns and run index SELECT queries. Needs --cql-features all
   -s, --seed string                                    Statement seed value (default "random")
       --statement-log-file-compression string          Compression of the statement log files: none, gzip or zstd (default "none")
       --statement-ratios string                        Statement ratios configuration in JSON format (e.g., '{"mutation_ratios":{"insert_ratio":0.7,"update_ratio":0.2,"delete_ratio":0.1}}')

@@ -43,12 +43,13 @@ By default, Gemini generates a random schema based on CLI parameters:
 | `--min-columns` | 5 | Minimum regular columns |
 | `--dataset-size` | large | Size preset: `small` or `large` |
 | `--cql-features` | normal | Feature set: `basic`, `normal`, or `all` |
+| `--secondary-indexes` | false | Create secondary indexes on regular columns. Needs `all` |
 
 ### CQL Feature Levels
 
 - **basic** - Simple types only (int, text, boolean, etc.)
-- **normal** - Adds collections (list, set, map), tuples and secondary indexes on regular columns of type `int`, `smallint`, `varint`, `float`, `double` or `decimal`
-- **all** - Adds UDTs (User-Defined Types) and complex nested types
+- **normal** - Adds collections (list, set, map) and tuples
+- **all** - Adds UDTs (User-Defined Types) and complex nested types. With `--secondary-indexes`, it also adds secondary indexes on regular columns of type `int`, `smallint`, `varint`, `float`, `double` or `decimal`
 
 ### Reproducible Schemas
 

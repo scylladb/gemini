@@ -102,9 +102,9 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 		table.KnownIssues[typedef.KnownIssuesJSONWithTuples] = true
 	}
 
-	// Secondary indexes are part of the default feature set. Materialized
+	// Secondary indexes need the full feature set and the flag. Materialized
 	// views are a separate option and do not control them.
-	if sc.CQLFeature >= typedef.CQLFeatureNormal && columns > 0 {
+	if sc.CQLFeature >= typedef.CQLFeatureAll && sc.UseSecondaryIndexes && columns > 0 {
 		table.Indexes = CreateIndexesForColumn(&table, utils.RandInt2(r, 1, columns))
 	}
 

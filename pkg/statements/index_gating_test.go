@@ -24,20 +24,23 @@ import (
 	"github.com/scylladb/gemini/pkg/typedef"
 )
 
-// TestIndexesAreCreatedWithoutMaterializedViews: the default feature set
-// creates secondary indexes, so index SELECTs run in a default run. Basic
-// creates none.
-func TestIndexesAreCreatedWithoutMaterializedViews(t *testing.T) {
+// TestIndexesFollowTheFlag: secondary indexes exist only when
+// UseSecondaryIndexes is set and the feature set is all. Materialized
+// views do not control them.
+func TestIndexesFollowTheFlag(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		name        string
 		feature     typedef.CQLFeature
+		useIndexes  bool
 		wantIndexes bool
 	}{
-		{name: "basic", feature: typedef.CQLFeatureBasic, wantIndexes: false},
-		{name: "normal", feature: typedef.CQLFeatureNormal, wantIndexes: true},
-		{name: "all", feature: typedef.CQLFeatureAll, wantIndexes: true},
+		{name: "basic with flag", feature: typedef.CQLFeatureBasic, useIndexes: true, wantIndexes: false},
+		{name: "normal with flag", feature: typedef.CQLFeatureNormal, useIndexes: true, wantIndexes: false},
+		{name: "all with flag", feature: typedef.CQLFeatureAll, useIndexes: true, wantIndexes: true},
+		{name: "normal without flag", feature: typedef.CQLFeatureNormal, useIndexes: false, wantIndexes: false},
+		{name: "all without flag", feature: typedef.CQLFeatureAll, useIndexes: false, wantIndexes: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -45,6 +48,7 @@ func TestIndexesAreCreatedWithoutMaterializedViews(t *testing.T) {
 			sc := testSchemaConfig
 			sc.CQLFeature = tc.feature
 			sc.UseMaterializedViews = false
+			sc.UseSecondaryIndexes = tc.useIndexes
 			sc.MinColumns = 5
 			sc.MaxColumns = 10
 
@@ -58,7 +62,7 @@ func TestIndexesAreCreatedWithoutMaterializedViews(t *testing.T) {
 			}
 
 			if tc.wantIndexes {
-				assert.Positive(t, indexes, "the default feature set must create indexes")
+				assert.Positive(t, indexes)
 			} else {
 				assert.Zero(t, indexes)
 			}
@@ -73,6 +77,7 @@ func TestIndexesSkipTinyintColumns(t *testing.T) {
 
 	sc := testSchemaConfig
 	sc.CQLFeature = typedef.CQLFeatureAll
+	sc.UseSecondaryIndexes = true
 	sc.MinColumns = 10
 	sc.MaxColumns = 20
 

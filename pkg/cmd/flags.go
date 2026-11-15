@@ -59,6 +59,7 @@ var (
 	datasetSize                      string
 	cqlFeatures                      string
 	useMaterializedViews             bool
+	useSecondaryIndexes              bool
 	level                            string
 	maxRetriesMutate                 int
 	maxRetriesMutateSleep            time.Duration
@@ -203,6 +204,9 @@ func setupFlags(cmd *cobra.Command) {
 		StringVarP(&cqlFeatures, "cql-features", "", "normal", "Specify the type of cql features to use, basic|normal|all")
 	cmd.Flags().
 		BoolVarP(&useMaterializedViews, "materialized-views", "", false, "Run gemini with materialized views support")
+	cmd.Flags().
+		BoolVarP(&useSecondaryIndexes, "secondary-indexes", "", false,
+			"Create secondary indexes on regular columns and run index SELECT queries. Needs --cql-features all")
 	cmd.Flags().
 		StringVarP(&level, "level", "", "info", "Specify the logging level, debug|info|warn|error|dpanic|panic|fatal")
 	cmd.Flags().
