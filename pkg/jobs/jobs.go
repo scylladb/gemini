@@ -16,6 +16,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -53,7 +54,7 @@ type Jobs struct {
 	schema               *typedef.Schema
 	status               *status.GlobalStatus
 	logger               *zap.Logger
-	random               *rand.ChaCha8
+	random               rand.Source
 	ratioController      *statements.RatioController
 	name                 string
 	mutationConcurrency  int
@@ -71,6 +72,33 @@ var ErrNoStatement = errors.New("no statement generated")
 // of headroom while still bounding total runtime so SCT does not have to
 // wait out its own (multi-hour) timeout when gemini deadlocks.
 const watchdogGracePeriod = 5 * time.Minute
+
+// retryDrainGrace is how long the run context outlives the soft stop. The
+// validation workers use it to finish the retries they already queued: a retry
+// is a validation that already saw a difference, so dropping it at the end of
+// the run would leave a possible divergence unreported. It must stay well
+// below watchdogGracePeriod.
+const retryDrainGrace = time.Minute
+
+// seedWorker fills seed with fresh bytes of the run's source.
+func (j *Jobs) seedWorker(seed *[32]byte) {
+	for i := 0; i < len(seed); i += 8 {
+		binary.LittleEndian.PutUint64(seed[i:], j.random.Uint64())
+	}
+}
+
+// runDeadlines returns when the soft stop fires and when the run context ends,
+// both measured from the start of the run. The context ends after the soft
+// stop, so the workers can finish their queued retries. A run without a
+// duration has no soft stop timer.
+func runDeadlines(duration time.Duration) (softStop, contextEnd time.Duration) {
+	softStop = duration + time.Second
+	if duration <= 0 {
+		return softStop, softStop
+	}
+
+	return softStop, softStop + retryDrainGrace
+}
 
 // watchdogDump writes a full goroutine stack trace to a file in the current
 // working directory and returns the path. It never panics; on failure it
@@ -124,7 +152,7 @@ func New(
 	globalStatus *status.GlobalStatus,
 	ratioController *statements.RatioController,
 	logger *zap.Logger,
-	src *rand.ChaCha8,
+	src rand.Source,
 	ratios statements.Ratios,
 	limiter *concurrency.Limiter,
 ) *Jobs {
@@ -177,7 +205,9 @@ func (j *Jobs) Run(
 	log.Info("start jobs", zap.String("mode", mode))
 	defer log.Info("stop jobs")
 
-	timeoutCtx, cancel := context.WithTimeout(base, duration+1*time.Second)
+	softStopAfter, contextEnd := runDeadlines(duration)
+
+	timeoutCtx, cancel := context.WithTimeout(base, contextEnd)
 	defer cancel()
 
 	g, gCtx := errgroup.WithContext(timeoutCtx)
@@ -196,7 +226,7 @@ func (j *Jobs) Run(
 	// all firing at the same absolute deadline, producing N dump files and
 	// N racing os.Exit(2) calls.
 	if duration > 0 {
-		softTimer := time.AfterFunc(duration+1*time.Second, func() {
+		softTimer := time.AfterFunc(softStopAfter, func() {
 			log.Debug("workload timeout reached, setting soft stop (no parent propagation)")
 			// Do not propagate to parent; each Run call manages its own lifecycle.
 			stopFlag.SetSoft(false)
@@ -210,7 +240,7 @@ func (j *Jobs) Run(
 		// next post-mortem takes minutes instead of days, then
 		// os.Exit so SCT does not have to sit out its own 48h
 		// timeout.
-		watchdogDeadline := duration + watchdogGracePeriod
+		watchdogDeadline := contextEnd + watchdogGracePeriod
 		watchdogTimer := time.AfterFunc(watchdogDeadline, func() {
 			dumpPath := watchdogDump(log)
 			log.Error("watchdog deadline exceeded — workers did not exit, forcing process exit",
@@ -242,7 +272,7 @@ func (j *Jobs) Run(
 				)
 				for i := range j.mutationConcurrency {
 					newSrc := [32]byte{}
-					_, _ = j.random.Read(newSrc[:])
+					j.seedWorker(&newSrc)
 
 					mutation := NewMutation(
 						j.schema,
@@ -294,7 +324,7 @@ func (j *Jobs) Run(
 				)
 				for i := range j.readConcurrency {
 					newSrc := [32]byte{}
-					_, _ = j.random.Read(newSrc[:])
+					j.seedWorker(&newSrc)
 
 					validation := NewValidation(
 						j.schema,

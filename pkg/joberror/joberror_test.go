@@ -18,11 +18,13 @@ import (
 	"encoding/hex"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/scylladb/gemini/pkg/typedef"
@@ -485,5 +487,35 @@ func TestListError_ConcurrentAccess(t *testing.T) {
 	errs := el.Errors()
 	if len(errs) == 0 {
 		t.Error("Expected some errors to be added concurrently")
+	}
+}
+
+// TestListErrorHashRace: the statement fetcher hashes each error it receives
+// while the report copies the list. Run with -race.
+func TestListErrorHashRace(t *testing.T) {
+	t.Parallel()
+
+	el := NewListError(16)
+	ch := el.GetChannel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for jobErr := range ch {
+			_ = jobErr.Hash()
+			_ = jobErr.HashHex()
+		}
+	}()
+
+	for i := range 16 {
+		el.AddError(JobError{Query: fmt.Sprintf("SELECT %d", i), Message: "m"})
+		_ = el.Errors()
+	}
+
+	_ = el.Close()
+	<-done
+
+	for _, jobErr := range el.Errors() {
+		assert.NotEqual(t, [32]byte{}, jobErr.hash, "the hash must be computed when the error is added")
 	}
 }

@@ -61,7 +61,7 @@ func (g *Generator) buildCachedSelectQueries() {
 	}
 	g.selectSinglePartitionQuery, _ = builder.ToCql()
 
-	maxN := g.table.PartitionKeys.Len()
+	maxN := g.maxMultiplePartitionCount()
 	g.selectMultiplePartitionQueries = make([]string, maxN+1)
 	for i := range maxN {
 		n := i + 1
@@ -252,12 +252,13 @@ func (g *Generator) genMultiplePartitionClusteringRangeQuery(ctx context.Context
 }
 
 func (g *Generator) genSingleIndexQuery() *typedef.Stmt {
-	idxCount := g.getIndex(0)
-	values := make([]any, 0, idxCount)
-	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...).AllowFiltering()
-
 	g.table.RLock()
 	defer g.table.RUnlock()
+
+	// Counted under the lock that guards the slice it is applied to.
+	idxCount := g.getIndexCount()
+	values := make([]any, 0, idxCount)
+	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...).AllowFiltering()
 
 	for _, idx := range g.table.Indexes[:idxCount] {
 		builder = builder.Where(qb.Eq(idx.ColumnName))

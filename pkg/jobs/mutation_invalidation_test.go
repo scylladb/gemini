@@ -198,3 +198,78 @@ func TestMutationRun_AsymmetricWriteInvalidatesRegardlessOfErrorKind(t *testing.
 		})
 	}
 }
+
+// TestMutationRun_UnknownOutcomeAndCancelInvalidate pins two more reasons to
+// distrust a partition: a write whose outcome is unknown and cannot be undone
+// (a counter increment that timed out), and a write the shutdown interrupted
+// after one cluster took it. Neither is charged to the error budget.
+func TestMutationRun_UnknownOutcomeAndCancelInvalidate(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		build      func() *store.MutationError
+		wantReturn error
+		name       string
+	}{
+		{
+			name: "counter increment with unknown outcome",
+			build: func() *store.MutationError {
+				mutErr := &store.MutationError{OutcomeUnknown: true}
+				mutErr.Finalize(context.DeadlineExceeded)
+				return mutErr
+			},
+		},
+		{
+			name: "asymmetric write interrupted by shutdown",
+			build: func() *store.MutationError {
+				mutErr := &store.MutationError{TestStoreSuccess: true}
+				mutErr.Finalize(context.Canceled)
+				return mutErr
+			},
+			wantReturn: context.Canceled,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			gen := &invalidationRecorder{}
+			table := &typedef.Table{
+				Name:          "t",
+				PartitionKeys: typedef.Columns{{Name: "pk1", Type: typedef.TypeInt}},
+				Columns:       typedef.Columns{{Name: "c1", Type: typedef.TypeInt}},
+			}
+
+			controller, err := statements.NewRatioController(
+				statements.DefaultStatementRatios(),
+				rand.New(rand.NewChaCha8([32]byte{})),
+			)
+			require.NoError(t, err)
+
+			vrc := typedef.ValueRangeConfig{}
+			m := &Mutation{
+				table:     table,
+				schema:    &typedef.Schema{Keyspace: typedef.Keyspace{Name: "ks"}},
+				logger:    zap.NewNop(),
+				status:    status.NewGlobalStatus(10),
+				generator: gen,
+				store:     &mutationErrStore{err: tc.build()},
+				statement: statements.New(
+					"ks", gen, table,
+					rand.New(rand.NewChaCha8([32]byte{})),
+					&vrc, controller, false,
+				),
+			}
+
+			runErr := m.run(t.Context())
+
+			assert.Positive(t, gen.count(), "the partition must be invalidated")
+
+			var jobErr *joberror.JobError
+			assert.NotErrorAs(t, runErr, &jobErr, "neither case is a data error")
+
+			if tc.wantReturn != nil {
+				assert.ErrorIs(t, runErr, tc.wantReturn)
+			}
+		})
+	}
+}

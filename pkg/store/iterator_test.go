@@ -204,7 +204,7 @@ func TestCompareCollectedRows(t *testing.T) {
 		result := CompareCollectedRows(table, testRows, oracleRows)
 
 		require.Error(t, result.ToError())
-		assert.Equal(t, 0, result.MatchCount)
+		assert.Equal(t, 1, result.MatchCount, "key1 is on both sides and matches")
 		assert.Len(t, result.TestOnlyRows, 1)
 		assert.Empty(t, result.OracleOnlyRows)
 	})
@@ -840,12 +840,12 @@ func TestBuildRowMap_CreatesCompositePKs(t *testing.T) {
 	}
 
 	r := NewRow([]string{"pk0", "ck0", "ck1", "v"}, []any{1, 2, 3, "x"})
-	m := buildRowMap(table, Rows{r})
+	m := buildPKMultiMap(table, Rows{r})
 	// Expect formatted keys like "pk0=1ck0=2ck1=3" (formatRows includes key names and '='; concatenated in order)
 	// We don't know exact concatenation without delimiters, so verify map has single entry and value is r.
 	require.Len(t, m, 1)
 	for _, got := range m {
-		assert.Equal(t, r, got)
+		assert.Equal(t, Rows{r}, got)
 	}
 }
 

@@ -293,41 +293,32 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 
 	iter := query.Iter()
 
-	if iter.NumRows() == 0 {
-		c.rowsPerQueryMetric.Observe(0)
-		return nil, iter.Close()
-	}
-
-	// Pre-allocate rows slice
-	rows := make(Rows, 0, iter.NumRows())
-
-	// Fetch column names once — they never change across rows.
-	firstRowData, err := iter.RowData()
+	// NumRows counts the current page only. A page can be empty while later
+	// pages hold rows, for example when a cluster ends a page at its tombstone
+	// limit, so only Scan, which fetches the next pages, can tell the result is
+	// empty.
+	plan, err := scanPlanFor(iter)
 	if err != nil {
+		if iter.NumRows() == 0 && len(iter.Columns()) == 0 {
+			c.rowsPerQueryMetric.Observe(0)
+			return nil, iter.Close()
+		}
+
+		_ = iter.Close()
 		return nil, err
 	}
-	columns := getColumnIndex(firstRowData.Columns)
 
-	// Scan the first row into the already-allocated destinations.
-	if !iter.Scan(firstRowData.Values...) {
-		if err = iter.Close(); err != nil && !errors.Is(err, context.Canceled) {
-			c.logger.Error("error closing iterator", zap.String("system", c.system), zap.Error(err))
-		}
-		return rows, err
-	}
-	rows = append(rows, newRowWithIndex(columns, firstRowData.Values))
+	rows := make(Rows, 0, iter.NumRows())
+	scanner := newRowScanner(plan)
 
-	// Each subsequent row gets its own fresh RowData so scan destinations are
-	// never shared between rows — no copying or reflection required.
+	// Every row scans into destinations of its own (see rowScanner), so no
+	// two rows share a byte slice, big.Int or inf.Dec.
 	for {
-		rowData, rdErr := iter.RowData()
-		if rdErr != nil {
-			return rows, rdErr
-		}
-		if !iter.Scan(rowData.Values...) {
+		dest := scanner.row(iter.NumRows())
+		if !iter.Scan(dest...) {
 			break
 		}
-		rows = append(rows, newRowWithIndex(columns, rowData.Values))
+		rows = append(rows, newRowWithIndex(plan.columns, dest))
 	}
 
 	if err = iter.Close(); err != nil && !errors.Is(err, context.Canceled) {
@@ -339,6 +330,10 @@ func (c *cqlStore) load(ctx context.Context, stmt *typedef.Stmt) (Rows, error) {
 
 	c.rowsReturnedMetric.Add(float64(len(rows)))
 	c.rowsPerQueryMetric.Observe(float64(len(rows)))
+
+	if len(rows) == 0 {
+		return nil, err
+	}
 
 	return rows, err
 }
@@ -368,33 +363,22 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			}
 		}()
 
-		if iter.NumRows() == 0 {
+		// NumRows counts the current page only, and a page can be empty while
+		// later pages hold rows. Scan fetches the next pages.
+		plan, planErr := scanPlanFor(iter)
+		if planErr != nil {
+			if iter.NumRows() == 0 && len(iter.Columns()) == 0 {
+				return
+			}
+
+			yield(Row{}, planErr)
 			return
 		}
 
-		// Fetch column names once — reused for every row.
-		firstRowData, rdErr := iter.RowData()
-		if rdErr != nil {
-			yield(Row{}, rdErr)
-			return
-		}
-		columns := getColumnIndex(firstRowData.Columns)
+		// Every row scans into destinations of its own (see rowScanner): a
+		// caller may keep a yielded row after it asks for the next one.
+		scanner := newRowScanner(plan)
 
-		// Scan the first row into the already-allocated destinations.
-		select {
-		case <-ctx.Done():
-			yield(Row{}, ctx.Err())
-			return
-		default:
-		}
-		if !iter.Scan(firstRowData.Values...) {
-			return
-		}
-		if !yield(newRowWithIndex(columns, firstRowData.Values), nil) {
-			return
-		}
-
-		// Each subsequent row gets its own fresh RowData.
 		for {
 			select {
 			case <-ctx.Done():
@@ -403,15 +387,11 @@ func (c *cqlStore) loadIter(ctx context.Context, stmt *typedef.Stmt) RowIterator
 			default:
 			}
 
-			rowData, rowErr := iter.RowData()
-			if rowErr != nil {
-				yield(Row{}, rowErr)
-				return
-			}
-			if !iter.Scan(rowData.Values...) {
+			dest := scanner.row(iter.NumRows())
+			if !iter.Scan(dest...) {
 				break
 			}
-			if !yield(newRowWithIndex(columns, rowData.Values), nil) {
+			if !yield(newRowWithIndex(plan.columns, dest), nil) {
 				return
 			}
 		}

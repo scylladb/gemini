@@ -99,7 +99,7 @@ func (s *Flag) sendSignal(signal uint32, sendToParent bool) bool {
 	)
 
 	s.closeChannel()
-	out := s.val.CompareAndSwap(SignalNoop, signal)
+	out := s.setSignal(signal)
 	if !out {
 		s.log.Debug("signal already set, ignoring new signal",
 			zap.String("flag", s.name),
@@ -152,6 +152,23 @@ func (s *Flag) sendSignal(signal uint32, sendToParent bool) bool {
 	}
 
 	return out
+}
+
+// setSignal stores signal when it is a stronger stop than the current state: a
+// soft or hard stop of a running flag, or a hard stop of a softly stopped one.
+// A hard stop must be able to end a soft stop that does not finish, for
+// example on a second Ctrl+C.
+func (s *Flag) setSignal(signal uint32) bool {
+	for {
+		current := s.val.Load()
+		if signal <= current {
+			return false
+		}
+
+		if s.val.CompareAndSwap(current, signal) {
+			return true
+		}
+	}
 }
 
 func (s *Flag) SetHard(sendToParent bool) bool {
@@ -301,34 +318,35 @@ func StartOsSignalsTransmitter(logger *zap.Logger, flags ...*Flag) {
 
 	go func() {
 		logger.Debug("OS signal handler goroutine started, waiting for signals")
-		sig := <-graceful
 
-		logger.Info("received OS signal",
-			zap.String("signal", sig.String()),
-		)
-
-		switch sig {
-		case syscall.SIGINT, syscall.SIGTERM:
-			logger.Info("processing graceful shutdown signal", zap.String("signal", sig.String()))
-			for i := range flags {
-				logger.Debug("setting soft stop for flag",
-					zap.String("flag", flags[i].name),
-					zap.Int("flag_index", i),
-				)
-				flags[i].SetSoft(true)
-			}
-			logger.Info("soft stop initiated for all flags")
-		default:
-			logger.Warn("processing unexpected signal as hard stop", zap.String("signal", sig.String()))
-			for i := range flags {
-				logger.Debug("setting hard stop for flag",
-					zap.String("flag", flags[i].name),
-					zap.Int("flag_index", i),
-				)
-				flags[i].SetHard(false)
-			}
-			logger.Info("hard stop initiated for all flags")
+		// The first signal asks for a soft stop: the workers finish what they
+		// started and the statement logs are flushed. A second signal asks
+		// for a hard stop. After it the handler is removed, so a third signal
+		// ends the process the default way instead of being ignored.
+		stops := []struct {
+			set  func(*Flag)
+			name string
+		}{
+			{name: "soft", set: func(f *Flag) { f.SetSoft(true) }},
+			{name: "hard", set: func(f *Flag) { f.SetHard(true) }},
 		}
+
+		for _, stop := range stops {
+			sig := <-graceful
+			logger.Info("received OS signal",
+				zap.String("signal", sig.String()),
+				zap.String("stop", stop.name),
+			)
+
+			for i := range flags {
+				stop.set(flags[i])
+			}
+
+			logger.Info(stop.name+" stop initiated for all flags", zap.String("signal", sig.String()))
+		}
+
+		signal.Stop(graceful)
+		logger.Warn("signal handler removed: the next SIGINT or SIGTERM ends the process at once")
 	}()
 
 	logger.Debug("OS signals transmitter started successfully")

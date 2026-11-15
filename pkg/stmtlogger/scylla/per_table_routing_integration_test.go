@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/scylladb/gemini/pkg/compression"
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
@@ -96,6 +97,7 @@ func TestLogger_MultiTableLogging_NoDrops_Integration(t *testing.T) {
 		replication.NewNetworkTopologyStrategy(),
 		itemCh,
 		"", "", // no statement files: exercise the committer / _logs tables only
+		compression.None,
 		errorCh,
 		logger,
 	)

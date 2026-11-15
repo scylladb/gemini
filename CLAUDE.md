@@ -53,6 +53,9 @@ Gemini writes to real ScyllaDB or Cassandra nodes. Three constraints control key
   `schema.Tables[0]`. Per-table behavior must come from the statement's own query, never from the
   store constructor arguments. `utils.KeyspaceTableFromQuery` does this for statement-log routing
   and for asymmetric-write compensation.
+- **A non-idempotent write that may have been applied is never sent again.** `Stmt.NonIdempotent`
+  marks a counter increment. `writeMayHaveApplied` decides whether an error leaves the outcome
+  unknown. A DELETE cannot undo a counter, so such a partition is invalidated (`OutcomeUnknown`).
 - **A compensating DELETE must reuse the original write timestamp.** Client-side timestamps are the
   default. A DELETE in a different timestamp domain does not cancel the write it compensates.
 - **`_logs` statement/values pairing rests on an aliasing rule.** `gocql.Batch.Query` stores the
@@ -406,14 +409,15 @@ Supports client-side timestamps (default) or server-side timestamps. Client-side
 
 ### Gotcha
 
-**Per-row scan destinations in `load()` are load-bearing.** gocql reuses internal buffers when
-you scan multiple rows into the *same* destinations, which would alias byte slices and
-`big.Int`/`inf.Dec` values across rows. `load()`/`loadIter()` avoid this by calling
-`iter.RowData()` once **per row** so every row gets freshly-allocated scan destinations — no
-copying or reflection needed. This is sound only because `iter.RowData()` allocates fresh
-destinations on each call (true in gocql today); do not refactor `load()` to reuse a single
-`RowData` across rows without reintroducing a deep copy. (This replaces the old `deepCopyValue`
-helper, which no longer exists.)
+**Per-row scan destinations in `load()` are load-bearing.** gocql reuses the
+buffers of a destination that it scans into again, which would alias byte slices
+and `big.Int`/`inf.Dec` values across rows. `load()` and `loadIter()` scan
+through a `rowScanner` (`pkg/store/scan.go`). It allocates zeroed destinations a
+chunk of rows at a time, one slice per column, and gives every row its own
+element of each slice. Never hand a row a destination that an earlier row used.
+`TestRowScannerGivesEveryRowItsOwnDestinations` fails when this breaks. The scan
+plan behind it is cached per result metadata, which gocql keeps per prepared
+statement.
 
 ---
 

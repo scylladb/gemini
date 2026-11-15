@@ -241,7 +241,11 @@ func TestDelegatingStore_Mutate_AsymmetricCommit_IncrementsMetric(t *testing.T) 
 		"asymmetric commit (test committed, oracle failed) must increment the divergence counter")
 }
 
-func TestDelegatingStore_Mutate_ContextCanceledDuringBackoff_ReturnsNil(t *testing.T) {
+// TestDelegatingStore_Mutate_ContextCanceledDuringBackoff_ReturnsError: a
+// write that the shutdown interrupts can leave the clusters asymmetric, so the
+// caller gets the mutation error and decides about invalidation. The error
+// wraps context.Canceled, so the caller does not count it as a write failure.
+func TestDelegatingStore_Mutate_ContextCanceledDuringBackoff_ReturnsError(t *testing.T) {
 	t.Parallel()
 	retryErr := errors.New("temporary")
 	test := &fakeStore{nameStr: "test", mutateSeq: []error{retryErr, retryErr}}
@@ -263,8 +267,11 @@ func TestDelegatingStore_Mutate_ContextCanceledDuringBackoff_ReturnsNil(t *testi
 	}()
 	stmt := typedef.SimpleStmt("INSERT INTO ks.t (k) VALUES (1)", typedef.InsertStatementType)
 	err := ds.Mutate(ctx, stmt)
-	// On context canceled during delay, code returns nil
-	assert.NoError(t, err)
+	require.ErrorIs(t, err, context.Canceled)
+
+	var mutErr *MutationError
+	require.ErrorAs(t, err, &mutErr)
+	assert.False(t, mutErr.TestStoreSuccess)
 }
 
 func TestDelegatingStore_Check_OracleNil_ReturnsCount(t *testing.T) {

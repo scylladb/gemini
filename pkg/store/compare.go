@@ -84,24 +84,32 @@ func CompareCollectedRows(table *typedef.Table, testRows, oracleRows Rows) Compa
 		return result
 	}
 
-	// If row counts differ, report only set differences and keep MatchCount = 0.
+	// If row counts differ, pair the rows key by key. A key can repeat when a
+	// cluster returns a row twice, so each key holds every row it has on each
+	// side. The rows a side has beyond the other side's count are reported as
+	// present on that side only. The rows that pair up are compared by value.
 	if len(testRows) != len(oracleRows) {
-		// Build pk → Row maps for both sides in a single pass each.
-		// This replaces the previous pks() + buildRowMap() double-pass.
-		testRowMap := buildPKMap(table, testRows)
-		oracleRowMap := buildPKMap(table, oracleRows)
+		testRowMap := buildPKMultiMap(table, testRows)
+		oracleRowMap := buildPKMultiMap(table, oracleRows)
 
-		// Rows present only in oracle
-		for pk, row := range oracleRowMap {
-			if _, ok := testRowMap[pk]; !ok {
-				result.OracleOnlyRows = append(result.OracleOnlyRows, row)
+		for _, key := range sortedMapKeys(oracleRowMap) {
+			oRows, tRows := oracleRowMap[key], testRowMap[key]
+			compareKeyRows(&result, table, tRows, oRows)
+
+			if len(oRows) > len(tRows) {
+				result.OracleOnlyRows = append(result.OracleOnlyRows, oRows[len(tRows):]...)
 			}
 		}
 
-		// Rows present only in test
-		for pk, row := range testRowMap {
-			if _, ok := oracleRowMap[pk]; !ok {
-				result.TestOnlyRows = append(result.TestOnlyRows, row)
+		for _, key := range sortedMapKeys(testRowMap) {
+			tRows, oRows := testRowMap[key], oracleRowMap[key]
+			if len(oRows) == 0 {
+				result.TestOnlyRows = append(result.TestOnlyRows, tRows...)
+				continue
+			}
+
+			if len(tRows) > len(oRows) {
+				result.TestOnlyRows = append(result.TestOnlyRows, tRows[len(oRows):]...)
 			}
 		}
 
@@ -197,17 +205,26 @@ func nameComparator(keyNames []string) func(a, b Row) int {
 	}
 }
 
-// buildRowMap creates a map from pk string to Row for efficient lookup.
-// Kept for any external callers; internally CompareCollectedRows uses buildPKMap.
-func buildRowMap(table *typedef.Table, rows Rows) map[string]Row {
-	return buildPKMap(table, rows)
+// compareKeyRows compares the rows that one key has on both sides, in order,
+// and records each pair as a match or a difference.
+func compareKeyRows(cr *ComparisonResult, table *typedef.Table, testRows, oracleRows Rows) {
+	for i := range min(len(testRows), len(oracleRows)) {
+		if diff := diffRows(table, oracleRows[i], testRows[i]); diff != "" {
+			cr.DifferentRows = append(cr.DifferentRows, RowDifference{
+				TestRow:   testRows[i],
+				OracleRow: oracleRows[i],
+				Diff:      diff,
+			})
+		} else {
+			cr.MatchCount++
+		}
+	}
 }
 
-// buildPKMap builds a composite-key → Row map in a single pass.
-// It replaces the previous pks() + buildRowMap() double-pass, cutting
-// allocations roughly in half for the count-mismatch path.
-func buildPKMap(table *typedef.Table, rows Rows) map[string]Row {
-	result := make(map[string]Row, len(rows))
+// buildPKMultiMap groups rows by their partition and clustering key. The rows
+// of a key keep their order, so two sides sorted the same way pair up.
+func buildPKMultiMap(table *typedef.Table, rows Rows) map[string]Rows {
+	result := make(map[string]Rows, len(rows))
 
 	var sb strings.Builder
 	sb.Grow(64)
@@ -224,11 +241,23 @@ func buildPKMap(table *typedef.Table, rows Rows) map[string]Row {
 			sb.WriteByte(',')
 		}
 
-		pkStr := strings.TrimRight(sb.String(), ",")
-		result[pkStr] = row
+		key := strings.TrimRight(sb.String(), ",")
+		result[key] = append(result[key], row)
 	}
 
 	return result
+}
+
+// sortedMapKeys returns the keys of m in order, so a report lists rows the same
+// way on every run.
+func sortedMapKeys(m map[string]Rows) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	return keys
 }
 
 // ToError converts ComparisonResult to an error if there are differences

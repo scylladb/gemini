@@ -62,7 +62,7 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 		utils.RandInt2(r, sc.GetMinClusteringKeys(), sc.GetMaxClusteringKeys()),
 	)
 
-	for i := range cap(partitionKeys) {
+	for i := range cap(clusteringKeys) {
 		clusteringKeys = append(clusteringKeys, typedef.ColumnDef{
 			Name: GenColumnName("ck", i),
 			Type: GenPrimaryKeyColumnType(r),
@@ -73,9 +73,7 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 		Name:           tableName,
 		PartitionKeys:  partitionKeys,
 		ClusteringKeys: clusteringKeys,
-		KnownIssues: map[string]bool{
-			typedef.KnownIssuesJSONWithTuples: true,
-		},
+		KnownIssues:    map[string]bool{},
 	}
 	for _, option := range sc.TableOptions {
 		table.TableOptions = append(table.TableOptions, option.ToCQL())
@@ -96,6 +94,12 @@ func genTable(sc typedef.SchemaConfig, tableName string, r *rand.Rand) *typedef.
 			Name: GenColumnName("col", i),
 			Type: GenColumnType(columns, &sc, r),
 		})
+	}
+
+	// INSERT JSON runs on every table except one that holds a tuple, where
+	// Scylla has a known issue.
+	if table.HasTupleColumns() {
+		table.KnownIssues[typedef.KnownIssuesJSONWithTuples] = true
 	}
 
 	if sc.CQLFeature > typedef.CQLFeatureNormal && sc.UseMaterializedViews && columns > 0 {

@@ -17,9 +17,11 @@ package store
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"strconv"
 	"sync"
+	"syscall"
 
 	"github.com/gocql/gocql"
 	"github.com/prometheus/client_golang/prometheus"
@@ -176,7 +178,7 @@ func classifyError(err error) string {
 
 	reqErr, ok := errors.AsType[gocql.RequestError](err)
 	if !ok {
-		return "other"
+		return classifyTransportError(err)
 	}
 
 	switch reqErr.Code() {
@@ -203,6 +205,34 @@ func classifyError(err error) string {
 	default:
 		return "request_error"
 	}
+}
+
+// classifyTransportError names the errors that do not come from the server:
+// dial and socket failures and context ends. The message of a socket error
+// holds the local port, so it is never used as a label itself.
+func classifyTransportError(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline_exceeded"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection_refused"
+	case errors.Is(err, syscall.ECONNRESET):
+		return "connection_reset"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		return "eof"
+	}
+
+	if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
+		return "net_timeout"
+	}
+
+	if _, ok := errors.AsType[*net.OpError](err); ok {
+		return "net_error"
+	}
+
+	return "other"
 }
 
 // observeDriverError counts err by category. When the error shows a lost
@@ -236,7 +266,7 @@ func (c *ClusterObserver) incGoCQLQueryError(instance string, err error) {
 		return
 	}
 	metrics.GoCQLQueryErrors.
-		WithLabelValues(string(c.clusterName), instance, err.Error()).
+		WithLabelValues(string(c.clusterName), instance, classifyError(err)).
 		Inc()
 }
 
@@ -411,7 +441,7 @@ func (c *ClusterObserver) observeQuery(
 
 	var errStr string
 	if query.Err != nil {
-		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, query.Err.Error()).Inc()
+		metrics.GoCQLQueryErrors.WithLabelValues(string(c.clusterName), instance, classifyError(query.Err)).Inc()
 		errStr = query.Err.Error()
 		c.observeDriverError(query.Host, instance, query.Err)
 	}
@@ -450,10 +480,10 @@ func (c *ClusterObserver) ObserveConnect(connect gocql.ObservedConnect) {
 		metrics.GoCQLConnectionsErrors.WithLabelValues(
 			string(c.clusterName),
 			instance,
-			connect.Err.Error(),
+			classifyError(connect.Err),
 		).Inc()
 		metrics.GoCQLErrorsByType.WithLabelValues(string(c.clusterName), "connect_"+classifyError(connect.Err)).Inc()
-		metrics.GoCQLConnections.WithLabelValues(string(c.clusterName), instance).Dec()
+		// A failed dial opened no connection, so the connection count stays.
 		// One failed dial does not take a host down while its other
 		// connections serve requests. The driver's host state decides.
 		c.goCQLHostUp.Get(instance, 0).Set(hostUpValue(connect.Host))

@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/gocql/gocql"
 	"go.uber.org/zap"
 
+	"github.com/scylladb/gemini/pkg/compression"
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
@@ -82,7 +84,9 @@ type (
 		fetchHook   func(ctx context.Context, ty stmtlogger.Type, jobError *joberror.JobError, w io.Writer) (int64, error)
 		// openHook is openStatementFile outside tests.
 		openHook func(name string) (*bufio.Writer, func() error, error)
-		wg       sync.WaitGroup
+		// fileCompression compresses the statements files.
+		fileCompression compression.Algorithm
+		wg              sync.WaitGroup
 		// fetchDelay is statementErrorFetchDelay outside tests.
 		fetchDelay        time.Duration
 		malformedWarnOnce sync.Once
@@ -119,6 +123,7 @@ func New(
 	ch <-chan stmtlogger.Item,
 	oracleStatementsFile string,
 	testStatementsFile string,
+	fileCompression compression.Algorithm,
 	e <-chan *joberror.JobError,
 	l *zap.Logger,
 ) (*Logger, error) {
@@ -189,11 +194,12 @@ func New(
 	l.Debug("schema agreement reached")
 
 	logger := &Logger{
-		channel:    ch,
-		logger:     l,
-		logs:       gocqlLogSession{session: session},
-		statements: statements,
-		queries:    queries,
+		channel:         ch,
+		logger:          l,
+		logs:            gocqlLogSession{session: session},
+		statements:      statements,
+		queries:         queries,
+		fileCompression: fileCompression,
 	}
 
 	// Open the sinks before any worker exists. A failure here returns no logger,
@@ -498,7 +504,7 @@ func (s *Logger) bind(pair logPair, dst []any, arena *rowArena) (boundRow, bool)
 	}
 
 	row := boundRow{cql: cql, args: args, id: id}
-	if s.queries != nil && s.queries.remember(id, it.Statement) {
+	if s.queries != nil && s.queries.needsWrite(id, it.Statement) {
 		row.statement = it.Statement
 	}
 
@@ -650,15 +656,31 @@ func (g gocqlLogSession) execQuery(ctx context.Context, stmt string, args ...any
 }
 
 // executeBatchWithFallback tries to execute the batch and, in case of failure,
-// falls back to executing individual queries to reduce data loss.
-func (s *Logger) executeBatchWithFallback(ctx context.Context, batch *gocql.Batch, held [][]any, heldInsert []string, count int) {
+// falls back to executing individual queries to reduce data loss. It calls
+// written with the index of every held row that reached the cluster.
+func (s *Logger) executeBatchWithFallback(
+	ctx context.Context,
+	batch *gocql.Batch,
+	held [][]any,
+	heldInsert []string,
+	count int,
+	written func(i int),
+) {
 	if len(batch.Entries) == 0 {
 		return
 	}
 
 	err := s.logs.execBatch(ctx, batch)
 
-	if err == nil || errors.Is(err, context.Canceled) {
+	if err == nil {
+		for i := range count {
+			written(i)
+		}
+
+		return
+	}
+
+	if errors.Is(err, context.Canceled) {
 		return
 	}
 
@@ -689,7 +711,11 @@ func (s *Logger) executeBatchWithFallback(ctx context.Context, batch *gocql.Batc
 		if ctx.Err() != nil {
 			return
 		}
-		if err = s.logs.execQuery(ctx, heldInsert[i], held[i]...); err != nil && !errors.Is(err, context.Canceled) {
+		err = s.logs.execQuery(ctx, heldInsert[i], held[i]...)
+		switch {
+		case err == nil:
+			written(i)
+		case !errors.Is(err, context.Canceled):
 			s.logger.Error("failed to insert item after batch failure", zap.Error(err))
 		}
 	}
@@ -720,6 +746,19 @@ func (s *Logger) insertWorker() {
 	// heldInsert[i] records which per-table _logs INSERT held[i] was bound for,
 	// so the row-by-row fallback re-executes each row against the right table.
 	heldInsert := make([]string, len(held))
+	// heldQuery[i] is true when held[i] is a queries row; its id is held[i][0].
+	// The dictionary marks the id written only once that row reached the
+	// cluster, so a failed batch leaves it for a later batch to carry.
+	heldQuery := make([]bool, len(held))
+	markWritten := func(i int) {
+		if heldQuery[i] && s.queries != nil {
+			s.queries.markWritten(held[i][0].(int64)) //nolint:forcetypeassert // bind stores the id as int64
+		}
+	}
+	// batchQueries holds the query ids whose queries row the current batch
+	// carries.
+	var batchQueries []int64
+
 	// arena holds the data cells of the current batch. Like held, it is reused
 	// only after the batch executed.
 	arena := &rowArena{}
@@ -741,6 +780,7 @@ func (s *Logger) insertWorker() {
 		// callback (and thus every mutation/validation worker).
 		ctx, cancel := context.WithTimeout(parentCtx, committerBatchTimeout)
 		batch := s.logs.makeBatch(ctx)
+		batchQueries = batchQueries[:0]
 
 		// Helper to add an item to the batch
 		addItem := func(pair logPair) {
@@ -754,12 +794,17 @@ func (s *Logger) insertWorker() {
 				return
 			}
 			heldInsert[idx] = row.cql.insertStmt
+			heldQuery[idx] = false
 			batch.Query(row.cql.insertStmt, held[idx]...)
 			idx++
 
-			if row.statement != "" {
+			// Rows of one batch can share a new statement: its queries row
+			// goes into the batch once.
+			if row.statement != "" && !slices.Contains(batchQueries, row.id) {
+				batchQueries = append(batchQueries, row.id)
 				held[idx] = append(held[idx][:0], row.id, row.statement)
 				heldInsert[idx] = row.cql.queriesInsert
+				heldQuery[idx] = true
 				batch.Query(row.cql.queriesInsert, held[idx]...)
 				idx++
 			}
@@ -785,7 +830,7 @@ func (s *Logger) insertWorker() {
 			}
 		}
 		// Execute current batch with fallback
-		s.executeBatchWithFallback(ctx, batch, held, heldInsert, idx)
+		s.executeBatchWithFallback(ctx, batch, held, heldInsert, idx, markWritten)
 		cancel()
 		idx = 0
 		arena.reset()
@@ -814,8 +859,9 @@ func (s *Logger) insert(it stmtlogger.Item) {
 	if !ok {
 		return
 	}
-	if row.statement != "" {
-		_ = s.logs.execQuery(context.Background(), row.cql.queriesInsert, row.id, row.statement)
+	if row.statement != "" &&
+		s.logs.execQuery(context.Background(), row.cql.queriesInsert, row.id, row.statement) == nil {
+		s.queries.markWritten(row.id)
 	}
 	_ = s.logs.execQuery(context.Background(), row.cql.insertStmt, row.args...)
 }
@@ -857,7 +903,13 @@ func (s *Logger) openStatementFile(name string) (*bufio.Writer, func() error, er
 		return nil, nil, fmt.Errorf("failed to open statements file '%q': %w", name, err)
 	}
 
-	buffered := bufio.NewWriterSize(file, statementFileBufferSize)
+	compressed, err := compression.NewWriter(file, s.fileCompression)
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, err
+	}
+
+	buffered := bufio.NewWriterSize(compressed, statementFileBufferSize)
 
 	return buffered, func() error {
 		defer func() {
@@ -867,6 +919,12 @@ func (s *Logger) openStatementFile(name string) (*bufio.Writer, func() error, er
 		}()
 
 		if err = buffered.Flush(); err != nil {
+			return err
+		}
+
+		// Close ends the compressed stream. Without it the file has no trailer
+		// and a reader stops with an error at its end.
+		if err = compressed.Close(); err != nil {
 			return err
 		}
 

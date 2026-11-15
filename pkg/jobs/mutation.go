@@ -120,11 +120,6 @@ func (m *Mutation) run(ctx context.Context) error {
 		return nil
 	}
 
-	// Treat context cancellation as expected termination
-	if errors.Is(err, context.Canceled) {
-		return context.Canceled
-	}
-
 	var mutErr *store.MutationError
 	isMutationErr := errors.As(err, &mutErr)
 
@@ -148,8 +143,13 @@ func (m *Mutation) run(ctx context.Context) error {
 	//      independently have committed. Compensation is what collapses that
 	//      ambiguity, so if it half-succeeds the clusters can genuinely differ
 	//      while the flags still look symmetric.
+	//   3. Unknown outcome — a cluster may have applied a write that cannot be
+	//      undone, such as a counter increment whose reply did not arrive.
+	//
+	// The check runs before the cancellation return below: a write the
+	// shutdown interrupted can leave the clusters asymmetric too.
 	if isMutationErr &&
-		(mutErr.OracleStoreSuccess != mutErr.TestStoreSuccess || mutErr.CompensationFailed) {
+		(mutErr.OracleStoreSuccess != mutErr.TestStoreSuccess || mutErr.CompensationFailed || mutErr.OutcomeUnknown) {
 		// Whether the clusters actually diverged is UNKNOWN — a timed-out server
 		// may have applied the write and lost the response — so this is reported as
 		// a possible divergence, not a confirmed one. Claiming otherwise would give
@@ -161,6 +161,7 @@ func (m *Mutation) run(ctx context.Context) error {
 			zap.String("query_type", mutateStmt.QueryType.String()),
 			zap.Bool("asymmetric_ack", mutErr.TestStoreSuccess != mutErr.OracleStoreSuccess),
 			zap.Bool("compensation_failed", mutErr.CompensationFailed),
+			zap.Bool("outcome_unknown", mutErr.OutcomeUnknown),
 			zap.Bool("test_store_success", mutErr.TestStoreSuccess),
 			zap.Bool("oracle_store_success", mutErr.OracleStoreSuccess),
 			zap.Bool("timed_out", errors.Is(err, context.DeadlineExceeded)),
@@ -169,6 +170,11 @@ func (m *Mutation) run(ctx context.Context) error {
 		for i := range mutateStmt.PartitionKeys {
 			m.statement.MarkInvalid(&mutateStmt.PartitionKeys[i])
 		}
+	}
+
+	// Treat context cancellation as expected termination
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
 	}
 
 	// For context deadline expirations (CQL RequestTimeout or job shutdown), don't

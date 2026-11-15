@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/scylladb/gemini/pkg/compression"
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/replication"
 	"github.com/scylladb/gemini/pkg/stmtlogger"
@@ -721,6 +722,7 @@ func TestLogger_FullWorkflow_Integration(t *testing.T) {
 		itemCh,
 		oracleFile,
 		testFile,
+		compression.None,
 		errorCh,
 		logger,
 	)

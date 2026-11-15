@@ -117,7 +117,7 @@ func (st SimpleType) Indexable() bool {
 func (st SimpleType) GenJSONValue(r utils.Random, p RangeConfig) any {
 	switch st {
 	case TypeBlob:
-		ln := r.IntN(p.GetMaxBlobLength()) + p.GetMinBlobLength()
+		ln := randLength(r, p.GetMinBlobLength(), p.GetMaxBlobLength())
 		buffer := bytes.NewBuffer(nil)
 		buffer.Grow(ln*2 + 2)
 		buffer.WriteString("0x")
@@ -125,11 +125,11 @@ func (st SimpleType) GenJSONValue(r utils.Random, p RangeConfig) any {
 		_, _ = encoder.Write(utils.RandomBytes(r, ln))
 		return utils.UnsafeString(buffer.Bytes())
 	case TypeDecimal:
-		return inf.NewDec(r.Int64N(math.MaxInt64), 3).String()
+		return randDecimal(r).String()
 	case TypeUUID, TypeTimeuuid:
 		return utils.UUIDFromTime(r).String()
 	case TypeVarint:
-		return big.NewInt(r.Int64N(math.MaxInt64)).String()
+		return big.NewInt(randSigned(r)).String()
 	case TypeDate:
 		return utils.RandDate(r).Format(time.DateOnly)
 	case TypeDuration:
@@ -153,26 +153,78 @@ func (st SimpleType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any
 	return out
 }
 
-// randSpan guards the bound passed to rand.IntN, which panics on a non-positive
-// argument. A misconfigured RangeConfig (e.g. a preset that left a max length at
-// zero) would otherwise crash the whole process during partition fill. When the
-// max is already positive this returns it unchanged, so value generation — and
-// the random stream it consumes — is identical for every valid configuration.
-func randSpan(maxLen int) int {
-	if maxLen < 1 {
-		return 1
+// randLength returns a length in [minLen, maxLen]. A max below the min is
+// taken as the min, so a misconfigured range never reaches rand.IntN with a
+// non-positive bound.
+func randLength(r utils.Random, minLen, maxLen int) int {
+	minLen = max(minLen, 0)
+	maxLen = max(maxLen, minLen)
+
+	return minLen + r.IntN(maxLen-minLen+1)
+}
+
+// randSigned returns an int64 over its whole range, negative values included.
+func randSigned(r utils.Random) int64 {
+	return int64(r.Uint64())
+}
+
+// randDecimal returns a decimal with a random sign and a scale in [0, 9]. CQL
+// keeps the scale of a decimal, so a cluster that changes it changes the value.
+func randDecimal(r utils.Random) *inf.Dec {
+	return inf.NewDec(randSigned(r), inf.Scale(r.IntN(10)))
+}
+
+// randFloat64 returns a finite double. One draw in four is a random bit
+// pattern: it covers -0, subnormal numbers and the largest magnitudes. The
+// others are values of everyday magnitude with a random sign. NaN and ±Inf
+// are left out, because a double can be a key column.
+func randFloat64(r utils.Random) float64 {
+	if r.IntN(4) == 0 {
+		f := math.Float64frombits(r.Uint64())
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			// Clearing the top exponent bit leaves a finite number.
+			f = math.Float64frombits(math.Float64bits(f) &^ (1 << 62))
+		}
+
+		return f
 	}
-	return maxLen
+
+	f := float64(r.Uint64()<<11>>11) / (1 << 53) * math.Pow10(r.IntN(10))
+	if r.IntN(2) == 0 {
+		f = -f
+	}
+
+	return f
+}
+
+// randFloat32 returns a finite float, as randFloat64 does for a double.
+func randFloat32(r utils.Random) float32 {
+	if r.IntN(4) == 0 {
+		f := math.Float32frombits(r.Uint32())
+		if f != f || math.IsInf(float64(f), 0) {
+			// Clearing the top exponent bit leaves a finite number.
+			f = math.Float32frombits(math.Float32bits(f) &^ (1 << 30))
+		}
+
+		return f
+	}
+
+	f := float32(r.Uint32()<<8>>8) / (1 << 24) * float32(math.Pow10(r.IntN(6)))
+	if r.IntN(2) == 0 {
+		f = -f
+	}
+
+	return f
 }
 
 func (st SimpleType) genValue(r utils.Random, p RangeConfig) any {
 	switch st {
 	case TypeBlob:
-		return utils.RandomBytes(r, r.IntN(randSpan(p.GetMaxStringLength()))+p.GetMinStringLength())
+		return utils.RandomBytes(r, randLength(r, p.GetMinBlobLength(), p.GetMaxBlobLength()))
 	case TypeASCII, TypeText, TypeVarchar:
-		return utils.RandString(r, r.IntN(randSpan(p.GetMaxStringLength()))+p.GetMinStringLength(), false)
+		return utils.RandString(r, randLength(r, p.GetMinStringLength(), p.GetMaxStringLength()), false)
 	case TypeBigint:
-		return r.Int64()
+		return randSigned(r)
 	case TypeBoolean:
 		return r.IntN(2) == 0
 	case TypeDate:
@@ -182,27 +234,27 @@ func (st SimpleType) genValue(r utils.Random, p RangeConfig) any {
 	case TypeTimestamp:
 		return utils.RandTimestamp(r)
 	case TypeDecimal:
-		return inf.NewDec(r.Int64(), 3)
+		return randDecimal(r)
 	case TypeDouble:
-		return float64(r.Uint64()<<11>>11) / (1 << 53)
+		return randFloat64(r)
 	case TypeDuration:
 		return utils.RandDuration(r)
 	case TypeFloat:
-		return float32(r.Uint32()<<8>>8) / (1 << 24)
+		return randFloat32(r)
 	case TypeInet:
 		return utils.RandIPV4Address(r, r.IntN(math.MaxUint8), 1+r.IntN(3))
 	case TypeInt:
-		return int32(r.Int64N(math.MaxInt32))
+		return int32(r.Uint32())
 	case TypeSmallint:
-		return int16(r.Uint64N(math.MaxUint16))
+		return int16(r.Uint32())
 	case TypeUUID:
 		return utils.RandomUUID(r)
 	case TypeTimeuuid:
 		return utils.UUIDFromTime(r)
 	case TypeTinyint:
-		return int8(r.Uint64N(math.MaxUint8))
+		return int8(r.Uint32())
 	case TypeVarint:
-		return big.NewInt(r.Int64())
+		return big.NewInt(randSigned(r))
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", st))
 	}

@@ -171,16 +171,20 @@ func TestQueryDict(t *testing.T) {
 
 	var d queryDict
 
-	id := queryID("INSERT INTO ks.t (a) VALUES (?)")
-	assert.Equal(t, id, queryID("INSERT INTO ks.t (a) VALUES (?)"), "an id must be stable within a process")
+	stmt := "INSERT INTO ks.t (a) VALUES (?)"
+	id := queryID(stmt)
+	assert.Equal(t, id, queryID(stmt), "an id must be stable within a process")
 	assert.NotEqual(t, id, queryID("INSERT INTO ks.t (b) VALUES (?)"))
 
-	assert.True(t, d.remember(id, "INSERT INTO ks.t (a) VALUES (?)"), "the first sight must write the queries row")
-	assert.False(t, d.remember(id, "INSERT INTO ks.t (a) VALUES (?)"), "a known id must not write it again")
+	assert.True(t, d.needsWrite(id, stmt), "a new id must be written")
+	assert.True(t, d.needsWrite(id, stmt), "an id stays unwritten until its row reached the cluster")
 
 	text, ok := d.text(id)
-	assert.True(t, ok)
-	assert.Equal(t, "INSERT INTO ks.t (a) VALUES (?)", text)
+	assert.True(t, ok, "the text is known before the row is written")
+	assert.Equal(t, stmt, text)
+
+	d.markWritten(id)
+	assert.False(t, d.needsWrite(id, stmt), "a written id must not be written again")
 
 	var none *queryDict
 	_, ok = none.text(id)

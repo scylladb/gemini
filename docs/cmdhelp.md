@@ -49,8 +49,8 @@ Flags:
       --minimum-delay duration                         Minimum delay between mutations (default 25µs)
   -m, --mode string                                    Query operation mode. Mode options: write, read, mixed (default) (default "mixed")
       --mutation-concurrency int                       Maximum number of mutation workers per table. 0 uses --concurrency
-      --normal-dist-mean float                         Mean of the normal distribution (default 9.223372036854776e+18)
-      --normal-dist-sigma float                        Sigma of the normal distribution, defaults to one standard deviation ~0.341 (default 6.290339729134958e+18)
+      --normal-dist-mean float                         Mean of the normal distribution, a position on the uint64 range. For lognormal, the log-space index mean (default 9.223372036854776e+18)
+      --normal-dist-sigma float                        Sigma of the normal distribution, a share of the uint64 range (~0.341). For lognormal, the log-space sigma (default 6.290339729134958e+18)
   -o, --oracle-cluster strings                         Host names or IPs of the oracle cluster that provides correct answers. If omitted no oracle will be used
       --oracle-host-selection-policy string            Host selection policy used by the driver for the oracle cluster: round-robin|host-pool|token-aware (default "token-aware")
       --oracle-password string                         Password for the oracle cluster
@@ -59,7 +59,7 @@ Flags:
       --oracle-username string                         Username for the oracle cluster
       --outfile string                                 Specify the name of the file where the results should go
       --partition-count uint                           Number of Scylla Partitions (default 2000000)
-      --partition-key-distribution string              Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf (default "uniform")
+      --partition-key-distribution string              Specify the distribution from which to draw partition keys: uniform|normal|lognormal|zipf (default "uniform")
       --profiling-port int                             If non-zero starts the pprof server on the given port at 'http://0.0.0.0:<port>/debug/pprof/' and records mutex and block profiles
       --random-string-buffer-size int                  Size of the buffer used for random strings (default 104857600)
       --read-concurrency int                           Maximum number of validation workers per table. 0 uses --concurrency
@@ -69,7 +69,7 @@ Flags:
       --schema string                                  Schema JSON config file
       --schema-seed string                             Schema seed value (default "random")
   -s, --seed string                                    Statement seed value (default "random")
-      --statement-log-file-compression string          Compression algorithm to use for statement log files (default "none")
+      --statement-log-file-compression string          Compression of the statement log files: none, gzip or zstd (default "none")
       --statement-ratios string                        Statement ratios configuration in JSON format (e.g., '{"mutation_ratios":{"insert_ratio":0.7,"update_ratio":0.2,"delete_ratio":0.1}}')
       --summary-file string                            Path to the file where the human-readable corruption summary is written (default "./gemini-summary.txt")
       --table-options stringArray                      Repeatable argument to set table options to be added to the created tables

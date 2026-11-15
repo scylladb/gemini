@@ -271,3 +271,35 @@ func TestUpdate_NoColumnsFallsBackToInsert(t *testing.T) {
 	require.NotNil(t, stmt)
 	assert.Equal(t, typedef.InsertStatementType, stmt.QueryType, "update with no SET columns must fall back to insert")
 }
+
+// TestUpdateMarksCounterIncrementNonIdempotent: a counter increment changes the
+// data again each time it runs, so the store must never resend it after a reply
+// that did not arrive.
+func TestUpdateMarksCounterIncrementNonIdempotent(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		columns typedef.Columns
+		want    bool
+	}{
+		{name: "counter table", columns: typedef.Columns{{Name: "c", Type: &typedef.CounterType{}}}, want: true},
+		{name: "plain table", columns: typedef.Columns{{Name: "c", Type: typedef.TypeInt}}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			table := &typedef.Table{
+				Name:          "t",
+				PartitionKeys: typedef.Columns{{Name: "pk", Type: typedef.TypeInt}},
+				Columns:       tc.columns,
+			}
+
+			g, _ := newGen(t, table, 100)
+
+			stmt, err := g.Update(t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, stmt.NonIdempotent)
+		})
+	}
+}

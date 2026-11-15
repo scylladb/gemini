@@ -174,10 +174,17 @@ func newTableStatements(
 func (c *cqlStatements) Insert(ctx context.Context, item stmtlogger.Item) error {
 	id := queryID(item.Statement)
 
-	if c.queries == nil || c.queries.remember(id, item.Statement) {
-		if err := c.session.QueryWithContext(ctx, c.queriesInsert, id, item.Statement).Exec(); err != nil &&
-			!errors.Is(err, context.Canceled) {
+	if c.queries == nil || c.queries.needsWrite(id, item.Statement) {
+		if err := c.session.QueryWithContext(ctx, c.queriesInsert, id, item.Statement).Exec(); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+
 			return err
+		}
+
+		if c.queries != nil {
+			c.queries.markWritten(id)
 		}
 	}
 

@@ -22,7 +22,7 @@ package store
 //	  ├─ deduplicateListValues (covered in dedup_bench_test.go)
 //	  ├─ slices.SortStableFunc  ←  compareValues / rowsCmp
 //	  ├─ reflect.DeepEqual  (fast-path, all-match)
-//	  ├─ pks + buildRowMap  (count-mismatch path)
+//	  ├─ pks + buildPKMultiMap  (count-mismatch path)
 //	  └─ diffRows × N  (same-count, some-differ path)
 //	       └─ canonicalizeRow × 2  →  canonicalValueString × col
 //
@@ -126,7 +126,7 @@ func makeScalarRowsWithDiffs(table *typedef.Table, nRows, nDiff int) (test, orac
 }
 
 // makeScalarRowsCountMismatch returns test with nRows rows and oracle with
-// nRows-nMissing rows — exercises the pks + buildRowMap path.
+// nRows-nMissing rows — exercises the pks + buildPKMultiMap path.
 func makeScalarRowsCountMismatch(table *typedef.Table, nRows, nMissing int) (test, oracle Rows) {
 	test = make(Rows, nRows)
 	oracle = make(Rows, nRows-nMissing)
@@ -512,10 +512,10 @@ func BenchmarkDiffRows(b *testing.B) {
 	}
 }
 
-// ── BenchmarkBuildRowMap ─────────────────────────────────────────────────────
-// buildRowMap allocates a map[string]Row; used only on count-mismatch path.
+// ── BenchmarkBuildPKMultiMap ─────────────────────────────────────────────────
+// buildPKMultiMap allocates a map[string]Rows; used only on count-mismatch path.
 
-func BenchmarkBuildRowMap(b *testing.B) {
+func BenchmarkBuildPKMultiMap(b *testing.B) {
 	for _, nRows := range []int{10, 100, 1000} {
 		table := makeScalarTable(2)
 		rows := make(Rows, nRows)
@@ -526,7 +526,7 @@ func BenchmarkBuildRowMap(b *testing.B) {
 		b.Run(fmt.Sprintf("rows=%d", nRows), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				_ = buildRowMap(table, rows)
+				_ = buildPKMultiMap(table, rows)
 			}
 		})
 	}
@@ -607,7 +607,7 @@ func BenchmarkRowsToKeyStrings(b *testing.B) {
 //
 //  1. allMatch   — reflect.DeepEqual fast-path after sort
 //  2. someDiff   — same row count but diffRows called for nDiff rows
-//  3. countMismatch — pks + buildRowMap set-difference path
+//  3. countMismatch — pks + buildPKMultiMap set-difference path
 
 func BenchmarkCompareCollectedRows_AllMatch(b *testing.B) {
 	type matchCase struct {

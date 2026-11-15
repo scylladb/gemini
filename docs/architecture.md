@@ -144,7 +144,7 @@ Partition selection supports multiple distributions (`pkg/distributions/`):
 | `uniform` | Equal probability for all partitions |
 | `zipf` | Power-law distribution - some partitions accessed more frequently |
 | `normal` | Gaussian distribution around a mean |
-| `lognormal` | Log-normal distribution |
+| `lognormal` | Log-normal distribution of the partition index. A log-space mean above ln(2^64) is taken as unset: the default is a hot head of the pool that still reaches its end |
 
 ## Statement Generation
 

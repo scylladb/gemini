@@ -37,6 +37,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/scylladb/gemini/pkg/compression"
 	"github.com/scylladb/gemini/pkg/distributions"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/random"
@@ -219,6 +220,11 @@ func run(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to get schema: %w", err)
 	}
 
+	statementFileCompression, err := resolveRunFlags()
+	if err != nil {
+		return err
+	}
+
 	storeConfig := store.Config{
 		MaxRetriesMutate:                 maxRetriesMutate,
 		MaxRetriesMutateSleep:            maxRetriesMutateSleep,
@@ -226,6 +232,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		AsyncObjectStabilizationDelay:    asyncObjectStabilizationDelay,
 		UseServerSideTimestamps:          useServerSideTimestamps,
 		OracleStatementFile:              oracleStatementLogFile,
+		StatementFileCompression:         statementFileCompression,
 		TestStatementFile:                testStatementLogFile,
 		MinimumDelay:                     minimumDelay,
 		TestClusterConfig: store.ScyllaClusterConfig{
@@ -296,7 +303,30 @@ func run(cmd *cobra.Command, _ []string) error {
 		logger.Error("failed to run gemini workload", zap.Error(err))
 	}
 
+	// The summary reads the statement files, and Close is what finishes them:
+	// it waits for the statement fetches of the errors that ended the run. The
+	// deferred Close above then does nothing.
+	if closeErr := workload.Close(); closeErr != nil {
+		logger.Error("failed to close workload", zap.Error(closeErr))
+	}
+
 	return workload.PrintResults(version)
+}
+
+// resolveRunFlags checks the flags that change how the run behaves and returns
+// the compression of the statement log files. --fail-fast stops the run at its
+// first error: an error budget of one.
+func resolveRunFlags() (compression.Algorithm, error) {
+	statementFileCompression, err := compression.Parse(statementLogFileCompression)
+	if err != nil {
+		return "", err
+	}
+
+	if failFast {
+		maxErrorsToStore = 1
+	}
+
+	return statementFileCompression, nil
 }
 
 func createLogger(level string) *zap.Logger {

@@ -19,6 +19,7 @@ import (
 	"cmp"
 	"encoding/json/v2"
 	"fmt"
+	"math"
 	"math/big"
 	"net"
 	"reflect"
@@ -302,19 +303,19 @@ func ValuesEqual(a, b any) bool {
 		}
 	case float32:
 		if bv, ok := b.(*float32); ok {
-			return bv != nil && av == *bv
+			return bv != nil && compareFloat(float64(av), float64(*bv)) == 0
 		}
 	case *float32:
 		if bv, ok := b.(float32); ok {
-			return av != nil && *av == bv
+			return av != nil && compareFloat(float64(*av), float64(bv)) == 0
 		}
 	case float64:
 		if bv, ok := b.(*float64); ok {
-			return bv != nil && av == *bv
+			return bv != nil && compareFloat(av, *bv) == 0
 		}
 	case *float64:
 		if bv, ok := b.(float64); ok {
-			return av != nil && *av == bv
+			return av != nil && compareFloat(*av, bv) == 0
 		}
 	case time.Duration:
 		if bv, ok := b.(*time.Duration); ok {
@@ -478,19 +479,25 @@ func compareValues(a, b any) int {
 		}
 	case float32:
 		if bv, ok := b.(float32); ok {
-			return cmp.Compare(av, bv)
+			return compareFloat(float64(av), float64(bv))
 		}
 	case *float32:
 		if bv, ok := b.(*float32); ok {
-			return comparePtr(av, bv)
+			if av == nil || bv == nil {
+				return comparePresence(av == nil, bv == nil)
+			}
+			return compareFloat(float64(*av), float64(*bv))
 		}
 	case float64:
 		if bv, ok := b.(float64); ok {
-			return cmp.Compare(av, bv)
+			return compareFloat(av, bv)
 		}
 	case *float64:
 		if bv, ok := b.(*float64); ok {
-			return comparePtr(av, bv)
+			if av == nil || bv == nil {
+				return comparePresence(av == nil, bv == nil)
+			}
+			return compareFloat(*av, *bv)
 		}
 	case int:
 		if bv, ok := b.(int); ok {
@@ -629,16 +636,10 @@ func compareValues(a, b any) int {
 		}
 	case *inf.Dec:
 		if bv, ok := b.(*inf.Dec); ok {
-			if av == nil && bv == nil {
-				return 0
+			if av == nil || bv == nil {
+				return comparePresence(av == nil, bv == nil)
 			}
-			if av == nil {
-				return -1
-			}
-			if bv == nil {
-				return 1
-			}
-			return av.Cmp(bv)
+			return compareDecimal(av, bv)
 		}
 	case net.IP:
 		if bv, ok := b.(net.IP); ok {
@@ -675,8 +676,8 @@ func compareValues(a, b any) int {
 }
 
 // compareStructured compares two values of the same type that are pointers,
-// slices, arrays or maps, element by element through compareValues. It reports
-// false when the types differ or the kind is not one of those.
+// slices, arrays or maps, element by element in the order of compareValues. It
+// reports false when the types differ or the kind is not one of those.
 //
 // Slices and arrays compare element by element, then by length. Maps compare by
 // length, then by their sorted keys, then by the values in key order. A nil
@@ -687,46 +688,127 @@ func compareStructured(a, b reflect.Value) (int, bool) {
 	}
 
 	switch a.Kind() {
-	case reflect.Pointer:
-		if a.IsNil() || b.IsNil() {
-			return comparePresence(a.IsNil(), b.IsNil()), true
-		}
-		return compareValues(a.Elem().Interface(), b.Elem().Interface()), true
-	case reflect.Slice, reflect.Array:
-		n := min(a.Len(), b.Len())
-		for i := range n {
-			if c := compareValues(a.Index(i).Interface(), b.Index(i).Interface()); c != 0 {
-				return c, true
-			}
-		}
-		return cmp.Compare(a.Len(), b.Len()), true
-	case reflect.Map:
-		if c := cmp.Compare(a.Len(), b.Len()); c != 0 {
-			return c, true
-		}
-		aKeys, bKeys := sortedKeys(a), sortedKeys(b)
-		for i := range aKeys {
-			if c := compareValues(aKeys[i].Interface(), bKeys[i].Interface()); c != 0 {
-				return c, true
-			}
-		}
-		for _, key := range aKeys {
-			if c := compareValues(a.MapIndex(key).Interface(), b.MapIndex(key).Interface()); c != 0 {
-				return c, true
-			}
-		}
-		return 0, true
+	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
+		return compareReflect(a, b), true
 	default:
 		return 0, false
 	}
 }
 
+var (
+	bigIntPtrType = reflect.TypeFor[*big.Int]()
+	decPtrType    = reflect.TypeFor[*inf.Dec]()
+	timeType      = reflect.TypeFor[time.Time]()
+	ipType        = reflect.TypeFor[net.IP]()
+	durationType  = reflect.TypeFor[gocql.Duration]()
+)
+
+// compareReflect compares two values of one type with the order of
+// compareValues. Collections from a scan hold their elements in place, so it
+// reads basic kinds straight from the reflect.Value and boxes nothing into an
+// interface on the common paths.
+//
+//nolint:gocyclo,cyclop // one case per reflect kind
+func compareReflect(a, b reflect.Value) int {
+	switch a.Type() {
+	case bigIntPtrType, decPtrType, timeType, ipType, durationType:
+		// Their order is not the order of their fields or bytes.
+		return compareValues(a.Interface(), b.Interface())
+	}
+
+	switch a.Kind() {
+	case reflect.String:
+		return strings.Compare(a.String(), b.String())
+	case reflect.Bool:
+		return compareBool(a.Bool(), b.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return cmp.Compare(a.Int(), b.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return cmp.Compare(a.Uint(), b.Uint())
+	case reflect.Float32, reflect.Float64:
+		return compareFloat(a.Float(), b.Float())
+	case reflect.Pointer:
+		if a.IsNil() || b.IsNil() {
+			return comparePresence(a.IsNil(), b.IsNil())
+		}
+
+		return compareReflect(a.Elem(), b.Elem())
+	case reflect.Interface:
+		if a.IsNil() || b.IsNil() {
+			return comparePresence(a.IsNil(), b.IsNil())
+		}
+
+		return compareValues(a.Elem().Interface(), b.Elem().Interface())
+	case reflect.Slice, reflect.Array:
+		if a.Type().Elem().Kind() == reflect.Uint8 && a.Kind() == reflect.Slice {
+			return bytes.Compare(a.Bytes(), b.Bytes())
+		}
+
+		n := min(a.Len(), b.Len())
+		for i := range n {
+			if c := compareReflect(a.Index(i), b.Index(i)); c != 0 {
+				return c
+			}
+		}
+
+		return cmp.Compare(a.Len(), b.Len())
+	case reflect.Map:
+		if c := cmp.Compare(a.Len(), b.Len()); c != 0 {
+			return c
+		}
+
+		aKeys, bKeys := sortedKeys(a), sortedKeys(b)
+		for i := range aKeys {
+			if c := compareReflect(aKeys[i], bKeys[i]); c != 0 {
+				return c
+			}
+		}
+
+		// The keys of both maps are equal pairwise here. Each map is read with
+		// its own key: a pointer key (varint, decimal) of a is not a key of b.
+		for i := range aKeys {
+			if c := compareReflect(a.MapIndex(aKeys[i]), b.MapIndex(bKeys[i])); c != 0 {
+				return c
+			}
+		}
+
+		return 0
+	default:
+		return compareValues(a.Interface(), b.Interface())
+	}
+}
+
 func sortedKeys(m reflect.Value) []reflect.Value {
 	keys := m.MapKeys()
-	slices.SortFunc(keys, func(x, y reflect.Value) int {
-		return compareValues(x.Interface(), y.Interface())
-	})
+	slices.SortFunc(keys, compareReflect)
+
 	return keys
+}
+
+// compareFloat orders floats numerically, with -0 before +0 and NaN before
+// every number. CQL stores the sign of a zero, so a cluster that returns +0
+// for a written -0 has changed the value. All NaNs compare equal: their
+// payload is not part of what CQL defines.
+func compareFloat(a, b float64) int {
+	if c := cmp.Compare(a, b); c != 0 {
+		return c
+	}
+
+	if a == 0 {
+		return compareBool(!math.Signbit(a), !math.Signbit(b))
+	}
+
+	return 0
+}
+
+// compareDecimal orders decimals by value, then by scale. CQL keeps the scale
+// of a decimal, so 1.0 and 1.00 are two different values.
+func compareDecimal(a, b *inf.Dec) int {
+	if c := a.Cmp(b); c != 0 {
+		return c
+	}
+
+	return cmp.Compare(a.Scale(), b.Scale())
 }
 
 // comparePresence orders a nil pointer before a non-nil one. Both nil compare

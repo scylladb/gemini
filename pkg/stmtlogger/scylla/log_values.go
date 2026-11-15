@@ -52,24 +52,34 @@ func queryID(stmt string) int64 {
 	return int64(maphash.String(querySeed, stmt))
 }
 
-// queryDict holds the CQL text of every query id that the committers wrote. A
-// row stores only the id, so the text of a statement crosses the network and
-// the disk once per run instead of once per execution.
+// queryDict holds the CQL text of every query id the committers saw, and which
+// of them reached the queries table. A row stores only the id, so the text of
+// a statement crosses the network and the disk once per run instead of once
+// per execution.
 type queryDict struct {
-	texts sync.Map // int64 -> string
+	texts   sync.Map // int64 -> string
+	written sync.Map // int64 -> struct{}
 }
 
-// remember records stmt under id. It reports true the first time it sees id:
-// the caller then writes the queries row. Two committers that race on a new id
-// both write the same row, which is harmless.
-func (d *queryDict) remember(id int64, stmt string) bool {
-	if _, ok := d.texts.Load(id); ok {
+// needsWrite records stmt under id and reports whether the queries row of id
+// still has to be written. It stays true until markWritten: a batch that
+// carried the row can fail, and then a later batch must carry it again. Two
+// committers that write the same row is harmless.
+func (d *queryDict) needsWrite(id int64, stmt string) bool {
+	if _, ok := d.written.Load(id); ok {
 		return false
 	}
 
-	_, loaded := d.texts.LoadOrStore(id, stmt)
+	if _, ok := d.texts.Load(id); !ok {
+		d.texts.LoadOrStore(id, stmt)
+	}
 
-	return !loaded
+	return true
+}
+
+// markWritten records that the queries row of id reached the cluster.
+func (d *queryDict) markWritten(id int64) {
+	d.written.Store(id, struct{}{})
 }
 
 // text returns the CQL text of id, if a committer of this process wrote it.
@@ -83,7 +93,7 @@ func (d *queryDict) text(id int64) (string, bool) {
 		return "", false
 	}
 
-	return v.(string), true //nolint:forcetypeassert // only remember stores, and it stores strings
+	return v.(string), true //nolint:forcetypeassert // only needsWrite stores, and it stores strings
 }
 
 // logData is the data cell of one _logs row: everything about one execution

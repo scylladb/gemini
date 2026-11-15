@@ -39,6 +39,8 @@ type updateVariant struct {
 	query        string
 	columns      []int
 	setValuesLen int
+	// nonIdempotent is true when the SET clause increments a counter.
+	nonIdempotent bool
 }
 
 // buildCachedUpdateQueries pre-builds a small, bounded pool of single-row UPDATE
@@ -93,6 +95,7 @@ func (g *Generator) buildCachedUpdateQueries() {
 func (g *Generator) buildUpdateVariant(indices []int) updateVariant {
 	builder := qb.Update(g.keyspaceAndTable)
 	setValuesLen := 0
+	nonIdempotent := false
 	for _, ci := range indices {
 		col := g.table.Columns[ci]
 		switch ty := col.Type.(type) {
@@ -101,6 +104,7 @@ func (g *Generator) buildUpdateVariant(indices []int) updateVariant {
 			setValuesLen += col.Type.LenValue()
 		case *typedef.CounterType:
 			builder.SetLit(col.Name, col.Name+"+1")
+			nonIdempotent = true
 		default:
 			builder.Set(col.Name)
 			setValuesLen += col.Type.LenValue()
@@ -115,7 +119,7 @@ func (g *Generator) buildUpdateVariant(indices []int) updateVariant {
 	}
 
 	query, _ := builder.ToCql()
-	return updateVariant{query: query, columns: indices, setValuesLen: setValuesLen}
+	return updateVariant{query: query, columns: indices, setValuesLen: setValuesLen, nonIdempotent: nonIdempotent}
 }
 
 // pickUpdateVariant returns a cached UPDATE shape for this statement: which
@@ -163,13 +167,17 @@ func (g *Generator) Update(ctx context.Context) (*typedef.Stmt, error) {
 
 	if trackedRow, ok := g.generator.PopTrackedRow(); ok {
 		if stmt := g.updateFromTracked(values, variant.query, trackedRow); stmt != nil {
+			stmt.NonIdempotent = variant.nonIdempotent
 			return stmt, nil
 		}
 		// On a tracked miss appendTrackedKeys appends nothing (it validates
 		// lengths first), so values still holds only the SET bind values.
 	}
 
-	return g.updateRandomRow(values, variant.query), nil
+	stmt := g.updateRandomRow(values, variant.query)
+	stmt.NonIdempotent = variant.nonIdempotent
+
+	return stmt, nil
 }
 
 // updateFromTracked builds a single-row UPDATE targeting trackedRow (full

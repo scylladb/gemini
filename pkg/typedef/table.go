@@ -65,6 +65,20 @@ func (t *Table) SelectColumnNames() []string {
 	return columns
 }
 
+// HasTupleColumns reports whether a column of the table is a tuple. Scylla
+// has a known issue with INSERT JSON on such tables (KnownIssuesJSONWithTuples).
+func (t *Table) HasTupleColumns() bool {
+	for _, cols := range []Columns{t.PartitionKeys, t.ClusteringKeys, t.Columns} {
+		for _, col := range cols {
+			if _, ok := col.Type.(*TupleType); ok {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 func (t *Table) IsCounterTable() bool {
 	for _, col := range t.Columns {
 		if _, ok := col.Type.(*CounterType); ok {

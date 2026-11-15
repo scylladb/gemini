@@ -15,6 +15,7 @@
 package typedef
 
 import (
+	"encoding/json/v2"
 	"math"
 	"reflect"
 	"sync/atomic"
@@ -155,22 +156,35 @@ func (mt *MapType) CQLHolder() string {
 	return "?"
 }
 
+// GenJSONValue returns a map for an INSERT JSON statement. A JSON object key
+// is a string, and Scylla parses a key of any other type from its string
+// form, such as "true" or "12". So the map has string keys.
 func (mt *MapType) GenJSONValue(r utils.Random, p RangeConfig) any {
 	count := r.IntN(9) + 1
-	vals := reflect.MakeMap(
-		reflect.MapOf(
-			reflect.TypeOf(mt.KeyType.GenJSONValue(r, p)),
-			reflect.TypeOf(mt.ValueType.GenJSONValue(r, p)),
-		),
-	)
+	vals := make(map[string]any, count)
 
 	for range count {
-		vals.SetMapIndex(
-			reflect.ValueOf(mt.KeyType.GenJSONValue(r, p)),
-			reflect.ValueOf(mt.ValueType.GenJSONValue(r, p)),
-		)
+		vals[jsonMapKey(mt.KeyType.GenJSONValue(r, p))] = mt.ValueType.GenJSONValue(r, p)
 	}
-	return vals.Interface()
+
+	return vals
+}
+
+// jsonMapKey returns the string form of a map key in an INSERT JSON statement:
+// a string as it is, any other value as its JSON text.
+func jsonMapKey(key any) string {
+	if s, ok := key.(string); ok {
+		return s
+	}
+
+	data := utils.MarshalJSONUnchecked(key)
+
+	var unquoted string
+	if err := json.Unmarshal(data, &unquoted); err == nil {
+		return unquoted
+	}
+
+	return string(data)
 }
 
 func (mt *MapType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {

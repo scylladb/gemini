@@ -127,14 +127,21 @@ type ListError struct {
 	channelClosed atomic.Bool
 }
 
+// AddError stores err and sends it to the statement fetcher. The hash is
+// computed here, before anything shares the error: Hash caches it in the
+// struct, and a cache write that races Errors' copy is a data race. The
+// fetcher gets a copy of its own, not a pointer into the list.
 func (el *ListError) AddError(err JobError) {
+	err.Hash()
+
 	el.mu.Lock()
 	defer el.mu.Unlock()
 
 	if len(el.errors) < el.limit {
 		el.errors = append(el.errors, err)
 		if el.ch != nil {
-			el.ch <- &el.errors[len(el.errors)-1]
+			sent := err
+			el.ch <- &sent
 		}
 	}
 }

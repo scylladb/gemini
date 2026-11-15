@@ -366,7 +366,10 @@ func (v *Validation) handleCheckFailure(err error, stmt *typedef.Stmt) error {
 	// Step 3: Release keys (may trigger deleteValidation — safe now).
 	releaseKeys(stmt)
 
-	if marked {
+	// An index query names no partition: its rows come from any partition the
+	// index matches. There is nothing to mark, and nothing to deduplicate by,
+	// so its failure is reported every time. It is still a divergence.
+	if marked || len(stmt.PartitionKeys) == 0 {
 		return v.buildJobError(err, stmt, "Validation failed: "+err.Error())
 	}
 	return nil

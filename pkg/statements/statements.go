@@ -163,30 +163,54 @@ func (g *Generator) DrainTrackedMisses() TrackedMissCounts {
 	return c
 }
 
-func (g *Generator) getMultiplePartitionKeys() int {
+// maxMultiplePartitionKeys bounds the partitions of one multi-partition
+// statement, so a statement does not read or delete a large share of the
+// partition pool at once.
+const maxMultiplePartitionKeys = 10
+
+// maxMultiplePartitionCount returns the most partitions a multi-partition
+// statement may name. Every partition-key column gets one IN value per
+// partition, so the server reads count^columns key combinations, which must
+// stay below MaxCartesianProductCount.
+// It returns 0 for a table without partition keys.
+func (g *Generator) maxMultiplePartitionCount() int {
 	l := g.table.PartitionKeys.Len()
 	if l == 0 {
+		return 0
+	}
+
+	return min(max(1, TotalCartesianProductCount(MaxCartesianProductCount, float64(l))), maxMultiplePartitionKeys)
+}
+
+// getMultiplePartitionKeys returns the number of partitions of a
+// multi-partition statement, uniform in [1, maxMultiplePartitionCount].
+func (g *Generator) getMultiplePartitionKeys() int {
+	maxCount := g.maxMultiplePartitionCount()
+	if maxCount == 0 {
 		panic("table has no partition keys")
 	}
 
-	maximum := TotalCartesianProductCount(float64(g.random.IntN(l)), float64(l))
-
-	return max(1, maximum)
+	return 1 + g.random.IntN(maxCount)
 }
 
+// getMultipleClusteringKeys returns the number of clustering columns a
+// clustering-range statement uses, uniform in [1, number of clustering
+// columns]. The last one used carries the range, so every clustering column
+// can be ranged.
 func (g *Generator) getMultipleClusteringKeys() int {
 	l := g.table.ClusteringKeys.Len()
 	if l == 0 {
 		return 0
 	}
 
-	maximum := TotalCartesianProductCount(float64(g.random.IntN(l)), float64(l))
-	return max(1, maximum)
+	return 1 + g.random.IntN(l)
 }
 
-func (g *Generator) getIndex(initial int) int {
-	l := len(g.table.Indexes)
-	return min(initial, l) + g.random.IntN(l)
+// getIndexCount returns how many indexed columns an index query filters on,
+// uniform in [1, number of indexes]. Zero would give a SELECT with no WHERE
+// clause: a scan of the whole table.
+func (g *Generator) getIndexCount() int {
+	return 1 + g.random.IntN(len(g.table.Indexes))
 }
 
 const MaxCartesianProductCount = float64(100.0)

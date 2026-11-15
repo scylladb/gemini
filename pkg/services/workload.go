@@ -21,6 +21,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -66,6 +67,11 @@ type (
 		store    store.Store
 		jobs     *jobs.Jobs
 		distFunc distributions.DistributionFunc
+		closeErr error
+		// closeOnce makes Close safe to call twice: run closes the workload
+		// before it prints the summary, and a deferred Close covers the early
+		// returns.
+		closeOnce sync.Once
 	}
 )
 
@@ -364,7 +370,18 @@ func (w *Workload) PrintResults(geminiVersion string) error {
 	return nil
 }
 
+// Close stops the workload and closes the store, which flushes the statement
+// logger and finishes the statement files. Only the first call does the work;
+// every call returns its error.
 func (w *Workload) Close() error {
+	w.closeOnce.Do(func() {
+		w.closeErr = w.close()
+	})
+
+	return w.closeErr
+}
+
+func (w *Workload) close() error {
 	w.logger.Info("closing workload")
 
 	w.logger.Info("setting stop flag")

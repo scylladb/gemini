@@ -108,6 +108,10 @@ type (
 		Query         string          `json:"Query"`
 		Values        []any           `json:"Values"`
 		QueryType     StatementType   `json:"QueryType"`
+		// NonIdempotent marks a statement that changes the data again each time
+		// it runs, such as a counter increment. A write that may already be
+		// applied must never be sent again.
+		NonIdempotent bool `json:"NonIdempotent,omitzero"`
 	}
 )
 

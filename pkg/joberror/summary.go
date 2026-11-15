@@ -31,6 +31,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/scylladb/gemini/pkg/compression"
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
@@ -163,13 +164,23 @@ func buildStmtIndex(path string) stmtIndex {
 		return nil
 	}
 	defer func() { _ = f.Close() }()
+
+	// The file is plain, gzip or zstd, as --statement-log-file-compression
+	// wrote it.
+	plain, err := compression.NewReader(f)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "statement log %s: %v\n", path, err)
+		return nil
+	}
+	defer func() { _ = plain.Close() }()
+
 	idx := make(stmtIndex)
 
 	// ReadString, not a bufio.Scanner: one line holds a partition's whole
 	// statement history, which has no upper bound. A Scanner stops at its buffer
 	// cap and drops the rest of the file with it. A malformed line costs only
 	// itself, because the next newline starts a whole record again.
-	r := bufio.NewReaderSize(f, stmtReaderBufSize)
+	r := bufio.NewReaderSize(plain, stmtReaderBufSize)
 
 	var malformed int
 

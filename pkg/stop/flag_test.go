@@ -63,10 +63,15 @@ func TestSoftOrHardStop(t *testing.T) {
 			t.Error("Error:SetSoft function apply hardStopHandler")
 		}
 
+		// A hard stop must still end a soft stop that does not finish, as a
+		// second Ctrl+C does.
 		workersDone.Store(uint32(0))
 		testSignals(t, workersDone, testFlag.IsHardOrSoft, testFlag.SetHard)
-		if ctx.Err() != nil {
-			t.Error("Error:SetHard function apply hardStopHandler after SetSoft")
+		if ctx.Err() == nil {
+			t.Error("Error:SetHard function does not apply hardStopHandler after SetSoft")
+		}
+		if !testFlag.IsHard() {
+			t.Error("Error:SetHard after SetSoft must leave the flag hard")
 		}
 
 		testFlag, ctx, workersDone = initVars()
@@ -609,4 +614,24 @@ func TestSignalChannel(t *testing.T) {
 		}()
 		<-parent.SignalChannel()
 	})
+}
+
+// TestSoftNeverOverridesHard: a stop only gets stronger. A soft stop after a
+// hard stop must not weaken it.
+func TestSoftNeverOverridesHard(t *testing.T) {
+	t.Parallel()
+
+	flag := stop.NewFlag(t.Name())
+	if !flag.SetHard(false) {
+		t.Fatal("the first hard stop must be applied")
+	}
+	if flag.SetSoft(false) {
+		t.Error("a soft stop after a hard stop must be ignored")
+	}
+	if !flag.IsHard() {
+		t.Error("the flag must stay hard")
+	}
+	if flag.SetHard(false) {
+		t.Error("a second hard stop changes nothing")
+	}
 }

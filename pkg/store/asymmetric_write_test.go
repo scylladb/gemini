@@ -17,12 +17,14 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gocql/gocql"
 	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,80 +34,45 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// isOnlyTimeoutFailure
+// outcomeUnknown
 // ---------------------------------------------------------------------------
 
-func TestIsOnlyTimeoutFailure(t *testing.T) {
+func TestOutcomeUnknown(t *testing.T) {
 	t.Parallel()
 
 	deadline := context.DeadlineExceeded
-	otherErr := errors.New("network error")
+	noResponse := fmt.Errorf("query: %w", gocql.ErrTimeoutNoResponse)
+	writeTimeout := &gocql.RequestErrWriteTimeout{}
+	unavailable := &gocql.RequestErrUnavailable{}
+	otherErr := errors.New("syntax error")
 
 	tests := []struct {
 		name   string
 		result mutationResult
 		want   bool
 	}{
+		{name: "both succeeded", result: mutationResult{}, want: false},
+		{name: "test timed out", result: mutationResult{testErr: deadline}, want: true},
+		{name: "oracle timed out", result: mutationResult{oracleErr: deadline}, want: true},
+		{name: "both timed out", result: mutationResult{testErr: deadline, oracleErr: deadline}, want: true},
+		{name: "no response from the server", result: mutationResult{testErr: noResponse}, want: true},
+		{name: "coordinator write timeout", result: mutationResult{oracleErr: writeTimeout}, want: true},
+		{name: "unavailable: not applied", result: mutationResult{testErr: unavailable}, want: false},
+		{name: "hard error: not applied", result: mutationResult{oracleErr: otherErr}, want: false},
+		{name: "both hard errors", result: mutationResult{testErr: otherErr, oracleErr: unavailable}, want: false},
 		{
-			name:   "both nil — no timeout at all",
-			result: mutationResult{testErr: nil, oracleErr: nil},
-			want:   false,
-		},
-		{
-			name:   "test timed out, oracle nil",
-			result: mutationResult{testErr: deadline, oracleErr: nil},
-			want:   true,
-		},
-		{
-			name:   "oracle timed out, test nil",
-			result: mutationResult{testErr: nil, oracleErr: deadline},
-			want:   true,
-		},
-		{
-			name:   "both timed out",
-			result: mutationResult{testErr: deadline, oracleErr: deadline},
-			want:   true,
-		},
-		{
-			name:   "test hard error, oracle nil",
-			result: mutationResult{testErr: otherErr, oracleErr: nil},
-			want:   false,
-		},
-		{
-			name:   "oracle hard error, test nil",
-			result: mutationResult{testErr: nil, oracleErr: otherErr},
-			want:   false,
-		},
-		{
-			name:   "test hard error, oracle timed out",
+			// The timed-out side may have applied the write, the other side did
+			// not: the clusters may differ, whatever the other error was.
+			name:   "hard error on one side, timeout on the other",
 			result: mutationResult{testErr: otherErr, oracleErr: deadline},
-			want:   false, // test is not a timeout → testTimeout false
-		},
-		{
-			name:   "test timed out, oracle hard error",
-			result: mutationResult{testErr: deadline, oracleErr: otherErr},
-			want:   false, // oracle is not a timeout → oracleTimeout false
-		},
-		{
-			name:   "both hard errors",
-			result: mutationResult{testErr: otherErr, oracleErr: otherErr},
-			want:   false,
-		},
-		{
-			name: "wrapped DeadlineExceeded via fmt.Errorf still matches",
-			result: mutationResult{
-				testErr:   context.DeadlineExceeded,
-				oracleErr: nil,
-			},
-			want: true,
+			want:   true,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := isOnlyTimeoutFailure(tc.result)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, outcomeUnknown(tc.result))
 		})
 	}
 }

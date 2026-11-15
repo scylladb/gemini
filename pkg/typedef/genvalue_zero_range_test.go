@@ -27,7 +27,7 @@ import (
 // a RangeConfig whose max string/blob length is zero (what the --dataset-size=small
 // preset produced for partition keys before the fix) made string/blob value
 // generation call rand.IntN(0), which panics ("invalid argument to IntN") and
-// crashes the whole process at partition fill. The randSpan guard must turn that
+// crashes the whole process at partition fill. The randLength guard must turn that
 // into a harmless (empty) value instead.
 func TestSimpleType_GenValue_ZeroRangeDoesNotPanic(t *testing.T) {
 	t.Parallel()

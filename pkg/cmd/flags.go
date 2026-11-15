@@ -220,11 +220,11 @@ func setupFlags(cmd *cobra.Command) {
 			"Comma-separated delays after which a deleted partition is checked for data resurrection, for example 30s,3m,30h")
 	cmd.Flags().
 		StringVarP(&partitionKeyDistribution, "partition-key-distribution", "", "uniform",
-			"Specify the distribution from which to draw partition keys, supported values are currently uniform|normal|zipf")
+			"Specify the distribution from which to draw partition keys: uniform|normal|lognormal|zipf")
 	cmd.Flags().
-		Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution")
+		Float64VarP(&normalDistMean, "normal-dist-mean", "", stdDistMean, "Mean of the normal distribution, a position on the uint64 range. For lognormal, the log-space index mean")
 	cmd.Flags().
-		Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, defaults to one standard deviation ~0.341")
+		Float64VarP(&normalDistSigma, "normal-dist-sigma", "", oneStdDev, "Sigma of the normal distribution, a share of the uint64 range (~0.341). For lognormal, the log-space sigma")
 	cmd.Flags().
 		StringVarP(&tracingOutFile, "tracing-outdir", "", "",
 			"Specify the file to which tracing information gets written. Two magic names are available, 'stdout' and 'stderr'. By default tracing is disabled.")
@@ -265,7 +265,7 @@ func setupFlags(cmd *cobra.Command) {
 	cmd.Flags().
 		StringVarP(&oracleStatementLogFile, "oracle-statement-log-file", "", "", "File to write statements flow to")
 	cmd.Flags().
-		StringVarP(&statementLogFileCompression, "statement-log-file-compression", "", "none", "Compression algorithm to use for statement log files")
+		StringVarP(&statementLogFileCompression, "statement-log-file-compression", "", "none", "Compression of the statement log files: none, gzip or zstd")
 	cmd.Flags().
 		IntVarP(&rowTrackerCapacity, "row-tracker-capacity", "", 100_000,
 			"Maximum capacity for the row tracker used by targeted delete operations. "+

@@ -154,6 +154,47 @@ type MutationError struct {
 	// the affected partitions: without it, a partial compensation failure silently
 	// manufactures a divergence that validation later reports as a product bug.
 	CompensationFailed bool `json:"compensation_failed"`
+
+	// OutcomeUnknown reports that a cluster may have applied a write gemini
+	// could not confirm and could not compensate: a counter increment whose
+	// reply did not arrive. The partition must be invalidated.
+	OutcomeUnknown bool `json:"outcome_unknown"`
+}
+
+// MarshalJSON writes the fields of the embedded ValidationError and the flags
+// that tell whether the write left the two clusters asymmetric. Without its own
+// method the type would use the one of ValidationError and drop the flags.
+func (me *MutationError) MarshalJSON() ([]byte, error) {
+	finalErr := ""
+	if me.FinalError != nil {
+		finalErr = me.FinalError.Error()
+	}
+
+	payload := struct {
+		StartTime          time.Time     `json:"start_time"`
+		EndTime            time.Time     `json:"end_time"`
+		FinalError         string        `json:"final_error"`
+		Statement          *typedef.Stmt `json:"statement,omitempty"`
+		Operation          string        `json:"operation,omitempty"`
+		TotalAttempts      uint64        `json:"total_attempts,omitzero"`
+		TestStoreSuccess   bool          `json:"test_store_success"`
+		OracleStoreSuccess bool          `json:"oracle_store_success"`
+		CompensationFailed bool          `json:"compensation_failed"`
+		OutcomeUnknown     bool          `json:"outcome_unknown"`
+	}{
+		StartTime:          me.StartTime,
+		EndTime:            me.EndTime,
+		FinalError:         finalErr,
+		Statement:          me.Statement,
+		Operation:          me.Operation,
+		TotalAttempts:      me.TotalAttempts.Load(),
+		TestStoreSuccess:   me.TestStoreSuccess,
+		OracleStoreSuccess: me.OracleStoreSuccess,
+		CompensationFailed: me.CompensationFailed,
+		OutcomeUnknown:     me.OutcomeUnknown,
+	}
+
+	return json.Marshal(payload, json.Deterministic(true))
 }
 
 // NewStoreMutationError creates a new StoreMutationError

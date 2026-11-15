@@ -23,9 +23,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gocql/gocql"
 	"github.com/samber/mo"
 	"go.uber.org/zap"
 
+	"github.com/scylladb/gemini/pkg/compression"
 	"github.com/scylladb/gemini/pkg/joberror"
 	"github.com/scylladb/gemini/pkg/metrics"
 	"github.com/scylladb/gemini/pkg/replication"
@@ -93,8 +95,10 @@ type (
 		UseServerSideTimestamps bool
 	}
 	Config struct {
-		OracleClusterConfig              *ScyllaClusterConfig
-		OracleStatementFile              string
+		OracleClusterConfig *ScyllaClusterConfig
+		OracleStatementFile string
+		// StatementFileCompression compresses the statement log files.
+		StatementFileCompression         compression.Algorithm
 		TestStatementFile                string
 		TestClusterConfig                ScyllaClusterConfig
 		MaxRetriesMutate                 int
@@ -192,6 +196,7 @@ func New(
 					ch,
 					cfg.OracleStatementFile,
 					cfg.TestStatementFile,
+					cfg.StatementFileCompression,
 					e.GetChannel(),
 					logger.With(zap.String("component", "statement_logger")),
 				)),
@@ -402,21 +407,68 @@ func (ds delegatingStore) compensateAsymmetricWrite(ctx context.Context, stmt *t
 	return ok
 }
 
-// isOnlyTimeoutFailure reports whether all non-nil errors in result are
-// context.DeadlineExceeded (CQL request timeouts), and at least one store had
-// such a timeout.  This distinguishes transient timeouts from hard failures
-// (e.g. serialisation errors, network errors) that should propagate to the
-// caller as write errors.
-//
-// Assumption: individual store errors are plain values, not errors.Join
-// composites.  delegatingStore stores one error per store; the only joined
-// errors appear in the finalErr that is passed to MutationError.Finalize,
-// which is never inspected by this function.
-func isOnlyTimeoutFailure(result mutationResult) bool {
-	testTimeout := result.testErr == nil || errors.Is(result.testErr, context.DeadlineExceeded)
-	oracleTimeout := result.oracleErr == nil || errors.Is(result.oracleErr, context.DeadlineExceeded)
-	atLeastOne := errors.Is(result.testErr, context.DeadlineExceeded) || errors.Is(result.oracleErr, context.DeadlineExceeded)
-	return testTimeout && oracleTimeout && atLeastOne
+// writeMayHaveApplied reports whether err leaves it unknown if the server
+// applied the write. A request that timed out, on the client or between the
+// coordinator and its replicas, may have been applied. An error the server
+// returned before it ran the write, such as Unavailable or a syntax error,
+// means the write was not applied.
+func writeMayHaveApplied(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, gocql.ErrTimeoutNoResponse) {
+		return true
+	}
+
+	if queryErr, ok := errors.AsType[*gocql.QueryError](err); ok && queryErr.PotentiallyExecuted() {
+		return true
+	}
+
+	if _, ok := errors.AsType[*gocql.RequestErrWriteTimeout](err); ok {
+		return true
+	}
+
+	_, ok := errors.AsType[*gocql.RequestErrWriteFailure](err)
+
+	return ok
+}
+
+// outcomeUnknown reports whether a cluster of result may have applied the
+// write without gemini knowing it. The success flags then cannot tell whether
+// the clusters are symmetric.
+func outcomeUnknown(result mutationResult) bool {
+	return writeMayHaveApplied(result.testErr) || writeMayHaveApplied(result.oracleErr)
+}
+
+// resolveUnknownOutcome makes the partitions of a write whose outcome is
+// unknown either symmetric or invalid. It returns true when a compensating
+// DELETE made both clusters equal. A non-idempotent write, such as a counter
+// increment, cannot be undone with a DELETE, so its partitions are marked for
+// invalidation instead.
+func (ds delegatingStore) resolveUnknownOutcome(
+	ctx context.Context,
+	stmt *typedef.Stmt,
+	ts mo.Option[time.Time],
+	mutationErr *MutationError,
+) bool {
+	if stmt.NonIdempotent {
+		mutationErr.OutcomeUnknown = true
+		return false
+	}
+
+	if ds.compensateAsymmetricWrite(ctx, stmt, ts) {
+		return true
+	}
+
+	// Compensation ran but did not fully succeed, so the partition's
+	// cross-cluster state is now unknown even if the ORIGINAL writes failed
+	// symmetrically. The success flags alone would look symmetric and
+	// mutation.run() would leave the partition valid, silently manufacturing a
+	// divergence.
+	mutationErr.CompensationFailed = true
+
+	return false
 }
 
 // recordAsymmetricAck counts a dual-write that exactly one cluster
@@ -695,6 +747,20 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		retryTest := attempt == 0 || cumulativeResult.testErr != nil
 		retryOracle := (attempt == 0 || cumulativeResult.oracleErr != nil) && ds.oracleStore != nil
 
+		// A non-idempotent write that a cluster may already have applied must
+		// not be sent to it again: a second counter increment would add twice.
+		if attempt > 0 && stmt.NonIdempotent {
+			if writeMayHaveApplied(cumulativeResult.testErr) {
+				retryTest = false
+			}
+			if writeMayHaveApplied(cumulativeResult.oracleErr) {
+				retryOracle = false
+			}
+			if !retryTest && !retryOracle {
+				break
+			}
+		}
+
 		// Execute mutations only on stores that need to be retried
 		attemptResult := ds.executeParallelMutations(ctx, stmt, ts, attempt, retryTest, retryOracle)
 		// Record any errors that occurred during this attempt
@@ -759,30 +825,22 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 				continue
 			case <-ctx.Done():
 				utils.PutTimer(timer)
-				if errors.Is(ctx.Err(), context.Canceled) {
-					return nil
-				}
 
-				// Context expired during the backoff delay between retries.
+				// The context ended during the backoff delay between retries.
 				// The stores may be asymmetric at this point (e.g. the previous
-				// attempt committed on test but timed out on oracle).
+				// attempt committed on test but timed out on oracle), even when
+				// the run is shutting down, so the error goes back to the caller
+				// for the invalidation decision.
 				mutationErr.Finalize(fmt.Errorf("mutation cancelled during retry delay: %w", ctx.Err()))
 
-				// If the only failures are CQL timeouts, attempt a compensating
-				// DELETE on both stores so the partition is deterministically
-				// empty for the upcoming validation phase.  On success, return
-				// nil so the partition is NOT marked invalid.
-				if isOnlyTimeoutFailure(cumulativeResult) {
-					if ds.compensateAsymmetricWrite(ctx, stmt, ts) {
-						ds.recordAsymmetricAck(cumulativeResult, "compensated")
-						return nil
-					}
-					// Compensation ran but did not fully succeed, so the partition's
-					// cross-cluster state is now unknown even if the ORIGINAL writes
-					// failed symmetrically. Flag it explicitly: the success flags
-					// alone would look symmetric and mutation.run() would leave the
-					// partition valid, silently manufacturing a divergence.
-					mutationErr.CompensationFailed = true
+				// If a cluster may have applied the write, make the partition
+				// deterministically equal on both stores for the validation
+				// phase. On success, return nil so the partition is NOT marked
+				// invalid.
+				if outcomeUnknown(cumulativeResult) &&
+					ds.resolveUnknownOutcome(ctx, stmt, ts, mutationErr) {
+					ds.recordAsymmetricAck(cumulativeResult, "compensated")
+					return nil
 				}
 
 				// Compensation not applicable or failed — return the
@@ -810,20 +868,13 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 	mutationErr.Finalize(finalErr)
 	metrics.MutationRetriesTotal.WithLabelValues("exhausted").Inc()
 
-	// If all remaining failures are CQL timeouts, the servers may have
-	// committed on one side but not the other.  Issue a compensating DELETE
-	// on both stores so the partition is deterministically empty before the
-	// validation phase starts.  On success return nil so the partition is not
-	// marked invalid.
-	if isOnlyTimeoutFailure(cumulativeResult) {
-		if ds.compensateAsymmetricWrite(ctx, stmt, ts) {
-			ds.recordAsymmetricAck(cumulativeResult, "compensated")
-			return nil
-		}
-		// See the retry-loop site above: a partial compensation failure leaves the
-		// clusters in an unknown state that the symmetric success flags cannot
-		// express, so it must be signalled explicitly.
-		mutationErr.CompensationFailed = true
+	// If a cluster may have applied the write, the servers may have committed
+	// on one side but not the other. Make the partition deterministically equal
+	// on both stores before the validation phase starts. On success return nil
+	// so the partition is not marked invalid.
+	if outcomeUnknown(cumulativeResult) && ds.resolveUnknownOutcome(ctx, stmt, ts, mutationErr) {
+		ds.recordAsymmetricAck(cumulativeResult, "compensated")
+		return nil
 	}
 
 	ds.recordAsymmetricAck(cumulativeResult, "uncompensated")

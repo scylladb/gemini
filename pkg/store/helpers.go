@@ -228,7 +228,7 @@ func pks(t *typedef.Table, rows Rows) *strset.Set {
 }
 
 // writeRowKey writes the composite primary key for a row into sb.
-// Shared by pks(), buildRowMap(), and rowKeyString() to avoid
+// Shared by pks(), buildPKMultiMap(), and rowKeyString() to avoid
 // duplicating key-building logic and its allocations.
 func writeRowKey(sb *strings.Builder, t *typedef.Table, row Row) {
 	for i, pk := range t.PartitionKeys {
