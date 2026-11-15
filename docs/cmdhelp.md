@@ -27,7 +27,7 @@ Flags:
   -h, --help                                           help for gemini
       --level string                                   Specify the logging level, debug|info|warn|error|dpanic|panic|fatal (default "info")
       --materialized-views                             Run gemini with materialized views support
-      --max-blob-length int                            Maximum blob length (default 10000)
+      --max-blob-length int                            Maximum blob length (default 256)
       --max-clustering-keys int                        Maximum number of generated clustering keys (default 5)
       --max-columns int                                Maximum number of generated columns (default 12)
       --max-deleted-heap-size int                      Maximum number of entries in the deleted-partitions heap. Gemini lowers a value above 3000000 to 3000000 (default 3000000)
@@ -37,15 +37,15 @@ Flags:
       --max-partition-keys int                         Maximum number of generated partition keys (default 8)
       --max-pk-blob-length int                         Maximum blob length (default 128)
       --max-pk-string-length int                       Maximum string length (default 64)
-      --max-string-length int                          Maximum string length (default 1024)
+      --max-string-length int                          Maximum string length (default 128)
       --max-tables int                                 Maximum number of generated tables (default 1)
-      --min-blob-length int                            Minimum blob length (default 1)
+      --min-blob-length int                            Minimum blob length
       --min-clustering-keys int                        Minimum number of generated clustering keys
       --min-columns int                                Minimum number of generated columns (default 5)
       --min-partition-keys int                         Minimum number of generated partition keys (default 1)
       --min-pk-blob-length int                         Minimum blob length (default 32)
       --min-pk-string-length int                       Minimum string length (default 16)
-      --min-string-length int                          Minimum string length (default 1)
+      --min-string-length int                          Minimum string length
       --minimum-delay duration                         Minimum delay between mutations (default 25µs)
   -m, --mode string                                    Query operation mode. Mode options: write, read, mixed (default) (default "mixed")
       --mutation-concurrency int                       Maximum number of mutation workers per table. 0 uses --concurrency

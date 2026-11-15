@@ -19,6 +19,9 @@ import (
 	"math"
 	"math/rand/v2"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultStatementRatios(t *testing.T) {
@@ -518,4 +521,19 @@ func TestGetStatementInfo(t *testing.T) {
 		t.Errorf("Regular insert ratio in info: got %.3f, expected %.3f",
 			insertSubtypes["regular"], ratios.MutationRatios.InsertSubtypeRatios.RegularInsertRatio)
 	}
+}
+
+// TestRatioControllerWithRandomKeepsRatios: a worker copy draws from its own
+// source and keeps the configured ratios.
+func TestRatioControllerWithRandomKeepsRatios(t *testing.T) {
+	t.Parallel()
+
+	shared, err := NewRatioController(DefaultStatementRatios(), rand.New(rand.NewPCG(1, 1)))
+	require.NoError(t, err)
+
+	worker := shared.WithRandom(rand.New(rand.NewPCG(2, 2)))
+	require.NotSame(t, shared, worker)
+	assert.Equal(t, shared.mutationCDF, worker.mutationCDF)
+	assert.Equal(t, shared.selectCDF, worker.selectCDF)
+	assert.NotSame(t, shared.random, worker.random)
 }

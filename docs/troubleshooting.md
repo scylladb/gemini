@@ -96,6 +96,36 @@ Intermittent mismatches that resolve on retry.
 3. Add delay between mutations: `--minimum-delay=100ms`
 4. Check cluster replication status
 
+### Read errors with no data mismatch
+
+**Symptoms:**
+```
+Validation could not read rows from the test cluster, no data mismatch was seen
+```
+
+**Causes:**
+- The test cluster timed out or was unavailable on every attempt
+
+**Solutions:**
+1. Check the health of the test cluster
+2. Increase `--request-timeout`
+3. Reduce concurrency
+
+### Oracle failures
+
+**Symptoms:**
+`mutation_oracle_failures_total` or `validation_read_failures_total{cluster="oracle"}` rises.
+
+**Causes:**
+- The oracle cluster is overloaded or unavailable
+
+**Solutions:**
+1. Check the health of the oracle cluster
+2. Give the oracle cluster more resources
+
+These failures are not charged to the system under test. The partitions of a
+failed oracle write are marked invalid, so the run loses validation coverage.
+
 ### Row count differences
 
 **Symptoms:**

@@ -322,6 +322,10 @@ func resolveRunFlags() (compression.Algorithm, error) {
 		return "", err
 	}
 
+	if err = validateValueLengths(); err != nil {
+		return "", err
+	}
+
 	if failFast {
 		maxErrorsToStore = 1
 	}
@@ -440,6 +444,32 @@ func seedFromString(seed string) uint64 {
 	return val
 }
 
+// validateValueLengths checks the length flags of non-key string and blob
+// values. A length is not negative, and a minimum is not larger than its
+// maximum.
+func validateValueLengths() error {
+	pairs := []struct {
+		minFlag, maxFlag string
+		minimum, maximum int
+	}{
+		{"--min-string-length", "--max-string-length", minStringLength, maxStringLength},
+		{"--min-blob-length", "--max-blob-length", minBlobLength, maxBlobLength},
+	}
+
+	for _, pair := range pairs {
+		if pair.minimum < 0 || pair.maximum < 0 {
+			return fmt.Errorf("%s (%d) and %s (%d) must not be negative",
+				pair.minFlag, pair.minimum, pair.maxFlag, pair.maximum)
+		}
+		if pair.minimum > pair.maximum {
+			return fmt.Errorf("%s (%d) must not be larger than %s (%d)",
+				pair.minFlag, pair.minimum, pair.maxFlag, pair.maximum)
+		}
+	}
+
+	return nil
+}
+
 func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 	rs := schema.GetReplicationStrategy(replicationStrategy, replication.NewNetworkTopologyStrategy(), logger)
 	ors := schema.GetReplicationStrategy(oracleReplicationStrategy, rs, logger)
@@ -457,10 +487,10 @@ func createDefaultSchemaConfig(logger *zap.Logger) typedef.SchemaConfig {
 		MinColumns:                       minColumns,
 		MaxUDTParts:                      schema.MaxUDTParts,
 		MaxTupleParts:                    schema.MaxTupleParts,
-		MaxBlobLength:                    schema.MaxBlobLength,
-		MinBlobLength:                    schema.MinBlobLength,
-		MaxStringLength:                  schema.MaxStringLength,
-		MinStringLength:                  schema.MinStringLength,
+		MaxBlobLength:                    maxBlobLength,
+		MinBlobLength:                    minBlobLength,
+		MaxStringLength:                  maxStringLength,
+		MinStringLength:                  minStringLength,
 		UseCounters:                      useCounters,
 		UseLWT:                           useLWT,
 		CQLFeature:                       getCQLFeature(cqlFeatures),

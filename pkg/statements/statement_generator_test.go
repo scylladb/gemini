@@ -222,7 +222,7 @@ func transformAndDiff(t *testing.T, testSchema *typedef.Schema) {
 	t.Helper()
 	opts := cmp.Options{
 		cmp.AllowUnexported(typedef.Table{}, typedef.MaterializedView{}),
-		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}),
+		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}, typedef.MapType{}, typedef.UDTType{}),
 		cmpopts.EquateEmpty(),
 	}
 

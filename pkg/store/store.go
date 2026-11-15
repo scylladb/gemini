@@ -441,6 +441,21 @@ func outcomeUnknown(result mutationResult) bool {
 	return writeMayHaveApplied(result.testErr) || writeMayHaveApplied(result.oracleErr)
 }
 
+// compensatedResult returns the result of a write whose partition a
+// compensating DELETE made equal on both clusters. The partition stays valid.
+// A definite failure of the test cluster, an error the server returned without
+// applying the write, is still returned, so it is charged to the system under
+// test. Compensated tells the caller not to invalidate the partition.
+func compensatedResult(result mutationResult, mutationErr *MutationError) error {
+	if result.testErr == nil || writeMayHaveApplied(result.testErr) {
+		return nil
+	}
+
+	mutationErr.Compensated = true
+
+	return mutationErr
+}
+
 // resolveUnknownOutcome makes the partitions of a write whose outcome is
 // unknown either symmetric or invalid. It returns true when a compensating
 // DELETE made both clusters equal. A non-idempotent write, such as a counter
@@ -730,6 +745,28 @@ func (ds delegatingStore) logMutationRetry(attempt, maxAttempts int, result muta
 	}
 }
 
+// newMutationError builds the error of a failed mutation from the results of
+// every attempt. A mutation that succeeds never builds one.
+func (ds delegatingStore) newMutationError(stmt *typedef.Stmt, started time.Time, result mutationResult, attemptErrors uint64) *MutationError {
+	me := &MutationError{
+		Operation:        "mutation",
+		Statement:        stmt,
+		StartTime:        started,
+		TestErr:          result.testErr,
+		OracleErr:        result.oracleErr,
+		TestStoreSuccess: result.testDone && result.testErr == nil,
+	}
+	// When oracleStore is nil the oracle "done" signal is synthetic, so
+	// OracleStoreSuccess stays false and the asymmetry check in mutation.run
+	// sees no oracle.
+	if ds.oracleStore != nil {
+		me.OracleStoreSuccess = result.oracleDone && result.oracleErr == nil
+	}
+	me.TotalAttempts.Store(attemptErrors)
+
+	return me
+}
+
 //nolint:gocyclo
 func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error {
 	// Prepare timestamp
@@ -738,8 +775,9 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		ts = mo.Some(time.Now().UTC())
 	}
 
-	mutationErr := NewStoreMutationError(stmt)
+	started := time.Now().UTC()
 	var cumulativeResult mutationResult
+	var attemptErrors uint64
 	maxAttempts := ds.mutationRetries + 1 // +1 for the initial attempt
 
 	for attempt := range maxAttempts {
@@ -763,30 +801,21 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 
 		// Execute mutations only on stores that need to be retried
 		attemptResult := ds.executeParallelMutations(ctx, stmt, ts, attempt, retryTest, retryOracle)
-		// Record any errors that occurred during this attempt
 		if attemptResult.testErr != nil {
-			mutationErr.AddAttempt(attemptResult.testErr)
+			attemptErrors++
 		}
 		if attemptResult.oracleErr != nil {
-			mutationErr.AddAttempt(attemptResult.oracleErr)
+			attemptErrors++
 		}
 
 		// Update cumulative result with new attempts
 		if attemptResult.testDone {
 			cumulativeResult.testDone = true
 			cumulativeResult.testErr = attemptResult.testErr
-			mutationErr.SetStoreSuccess(TypeTest, attemptResult.testErr == nil)
 		}
 		if attemptResult.oracleDone {
 			cumulativeResult.oracleDone = true
 			cumulativeResult.oracleErr = attemptResult.oracleErr
-			// Only record oracle success when oracle is actually configured.
-			// When oracleStore is nil the "done" signal is synthetic (expectOracle=false),
-			// so OracleStoreSuccess would be a meaningless true and would mask the
-			// asymmetric-timeout check in mutation.run().
-			if ds.oracleStore != nil {
-				mutationErr.SetStoreSuccess(TypeOracle, attemptResult.oracleErr == nil)
-			}
 		}
 
 		// Check if we succeeded
@@ -831,6 +860,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 				// attempt committed on test but timed out on oracle), even when
 				// the run is shutting down, so the error goes back to the caller
 				// for the invalidation decision.
+				mutationErr := ds.newMutationError(stmt, started, cumulativeResult, attemptErrors)
 				mutationErr.Finalize(fmt.Errorf("mutation cancelled during retry delay: %w", ctx.Err()))
 
 				// If a cluster may have applied the write, make the partition
@@ -840,7 +870,7 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 				if outcomeUnknown(cumulativeResult) &&
 					ds.resolveUnknownOutcome(ctx, stmt, ts, mutationErr) {
 					ds.recordAsymmetricAck(cumulativeResult, "compensated")
-					return nil
+					return compensatedResult(cumulativeResult, mutationErr)
 				}
 
 				// Compensation not applicable or failed — return the
@@ -853,15 +883,14 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 		}
 	}
 
-	// All attempts failed - finalize the mutation error with comprehensive details
-	var finalErr error
-
-	switch {
-	case cumulativeResult.testErr != nil && cumulativeResult.oracleErr != nil:
-		finalErr = errors.Join(cumulativeResult.testErr, cumulativeResult.oracleErr)
-	case cumulativeResult.testErr != nil:
-		finalErr = cumulativeResult.testErr
-	case cumulativeResult.oracleErr != nil:
+	// All attempts failed. FinalError is the error of the test cluster when
+	// it failed, because the caller decides from the test cluster whether the
+	// system under test failed. The error of each cluster stays on TestErr and
+	// OracleErr. A joined error would let a timeout on one cluster hide a hard
+	// error on the other from errors.Is.
+	mutationErr := ds.newMutationError(stmt, started, cumulativeResult, attemptErrors)
+	finalErr := cumulativeResult.testErr
+	if finalErr == nil {
 		finalErr = cumulativeResult.oracleErr
 	}
 
@@ -870,11 +899,11 @@ func (ds delegatingStore) Mutate(ctx context.Context, stmt *typedef.Stmt) error 
 
 	// If a cluster may have applied the write, the servers may have committed
 	// on one side but not the other. Make the partition deterministically equal
-	// on both stores before the validation phase starts. On success return nil
-	// so the partition is not marked invalid.
+	// on both stores before the validation phase starts. The partition then
+	// stays valid, see compensatedResult.
 	if outcomeUnknown(cumulativeResult) && ds.resolveUnknownOutcome(ctx, stmt, ts, mutationErr) {
 		ds.recordAsymmetricAck(cumulativeResult, "compensated")
-		return nil
+		return compensatedResult(cumulativeResult, mutationErr)
 	}
 
 	ds.recordAsymmetricAck(cumulativeResult, "uncompensated")
@@ -910,10 +939,7 @@ func (ds delegatingStore) CheckOnce(
 	if ds.oracleStore == nil {
 		testRows, testErr := ds.testStore.load(doCtx, stmt)
 		if testErr != nil {
-			validationErr := NewValidationError("validation", stmt)
-			validationErr.AddAttempt(testErr)
-			validationErr.Finalize(testErr)
-			return 0, nil, validationErr
+			return 0, nil, newLoadError(stmt, testErr, nil)
 		}
 		return len(testRows), testRows, nil
 	}
@@ -949,24 +975,8 @@ func (ds delegatingStore) CheckOnce(
 	testRows, oracleRows := tRes.rows, oRes.rows
 	testErr, oracleErr := tRes.err, oRes.err
 
-	validationErr := NewValidationError("validation", stmt)
-
-	// Record any errors that occurred
-	if testErr != nil {
-		validationErr.AddAttempt(testErr)
-	}
-	if oracleErr != nil {
-		validationErr.AddAttempt(oracleErr)
-	}
-
-	// If either side had a load error, finalize and return
 	if testErr != nil || oracleErr != nil {
-		lastErr := testErr
-		if oracleErr != nil {
-			lastErr = oracleErr
-		}
-		validationErr.Finalize(lastErr)
-		return 0, nil, validationErr
+		return 0, nil, newLoadError(stmt, testErr, oracleErr)
 	}
 
 	// Compare results normally; if both sides are empty this will succeed with count 0.
@@ -997,6 +1007,7 @@ func (ds delegatingStore) CheckOnce(
 	}
 
 	// Found differences, record them and store the comparison results
+	validationErr := NewValidationError("validation", stmt)
 	validationErr.AddAttempt(compErr)
 	validationErr.ComparisonResults = &ComparisonResults{
 		TestRows:       testRows,
@@ -1015,6 +1026,15 @@ func (ds delegatingStore) CheckOnce(
 // and the validation retry queue use the same schedule.
 const ValidationRetryMinDelay = 100 * time.Millisecond
 
+// Check runs CheckOnce until it succeeds or the attempts are used up. The
+// result of a failed run comes from all attempts, not from the last one:
+//
+//   - A divergence that an attempt saw is returned, also when a later attempt
+//     only failed to read. A timeout on the last attempt must not hide a
+//     difference that an earlier attempt found.
+//   - Else a read failure of the test cluster is returned.
+//   - Else the read failure of the oracle cluster is returned.
+//     IsOracleLoadError reports true for it.
 func (ds delegatingStore) Check(
 	ctx context.Context,
 	table *typedef.Table,
@@ -1026,7 +1046,7 @@ func (ds delegatingStore) Check(
 		maxAttempts = 1
 	}
 
-	var lastErr error
+	var lastErr, divergence, testReadErr error
 	for attempt := range maxAttempts {
 		count, testRows, err := ds.CheckOnce(ctx, table, stmt, attempt)
 		if err == nil {
@@ -1039,6 +1059,13 @@ func (ds delegatingStore) Check(
 			return 0, nil, err
 		}
 		lastErr = err
+
+		switch {
+		case IsDivergence(err):
+			divergence = err
+		case !IsOracleLoadError(err):
+			testReadErr = err
+		}
 
 		if attempt < maxAttempts-1 {
 			// Same schedule as the validation retry queue: exponential, from
@@ -1059,13 +1086,45 @@ func (ds delegatingStore) Check(
 		}
 	}
 
-	// All attempts failed — return the error from the final attempt
-	// (already finalized by CheckOnce).
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return 0, nil, context.Canceled
 	}
 
-	return 0, nil, lastErr
+	outcome := lastErr
+	switch {
+	case divergence != nil:
+		outcome = divergence
+	case testReadErr != nil:
+		outcome = testReadErr
+	}
+
+	if ve, ok := errors.AsType[*ValidationError](outcome); ok {
+		ve.TotalAttempts.Store(uint64(maxAttempts))
+	}
+
+	return 0, nil, outcome
+}
+
+// newLoadError returns the error of an attempt in which a cluster did not
+// return its rows. FinalError is the error of the test cluster when it failed.
+func newLoadError(stmt *typedef.Stmt, testErr, oracleErr error) *ValidationError {
+	ve := NewValidationError("validation", stmt)
+	ve.TestErr = testErr
+	ve.OracleErr = oracleErr
+	if testErr != nil {
+		ve.AddAttempt(testErr)
+	}
+	if oracleErr != nil {
+		ve.AddAttempt(oracleErr)
+	}
+
+	finalErr := testErr
+	if finalErr == nil {
+		finalErr = oracleErr
+	}
+	ve.Finalize(finalErr)
+
+	return ve
 }
 
 func (ds delegatingStore) ShardCount() int {

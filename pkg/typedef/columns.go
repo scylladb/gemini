@@ -331,6 +331,13 @@ func GetSimpleTypeColumn(data map[string]any) (*ColumnDef, error) {
 		return nil, fmt.Errorf("empty definition of column 'type' [%T]%+[1]v: %w", data, ErrSchemaValidation)
 	}
 
+	if st.Type == TypeCounter {
+		return &ColumnDef{
+			Name: st.Name,
+			Type: &CounterType{},
+		}, nil
+	}
+
 	knownType := false
 	for _, sType := range AllTypes {
 		if sType == st.Type {

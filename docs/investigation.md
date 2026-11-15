@@ -149,6 +149,34 @@ When rows exist on both but have different values:
 - Timestamp issues (check `--use-server-timestamps`) -> Beware of the issue with the QUERY ORDERING, it might lead to issues, and false positives
 - Type conversion problems
 
+### Read Errors Without a Data Mismatch
+
+A read error has the message "Validation could not read rows from the test
+cluster, no data mismatch was seen". Every attempt of the validation failed,
+and the test cluster failed to read on at least one attempt. No attempt
+compared rows, so the error is not a divergence. Check the health of the test
+cluster before you look for a data bug.
+
+A validation in which only the oracle cluster failed to read is not an error of
+the run. Look at `validation_read_failures_total{cluster="oracle"}` for it.
+
+### Divergence After Retries
+
+A validation error reports the latest attempt that found different rows. Later
+attempts of the same validation can have timed out. The reported rows come
+from the attempt that compared them.
+
+A multi-partition SELECT reports only the partitions whose rows differ and that
+were not already invalid. The `partitionIds` and the rows in `results` belong
+to those partitions.
+
+### Oracle Write Failures
+
+A write that the test cluster applied and the oracle cluster rejected is not a
+write error. Gemini counts it in `mutation_oracle_failures_total` and marks its
+partitions invalid. A rising value means that the oracle cluster is unhealthy,
+and that the run loses validation coverage.
+
 ### Timeout Errors
 
 If you see timeout errors in statement logs:

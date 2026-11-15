@@ -94,8 +94,17 @@ func (l *Limiter) Limit() int {
 // It parks while idx is at or above the limit. It returns ctx.Err() when ctx
 // ends, and nil when stopped reports true, so the caller's loop sees the stop.
 func (l *Limiter) Wait(ctx context.Context, idx int, stopped func() bool) error {
+	_, err := l.WaitOrWake(ctx, idx, stopped, nil)
+	return err
+}
+
+// WaitOrWake parks like Wait, and also returns when wake delivers a value.
+// It then reports woke as true. The caller owns the value that it received
+// from wake, for example a fired timer. A nil wake never fires. A parked
+// worker uses it to run work that it already started, such as a due retry.
+func (l *Limiter) WaitOrWake(ctx context.Context, idx int, stopped func() bool, wake <-chan time.Time) (woke bool, err error) {
 	if int64(idx) < l.limit.Load() {
-		return nil
+		return false, nil
 	}
 
 	ticker := time.NewTicker(parkCheck)
@@ -106,12 +115,14 @@ func (l *Limiter) Wait(ctx context.Context, idx int, stopped func() bool) error 
 		// load closes this channel, so the select below cannot miss it.
 		ch := *l.changed.Load()
 		if int64(idx) < l.limit.Load() || stopped() {
-			return nil
+			return false, nil
 		}
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, ctx.Err()
+		case <-wake:
+			return true, nil
 		case <-ch:
 		case <-ticker.C:
 		}

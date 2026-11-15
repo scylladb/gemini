@@ -35,9 +35,12 @@ const (
 // bucketEntry is one tracked deleted partition waiting on its current bucket.
 // readyAtNs is the Unix-nanos time it becomes due for re-validation. bucket is
 // the index of the time bucket it is currently waiting on (0-based); when it
-// fires and more buckets remain it advances to bucket+1.
+// fires and more buckets remain it advances to bucket+1. onDone drops the
+// reference that the entry holds. retain, when set, takes one more reference
+// on the same partition and returns the function that drops it.
 type bucketEntry struct {
 	onDone    func()
+	retain    func() func()
 	keys      typedef.PartitionKeys
 	readyAtNs int64
 	bucket    int
@@ -242,16 +245,26 @@ func (w *window) drainReady(nowNs int64, batchSize int, send func(typedef.Partit
 		// On the final emission the consumer (validator) owns the release: we
 		// hand it the onDone callback as the keys' Release so the deleted
 		// partition's UUID is retired only after re-validation completes, not
-		// the instant the keys leave the tracker. Intermediate emissions keep
-		// Release nil — the entry is re-scheduled and stays referenced.
+		// the instant the keys leave the tracker. An intermediate emission
+		// gets a new reference from retain, because the entry stays in the
+		// window and keeps its own. An eviction of the entry then drops only
+		// the reference of the entry, and the UUID stays mapped until the
+		// consumer releases its copy.
 		final := front.bucket+1 >= len(w.buckets)
 		emitKeys := front.keys
 		if final {
 			emitKeys.Release = front.onDone
+		} else if front.retain != nil {
+			emitKeys.Release = front.retain()
 		}
 
 		if !send(emitKeys) {
-			// Consumer not ready (channel full); retry shortly.
+			// Consumer not ready (channel full); retry shortly. The entry
+			// still holds its own reference, so this release cannot drop
+			// the last one and does no work under w.mu besides the count.
+			if !final && emitKeys.Release != nil {
+				emitKeys.Release()
+			}
 			w.refreshNextReadyLocked()
 			return 10 * time.Millisecond
 		}

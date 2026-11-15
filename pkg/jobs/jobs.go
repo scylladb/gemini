@@ -49,12 +49,16 @@ const (
 type Jobs struct {
 	// limiter sets how many workers of each pool run at a time. The pools
 	// start mutationConcurrency and readConcurrency workers, the maximums.
-	limiter              *concurrency.Limiter
-	store                store.Store
-	schema               *typedef.Schema
-	status               *status.GlobalStatus
-	logger               *zap.Logger
-	random               rand.Source
+	limiter *concurrency.Limiter
+	store   store.Store
+	schema  *typedef.Schema
+	status  *status.GlobalStatus
+	logger  *zap.Logger
+	random  rand.Source
+	// indexFactory gives every worker its own partition index function, so a
+	// draw takes no lock that the workers share. A nil indexFactory leaves
+	// the workers on the shared function of the pool.
+	indexFactory         distributions.Factory
 	ratioController      *statements.RatioController
 	name                 string
 	mutationConcurrency  int
@@ -81,6 +85,29 @@ const watchdogGracePeriod = 5 * time.Minute
 const retryDrainGrace = time.Minute
 
 // seedWorker fills seed with fresh bytes of the run's source.
+// workerPool returns the view of pool for one worker. With an indexFactory
+// the worker draws partition indexes from its own source, seeded from the
+// run's source.
+func (j *Jobs) workerPool(pool *partitions.Partitions) partitions.Interface {
+	if j.indexFactory == nil {
+		return pool
+	}
+
+	var seed [32]byte
+	j.seedWorker(&seed)
+
+	return pool.ForWorker(j.indexFactory(seed))
+}
+
+// workerRatios returns a copy of the ratio controller with its own source,
+// so the statement type draws of the workers share no lock.
+func (j *Jobs) workerRatios() *statements.RatioController {
+	var seed [32]byte
+	j.seedWorker(&seed)
+
+	return j.ratioController.WithRandom(rand.New(rand.NewChaCha8(seed)))
+}
+
 func (j *Jobs) seedWorker(seed *[32]byte) {
 	for i := 0; i < len(seed); i += 8 {
 		binary.LittleEndian.PutUint64(seed[i:], j.random.Uint64())
@@ -155,6 +182,7 @@ func New(
 	src rand.Source,
 	ratios statements.Ratios,
 	limiter *concurrency.Limiter,
+	indexFactory distributions.Factory,
 ) *Jobs {
 	logger.Info("creating jobs",
 		zap.Int("mutation_concurrency", mutationConcurrency),
@@ -172,6 +200,7 @@ func New(
 		ratioController:      ratioController,
 		targetedConsumeRatio: ratios.TargetedConsumeRatio(),
 		limiter:              limiter,
+		indexFactory:         indexFactory,
 	}
 }
 
@@ -191,16 +220,64 @@ func (j *Jobs) parseMode(mode string) []string {
 	return modes
 }
 
-func (j *Jobs) Run(
-	base context.Context,
-	duration time.Duration,
+// Pools holds one partition pool per table of the schema, in the order of
+// schema.Tables. The warmup and the main phase use the same pools, so the main
+// phase validates the partitions that the warmup wrote.
+type Pools []*partitions.Partitions
+
+// Close stops the background work of every pool.
+func (p Pools) Close() {
+	for _, pool := range p {
+		pool.Close()
+	}
+}
+
+// minInvalidCap is the smallest invalid-partition cap of a pool.
+const minInvalidCap = 1
+
+// invalidCap returns how many partitions of a pool of count partitions can be
+// marked invalid. Gemini marks a partition invalid when its own writes can
+// have left the clusters different, or when it reported a divergence on it.
+// The cap is half the pool, independent of the error budget. Write-side
+// invalidations are not errors of the system under test, so they must not use
+// up the budget that stops the run. Half the pool keeps most of the
+// validation coverage, and the selection of a valid partition stays fast.
+// The floor keeps the cap above zero, because zero means no cap.
+func invalidCap(count uint64) uint64 {
+	return max(count/2, minInvalidCap)
+}
+
+// NewPools builds one partition pool per table of the schema. ctx bounds the
+// background work of the pools. The caller closes the pools after the last
+// Run that uses them.
+func (j *Jobs) NewPools(
+	ctx context.Context,
 	idxFunc distributions.DistributionFunc,
 	partsCount uint64,
 	partsConfig typedef.PartitionRangeConfig,
+) Pools {
+	pools := make(Pools, 0, len(j.schema.Tables))
+	for _, table := range j.schema.Tables {
+		pools = append(pools, partitions.New(ctx, j.random, idxFunc, table, partsConfig, partsCount, invalidCap(partsCount)))
+	}
+
+	return pools
+}
+
+// Run starts the workers of mode on pools, which NewPools built for the same
+// schema, and waits for them. Run does not close pools, so a later Run can
+// use them again.
+func (j *Jobs) Run(
+	base context.Context,
+	duration time.Duration,
+	pools Pools,
 	stopFlag *stop.Flag,
 	mode string,
-	maxErrors uint64,
 ) error {
+	if len(pools) != len(j.schema.Tables) {
+		return fmt.Errorf("jobs: %d partition pools for %d tables", len(pools), len(j.schema.Tables))
+	}
+
 	log := j.logger.Named(j.name)
 	log.Info("start jobs", zap.String("mode", mode))
 	defer log.Info("stop jobs")
@@ -257,10 +334,8 @@ func (j *Jobs) Run(
 		defer watchdogTimer.Stop()
 	}
 
-	generators := make([]*partitions.Partitions, 0, len(j.schema.Tables))
-	for _, table := range j.schema.Tables {
-		generator := partitions.New(gCtx, j.random, idxFunc, table, partsConfig, partsCount, maxErrors)
-		generators = append(generators, generator)
+	for ti, table := range j.schema.Tables {
+		generator := pools[ti]
 		log.Debug("processing table", zap.String("table", table.Name))
 
 		for _, m := range j.parseMode(mode) {
@@ -277,9 +352,9 @@ func (j *Jobs) Run(
 					mutation := NewMutation(
 						j.schema,
 						table,
-						generator,
+						j.workerPool(generator),
 						j.status,
-						j.ratioController,
+						j.workerRatios(),
 						stopFlag,
 						j.store,
 						mode != WarmupMode,
@@ -329,9 +404,9 @@ func (j *Jobs) Run(
 					validation := NewValidation(
 						j.schema,
 						table,
-						generator,
+						j.workerPool(generator),
 						j.status,
-						j.ratioController,
+						j.workerRatios(),
 						stopFlag,
 						j.store,
 						newSrc,
@@ -370,11 +445,7 @@ func (j *Jobs) Run(
 	}
 
 	log.Info("waiting for all workers to complete")
-	err := g.Wait()
-	for _, gen := range generators {
-		gen.Close()
-	}
-	return err
+	return g.Wait()
 }
 
 // statementsGenerated holds statements_generated_total for every statement

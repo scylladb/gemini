@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/scylladb/gemini/pkg/jobs"
+	"github.com/scylladb/gemini/pkg/schema"
 )
 
 // MaxDeletedHeapSize is the largest number of deleted partitions that wait for
@@ -123,10 +124,10 @@ func setupFlags(cmd *cobra.Command) {
 	}
 	cmd.PersistentFlags().
 		BoolP("version-json", "", false, "Print version information in JSON format")
-	cmd.Flags().IntVarP(&maxStringLength, "max-string-length", "", 1024, "Maximum string length")
-	cmd.Flags().IntVarP(&minStringLength, "min-string-length", "", 1, "Minimum string length")
-	cmd.Flags().IntVarP(&maxBlobLength, "max-blob-length", "", 10000, "Maximum blob length")
-	cmd.Flags().IntVarP(&minBlobLength, "min-blob-length", "", 1, "Minimum blob length")
+	cmd.Flags().IntVarP(&maxStringLength, "max-string-length", "", schema.MaxStringLength, "Maximum string length")
+	cmd.Flags().IntVarP(&minStringLength, "min-string-length", "", schema.MinStringLength, "Minimum string length")
+	cmd.Flags().IntVarP(&maxBlobLength, "max-blob-length", "", schema.MaxBlobLength, "Maximum blob length")
+	cmd.Flags().IntVarP(&minBlobLength, "min-blob-length", "", schema.MinBlobLength, "Minimum blob length")
 	cmd.Flags().IntVarP(&maxPKStringLength, "max-pk-string-length", "", 64, "Maximum string length")
 	cmd.Flags().IntVarP(&minPKStringLength, "min-pk-string-length", "", 16, "Minimum string length")
 	cmd.Flags().IntVarP(&maxPKBlobLength, "max-pk-blob-length", "", 128, "Maximum blob length")

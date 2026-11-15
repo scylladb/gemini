@@ -68,8 +68,9 @@ func (l *LockedSource) Uint64() uint64 {
 	return l.src.Uint64()
 }
 
-// New returns the random source of a run and the function that picks the
-// partition index of each statement. Both are safe for concurrent use.
+// New returns the random source of a run and a shared function that picks a
+// partition index. Both are safe for concurrent use. The shared function
+// serializes its draws, so a worker draws from a NewFactory function instead.
 //
 // Normal draws a position on the uint64 range, with mu and sigma on that
 // range: the defaults center it on the middle of the pool. LogNormal draws an
@@ -78,56 +79,92 @@ func (l *LockedSource) Uint64() uint64 {
 // mu 0 and sigma ln(partition count)/3, a hot head of the pool that still
 // reaches its end.
 func New(distribution Distribution, partitionCount, seed uint64, mu, sigma float64) (*LockedSource, DistributionFunc) {
+	build := newBuilder(distribution, partitionCount, mu, sigma)
+
+	toHash := string(distribution) + strconv.FormatInt(int64(partitionCount), 10) + strconv.FormatUint(seed, 10)
+	if distribution == LogNormal || distribution == Normal {
+		toHash += strconv.FormatFloat(mu, 'f', -1, 64) + strconv.FormatFloat(sigma, 'f', -1, 64)
+	}
+
+	src := newLockedSource(sha256.Sum256([]byte(toHash)))
+	draw := build(src)
+
+	// A Zipf keeps state between draws, so the shared function holds a lock
+	// across the whole draw.
+	var drawMu sync.Mutex
+
+	return src, func() uint64 {
+		drawMu.Lock()
+		defer drawMu.Unlock()
+
+		return draw()
+	}
+}
+
+// Factory returns a distribution function with its own source, seeded by
+// seed. The function is not safe for concurrent use. Each worker gets its
+// own, so a draw takes no lock and the draws of one worker do not depend on
+// how the other workers interleave.
+type Factory func(seed [32]byte) DistributionFunc
+
+// NewFactory returns the Factory of a distribution. The parameters mean the
+// same as in New.
+func NewFactory(distribution Distribution, partitionCount uint64, mu, sigma float64) Factory {
+	build := newBuilder(distribution, partitionCount, mu, sigma)
+
+	return func(seed [32]byte) DistributionFunc {
+		return build(rand.NewChaCha8(seed))
+	}
+}
+
+// newBuilder validates the parameters of a distribution and returns the
+// function that builds its DistributionFunc on a source.
+func newBuilder(distribution Distribution, partitionCount uint64, mu, sigma float64) func(rand.Source) DistributionFunc {
 	if partitionCount == 0 {
 		panic("distributions: partition count must be positive")
 	}
 
-	toHash := string(distribution) + strconv.FormatInt(int64(partitionCount), 10) + strconv.FormatUint(seed, 10)
-	withParams := toHash + strconv.FormatFloat(mu, 'f', -1, 64) + strconv.FormatFloat(sigma, 'f', -1, 64)
 	count := float64(partitionCount)
 
 	switch distribution {
 	case Zipf:
-		src := newLockedSource(sha256.Sum256([]byte(toHash)))
-		zipf := rand.NewZipf(rand.New(src), 1.001, count, partitionCount-1)
-
-		var zipfMu sync.Mutex
-
-		return src, func() uint64 {
-			// rand.Zipf keeps state between draws.
-			zipfMu.Lock()
-			defer zipfMu.Unlock()
-
-			return zipf.Uint64()
+		return func(src rand.Source) DistributionFunc {
+			// P(k) is proportional to (v + k)^-s, with v = partitionCount.
+			// The weight falls slowly over the pool, so no single partition
+			// takes most of the writes. A hot head makes validation reads race
+			// the writes of the same partition on every retry.
+			return rand.NewZipf(rand.New(src), 1.001, count, partitionCount-1).Uint64
 		}
 	case LogNormal:
-		src := newLockedSource(sha256.Sum256([]byte(withParams)))
-
 		if mu > maxLogSpaceMean || !(sigma > 0) || math.IsInf(sigma, 0) || sigma > maxLogSpaceMean {
 			mu, sigma = 0, math.Max(math.Log(count)/3, 1)
 		}
 
-		d := distuv.LogNormal{Src: src, Mu: mu, Sigma: sigma}
+		return func(src rand.Source) DistributionFunc {
+			d := distuv.LogNormal{Src: src, Mu: mu, Sigma: sigma}
 
-		return src, func() uint64 {
-			return drawIndex(d.Rand, func(v float64) float64 { return v }, partitionCount)
+			return func() uint64 {
+				return drawIndex(d.Rand, func(v float64) float64 { return v }, partitionCount)
+			}
 		}
 	case Normal:
-		src := newLockedSource(sha256.Sum256([]byte(withParams)))
-		d := distuv.Normal{Src: src, Mu: mu, Sigma: sigma}
-
 		// The position on the uint64 range, scaled into the pool.
 		scale := count / math.Exp2(64)
 
-		return src, func() uint64 {
-			return drawIndex(d.Rand, func(v float64) float64 { return v * scale }, partitionCount)
+		return func(src rand.Source) DistributionFunc {
+			d := distuv.Normal{Src: src, Mu: mu, Sigma: sigma}
+
+			return func() uint64 {
+				return drawIndex(d.Rand, func(v float64) float64 { return v * scale }, partitionCount)
+			}
 		}
 	case Uniform:
-		src := newLockedSource(sha256.Sum256([]byte(toHash)))
-		d := distuv.Uniform{Min: 0, Max: count, Src: src}
+		return func(src rand.Source) DistributionFunc {
+			d := distuv.Uniform{Min: 0, Max: count, Src: src}
 
-		return src, func() uint64 {
-			return drawIndex(d.Rand, func(v float64) float64 { return v }, partitionCount)
+			return func() uint64 {
+				return drawIndex(d.Rand, func(v float64) float64 { return v }, partitionCount)
+			}
 		}
 	default:
 		panic("unsupported distribution: " + string(distribution))

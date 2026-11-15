@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -108,9 +109,11 @@ type (
 		Query         string          `json:"Query"`
 		Values        []any           `json:"Values"`
 		QueryType     StatementType   `json:"QueryType"`
-		// NonIdempotent marks a statement that changes the data again each time
-		// it runs, such as a counter increment. A write that may already be
-		// applied must never be sent again.
+		// NonIdempotent marks a write that a compensating DELETE cannot undo:
+		// a counter increment, which changes the data again each time it runs,
+		// or a conditional (LWT) write, which takes its timestamp from the
+		// Paxos ballot. A write that may already be applied must never be sent
+		// again, and its partition is invalidated instead of compensated.
 		NonIdempotent bool `json:"NonIdempotent,omitzero"`
 	}
 )
@@ -420,16 +423,60 @@ func NewValuesFromMap(m map[string][]any) *Values {
 // later append (e.g. via Merge) to reallocate rather than clobber the shared
 // backing array.
 func NewPartitionValues(cols Columns, src []any) *Values {
-	names := make([]string, len(cols))
 	vals := make([][]any, len(cols))
 	off := 0
 	for i, col := range cols {
 		end := off + col.Type.LenValue()
-		names[i] = col.Name
 		vals[i] = src[off:end:end]
 		off = end
 	}
-	return &Values{names: names, vals: vals}
+	return &Values{names: columnNames(cols), vals: vals}
+}
+
+// columnNamesCache holds one shared name slice for each column layout that
+// NewPartitionValues receives. The key is the address of the first column, so
+// every call with the same table's PartitionKeys finds the same entry.
+var columnNamesCache sync.Map // map[*ColumnDef][]string
+
+// columnNames returns the names of cols, in order. The result is shared
+// between all Values built from the same columns, so it is read-only. Its
+// capacity equals its length, so an append in Merge or UnmarshalJSON copies
+// it first. The cached names are compared with cols on every call, so a
+// column slice that was changed in place gets a new entry.
+func columnNames(cols Columns) []string {
+	if len(cols) == 0 {
+		return nil
+	}
+
+	key := &cols[0]
+	if cached, ok := columnNamesCache.Load(key); ok {
+		names, isNames := cached.([]string)
+		if !isNames {
+			panic(fmt.Sprintf("column name cache holds %T, want []string", cached))
+		}
+		if sameColumnNames(names, cols) {
+			return names
+		}
+	}
+
+	names := slices.Clip(cols.Names())
+	columnNamesCache.Store(key, names)
+
+	return names
+}
+
+func sameColumnNames(names []string, cols Columns) bool {
+	if len(names) != len(cols) {
+		return false
+	}
+
+	for i := range cols {
+		if names[i] != cols[i].Name {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (v *Values) Get(name string) []any {

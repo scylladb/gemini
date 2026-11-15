@@ -260,3 +260,80 @@ func TestGet_InvalidConfig_ReturnsError(t *testing.T) {
 		t.Error("expected error for invalid schema config, got nil")
 	}
 }
+
+func writeSchemaFile(t *testing.T, content string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "schema.json")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	return path
+}
+
+// TestRead_TupleTableSetsJSONKnownIssue: Scylla issue 3708 breaks INSERT JSON
+// with tuples, so a tuple table read from a file must skip JSON inserts like a
+// generated table does.
+func TestRead_TupleTableSetsJSONKnownIssue(t *testing.T) {
+	t.Parallel()
+
+	path := writeSchemaFile(t, `{
+		"keyspace": {"name": "ks1"},
+		"tables": [
+			{
+				"name": "with_tuple",
+				"partition_keys": [{"name": "pk0", "type": "int"}],
+				"clustering_keys": [],
+				"columns": [{"name": "col0", "type": {"complex_type": "tuple", "value_types": ["int", "text"], "frozen": false}}]
+			},
+			{
+				"name": "without_tuple",
+				"partition_keys": [{"name": "pk0", "type": "int"}],
+				"clustering_keys": [],
+				"columns": [{"name": "col0", "type": "text"}]
+			}
+		]
+	}`)
+
+	s, err := schema.Read(path, typedef.SchemaConfig{})
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+
+	if !s.Tables[0].KnownIssues[typedef.KnownIssuesJSONWithTuples] {
+		t.Errorf("table %s: known issue %s is not set", s.Tables[0].Name, typedef.KnownIssuesJSONWithTuples)
+	}
+	if s.Tables[1].KnownIssues[typedef.KnownIssuesJSONWithTuples] {
+		t.Errorf("table %s: known issue %s is set", s.Tables[1].Name, typedef.KnownIssuesJSONWithTuples)
+	}
+}
+
+func TestRead_AcceptsCounterColumns(t *testing.T) {
+	t.Parallel()
+
+	path := writeSchemaFile(t, `{
+		"keyspace": {"name": "ks1"},
+		"tables": [{
+			"name": "counters",
+			"partition_keys": [{"name": "pk0", "type": "int"}],
+			"clustering_keys": [{"name": "ck0", "type": "bigint"}],
+			"columns": [{"name": "col0", "type": "counter"}, {"name": "col1", "type": "counter"}]
+		}]
+	}`)
+
+	s, err := schema.Read(path, typedef.SchemaConfig{})
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+
+	table := s.Tables[0]
+	if !table.IsCounterTable() {
+		t.Fatalf("table %s is not a counter table", table.Name)
+	}
+	for _, col := range table.Columns {
+		if _, ok := col.Type.(*typedef.CounterType); !ok {
+			t.Errorf("column %s type is %T, want *typedef.CounterType", col.Name, col.Type)
+		}
+	}
+}

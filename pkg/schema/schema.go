@@ -56,6 +56,12 @@ func Read(confFile string, schemaConfig typedef.SchemaConfig) (*typedef.Schema, 
 	schemaBuilder.Keyspace(shm.Keyspace).Config(schemaConfig)
 	for t, tbl := range shm.Tables {
 		shm.Tables[t].LinkIndexAndColumns()
+		if tbl.HasTupleColumns() {
+			if tbl.KnownIssues == nil {
+				tbl.KnownIssues = typedef.KnownIssues{}
+			}
+			tbl.KnownIssues[typedef.KnownIssuesJSONWithTuples] = true
+		}
 		schemaBuilder.Table(tbl)
 	}
 	return schemaBuilder.Build(), nil

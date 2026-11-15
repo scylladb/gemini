@@ -67,3 +67,7 @@ _--table-options"compression = {'sstable_compression': 'LZ4Compressor'}"_
 20. ___--statement-log-file-compression___: Compression algorithm to use for statement log files. Options are: `none` (default), `gzip`, `zstd`. Helps reduce disk space usage for large test runs.
 
 21. ___--statement-ratios___: Controls the ratio of different statement types that Gemini executes during a run. Accepts JSON configuration either inline or as a file path. Allows fine-grained control over mutation (insert/update/delete) and validation (select) statement distribution. See [Statement Ratio documentation](statement-ratio.md) for detailed configuration options.
+
+22. ___--min-string-length___, ___--max-string-length___: Length range of the text values in columns that are not keys. The defaults are 0 and 128. Gemini adds the minimum to a random length below the maximum. The minimum must not be larger than the maximum. The `--dataset-size small` preset uses 10 and 20.
+
+23. ___--min-blob-length___, ___--max-blob-length___: Length range of the blob values in columns that are not keys. The defaults are 0 and 256. The minimum must not be larger than the maximum. The `--dataset-size small` preset uses 10 and 20.

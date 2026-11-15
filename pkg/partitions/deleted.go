@@ -287,8 +287,20 @@ func (d *deletedPartitions) dropSampled(keys typedef.PartitionKeys) {
 	d.deleted.Add(1)
 }
 
-// Delete adds a deleted partition to the tracking system.
+// Delete adds a deleted partition to the tracking system. An emission before
+// the final bucket carries no Release. Use deleteRetained for keys that hold a
+// partition reference.
 func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
+	d.deleteRetained(keys, nil)
+}
+
+// deleteRetained adds a deleted partition to the tracking system. The window
+// holds the reference of keys until the final emission or an eviction. retain
+// takes one more reference on the same partition and returns its release. The
+// window calls it for every emission before the final bucket, so each copy
+// that a validator receives holds its own reference. An eviction of the entry
+// then cannot unmap the UUID while a validator still checks that copy.
+func (d *deletedPartitions) deleteRetained(keys typedef.PartitionKeys, retain func() func()) {
 	// If no buckets configured, just count the deletion.
 	if len(d.buckets) == 0 {
 		d.deleted.Add(1)
@@ -316,7 +328,7 @@ func (d *deletedPartitions) Delete(keys typedef.PartitionKeys) {
 	onDone := keys.Release
 	keys.Release = nil
 
-	evicted := d.win.push(bucketEntry{onDone: onDone, keys: keys, readyAtNs: readyAtNs, bucket: 0})
+	evicted := d.win.push(bucketEntry{onDone: onDone, retain: retain, keys: keys, readyAtNs: readyAtNs, bucket: 0})
 
 	// Run onDone callbacks outside the window lock.
 	d.runEvicted(evicted)

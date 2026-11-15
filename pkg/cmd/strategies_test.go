@@ -73,7 +73,7 @@ func TestReadExampleSchema(t *testing.T) {
 
 	opts := cmp.Options{
 		cmp.AllowUnexported(typedef.Table{}, typedef.MaterializedView{}),
-		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}),
+		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}, typedef.MapType{}, typedef.UDTType{}),
 	}
 
 	testSchemaMarshaled, err := json.Marshal(testSchema, jsontext.WithIndentPrefix("  "), jsontext.WithIndent("  "), json.Deterministic(true))

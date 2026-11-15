@@ -81,11 +81,16 @@ type Generator struct {
 	insertJSONQuery                string
 	selectSinglePartitionQuery     string
 	selectMultiplePartitionQueries []string
-	selectColumns                  []string
-	deleteClusteringSubsetQueries  []string
-	updateVariants                 []updateVariant
-	trackedMisses                  TrackedMissCounts
-	useLWT                         bool
+	selectClusteringRangeQueries   []string
+	selectIndexQueries             []string
+	// selectMultiPartitionClusteringRangeQueries is indexed by the number of
+	// IN-tupled partitions and then by the number of clustering keys.
+	selectMultiPartitionClusteringRangeQueries [][]string
+	selectColumns                              []string
+	deleteClusteringSubsetQueries              []string
+	updateVariants                             []updateVariant
+	trackedMisses                              TrackedMissCounts
+	useLWT                                     bool
 	// rangeReadable is true when every clustering key binds one value. The
 	// clustering-range SELECTs index the tracked row's flat clustering
 	// values by column, which a tuple clustering key would break.

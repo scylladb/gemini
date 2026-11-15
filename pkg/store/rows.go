@@ -757,6 +757,10 @@ func compareReflect(a, b reflect.Value) int {
 			return c
 		}
 
+		if mapsEqualByLookup(a, b) {
+			return 0
+		}
+
 		aKeys, bKeys := sortedKeys(a), sortedKeys(b)
 		for i := range aKeys {
 			if c := compareReflect(aKeys[i], bKeys[i]); c != 0 {
@@ -775,6 +779,52 @@ func compareReflect(a, b reflect.Value) int {
 		return 0
 	default:
 		return compareValues(a.Interface(), b.Interface())
+	}
+}
+
+// mapsEqualByLookup reports whether two maps of one type with the same
+// length hold equal entries. It looks up each key of a in b, which costs no
+// sort and no key slice. Most compared maps are equal, so this is the common
+// path. It reports false when the maps differ, and also when the key type has
+// a Go equality that differs from compareReflect, so the caller then orders
+// the maps by their sorted keys.
+func mapsEqualByLookup(a, b reflect.Value) bool {
+	if !lookupSafeKey(a.Type().Key()) {
+		return false
+	}
+
+	key := reflect.New(a.Type().Key()).Elem()
+	val := reflect.New(a.Type().Elem()).Elem()
+
+	var it reflect.MapIter
+	it.Reset(a)
+	for it.Next() {
+		key.SetIterKey(&it)
+		val.SetIterValue(&it)
+
+		other := b.MapIndex(key)
+		if !other.IsValid() || compareReflect(val, other) != 0 {
+			return false
+		}
+	}
+
+	return true
+}
+
+// lookupSafeKey reports whether two map keys of type t are equal in Go
+// exactly when compareReflect orders them equal. A float key is not: -0 and +0
+// are one Go key but two CQL values. A pointer key is not: equal values have
+// different addresses.
+func lookupSafeKey(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return true
+	case reflect.Array:
+		return t.Elem().Kind() == reflect.Uint8
+	default:
+		return false
 	}
 }
 

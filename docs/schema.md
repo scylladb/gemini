@@ -47,7 +47,7 @@ By default, Gemini generates a random schema based on CLI parameters:
 ### CQL Feature Levels
 
 - **basic** - Simple types only (int, text, boolean, etc.)
-- **normal** - Adds collections (list, set, map) and tuples
+- **normal** - Adds collections (list, set, map), tuples and secondary indexes on regular columns
 - **all** - Adds UDTs (User-Defined Types) and complex nested types
 
 ### Reproducible Schemas
@@ -175,6 +175,15 @@ UDT (User-Defined Type):
   }
 }
 ```
+
+Gemini sorts the UDT fields by name. It generates the field values and writes the `CREATE TYPE` fields in that order.
+
+Counter:
+```json
+{"name": "views", "type": "counter"}
+```
+
+A table with a tuple column does not get `INSERT JSON` statements, because of [scylladb/scylla#3708](https://github.com/scylladb/scylla/issues/3708). Gemini sets this known issue for a schema file too.
 
 ## Supported Data Types
 

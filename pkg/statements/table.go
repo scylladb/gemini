@@ -73,9 +73,10 @@ func GetCreateTypes(t *typedef.Table, keyspace typedef.Keyspace) []string {
 			continue
 		}
 		createType := "CREATE TYPE IF NOT EXISTS %s.%s (%s)"
-		typs := make([]string, 0, len(c.ValueTypes))
-		for name, typ := range c.ValueTypes {
-			typs = append(typs, name+" "+typ.CQLDef())
+		names := c.FieldNames()
+		typs := make([]string, 0, len(names))
+		for _, name := range names {
+			typs = append(typs, name+" "+c.ValueTypes[name].CQLDef())
 		}
 		stmts = append(
 			stmts,

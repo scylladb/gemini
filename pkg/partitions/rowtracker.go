@@ -64,17 +64,20 @@ type TrackedRow struct {
 // Queue semantics:
 //   - Push is a no-op when the queue is full (never overwrites existing rows).
 //     This prevents deletes from consuming rows faster than they are produced.
+//     Push also drops a row of a partition that has invalidated rows still in
+//     the queue.
 //   - Pop returns the oldest valid entry (FIFO order).
-//   - Invalidation bitset: invalidBits []uint64, one bit per slot, sized at
-//     construction time. Avoids any map allocation or GC pressure. Each word
-//     covers 64 consecutive slots.
-//   - When a partition is deleted, Invalidate(id) scans the buffer under the
-//     lock, marks matching slots in the bitset, and calls Release immediately.
-//   - Pop skips invalidated slots in a tight retry loop; valid entries are
-//     returned as-is.
+//   - live counts the queued rows of each partition. Invalidate(id) moves the
+//     count of id to dead in O(1). A row whose partition is in dead is
+//     invalid.
+//   - Pop and Peek skip invalid rows. Pop removes them from the queue and from
+//     dead, so each invalid row costs one skip.
 type RowTracker struct {
+	// live counts the queued valid rows of each partition.
+	live map[uuid.UUID]uint32
+	// dead counts the queued invalid rows of each invalidated partition.
+	dead         map[uuid.UUID]uint32
 	buf          []TrackedRow
-	invalidBits  []uint64
 	head         uint64
 	count        atomic.Uint64
 	invalidCount atomic.Uint64
@@ -92,27 +95,12 @@ func NewRowTracker(capacity uint64) *RowTracker {
 		return &RowTracker{}
 	}
 
-	words := (capacity + 63) / 64
 	return &RowTracker{
-		buf:         make([]TrackedRow, capacity),
-		invalidBits: make([]uint64, words),
-		capacity:    capacity,
+		buf:      make([]TrackedRow, capacity),
+		live:     make(map[uuid.UUID]uint32),
+		dead:     make(map[uuid.UUID]uint32),
+		capacity: capacity,
 	}
-}
-
-// setBit marks slot i as invalid in the bitset (caller must hold mu).
-func (rt *RowTracker) setBit(i uint64) {
-	rt.invalidBits[i>>6] |= 1 << (i & 63)
-}
-
-// clearBit clears the invalid bit for slot i (caller must hold mu).
-func (rt *RowTracker) clearBit(i uint64) {
-	rt.invalidBits[i>>6] &^= 1 << (i & 63)
-}
-
-// testBit reports whether slot i is marked invalid (caller must hold mu).
-func (rt *RowTracker) testBit(i uint64) bool {
-	return rt.invalidBits[i>>6]&(1<<(i&63)) != 0
 }
 
 // Push stores a tracked row. If the queue is full the row is dropped silently.
@@ -125,26 +113,33 @@ func (rt *RowTracker) Push(row TrackedRow) {
 	}
 
 	rt.mu.Lock()
+	defer rt.mu.Unlock()
+
 	// count is read under the lock; the atomic is only used for lock-free reads
 	// in FillRatio/Len. Inside the lock a plain Load is correct.
 	if rt.count.Load() >= rt.capacity {
 		// Queue is full — drop the row.
-		rt.mu.Unlock()
+		return
+	}
+
+	// A validator that still holds keys of a replaced partition can observe
+	// its rows after Invalidate. Those rows target a partition that no longer
+	// exists, so they are dropped.
+	if _, invalidated := rt.dead[row.PartitionID]; invalidated {
 		return
 	}
 
 	idx := rt.head % rt.capacity
 	rt.buf[idx] = row
-	rt.clearBit(idx)
+	rt.live[row.PartitionID]++
 	rt.head++
 	rt.count.Add(1)
-	rt.mu.Unlock()
 }
 
 // Pop removes and returns the oldest valid row from the tracker.
-// Invalidated slots are skipped (their Release is called and they are
-// consumed from the count). Returns (TrackedRow, true) if a valid row was
-// found, or (zero, false) if the tracker is empty.
+// Invalidated rows are skipped and removed from the count. Returns
+// (TrackedRow, true) if a valid row was found, or (zero, false) if the tracker
+// is empty.
 // Safe to call concurrently.
 func (rt *RowTracker) Pop() (TrackedRow, bool) {
 	if rt.capacity == 0 {
@@ -161,18 +156,33 @@ func (rt *RowTracker) Pop() (TrackedRow, bool) {
 
 		oldestIdx := (rt.head - rt.count.Load()) % rt.capacity
 		row := rt.buf[oldestIdx]
-		invalid := rt.testBit(oldestIdx)
 
 		// Clear slot.
 		rt.buf[oldestIdx] = TrackedRow{}
-		rt.clearBit(oldestIdx)
 		rt.count.Add(^uint64(0)) // decrement
 
-		if !invalid {
-			return row, true
+		if decrement(rt.dead, row.PartitionID) {
+			rt.invalidCount.Add(^uint64(0)) // decrement
+			continue
 		}
-		rt.invalidCount.Add(^uint64(0)) // decrement
+		decrement(rt.live, row.PartitionID)
+		return row, true
 	}
+}
+
+// decrement lowers the count of id in m and removes the entry at zero. It
+// reports whether m held id.
+func decrement(m map[uuid.UUID]uint32, id uuid.UUID) bool {
+	n, ok := m[id]
+	if !ok {
+		return false
+	}
+	if n <= 1 {
+		delete(m, id)
+	} else {
+		m[id] = n - 1
+	}
+	return true
 }
 
 // Peek returns a live tracked row and leaves it in the tracker. Successive
@@ -188,10 +198,13 @@ func (rt *RowTracker) Peek() (TrackedRow, bool) {
 	defer rt.mu.Unlock()
 
 	n := rt.count.Load()
+	if n == rt.invalidCount.Load() {
+		return TrackedRow{}, false
+	}
 	for range n {
 		rt.peekCursor++
 		i := (rt.head - n + rt.peekCursor%n) % rt.capacity
-		if !rt.testBit(i) {
+		if _, invalidated := rt.dead[rt.buf[i].PartitionID]; !invalidated {
 			return rt.buf[i], true
 		}
 	}
@@ -199,32 +212,24 @@ func (rt *RowTracker) Peek() (TrackedRow, bool) {
 	return TrackedRow{}, false
 }
 
+// Invalidate marks every queued row of partition id invalid in constant time.
+// It moves the row count of id from live to dead. Pop and Peek skip the rows
+// later.
 func (rt *RowTracker) Invalidate(id uuid.UUID) {
 	if rt.capacity == 0 {
 		return
 	}
 
 	rt.mu.Lock()
-	n := rt.count.Load()
-	for k := range n {
-		i := (rt.head - n + k) % rt.capacity
-		if rt.buf[i].PartitionID != id {
-			continue
-		}
-		if rt.testBit(i) {
-			// Already invalidated; nothing to do for this slot.
-			continue
-		}
-		rt.setBit(i)
-		rt.invalidCount.Add(1)
-		// Do NOT decrement count here. The live-window pointer (head-count)
-		// advances sequentially from oldest to newest; decrementing count for
-		// a non-oldest slot would move the window past valid entries between
-		// the invalidated slot and the current oldest, making them unreachable.
-		// Pop's retry loop will consume and discard invalidated slots naturally
-		// as they become the oldest entry, decrementing count then.
+	defer rt.mu.Unlock()
+
+	n, ok := rt.live[id]
+	if !ok {
+		return
 	}
-	rt.mu.Unlock()
+	delete(rt.live, id)
+	rt.dead[id] += n
+	rt.invalidCount.Add(uint64(n))
 }
 
 func (rt *RowTracker) FillRatio() float64 {

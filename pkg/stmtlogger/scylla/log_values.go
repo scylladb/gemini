@@ -345,7 +345,17 @@ func appendUUID(buf []byte, u gocql.UUID) []byte {
 	return hex.AppendEncode(append(buf, '-'), u[10:16])
 }
 
+// appendJSONString appends s as a JSON string. Generated text is printable
+// ASCII almost always, so one pass checks for that and copies s as it is. Any
+// other string goes through UTF-8 repair and jsontext quoting.
 func appendJSONString(buf []byte, s string) []byte {
+	if plainASCII(s) {
+		buf = append(buf, '"')
+		buf = append(buf, s...)
+
+		return append(buf, '"')
+	}
+
 	if !utf8.ValidString(s) {
 		s = strings.ToValidUTF8(s, string(utf8.RuneError))
 	}
@@ -356,6 +366,18 @@ func appendJSONString(buf []byte, s string) []byte {
 	}
 
 	return out
+}
+
+// plainASCII reports whether every byte of s is printable ASCII that a JSON
+// string holds without an escape.
+func plainASCII(s string) bool {
+	for i := range len(s) {
+		if c := s[i]; c < 0x20 || c >= utf8.RuneSelf || c == '"' || c == '\\' {
+			return false
+		}
+	}
+
+	return true
 }
 
 func appendJSONFloat(buf []byte, f float64, bitSize int) []byte {

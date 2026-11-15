@@ -19,6 +19,7 @@ import (
 	randv1 "math/rand"
 	randv2 "math/rand/v2"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -260,5 +261,30 @@ func TestHexOfHalfIsPrefixOfFullHex(t *testing.T) {
 		if got := hex.EncodeToString(data[:n/2]); got != full[:n] {
 			t.Fatalf("hex of %d bytes = %q, want prefix %q", n/2, got, full[:n])
 		}
+	}
+}
+
+// TestKeyspaceTableFromQueryCopiesOfOneQuery: two strings with the same text
+// and different bytes give the same result, and a cached query keeps giving
+// its own result.
+func TestKeyspaceTableFromQueryCopiesOfOneQuery(t *testing.T) {
+	t.Parallel()
+
+	query := "INSERT INTO ks_copies.tbl (pk) VALUES (?)"
+	copied := strings.Clone(query)
+
+	if got := utils.KeyspaceTableFromQuery(query); got != "ks_copies.tbl" {
+		t.Fatalf("got %q", got)
+	}
+	if got := utils.KeyspaceTableFromQuery(copied); got != "ks_copies.tbl" {
+		t.Fatalf("copy: got %q", got)
+	}
+
+	other := "DELETE FROM ks_copies.other WHERE pk=?"
+	if got := utils.KeyspaceTableFromQuery(other); got != "ks_copies.other" {
+		t.Fatalf("other: got %q", got)
+	}
+	if got := utils.KeyspaceTableFromQuery(query); got != "ks_copies.tbl" {
+		t.Fatalf("again: got %q", got)
 	}
 }

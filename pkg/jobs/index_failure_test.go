@@ -43,7 +43,7 @@ func TestHandleCheckFailureReportsIndexQuery(t *testing.T) {
 		QueryType: typedef.SelectByIndexStatementType,
 	}
 
-	err := v.handleCheckFailure(errors.New("rows differ"), stmt)
+	err := v.handleCheckFailure(attemptHistory{divergence: errors.New("rows differ")}, stmt)
 
 	var jobErr *joberror.JobError
 	require.ErrorAs(t, err, &jobErr, "the divergence must be reported")

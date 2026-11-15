@@ -245,11 +245,6 @@ The project includes benchmarks for:
   - `BenchmarkPartitionsConcurrentMixed` - Mixed concurrent operations
   - `BenchmarkMemoryAllocation` - Memory allocation patterns
 
-- **In-flight tracking** (`pkg/inflight`)
-  - `BenchmarkBloom` - Bloom filter operations
-  - `BenchmarkBloomHashFunctions` - Hash function performance
-  - `BenchmarkBloomConcurrent` - Concurrent bloom filter access
-
 - **Hashing** (`pkg/murmur`)
   - `BenchmarkMurmur3H1` - Murmur3 hash function
 

@@ -15,16 +15,54 @@
 package typedef
 
 import (
+	"maps"
+	"slices"
+	"sync/atomic"
+
 	"github.com/gocql/gocql"
 
 	"github.com/scylladb/gemini/pkg/utils"
 )
 
 type UDTType struct {
+	fields      atomic.Pointer[udtFields]
 	ComplexType string                `json:"complex_type"`
 	ValueTypes  map[string]SimpleType `json:"value_types"`
 	TypeName    string                `json:"type_name"`
 	Frozen      bool                  `json:"frozen"`
+}
+
+// udtFields holds the UDT fields in sorted name order. types[i] is the type
+// of names[i].
+type udtFields struct {
+	names []string
+	types []SimpleType
+}
+
+// sortedFields returns the fields in sorted name order. Value generation and
+// the CREATE TYPE statement use this order, so one seed always gives the same
+// values and the same DDL. The fields are sorted on the first call and shared
+// after that, also for a type read from a JSON schema.
+func (t *UDTType) sortedFields() *udtFields {
+	if f := t.fields.Load(); f != nil {
+		return f
+	}
+
+	names := slices.Sorted(maps.Keys(t.ValueTypes))
+	types := make([]SimpleType, len(names))
+	for i, name := range names {
+		types[i] = t.ValueTypes[name]
+	}
+
+	t.fields.CompareAndSwap(nil, &udtFields{names: names, types: types})
+
+	return t.fields.Load()
+}
+
+// FieldNames returns the field names in sorted order. The slice is shared, so
+// the caller must not change it.
+func (t *UDTType) FieldNames() []string {
+	return t.sortedFields().names
 }
 
 func (t *UDTType) CQLType() gocql.TypeInfo {
@@ -57,28 +95,29 @@ func (t *UDTType) Indexable() bool {
 }
 
 func (t *UDTType) GenJSONValue(r utils.Random, p RangeConfig) any {
-	vals := make(map[string]any)
-	for name, typ := range t.ValueTypes {
-		vals[name] = typ.GenJSONValue(r, p)
+	f := t.sortedFields()
+	vals := make(map[string]any, len(f.names))
+	for i, name := range f.names {
+		vals[name] = f.types[i].GenJSONValue(r, p)
+	}
+	return vals
+}
+
+func (t *UDTType) genValue(r utils.Random, p RangeConfig) map[string]any {
+	f := t.sortedFields()
+	vals := make(map[string]any, len(f.names))
+	for i, name := range f.names {
+		vals[name] = f.types[i].genValue(r, p)
 	}
 	return vals
 }
 
 func (t *UDTType) GenValue(r utils.Random, p RangeConfig) []any {
-	vals := make(map[string]any)
-	for name, typ := range t.ValueTypes {
-		vals[name] = typ.GenValue(r, p)[0]
-	}
-	return []any{vals}
+	return []any{t.genValue(r, p)}
 }
 
 func (t *UDTType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {
-	vals := make(map[string]any)
-	for name, typ := range t.ValueTypes {
-		vals[name] = typ.GenValue(r, p)[0]
-	}
-
-	return append(out, vals)
+	return append(out, t.genValue(r, p))
 }
 
 func (t *UDTType) LenValue() int {
@@ -88,7 +127,7 @@ func (t *UDTType) LenValue() int {
 // ValueVariationsNumber returns number of bytes generated value holds
 func (t *UDTType) ValueVariationsNumber(p RangeConfig) float64 {
 	out := float64(1)
-	for _, tp := range t.ValueTypes {
+	for _, tp := range t.sortedFields().types {
 		out *= tp.ValueVariationsNumber(p)
 	}
 	return out

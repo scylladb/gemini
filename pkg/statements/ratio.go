@@ -360,6 +360,16 @@ func (c *RatioController) GetSelectSubtype() int {
 	return SelectSinglePartitionQuery
 }
 
+// WithRandom returns a copy of c that draws from random. Each worker gets its
+// own copy, so the draws of the workers share no lock. The copy keeps the
+// ratios that c has now.
+func (c *RatioController) WithRandom(random utils.Random) *RatioController {
+	worker := *c
+	worker.random = random
+
+	return &worker
+}
+
 // UpdateRatios updates the ratios and rebuilds the CDFs
 func (c *RatioController) UpdateRatios(ratios Ratios) error {
 	controller := &RatioController{

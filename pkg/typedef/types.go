@@ -32,6 +32,9 @@ const (
 	TypeList  = "list"
 	TypeSet   = "set"
 	TypeTuple = "tuple"
+	// TypeCounter is the CQL name of the counter type. A schema file names a
+	// counter column with it.
+	TypeCounter = "counter"
 )
 
 const (
@@ -135,10 +138,25 @@ var goCQLTypeMap = map[gocql.Type]gocql.TypeInfo{
 }
 
 type MapType struct {
+	goType      atomic.Pointer[reflect.Type]
 	ComplexType string     `json:"complex_type"`
 	KeyType     SimpleType `json:"key_type"`
 	ValueType   SimpleType `json:"value_type"`
 	Frozen      bool       `json:"frozen"`
+}
+
+// mapGoType returns the Go map type that GenValue and GenValueOut make. It
+// depends only on the key and value types, so it is resolved on the first call
+// and shared after that.
+func (mt *MapType) mapGoType() reflect.Type {
+	if t := mt.goType.Load(); t != nil {
+		return *t
+	}
+
+	t := reflect.MapOf(mt.KeyType.goType(), mt.ValueType.goType())
+	mt.goType.CompareAndSwap(nil, &t)
+
+	return *mt.goType.Load()
 }
 
 func (mt *MapType) CQLType() gocql.TypeInfo {
@@ -187,40 +205,26 @@ func jsonMapKey(key any) string {
 	return string(data)
 }
 
-func (mt *MapType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {
+func (mt *MapType) genValue(r utils.Random, p RangeConfig) any {
 	count := utils.RandInt2(r, 1, maxMapSize+1)
-	vals := reflect.MakeMap(
-		reflect.MapOf(
-			reflect.TypeOf(mt.KeyType.GenValue(r, p)[0]),
-			reflect.TypeOf(mt.ValueType.GenValue(r, p)[0]),
-		),
-	)
+	vals := reflect.MakeMapWithSize(mt.mapGoType(), count)
 
 	for range count {
 		vals.SetMapIndex(
-			reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]),
-			reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]),
+			reflect.ValueOf(mt.KeyType.genValue(r, p)),
+			reflect.ValueOf(mt.ValueType.genValue(r, p)),
 		)
 	}
 
-	return append(out, vals.Interface())
+	return vals.Interface()
+}
+
+func (mt *MapType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {
+	return append(out, mt.genValue(r, p))
 }
 
 func (mt *MapType) GenValue(r utils.Random, p RangeConfig) []any {
-	count := utils.RandInt2(r, 1, maxMapSize+1)
-	vals := reflect.MakeMap(
-		reflect.MapOf(
-			reflect.TypeOf(mt.KeyType.GenValue(r, p)[0]),
-			reflect.TypeOf(mt.ValueType.GenValue(r, p)[0]),
-		),
-	)
-	for range count {
-		vals.SetMapIndex(
-			reflect.ValueOf(mt.KeyType.GenValue(r, p)[0]),
-			reflect.ValueOf(mt.ValueType.GenValue(r, p)[0]),
-		)
-	}
-	return []any{vals.Interface()}
+	return []any{mt.genValue(r, p)}
 }
 
 func (mt *MapType) LenValue() int {
@@ -255,7 +259,13 @@ func (ct *CounterType) CQLType() gocql.TypeInfo {
 }
 
 func (ct *CounterType) Name() string {
-	return "counter"
+	return TypeCounter
+}
+
+// MarshalJSON writes a counter column type as "counter", the same form that
+// a schema file uses and that GetSimpleTypeColumn reads.
+func (ct *CounterType) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + TypeCounter + `"`), nil
 }
 
 func (ct *CounterType) CQLHolder() string {
@@ -290,7 +300,7 @@ func (ct *CounterType) LenValue() int {
 }
 
 func (ct *CounterType) CQLDef() string {
-	return "counter"
+	return TypeCounter
 }
 
 func (ct *CounterType) Indexable() bool {

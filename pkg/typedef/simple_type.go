@@ -21,6 +21,7 @@ import (
 	"math"
 	"math/big"
 	"math/rand/v2"
+	"reflect"
 	"slices"
 	"time"
 
@@ -257,6 +258,52 @@ func (st SimpleType) genValue(r utils.Random, p RangeConfig) any {
 		return big.NewInt(randSigned(r))
 	default:
 		panic(fmt.Sprintf("generate value: not supported type %s", st))
+	}
+}
+
+// goType returns the Go type of the values that genValue makes for st.
+func (st SimpleType) goType() reflect.Type {
+	switch st {
+	case TypeBlob:
+		return reflect.TypeFor[[]byte]()
+	case TypeASCII, TypeText, TypeVarchar, TypeInet:
+		return reflect.TypeFor[string]()
+	case TypeBigint, TypeTimestamp:
+		return reflect.TypeFor[int64]()
+	case TypeBoolean:
+		return reflect.TypeFor[bool]()
+	case TypeDate:
+		return reflect.TypeFor[time.Time]()
+	case TypeTime, TypeDuration:
+		return reflect.TypeFor[time.Duration]()
+	case TypeDecimal:
+		return reflect.TypeFor[*inf.Dec]()
+	case TypeDouble:
+		return reflect.TypeFor[float64]()
+	case TypeFloat:
+		return reflect.TypeFor[float32]()
+	case TypeInt:
+		return reflect.TypeFor[int32]()
+	case TypeSmallint:
+		return reflect.TypeFor[int16]()
+	case TypeTinyint:
+		return reflect.TypeFor[int8]()
+	case TypeUUID, TypeTimeuuid:
+		return reflect.TypeFor[gocql.UUID]()
+	case TypeVarint:
+		return reflect.TypeFor[*big.Int]()
+	default:
+		panic(fmt.Sprintf("generate value: not supported type %s", st))
+	}
+}
+
+// jsonGoType returns the Go type of the values that GenJSONValue makes for st.
+func (st SimpleType) jsonGoType() reflect.Type {
+	switch st {
+	case TypeBlob, TypeDecimal, TypeUUID, TypeTimeuuid, TypeVarint, TypeDate, TypeDuration, TypeTime:
+		return reflect.TypeFor[string]()
+	default:
+		return st.goType()
 	}
 }
 

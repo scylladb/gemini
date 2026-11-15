@@ -46,15 +46,19 @@ const retryQueueSaturationBackoff = 50 * time.Millisecond
 type Validation struct {
 	// limiter parks this worker while workerIdx is at or above its limit.
 	// Nil runs the worker without a limit.
-	limiter          *concurrency.Limiter
-	generator        partitions.Interface
-	store            store.Store
-	random           *rand.Rand
-	statement        *statements.Generator
-	status           *status.GlobalStatus
-	stopFlag         *stop.Flag
-	table            *typedef.Table
-	keyspaceName     string
+	limiter      *concurrency.Limiter
+	generator    partitions.Interface
+	store        store.Store
+	random       *rand.Rand
+	statement    *statements.Generator
+	status       *status.GlobalStatus
+	stopFlag     *stop.Flag
+	table        *typedef.Table
+	keyspaceName string
+	// deletedQuery is the SELECT of one whole partition, which re-validates
+	// a deleted partition. It is the same for every partition of the table,
+	// so it is built once. See deletedPartitionQuery.
+	deletedQuery     string
 	selectColumns    []string
 	permScratch      []int
 	maxAttempts      int
@@ -108,7 +112,7 @@ func NewValidation(
 	sampleRate := min(0.50, targetedConsumeRatio*3.5)
 	maxSamplesPerRun := max(1, min(10, int(30*sampleRate)))
 
-	return &Validation{
+	v := &Validation{
 		table:            table,
 		keyspaceName:     schema.Keyspace.Name,
 		statement:        statementGenerator,
@@ -122,6 +126,31 @@ func NewValidation(
 		delay:            delay,
 		sampleRate:       sampleRate,
 		maxSamplesPerRun: maxSamplesPerRun,
+	}
+	v.deletedPartitionQuery()
+
+	return v
+}
+
+// attemptHistory holds what the attempts of one validation saw, so that the
+// last attempt alone does not decide the result. A timeout on the last
+// attempt must not hide a divergence that an earlier attempt found.
+type attemptHistory struct {
+	// divergence is the latest attempt error that found different rows.
+	divergence error
+	// testReadErr is the latest attempt error in which the test cluster did
+	// not return its rows. An attempt in which only the oracle cluster did
+	// not return its rows is not recorded: it is not charged to the system
+	// under test.
+	testReadErr error
+}
+
+func (h *attemptHistory) record(err error) {
+	switch {
+	case store.IsDivergence(err):
+		h.divergence = err
+	case !store.IsOracleLoadError(err):
+		h.testReadErr = err
 	}
 }
 
@@ -141,6 +170,7 @@ func releaseKeys(stmt *typedef.Stmt) {
 type runResult struct {
 	err        error
 	stmt       *typedef.Stmt
+	history    attemptHistory
 	attempt    int
 	needsRetry bool
 }
@@ -160,7 +190,7 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) runResu
 
 	statementsGenerated[stmt.QueryType].Inc()
 
-	return v.checkOnce(ctx, stmt, 0, metric)
+	return v.checkOnce(ctx, stmt, 0, attemptHistory{}, metric)
 }
 
 // checkOnce performs a single validation attempt on a statement. Used both
@@ -170,7 +200,10 @@ func (v *Validation) run(ctx context.Context, metric prometheus.Counter) runResu
 //
 // testRows are returned by CheckOnce for free — they were already fetched for
 // comparison, so we reuse them for row-tracker sampling without a second SELECT.
-func (v *Validation) checkOnce(ctx context.Context, stmt *typedef.Stmt, attempt int, metric prometheus.Counter) runResult {
+//
+// history holds what the earlier attempts of stmt saw. A failed attempt adds
+// to it, and the result carries it to the next attempt.
+func (v *Validation) checkOnce(ctx context.Context, stmt *typedef.Stmt, attempt int, history attemptHistory, metric prometheus.Counter) runResult {
 	start := time.Now()
 	validatedRows, testRows, err := v.store.CheckOnce(ctx, v.table, stmt, attempt)
 	if v.limiter != nil {
@@ -224,7 +257,8 @@ func (v *Validation) checkOnce(ctx context.Context, stmt *typedef.Stmt, attempt 
 	}
 
 	// Signal that this can be retried (caller decides based on attempt count)
-	return runResult{err: err, stmt: stmt, attempt: attempt, needsRetry: true}
+	history.record(err)
+	return runResult{err: err, stmt: stmt, attempt: attempt, history: history, needsRetry: true}
 }
 
 // sampleRowsForTracker pushes a random subset of already-fetched test rows
@@ -334,45 +368,220 @@ func (v *Validation) samplingPerm(n int) []int {
 	return v.permScratch
 }
 
-// handleCheckFailure processes a non-context store.Check error: it records the
-// failure, releases all keys, and returns a JobError only for the first goroutine
-// to mark each partition invalid (deduplication via MarkInvalid).
-func (v *Validation) handleCheckFailure(err error, stmt *typedef.Stmt) error {
-	if v.generator == nil {
+// handleCheckFailure decides the result of a validation that used all its
+// attempts. It releases the keys of stmt, and returns a JobError when the
+// failure is charged to the system under test.
+//
+//   - A divergence that any attempt saw is reported. See reportDivergence.
+//   - Else, when the test cluster failed to read, the failure is a read error
+//     of the run. The message says that no data mismatch was seen.
+//   - Else only the oracle cluster failed to read. That is a fault of the
+//     reference cluster, so it is counted in a metric and not charged.
+func (v *Validation) handleCheckFailure(history attemptHistory, stmt *typedef.Stmt) error {
+	switch {
+	case history.divergence != nil:
+		return v.reportDivergence(history.divergence, stmt, "Validation failed: ")
+	case history.testReadErr != nil:
+		metrics.ValidationReadFailures.WithLabelValues(string(store.TypeTest)).Inc()
+		je := v.buildJobError(history.testReadErr, stmt,
+			"Validation could not read rows from the test cluster, no data mismatch was seen: "+history.testReadErr.Error())
 		releaseKeys(stmt)
-		return v.buildJobError(err, stmt, "Validation failed: "+err.Error())
+		return je
+	default:
+		metrics.ValidationReadFailures.WithLabelValues(string(store.TypeOracle)).Inc()
+		releaseKeys(stmt)
+		return nil
+	}
+}
+
+// reportDivergence records a divergence that err holds for stmt, releases the
+// keys of stmt, and returns a JobError when the divergence is new.
+//
+// Only the partitions whose rows differ are blamed and marked invalid. A
+// multi-partition SELECT can read a partition that gemini already made
+// diverge, for example with an asymmetric write. Its difference must not be
+// reported against a healthy partition of the same statement. MarkInvalid
+// reports false for a partition that is already invalid or that was replaced
+// and already reported. Such a partition is dropped from the report. When no
+// differing partition is new, nothing is reported.
+//
+// MarkInvalid must run while the keys are held: releaseKeys can remove the
+// UUID that MarkInvalid looks up.
+func (v *Validation) reportDivergence(err error, stmt *typedef.Stmt, prefix string) error {
+	if v.generator == nil {
+		je := v.buildJobError(err, stmt, prefix+err.Error())
+		releaseKeys(stmt)
+		return je
 	}
 
-	// Step 1: Record validation failure timestamps (UUID still live in uuidToIdx).
-	for i := range stmt.PartitionKeys {
+	diverged, attributed := v.divergedKeys(err, stmt)
+	newly := make([]bool, len(stmt.PartitionKeys))
+	newCount := 0
+	for _, i := range diverged {
 		v.generator.ValidationFailure(&stmt.PartitionKeys[i])
-	}
-
-	// Step 2: Attempt to mark invalid BEFORE releasing keys.
-	// releaseKeys may trigger deleteValidation which removes the UUID from
-	// uuidToIdx, so MarkInvalid must be called while the UUID is still registered.
-	// MarkInvalid is non-blocking and idempotent — only the first goroutine for
-	// a given partition returns true. Emit a JobError only for newly-marked
-	// partitions; silently drop the rest to ensure unique reporting.
-	marked := false
-	for i := range stmt.PartitionKeys {
+		// Do not stop at the first result: every differing partition must be
+		// marked, so that Next skips all of them.
 		if v.generator.MarkInvalid(&stmt.PartitionKeys[i]) {
-			marked = true
-			// Do not break: every key in the statement must be marked so that
-			// future Next()/ReplaceNext() calls skip all of them, not just the first.
+			newly[i] = true
+			newCount++
 		}
 	}
 
-	// Step 3: Release keys (may trigger deleteValidation — safe now).
-	releaseKeys(stmt)
-
-	// An index query names no partition: its rows come from any partition the
-	// index matches. There is nothing to mark, and nothing to deduplicate by,
-	// so its failure is reported every time. It is still a divergence.
-	if marked || len(stmt.PartitionKeys) == 0 {
-		return v.buildJobError(err, stmt, "Validation failed: "+err.Error())
+	// An unattributed difference with a known partition among the suspects
+	// is dropped. It cannot be told apart from the difference that gemini
+	// already knows about.
+	var je *joberror.JobError
+	switch {
+	case len(stmt.PartitionKeys) == 0:
+		// An index query names no partition: its rows come from any
+		// partition the index matches. There is nothing to mark and nothing
+		// to deduplicate by, so its failure is reported every time.
+		je = v.buildJobError(err, stmt, prefix+err.Error())
+	case newCount == 0:
+	case newCount == len(stmt.PartitionKeys):
+		je = v.buildJobError(err, stmt, prefix+err.Error())
+	case attributed:
+		je = v.buildPartialJobError(err, stmt, newly, prefix)
 	}
-	return nil
+
+	releaseKeys(stmt)
+	if je == nil {
+		return nil
+	}
+
+	return je
+}
+
+// divergedKeys returns the indexes of the partitions of stmt whose rows differ
+// between the clusters. attributed is false when a differing row matches no
+// partition of stmt. Then every partition of stmt is returned as a suspect.
+func (v *Validation) divergedKeys(err error, stmt *typedef.Stmt) (diverged []int, attributed bool) {
+	keys := stmt.PartitionKeys
+	all := make([]int, len(keys))
+	for i := range keys {
+		all[i] = i
+	}
+	if len(keys) <= 1 {
+		return all, true
+	}
+
+	ve, ok := errors.AsType[*store.ValidationError](err)
+	if !ok || ve.ComparisonResults == nil {
+		return all, false
+	}
+
+	hit := make([]bool, len(keys))
+	mark := func(row store.Row) bool {
+		ci := v.partitionOf(row, keys)
+		if ci < 0 {
+			return false
+		}
+		hit[ci] = true
+		return true
+	}
+
+	cr := ve.ComparisonResults
+	for _, row := range cr.TestOnlyRows {
+		if !mark(row) {
+			return all, false
+		}
+	}
+	for _, row := range cr.OracleOnlyRows {
+		if !mark(row) {
+			return all, false
+		}
+	}
+	for _, d := range cr.DifferentRows {
+		if !mark(d.TestRow) && !mark(d.OracleRow) {
+			return all, false
+		}
+	}
+
+	for i, h := range hit {
+		if h {
+			diverged = append(diverged, i)
+		}
+	}
+	if len(diverged) == 0 {
+		return all, false
+	}
+
+	return diverged, true
+}
+
+// partitionOf returns the index of the partition in keys that row belongs to,
+// or -1.
+func (v *Validation) partitionOf(row store.Row, keys []typedef.PartitionKeys) int {
+	for ci := range keys {
+		if v.rowInPartition(row, &keys[ci]) {
+			return ci
+		}
+	}
+
+	return -1
+}
+
+func (v *Validation) rowInPartition(row store.Row, pk *typedef.PartitionKeys) bool {
+	if pk.Values == nil {
+		return false
+	}
+	for _, col := range v.table.PartitionKeys {
+		values := pk.Values.Get(col.Name)
+		if len(values) != 1 || !store.ValuesEqual(row.Get(col.Name), values[0]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// buildPartialJobError reports the partitions of stmt at the indexes where
+// newly is true, with only their rows in the comparison results. The other differing partitions
+// were already reported or are already known to differ because of gemini.
+func (v *Validation) buildPartialJobError(err error, stmt *typedef.Stmt, newly []bool, prefix string) *joberror.JobError {
+	keep := make([]typedef.PartitionKeys, 0, len(stmt.PartitionKeys))
+	for i := range stmt.PartitionKeys {
+		if newly[i] {
+			keep = append(keep, stmt.PartitionKeys[i])
+		}
+	}
+	view := &typedef.Stmt{
+		PartitionKeys: keep,
+		Query:         stmt.Query,
+		Values:        stmt.Values,
+		QueryType:     stmt.QueryType,
+	}
+
+	je := v.buildJobError(err, view, prefix+err.Error())
+	if ve, ok := errors.AsType[*store.ValidationError](err); ok && ve.ComparisonResults != nil {
+		inKeep := func(row store.Row) bool { return v.partitionOf(row, keep) >= 0 }
+		cr := ve.ComparisonResults
+		filtered := &store.ComparisonResults{
+			TestRows:       filterRows(cr.TestRows, inKeep),
+			OracleRows:     filterRows(cr.OracleRows, inKeep),
+			TestOnlyRows:   filterRows(cr.TestOnlyRows, inKeep),
+			OracleOnlyRows: filterRows(cr.OracleOnlyRows, inKeep),
+		}
+		for _, d := range cr.DifferentRows {
+			if inKeep(d.TestRow) || inKeep(d.OracleRow) {
+				filtered.DifferentRows = append(filtered.DifferentRows, d)
+			}
+		}
+		je.Results = comparisonResults(filtered)
+	}
+
+	return je
+}
+
+func filterRows(rows store.Rows, keep func(store.Row) bool) store.Rows {
+	var out store.Rows
+	for _, row := range rows {
+		if keep(row) {
+			out = append(out, row)
+		}
+	}
+
+	return out
 }
 
 // extractComparisonResults extracts comparison results from a store.ValidationError
@@ -383,8 +592,10 @@ func extractComparisonResults(err error) *joberror.ComparisonResults {
 		return nil
 	}
 
-	cr := valErr.ComparisonResults
+	return comparisonResults(valErr.ComparisonResults)
+}
 
+func comparisonResults(cr *store.ComparisonResults) *joberror.ComparisonResults {
 	return &joberror.ComparisonResults{
 		TestRows:       marshalRows(cr.TestRows),
 		OracleRows:     marshalRows(cr.OracleRows),
@@ -475,20 +686,27 @@ func (v *Validation) buildJobError(err error, stmt *typedef.Stmt, message string
 	return je
 }
 
-// createSelectStmtForPartitionKeys creates a SELECT statement for specific partition key values
-func (v *Validation) createSelectStmtForPartitionKeys(keys typedef.PartitionKeys) *typedef.Stmt {
-	keyspaceAndTable := v.keyspaceName + "." + v.table.Name
-	builder := qb.Select(keyspaceAndTable).Columns(v.selectColumns...)
+// deletedPartitionQuery returns the SELECT of one whole partition of the
+// table. It builds the query on the first call and keeps it.
+func (v *Validation) deletedPartitionQuery() string {
+	if v.deletedQuery != "" {
+		return v.deletedQuery
+	}
 
+	builder := qb.Select(v.keyspaceName + "." + v.table.Name).Columns(v.selectColumns...)
 	for _, pk := range v.table.PartitionKeys {
 		builder = builder.Where(qb.Eq(pk.Name))
 	}
+	v.deletedQuery, _ = builder.ToCql()
 
-	query, _ := builder.ToCql()
+	return v.deletedQuery
+}
 
+// createSelectStmtForPartitionKeys creates a SELECT statement for specific partition key values
+func (v *Validation) createSelectStmtForPartitionKeys(keys typedef.PartitionKeys) *typedef.Stmt {
 	return &typedef.Stmt{
 		QueryType:     typedef.SelectStatementType,
-		Query:         query,
+		Query:         v.deletedPartitionQuery(),
 		PartitionKeys: []typedef.PartitionKeys{keys},
 		Values:        keys.Values.ToCQLValues(v.table.PartitionKeys),
 	}
@@ -497,6 +715,10 @@ func (v *Validation) createSelectStmtForPartitionKeys(keys typedef.PartitionKeys
 // validateDeletedPartition validates a deleted partition by verifying it no longer exists.
 // The partition should have been deleted from both test and oracle clusters, so we expect
 // zero rows to be returned.
+//
+// store.Check decides the outcome from all its attempts. A divergence is
+// reported. A read failure of the test cluster is a read error, and a read
+// failure of the oracle cluster alone is not charged to the system under test.
 func (v *Validation) validateDeletedPartition(ctx context.Context, keys typedef.PartitionKeys, deletionTimeNS uint64) error {
 	stmt := v.createSelectStmtForPartitionKeys(keys)
 
@@ -507,31 +729,43 @@ func (v *Validation) validateDeletedPartition(ctx context.Context, keys typedef.
 		}
 	}()
 
-	if _, _, err := v.store.Check(ctx, v.table, stmt, 0); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return err
+	_, _, err := v.store.Check(ctx, v.table, stmt, 0)
+	if err == nil {
+		if v.generator != nil {
+			v.generator.ValidationSuccess(&stmt.PartitionKeys[0])
 		}
-		// final failure after retries for deleted partition
+		return nil
+	}
+
+	// A context error that is not a validation result means that the
+	// worker's context ended.
+	_, isValidationErr := errors.AsType[*store.ValidationError](err)
+	if ctx.Err() != nil || (!isValidationErr && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled))) {
+		return err
+	}
+
+	switch {
+	case store.IsDivergence(err):
 		if v.generator != nil {
 			v.generator.ValidationFailure(&stmt.PartitionKeys[0])
+			// Mark the partition invalid and only report if this is the first time.
+			if !v.generator.MarkInvalid(&stmt.PartitionKeys[0]) {
+				return nil
+			}
 		}
-
-		// Mark the partition invalid and only report if this is the first time.
-		if v.generator != nil && !v.generator.MarkInvalid(&stmt.PartitionKeys[0]) {
-			// Already reported by another goroutine.
-			return nil
-		}
-
 		jobErr := v.buildJobError(err, stmt, "Deleted partition validation failed (difference found): "+err.Error())
 		jobErr.DeletionTimeNS = deletionTimeNS
 		return jobErr
+	case store.IsOracleLoadError(err):
+		metrics.ValidationReadFailures.WithLabelValues(string(store.TypeOracle)).Inc()
+		return nil
+	default:
+		metrics.ValidationReadFailures.WithLabelValues(string(store.TypeTest)).Inc()
+		jobErr := v.buildJobError(err, stmt,
+			"Deleted partition validation failed (test cluster read error, no data mismatch was seen): "+err.Error())
+		jobErr.DeletionTimeNS = deletionTimeNS
+		return jobErr
 	}
-
-	// success
-	if v.generator != nil {
-		v.generator.ValidationSuccess(&stmt.PartitionKeys[0])
-	}
-	return nil
 }
 
 func (v *Validation) Do(ctx context.Context) error {
@@ -552,7 +786,10 @@ func (v *Validation) Do(ctx context.Context) error {
 
 	for !v.stopFlag.IsHardOrSoft() {
 		if v.limiter != nil {
-			if err := v.limiter.Wait(ctx, v.workerIdx, v.stopFlag.IsHardOrSoft); err != nil {
+			if err := v.parkUntilAllowed(ctx, rq, validatedRowsMetric); err != nil {
+				if errors.Is(err, ErrValidationJobStopped) {
+					return err
+				}
 				return nil
 			}
 			if v.stopFlag.IsHardOrSoft() {
@@ -562,9 +799,7 @@ func (v *Validation) Do(ctx context.Context) error {
 
 		// First, check if any retries are ready (non-blocking).
 		if idx := rq.Ready(); idx >= 0 {
-			retry := rq.Take(idx)
-			result := v.checkOnce(ctx, retry.stmt, retry.attempt, validatedRowsMetric)
-			if err := v.handleRunResult(result, rq); err != nil {
+			if err := v.runRetry(ctx, rq, idx, validatedRowsMetric); err != nil {
 				return err
 			}
 			continue
@@ -589,9 +824,7 @@ func (v *Validation) Do(ctx context.Context) error {
 
 		case <-retryTimerCh:
 			// The earliest retry's timer fired — pick up that retry.
-			retry := rq.Take(earliestIdx)
-			result := v.checkOnce(ctx, retry.stmt, retry.attempt, validatedRowsMetric)
-			if err := v.handleRunResult(result, rq); err != nil {
+			if err := v.runRetry(ctx, rq, earliestIdx, validatedRowsMetric); err != nil {
 				return err
 			}
 
@@ -622,6 +855,35 @@ func (v *Validation) Do(ctx context.Context) error {
 	return v.finishPendingRetries(ctx, rq, validatedRowsMetric)
 }
 
+// parkUntilAllowed waits while the limiter parks this worker. A parked worker
+// starts no new validation, which is the purpose of the limiter. It still
+// runs the retries that come due, because a retry is a validation that
+// already started: left in the queue, its keys stay pinned and its result
+// comes late. It returns ctx.Err() when ctx ends, and ErrValidationJobStopped
+// when a retry uses up the error budget.
+func (v *Validation) parkUntilAllowed(ctx context.Context, rq *retryQueue, metric prometheus.Counter) error {
+	for {
+		earliestIdx, retryTimerCh := rq.Earliest()
+		woke, err := v.limiter.WaitOrWake(ctx, v.workerIdx, v.stopFlag.IsHardOrSoft, retryTimerCh)
+		if err != nil || !woke {
+			return err
+		}
+
+		if err = v.runRetry(ctx, rq, earliestIdx, metric); err != nil {
+			return err
+		}
+	}
+}
+
+// runRetry takes the retry at idx, whose timer fired, and runs its next
+// attempt. Returns a non-nil error only when the worker must stop.
+func (v *Validation) runRetry(ctx context.Context, rq *retryQueue, idx int, metric prometheus.Counter) error {
+	retry := rq.Take(idx)
+	result := v.checkOnce(ctx, retry.stmt, retry.attempt, retry.history, metric)
+
+	return v.handleRunResult(result, rq)
+}
+
 // finishPendingRetries runs the queued retries to completion after a soft
 // stop. A retry is a validation that already started, so dropping it would
 // leave a possible difference unreported. Each retry is bounded by
@@ -644,7 +906,7 @@ func (v *Validation) finishPendingRetries(ctx context.Context, rq *retryQueue, m
 			}
 		}
 
-		result := v.checkOnce(ctx, retry.stmt, retry.attempt, metric)
+		result := v.checkOnce(ctx, retry.stmt, retry.attempt, retry.history, metric)
 		if err := v.handleRunResult(result, rq); err != nil {
 			return err
 		}
@@ -657,10 +919,9 @@ func (v *Validation) finishPendingRetries(ctx context.Context, rq *retryQueue, m
 // from the generator's Deleted channel. Returns a non-nil error only when the
 // worker must stop.
 func (v *Validation) handleDeletedPartition(ctx context.Context, executionTime *metrics.RunningTime, deletedKeys typedef.PartitionKeys) error {
-	deletionNS := deletedKeys.DeletedAtNS
-	err := executionTime.RunFuncE(func() error {
-		return v.validateDeletedPartition(ctx, deletedKeys, deletionNS)
-	})
+	executionTime.Start()
+	err := v.validateDeletedPartition(ctx, deletedKeys, deletedKeys.DeletedAtNS)
+	executionTime.Record()
 
 	if err == nil {
 		v.status.ReadOp()
@@ -737,7 +998,7 @@ func (v *Validation) handleRunResult(result runResult, rq *retryQueue) error {
 	}
 
 	// Try to schedule a retry.
-	switch rq.Schedule(result.stmt, result.attempt) {
+	switch rq.Schedule(result.stmt, result.attempt, result.history) {
 	case scheduleAccepted:
 		// Stmt ownership transferred to the retry queue — do NOT release keys.
 		return nil
@@ -755,7 +1016,7 @@ func (v *Validation) handleRunResult(result runResult, rq *retryQueue) error {
 
 	// All retries exhausted — treat as final failure.
 	metrics.ValidationRetriesExhausted.Inc()
-	failErr := v.handleCheckFailure(result.err, result.stmt)
+	failErr := v.handleCheckFailure(result.history, result.stmt)
 	if failErr == nil {
 		return nil
 	}

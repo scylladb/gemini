@@ -47,8 +47,14 @@ func GenSimpleType(_ *typedef.SchemaConfig, r utils.Random) typedef.SimpleType {
 	return typedef.AllTypes[r.IntN(len(typedef.AllTypes))]
 }
 
+// GenTupleType makes a tuple of 2 to sc.MaxTupleParts elements, inclusive,
+// with an equal chance for each length. A tuple always has at least 2
+// elements, also when sc.MaxTupleParts is smaller than 2.
 func GenTupleType(sc *typedef.SchemaConfig, r utils.Random) typedef.Type {
-	n := max(r.IntN(sc.MaxTupleParts), 2)
+	n := 2
+	if sc.MaxTupleParts > 2 {
+		n += r.IntN(sc.MaxTupleParts - 1)
+	}
 	typeList := make([]typedef.SimpleType, n)
 	for i := range n {
 		typeList[i] = GenSimpleType(sc, r)

@@ -17,11 +17,14 @@ package store
 import (
 	"errors"
 	"fmt"
+	"math/big"
 	"reflect"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gocql/gocql"
+	"gopkg.in/inf.v0"
 )
 
 const (
@@ -41,6 +44,8 @@ const (
 type scanPlan struct {
 	columns   *columnIndex
 	elemTypes []reflect.Type
+	// slabs makes the destination slab of each scan column.
+	slabs []func() columnSlab
 }
 
 var (
@@ -120,7 +125,76 @@ func newScanPlan(cols []gocql.ColumnInfo) (*scanPlan, error) {
 		}
 	}
 
-	return &scanPlan{columns: getColumnIndex(names), elemTypes: types}, nil
+	slabs := make([]func() columnSlab, len(types))
+	for i, t := range types {
+		slabs[i] = slabFactory(t)
+	}
+
+	return &scanPlan{columns: getColumnIndex(names), elemTypes: types, slabs: slabs}, nil
+}
+
+// columnSlab holds the destinations of one scan column for a chunk of rows.
+// refill gives it n new zeroed destinations. at returns a pointer to
+// destination i as the *T that gocql scans into.
+type columnSlab interface {
+	refill(n int)
+	at(i int) any
+}
+
+// typedSlab is the slab of a column whose Go type is known at compile time.
+// Taking &s[i] as an any needs no reflection and no allocation.
+type typedSlab[T any] struct {
+	s []T
+}
+
+func (t *typedSlab[T]) refill(n int) { t.s = make([]T, n) }
+func (t *typedSlab[T]) at(i int) any { return &t.s[i] }
+
+// reflectSlab is the slab of any other column type, such as a collection.
+type reflectSlab struct {
+	sliceType reflect.Type
+	v         reflect.Value
+}
+
+func (r *reflectSlab) refill(n int) { r.v = reflect.MakeSlice(r.sliceType, n, n) }
+func (r *reflectSlab) at(i int) any { return r.v.Index(i).Addr().Interface() }
+
+func newTypedSlab[T any]() columnSlab { return &typedSlab[T]{} }
+
+// typedSlabs maps the Go types that gocql decodes a native CQL type into, see
+// gocql's goType, to their typed slab.
+var typedSlabs = map[reflect.Type]func() columnSlab{
+	reflect.TypeFor[string]():         newTypedSlab[string],
+	reflect.TypeFor[int64]():          newTypedSlab[int64],
+	reflect.TypeFor[int]():            newTypedSlab[int],
+	reflect.TypeFor[int16]():          newTypedSlab[int16],
+	reflect.TypeFor[int8]():           newTypedSlab[int8],
+	reflect.TypeFor[int32]():          newTypedSlab[int32],
+	reflect.TypeFor[bool]():           newTypedSlab[bool],
+	reflect.TypeFor[float32]():        newTypedSlab[float32],
+	reflect.TypeFor[float64]():        newTypedSlab[float64],
+	reflect.TypeFor[[]byte]():         newTypedSlab[[]byte],
+	reflect.TypeFor[time.Duration]():  newTypedSlab[time.Duration],
+	reflect.TypeFor[time.Time]():      newTypedSlab[time.Time],
+	reflect.TypeFor[*inf.Dec]():       newTypedSlab[*inf.Dec],
+	reflect.TypeFor[*big.Int]():       newTypedSlab[*big.Int],
+	reflect.TypeFor[gocql.UUID]():     newTypedSlab[gocql.UUID],
+	reflect.TypeFor[gocql.Duration](): newTypedSlab[gocql.Duration],
+	reflect.TypeFor[[]string]():       newTypedSlab[[]string],
+	reflect.TypeFor[[]int]():          newTypedSlab[[]int],
+	reflect.TypeFor[[]int64]():        newTypedSlab[[]int64],
+}
+
+// slabFactory returns the slab constructor of a column whose destinations
+// have type t.
+func slabFactory(t reflect.Type) func() columnSlab {
+	if f, ok := typedSlabs[t]; ok {
+		return f
+	}
+
+	sliceType := reflect.SliceOf(t)
+
+	return func() columnSlab { return &reflectSlab{sliceType: sliceType} }
 }
 
 // rowScanner hands out the scan destinations of one row at a time. It
@@ -132,39 +206,42 @@ func newScanPlan(cols []gocql.ColumnInfo) (*scanPlan, error) {
 // which would alias byte slices, big.Int and inf.Dec values across rows.
 type rowScanner struct {
 	plan  *scanPlan
-	slabs []reflect.Value
+	slabs []columnSlab
 	vals  []any
 	next  int
 	size  int
 }
 
 func newRowScanner(plan *scanPlan) *rowScanner {
-	return &rowScanner{
-		plan:  plan,
-		slabs: make([]reflect.Value, len(plan.elemTypes)),
+	slabs := make([]columnSlab, len(plan.slabs))
+	for i, newSlab := range plan.slabs {
+		slabs[i] = newSlab()
 	}
+
+	return &rowScanner{plan: plan, slabs: slabs}
 }
 
 // row returns the destinations of the next row. pageRows is the row count of
 // the current page, which sizes a new chunk.
 func (s *rowScanner) row(pageRows int) []any {
+	width := len(s.slabs)
+
 	if s.next == s.size {
 		s.size = min(max(pageRows, 1), maxScanChunkRows)
 		s.next = 0
 
-		for i, t := range s.plan.elemTypes {
-			s.slabs[i] = reflect.MakeSlice(reflect.SliceOf(t), s.size, s.size)
+		for _, slab := range s.slabs {
+			slab.refill(s.size)
 		}
 
-		s.vals = make([]any, s.size*len(s.plan.elemTypes))
+		s.vals = make([]any, s.size*width)
 	}
 
-	width := len(s.plan.elemTypes)
 	start := s.next * width
 	dest := s.vals[start : start+width : start+width]
 
-	for i := range s.slabs {
-		dest[i] = s.slabs[i].Index(s.next).Addr().Interface()
+	for i, slab := range s.slabs {
+		dest[i] = slab.at(s.next)
 	}
 
 	s.next++

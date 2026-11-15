@@ -499,6 +499,31 @@ var (
 		},
 	)
 
+	// ValidationReadFailures counts validations that used all attempts, saw no
+	// data mismatch, and failed because a cluster did not return its rows.
+	// "cluster" is "test" when the test cluster failed on an attempt, else
+	// "oracle". A "test" failure is a read error of the run. An "oracle"
+	// failure is a fault of the reference cluster and does not count against
+	// the system under test.
+	ValidationReadFailures = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "validation_read_failures_total",
+			Help: "Total validations that failed every attempt with read errors and saw no data mismatch, by the cluster that failed.",
+		},
+		[]string{"cluster"},
+	)
+
+	// MutationOracleFailures counts mutations that the test cluster applied or
+	// timed out on, and that the oracle cluster rejected with an error. They
+	// do not count against the system under test. Their partitions are marked
+	// invalid, because the clusters can hold different data.
+	MutationOracleFailures = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "mutation_oracle_failures_total",
+			Help: "Total mutations that failed on the oracle cluster only. Not counted as write errors; the partitions are marked invalid.",
+		},
+	)
+
 	// --- Context cancellation / timeout tracking ---
 
 	ContextCancellations = prometheus.NewCounterVec(
@@ -649,6 +674,8 @@ func init() {
 		ValidationRetriesPending,
 		ValidationRetriesAbandoned,
 		ValidationRetriesDropped,
+		ValidationReadFailures,
+		MutationOracleFailures,
 		ContextCancellations,
 		WorkerStopEvents,
 		StatementsGenerated,

@@ -35,10 +35,15 @@ const (
 
 // ValidationError represents a comprehensive validation error with all attempts
 type ValidationError struct {
-	StartTime         time.Time          `json:"start_time"`
-	EndTime           time.Time          `json:"end_time"`
-	FinalError        error              `json:"-"`
-	Statement         *typedef.Stmt      `json:"statement"`
+	StartTime  time.Time     `json:"start_time"`
+	EndTime    time.Time     `json:"end_time"`
+	FinalError error         `json:"-"`
+	Statement  *typedef.Stmt `json:"statement"`
+	// TestErr and OracleErr hold the error of each cluster. A caller decides
+	// from TestErr whether the system under test failed. An oracle failure
+	// is a fault of the reference cluster, not of the system under test.
+	TestErr           error              `json:"-"`
+	OracleErr         error              `json:"-"`
 	ComparisonResults *ComparisonResults `json:"comparison_results,omitempty"`
 	Operation         string             `json:"operation"`
 	TotalAttempts     atomic.Uint64      `json:"total_attempts"`
@@ -60,17 +65,47 @@ type RowDiffData struct {
 	OracleRow Row    `json:"oracleRow,omitzero"`
 }
 
-// Error implements the error interface
+// Error implements the error interface. It names the error of each cluster
+// that FinalError does not already show.
 func (ve *ValidationError) Error() string {
-	if ve.FinalError != nil {
-		return ve.FinalError.Error()
+	var msg string
+	switch {
+	case ve.FinalError != nil:
+		msg = ve.FinalError.Error()
+	case ve.Operation != "":
+		msg = ve.Operation + " failed"
+	default:
+		msg = "validation failed"
 	}
 
-	if ve.Operation != "" {
-		return ve.Operation + " failed"
+	if ve.TestErr != nil && !errors.Is(ve.FinalError, ve.TestErr) {
+		msg += "; test cluster: " + ve.TestErr.Error()
+	}
+	if ve.OracleErr != nil && !errors.Is(ve.FinalError, ve.OracleErr) {
+		msg += "; oracle cluster: " + ve.OracleErr.Error()
 	}
 
-	return "validation failed"
+	return msg
+}
+
+// Diverged reports whether the clusters returned different rows.
+func (ve *ValidationError) Diverged() bool {
+	return ve.ComparisonResults != nil
+}
+
+// IsDivergence reports whether err holds a row comparison that found a
+// difference between the clusters.
+func IsDivergence(err error) bool {
+	ve, ok := errors.AsType[*ValidationError](err)
+	return ok && ve.Diverged()
+}
+
+// IsOracleLoadError reports whether err is a read failure of the oracle
+// cluster alone. The test cluster returned its rows, so no comparison ran and
+// the system under test did not fail.
+func IsOracleLoadError(err error) bool {
+	ve, ok := errors.AsType[*ValidationError](err)
+	return ok && !ve.Diverged() && ve.OracleErr != nil && ve.TestErr == nil
 }
 
 // MarshalJSON strips verbose attempt and table data while keeping core context.
@@ -84,6 +119,8 @@ func (ve *ValidationError) MarshalJSON() ([]byte, error) {
 		StartTime     time.Time     `json:"start_time"`
 		EndTime       time.Time     `json:"end_time"`
 		FinalError    string        `json:"final_error"`
+		TestError     string        `json:"test_error,omitempty"`
+		OracleError   string        `json:"oracle_error,omitempty"`
 		Statement     *typedef.Stmt `json:"statement,omitempty"`
 		Operation     string        `json:"operation,omitempty"`
 		TotalAttempts uint64        `json:"total_attempts,omitzero"`
@@ -91,12 +128,22 @@ func (ve *ValidationError) MarshalJSON() ([]byte, error) {
 		StartTime:     ve.StartTime,
 		EndTime:       ve.EndTime,
 		FinalError:    finalErr,
+		TestError:     errorString(ve.TestErr),
+		OracleError:   errorString(ve.OracleErr),
 		Statement:     ve.Statement,
 		Operation:     ve.Operation,
 		TotalAttempts: ve.TotalAttempts.Load(),
 	}
 
 	return json.Marshal(payload, json.Deterministic(true))
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	return err.Error()
 }
 
 // Unwrap implements error unwrapping for proper error chain support
@@ -155,6 +202,12 @@ type MutationError struct {
 	// manufactures a divergence that validation later reports as a product bug.
 	CompensationFailed bool `json:"compensation_failed"`
 
+	// Compensated reports that a compensating whole-partition DELETE made the
+	// partition equal on both clusters. The error is still returned when the
+	// test cluster failed the write with a definite error, so that failure is
+	// charged to the system under test.
+	Compensated bool `json:"compensated"`
+
 	// OutcomeUnknown reports that a cluster may have applied a write gemini
 	// could not confirm and could not compensate: a counter increment whose
 	// reply did not arrive. The partition must be invalidated.
@@ -174,23 +227,29 @@ func (me *MutationError) MarshalJSON() ([]byte, error) {
 		StartTime          time.Time     `json:"start_time"`
 		EndTime            time.Time     `json:"end_time"`
 		FinalError         string        `json:"final_error"`
+		TestError          string        `json:"test_error,omitempty"`
+		OracleError        string        `json:"oracle_error,omitempty"`
 		Statement          *typedef.Stmt `json:"statement,omitempty"`
 		Operation          string        `json:"operation,omitempty"`
 		TotalAttempts      uint64        `json:"total_attempts,omitzero"`
 		TestStoreSuccess   bool          `json:"test_store_success"`
 		OracleStoreSuccess bool          `json:"oracle_store_success"`
 		CompensationFailed bool          `json:"compensation_failed"`
+		Compensated        bool          `json:"compensated"`
 		OutcomeUnknown     bool          `json:"outcome_unknown"`
 	}{
 		StartTime:          me.StartTime,
 		EndTime:            me.EndTime,
 		FinalError:         finalErr,
+		TestError:          errorString(me.TestErr),
+		OracleError:        errorString(me.OracleErr),
 		Statement:          me.Statement,
 		Operation:          me.Operation,
 		TotalAttempts:      me.TotalAttempts.Load(),
 		TestStoreSuccess:   me.TestStoreSuccess,
 		OracleStoreSuccess: me.OracleStoreSuccess,
 		CompensationFailed: me.CompensationFailed,
+		Compensated:        me.Compensated,
 		OutcomeUnknown:     me.OutcomeUnknown,
 	}
 

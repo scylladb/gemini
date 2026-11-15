@@ -54,8 +54,10 @@ Gemini writes to real ScyllaDB or Cassandra nodes. Three constraints control key
   store constructor arguments. `utils.KeyspaceTableFromQuery` does this for statement-log routing
   and for asymmetric-write compensation.
 - **A non-idempotent write that may have been applied is never sent again.** `Stmt.NonIdempotent`
-  marks a counter increment. `writeMayHaveApplied` decides whether an error leaves the outcome
-  unknown. A DELETE cannot undo a counter, so such a partition is invalidated (`OutcomeUnknown`).
+  marks a counter increment and an LWT `INSERT ... IF NOT EXISTS`. `writeMayHaveApplied` decides
+  whether an error leaves the outcome unknown. A DELETE cannot undo a counter. An LWT write takes
+  its timestamp from the Paxos ballot, so a DELETE at the client timestamp does not cancel it.
+  Such a partition is invalidated (`OutcomeUnknown`).
 - **A compensating DELETE must reuse the original write timestamp.** Client-side timestamps are the
   default. A DELETE in a different timestamp domain does not cancel the write it compensates.
 - **`_logs` statement/values pairing rests on an aliasing rule.** `gocql.Batch.Query` stores the
@@ -96,7 +98,6 @@ Gemini writes to real ScyllaDB or Cassandra nodes. Three constraints control key
 | `pkg/random` | Goroutine-safe random number generation |
 | `pkg/replication` | Replication strategy configuration |
 | `pkg/murmur` | Murmur3 hash for token-aware routing |
-| `pkg/inflight` | In-flight request tracking |
 | `pkg/tableopts` | Table options for CQL CREATE TABLE |
 | `pkg/schema` | Schema generation from seeds |
 | `pkg/services` | Supporting services (pprof, etc.) |
@@ -294,26 +295,40 @@ type Interface interface {
 
 ### Architecture
 
-- **Storage**: Flat slice of `*Partition` pointers stored via `atomic.Pointer[[]*Partition]`.
-  Individual partitions hold data in `atomic.Pointer[partitionData]` for lock-free reads.
-- **Thread safety**: No mutex for reading/writing individual partitions (atomic pointer swaps).
-  A mutex (`extendMu`) is only held during `Extend()` which copies the slice (rare operation).
-- **Partition selection**: `idxFunc` (distribution function) picks the next index. `pickValidIdx()`
-  skips invalid partitions with three strategies: fast-path (no invalids), linear scan (>50% invalid),
-  random retry.
-- **Validation tracking**: `sync.Map` keyed by UUID. `ValidationData` tracks first/last success
-  timestamps, failure timestamps, and a ring buffer of recent timestamps -- all using atomics.
-- **Invalid partitions**: `MarkInvalid()` uses CAS loop on `invalidCount` + `LoadOrStore` on
-  `invalidByIdx` for thread-safe, idempotent marking. `maxInvalid` acts as error budget.
-- **Reference counting**: `PartitionKeys.Release` function decrements `refCount`; when it hits
-  zero, validation data is cleaned up.
+- **Storage**: A contiguous `[]slot` behind `atomic.Pointer[[]slot]`. Each slot holds an
+  `atomic.Pointer[Partition]` and an `atomic.Bool` invalid flag. A `*Partition` keeps only its
+  UUID, a seed and counters. Every borrow regenerates the key values from the seed.
+- **Thread safety**: Reads take no lock. `invalidMu` serializes every slot write: the swap in
+  `installPartition` (fill/Replace), the mark in `MarkInvalid`, and the copy in `Extend`.
+  `Extend` (tests only) copies the slots into a larger array and publishes it atomically.
+- **Borrow**: `acquire` adds one to `refCount`, then reads the slot again. If the slot changed,
+  it releases the reference and tries again. Replace swaps the slot, sets `retired`, then reads
+  `refCount`, so either side sees the other.
+- **Partition selection**: a distribution function picks the next index. Every worker uses a
+  `Worker` view (`Partitions.ForWorker`) with its own function from `distributions.NewFactory`,
+  so a draw takes no shared lock. The pool's own `idxFunc` serializes its draws and serves only
+  callers without a view. `pickValidIdx()` skips invalid partitions with three strategies:
+  fast-path (no invalids), linear scan from a random start (at least 50% invalid), random retry.
+- **Written bits**: one bit per slot in `partitions.written`. `NextForWrite` sets it and
+  `installPartition` clears it. `Next` prefers a written slot and tests the bit without loading
+  the partition. The whole bit set stays in the CPU cache.
+- **Validation tracking**: Each `Partition` holds a `typedef.ValidationSlot`. Borrowed keys point
+  to it, so recording a result needs no lock and no map lookup.
+- **Invalid partitions**: `MarkInvalid()` returns true once per partition. It marks the slot only
+  while fewer than `maxInvalid` slots are invalid. At the cap it still returns true, so the caller
+  reports the divergence, and the slot stays unmarked. `reportedUnmarked` stops a second report.
+- **Reference counting**: Each borrow gets a `keysRef`. Its `release` drops `refCount` once. The
+  UUID mapping is removed when `refCount` reaches zero on a retired partition.
 
-### Delete Tracking (`deleted.go`)
+### Delete Tracking (`deleted.go`, `window.go`)
 
-- Min-heap sorted by `readyAt` time, with inlined heap operations (bit-shift arithmetic).
+- One ring buffer per time bucket, behind one window mutex. A hard cap evicts the entry with the
+  largest `readyAt`.
 - Background goroutine emits ready partitions to a buffered channel (50K capacity).
 - Time buckets define re-validation schedule with jitter (20% of bucket duration, max 5s).
-- Adaptive check intervals and heap shrinking when utilization drops below 25%.
+- Every emitted copy holds its own partition reference. An emission before the final bucket takes
+  a new reference, so an eviction cannot unmap a UUID that a validator still checks.
+- Adaptive check intervals and ring shrinking when utilization drops below 25%.
 
 ### Gotcha
 

@@ -497,15 +497,15 @@ func TestPartitionsAtomicCounters(t *testing.T) {
 	assert.Equal(t, uint64(concurrency*iterations), stats.PartitionsDeleted)
 }
 
-// TestPartitionsValuesCopy verifies valuesCopy returns a copy
+// TestPartitionsValuesCopy verifies that two borrows of one slot get equal keys
 func TestPartitionsValuesCopy(t *testing.T) {
 	t.Parallel()
 
 	parts := createTestPartitions(t, 10)
 
 	idx := uint64(5)
-	values1 := parts.valuesCopy(idx)
-	values2 := parts.valuesCopy(idx)
+	values1 := parts.borrow(idx)
+	values2 := parts.borrow(idx)
 
 	require.NotNil(t, values1)
 	require.NotNil(t, values2)
@@ -694,9 +694,8 @@ func TestNext_PrefersWrittenPartitions(t *testing.T) {
 	parts := createTestPartitions(t, 100)
 	written := make(map[uuid.UUID]bool, 50)
 	for i := range uint64(50) {
-		part := parts.partition(i * 2)
-		part.written.Store(true)
-		written[part.id] = true
+		parts.markWritten(i * 2)
+		written[parts.partition(i*2).id] = true
 	}
 
 	const picks = 2000
@@ -734,19 +733,19 @@ func TestNextForWrite_MarksThePartitionWritten(t *testing.T) {
 	idx := parts.uuidToIdx[keys.ID]
 	parts.validationMu.RUnlock()
 
-	require.True(t, parts.isWritten(idx))
+	require.True(t, isWritten(*parts.parts.written.Load(), idx))
 }
 
 func TestReplace_StartsTheNewPartitionUnwritten(t *testing.T) {
 	t.Parallel()
 
 	parts := createTestPartitions(t, 10)
-	parts.partition(5).written.Store(true)
+	parts.markWritten(5)
 
 	old := parts.Replace(5)
 	t.Cleanup(old.Release)
 
-	require.False(t, parts.isWritten(5), "a replacement partition holds no data yet")
+	require.False(t, isWritten(*parts.parts.written.Load(), 5), "a replacement partition holds no data yet")
 }
 
 // TestPublishInvalid_SumsAcrossPools marks partitions invalid in two pools and
@@ -791,7 +790,7 @@ func TestMarkInvalid_ReportsAReplacedPartitionOnce(t *testing.T) {
 	keys.Release()
 	old.Release()
 
-	_, tracked := parts.reportedRetired.Load(keys.ID)
+	_, tracked := parts.reportedUnmarked.Load(keys.ID)
 	require.False(t, tracked, "the last release forgets the reported UUID")
 }
 
@@ -811,7 +810,7 @@ func TestMarkInvalid_SkipsAReplacedInvalidPartition(t *testing.T) {
 	keys.Release()
 	old.Release()
 
-	_, tracked := parts.reportedRetired.Load(keys.ID)
+	_, tracked := parts.reportedUnmarked.Load(keys.ID)
 	require.False(t, tracked, "the last release forgets the reported UUID")
 }
 

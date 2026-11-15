@@ -129,7 +129,7 @@ func TestColumnMarshalUnmarshal(t *testing.T) {
 				t.Fatal(err.Error())
 			}
 
-			if diff := cmp.Diff(tcase.def, unmarshaledDef); diff != "" {
+			if diff := cmp.Diff(tcase.def, unmarshaledDef, cmpopts.IgnoreUnexported(typedef.MapType{}, typedef.UDTType{})); diff != "" {
 				t.Errorf("cmp.Diff failed: %s", diff)
 			}
 		})
@@ -145,7 +145,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 
 	opts := cmp.Options{
 		cmp.AllowUnexported(typedef.Table{}, typedef.MaterializedView{}),
-		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}, mo.Option[typedef.ColumnDef]{}),
+		cmpopts.IgnoreUnexported(typedef.Table{}, typedef.MaterializedView{}, typedef.MapType{}, typedef.UDTType{}, mo.Option[typedef.ColumnDef]{}),
 	}
 
 	b, err := json.Marshal(s1, jsontext.WithIndentPrefix("  "), jsontext.WithIndent("  "), json.Deterministic(true))

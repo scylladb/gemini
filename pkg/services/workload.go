@@ -185,6 +185,7 @@ func NewWorkload(config *WorkloadConfig, storeConfig store.Config, schema *typed
 			randSrc,
 			config.StatementRatios,
 			limiter,
+			distributions.NewFactory(config.PartitionDistribution, config.PartitionCount, config.MU, config.Sigma),
 		),
 	}
 
@@ -247,6 +248,11 @@ func (w *Workload) createSchemaAndTables(base context.Context) error {
 }
 
 func (w *Workload) Run(base context.Context) error {
+	// One set of partition pools serves the warmup and the main phase. The
+	// main phase then validates, by key, the partitions that the warmup wrote.
+	pools := w.jobs.NewPools(base, w.distFunc, w.config.PartitionCount, w.schema.Config.GetPartitionRangeConfig())
+	defer pools.Close()
+
 	if w.config.WarmupDuration > 0 {
 		w.logger.Debug("starting warmup phase", zap.Duration("duration", w.config.WarmupDuration))
 		stopFlag := w.stopFlag.CreateChild("warmup")
@@ -254,12 +260,9 @@ func (w *Workload) Run(base context.Context) error {
 		if err := w.jobs.Run(
 			base,
 			w.config.WarmupDuration,
-			w.distFunc,
-			w.config.PartitionCount,
-			w.schema.Config.GetPartitionRangeConfig(),
+			pools,
 			stopFlag,
 			jobs.WarmupMode,
-			uint64(w.config.MaxErrorsToStore),
 		); err != nil {
 			return fmt.Errorf("failed to run warmup jobs: %w", err)
 		}
@@ -273,12 +276,9 @@ func (w *Workload) Run(base context.Context) error {
 		if err := w.jobs.Run(
 			base,
 			w.config.Duration,
-			w.distFunc,
-			w.config.PartitionCount,
-			w.schema.Config.GetPartitionRangeConfig(),
+			pools,
 			stopFlag,
 			w.config.RunningMode,
-			uint64(w.config.MaxErrorsToStore),
 		); err != nil {
 			return err
 		}

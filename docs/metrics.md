@@ -80,6 +80,7 @@ when an oracle is configured and both `--test-statement-log-file` and
 | `validation_retries_pending` | Gauge | Validations waiting in the retry queue |
 | `validation_retries_abandoned_total` | Counter | Retries left unrun because validation stopped hard or its context ended. After a soft stop, the workers run the queued retries first |
 | `validation_retries_dropped_total` | Counter | Retries dropped because the retry queue was full. These do not count as validation failures |
+| `validation_read_failures_total` | Counter | Validations that failed every attempt with read errors and saw no data mismatch, by `cluster`. `test` is a read error of the run. `oracle` is a fault of the reference cluster and is not charged to the system under test |
 | `mutation_retries_total` | Counter | Mutation retries, by outcome (`success` adds the retries before success, `exhausted` adds one per failed mutation) |
 
 The four row-comparison counters add up on every validation attempt. A row
@@ -109,6 +110,7 @@ that differs on the first attempt and matches after a retry counts in both
 |--------|------|-------------|
 | `mutation_asymmetric_acks_total` | Counter | Dual-write mutations acknowledged by one cluster but not the other |
 | `mutation_compensation_failures_total` | Counter | Compensating whole-partition `DELETE`s that failed, by the cluster whose delete failed |
+| `mutation_oracle_failures_total` | Counter | Mutations that failed on the oracle cluster only. They are not write errors. Their partitions are marked invalid |
 
 Labels:
 
@@ -164,7 +166,9 @@ Invalidation is driven by the asymmetry itself, not by the error kind: a write
 that commits on one cluster and fails on the other with any error — timeout,
 `Unavailable`, `WriteFailure` — takes its partitions out of validation coverage.
 Only the *error accounting* distinguishes timeouts (exempt, to keep a slow
-runner from exhausting the error budget) from real failures (charged).
+runner from exhausting the error budget) from real failures (charged). The
+error of the test cluster alone decides the accounting. An oracle failure is
+counted in `mutation_oracle_failures_total` and is not charged.
 
 ```promql
 sum(rate(gemini_mutation_compensation_failures_total[5m])) by (store) > 0

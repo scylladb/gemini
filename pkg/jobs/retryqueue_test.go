@@ -48,10 +48,10 @@ func TestRetryQueue_Len(t *testing.T) {
 	require.Equal(t, 0, q.Len())
 
 	stmt := makeRetryStmt("SELECT 1")
-	q.Schedule(stmt, 0)
+	q.Schedule(stmt, 0, attemptHistory{})
 	require.Equal(t, 1, q.Len())
 
-	q.Schedule(makeRetryStmt("SELECT 2"), 1)
+	q.Schedule(makeRetryStmt("SELECT 2"), 1, attemptHistory{})
 	require.Equal(t, 2, q.Len())
 }
 
@@ -63,7 +63,7 @@ func TestRetryQueue_Schedule_ExhaustedWhenAttemptsUsedUp(t *testing.T) {
 	stmt := makeRetryStmt("SELECT exhausted")
 
 	// attempt + 1 >= maxAttempts → scheduleExhausted
-	outcome := q.Schedule(stmt, maxAttempts-1) // attempt=2, 2+1=3 >= 3
+	outcome := q.Schedule(stmt, maxAttempts-1, attemptHistory{}) // attempt=2, 2+1=3 >= 3
 	require.Equal(t, scheduleExhausted, outcome)
 	require.Equal(t, 0, q.Len(), "exhausted schedule should not enqueue")
 }
@@ -74,7 +74,7 @@ func TestRetryQueue_Schedule_AcceptedWhenNotExhausted(t *testing.T) {
 	q := newRetryQueue(5, time.Second, time.Millisecond)
 	stmt := makeRetryStmt("SELECT ok")
 
-	outcome := q.Schedule(stmt, 0)
+	outcome := q.Schedule(stmt, 0, attemptHistory{})
 	require.Equal(t, scheduleAccepted, outcome)
 	require.Equal(t, 1, q.Len())
 }
@@ -85,14 +85,14 @@ func TestRetryQueue_Schedule_SaturatedAtCap(t *testing.T) {
 	// maxAttempts high enough that exhaustion never triggers; fill to the cap.
 	q := newRetryQueue(1_000_000, 10*time.Second, time.Second)
 	for range maxPendingRetries {
-		require.Equal(t, scheduleAccepted, q.Schedule(makeRetryStmt("SELECT fill"), 0))
+		require.Equal(t, scheduleAccepted, q.Schedule(makeRetryStmt("SELECT fill"), 0, attemptHistory{}))
 	}
 	require.Equal(t, maxPendingRetries, q.Len())
 	require.True(t, q.Saturated())
 
 	// The next schedule must be reported as saturation (backpressure), NOT as
 	// attempt-exhaustion, and must not enqueue.
-	outcome := q.Schedule(makeRetryStmt("SELECT overflow"), 0)
+	outcome := q.Schedule(makeRetryStmt("SELECT overflow"), 0, attemptHistory{})
 	require.Equal(t, scheduleSaturated, outcome)
 	require.Equal(t, maxPendingRetries, q.Len())
 
@@ -111,8 +111,8 @@ func TestRetryQueue_Ready_NoFiredTimerReturnsMinusOne(t *testing.T) {
 
 	// Use a very long delay so the timer won't fire during the test.
 	q := newRetryQueue(5, 10*time.Second, time.Second)
-	q.Schedule(makeRetryStmt("SELECT 1"), 0)
-	q.Schedule(makeRetryStmt("SELECT 2"), 1)
+	q.Schedule(makeRetryStmt("SELECT 1"), 0, attemptHistory{})
+	q.Schedule(makeRetryStmt("SELECT 2"), 1, attemptHistory{})
 
 	// Timers have not fired — Ready should return -1.
 	require.Equal(t, -1, q.Ready())
@@ -126,7 +126,7 @@ func TestRetryQueue_Ready_FiredTimerReturnsIndex(t *testing.T) {
 
 	// Use a zero delay so the timer fires immediately.
 	q := newRetryQueue(5, 0, 0)
-	q.Schedule(makeRetryStmt("SELECT immediate"), 0)
+	q.Schedule(makeRetryStmt("SELECT immediate"), 0, attemptHistory{})
 
 	// Wait long enough for the timer to fire.
 	time.Sleep(10 * time.Millisecond)
@@ -140,7 +140,7 @@ func TestRetryQueue_Take(t *testing.T) {
 
 	q := newRetryQueue(5, 0, 0)
 	stmt := makeRetryStmt("SELECT take")
-	q.Schedule(stmt, 0)
+	q.Schedule(stmt, 0, attemptHistory{})
 
 	// Wait for timer to fire.
 	time.Sleep(10 * time.Millisecond)
@@ -164,9 +164,9 @@ func TestRetryQueue_Take_SwapRemove(t *testing.T) {
 	s2 := makeRetryStmt("S2")
 	s3 := makeRetryStmt("S3")
 
-	q.Schedule(s1, 0)
-	q.Schedule(s2, 1)
-	q.Schedule(s3, 2)
+	q.Schedule(s1, 0, attemptHistory{})
+	q.Schedule(s2, 1, attemptHistory{})
+	q.Schedule(s3, 2, attemptHistory{})
 
 	require.Equal(t, 3, q.Len())
 
@@ -200,9 +200,9 @@ func TestRetryQueue_Earliest_AfterSwapRemove(t *testing.T) {
 	soonest := makeRetryStmt("SELECT soonest")
 	latest := makeRetryStmt("SELECT latest")
 
-	q.Schedule(first, 1)
-	q.Schedule(soonest, 0)
-	q.Schedule(latest, 5)
+	q.Schedule(first, 1, attemptHistory{})
+	q.Schedule(soonest, 0, attemptHistory{})
+	q.Schedule(latest, 5, attemptHistory{})
 
 	removed := q.Take(0)
 	require.Equal(t, first, removed.stmt)
@@ -232,7 +232,7 @@ func TestRetryQueue_Drain_ReleasesStatements(t *testing.T) {
 		makeRetryStmt("S3"),
 	}
 	for _, s := range stmts {
-		q.Schedule(s, 0)
+		q.Schedule(s, 0, attemptHistory{})
 	}
 	require.Equal(t, 3, q.Len())
 
@@ -252,8 +252,8 @@ func TestRetryQueue_Drain_NilRelease(t *testing.T) {
 	t.Parallel()
 
 	q := newRetryQueue(5, time.Second, time.Millisecond)
-	q.Schedule(makeRetryStmt("S1"), 0)
-	q.Schedule(makeRetryStmt("S2"), 2)
+	q.Schedule(makeRetryStmt("S1"), 0, attemptHistory{})
+	q.Schedule(makeRetryStmt("S2"), 2, attemptHistory{})
 
 	// nil release function must not panic.
 	q.Drain(nil)

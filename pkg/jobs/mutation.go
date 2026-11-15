@@ -120,42 +120,18 @@ func (m *Mutation) run(ctx context.Context) error {
 		return nil
 	}
 
-	var mutErr *store.MutationError
-	isMutationErr := errors.As(err, &mutErr)
+	mutErr, isMutationErr := errors.AsType[*store.MutationError](err)
 
 	// Whether the partition is still trustworthy is decided FIRST, independent of
-	// how the write failed. Nesting this under the deadline check would let every
-	// non-timeout asymmetric failure through: if the test store commits and the
-	// oracle returns, say, Unavailable, the write is just as asymmetric as a
-	// timeout, but the error is not DeadlineExceeded, so the partition would stay
-	// in validation coverage and gemini would later report its own divergence as a
-	// product bug.
-	//
-	// Two independent reasons to distrust the partition:
-	//
-	//   1. Asymmetric acknowledgement — one cluster took the write and the other
-	//      did not, so their contents may differ. OracleStoreSuccess is only set
-	//      true when an oracle is configured (see delegatingStore.Mutate), so this
-	//      is safe when oracleStore == nil.
-	//   2. Failed compensation — the compensating DELETE did not fully succeed.
-	//      This one is NOT implied by the flags: when both original writes time
-	//      out the flags are equal (both false) even though each server may
-	//      independently have committed. Compensation is what collapses that
-	//      ambiguity, so if it half-succeeds the clusters can genuinely differ
-	//      while the flags still look symmetric.
-	//   3. Unknown outcome — a cluster may have applied a write that cannot be
-	//      undone, such as a counter increment whose reply did not arrive.
-	//
-	// The check runs before the cancellation return below: a write the
-	// shutdown interrupted can leave the clusters asymmetric too.
-	if isMutationErr &&
-		(mutErr.OracleStoreSuccess != mutErr.TestStoreSuccess || mutErr.CompensationFailed || mutErr.OutcomeUnknown) {
+	// how the write failed and of who is charged for it. When the clusters can
+	// hold different data, the partitions are marked invalid so validation skips
+	// them instead of reporting a mismatch gemini caused. The check runs before
+	// the cancellation return below: a write the shutdown interrupted can leave
+	// the clusters asymmetric too.
+	if isMutationErr && writeOutcomeUnknown(mutErr) {
 		// Whether the clusters actually diverged is UNKNOWN — a timed-out server
 		// may have applied the write and lost the response — so this is reported as
-		// a possible divergence, not a confirmed one. Claiming otherwise would give
-		// operators a false corruption signal. Surfaced at Warn rather than
-		// accumulating silently, and the affected partitions are marked invalid so
-		// validation skips them instead of reporting a mismatch gemini caused.
+		// a possible divergence, not a confirmed one.
 		m.logger.Warn("write left partitions in an unknown state, marking them invalid",
 			zap.Int("partition_count", len(mutateStmt.PartitionKeys)),
 			zap.String("query_type", mutateStmt.QueryType.String()),
@@ -164,7 +140,8 @@ func (m *Mutation) run(ctx context.Context) error {
 			zap.Bool("outcome_unknown", mutErr.OutcomeUnknown),
 			zap.Bool("test_store_success", mutErr.TestStoreSuccess),
 			zap.Bool("oracle_store_success", mutErr.OracleStoreSuccess),
-			zap.Bool("timed_out", errors.Is(err, context.DeadlineExceeded)),
+			zap.NamedError("test_error", mutErr.TestErr),
+			zap.NamedError("oracle_error", mutErr.OracleErr),
 		)
 
 		for i := range mutateStmt.PartitionKeys {
@@ -172,57 +149,92 @@ func (m *Mutation) run(ctx context.Context) error {
 		}
 	}
 
-	// Treat context cancellation as expected termination
+	// Treat context cancellation as expected termination.
 	if errors.Is(err, context.Canceled) {
 		return context.Canceled
 	}
 
-	// For context deadline expirations (CQL RequestTimeout or job shutdown), don't
-	// count as data errors. This covers both the raw error and MutationError whose
-	// FinalError is DeadlineExceeded (all retries timed out on a slow CI runner).
-	// Any partition invalidation the timeout warranted has already happened above.
-	if errors.Is(err, context.DeadlineExceeded) {
+	// The job context ended while the write was retried. The run is stopping,
+	// and the invalidation above already covers the partitions.
+	if ctx.Err() != nil {
 		return nil
 	}
 
-	// If this is a comprehensive mutation error (all retries failed for a non-timeout
-	// reason), surface it as a write error. Invalidation above and error accounting
-	// here are independent: an asymmetric non-timeout failure needs BOTH.
-	if isMutationErr {
-		je := &joberror.JobError{
-			Err:       err,
-			Timestamp: time.Now(),
-			StmtType:  mutateStmt.QueryType,
-			Message:   "Mutation failed: " + err.Error(),
-			Query:     mutateStmt.Query,
-			PartitionKeys: func() *typedef.Values {
-				if len(mutateStmt.PartitionKeys) > 0 {
-					return mutateStmt.PartitionKeys[0].Values
-				}
-				return nil
-			}(),
-			PartitionIDs: collectPartitionIDs(mutateStmt.PartitionKeys),
-			Values:       mutateStmt.Values,
+	if !isMutationErr {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil
 		}
-		return je
+		return newWriteJobError(err, mutateStmt)
 	}
 
-	je2 := &joberror.JobError{
-		Err:       err,
-		Timestamp: time.Now(),
-		StmtType:  mutateStmt.QueryType,
-		Message:   "Mutation failed: " + err.Error(),
-		Query:     mutateStmt.Query,
-		PartitionKeys: func() *typedef.Values {
-			if len(mutateStmt.PartitionKeys) > 0 {
-				return mutateStmt.PartitionKeys[0].Values
-			}
-			return nil
-		}(),
-		PartitionIDs: collectPartitionIDs(mutateStmt.PartitionKeys),
-		Values:       mutateStmt.Values,
+	// The test cluster's error alone decides whether the system under test
+	// failed. The oracle error never hides it, and is never charged to it.
+	switch {
+	case mutErr.TestErr == nil:
+		// The test cluster applied the write. The oracle cluster failed, so
+		// the fault is in the reference cluster, not in the system under test.
+		metrics.MutationOracleFailures.Inc()
+		m.logger.Warn("oracle cluster failed a write that the test cluster applied",
+			zap.String("query_type", mutateStmt.QueryType.String()),
+			zap.NamedError("oracle_error", mutErr.OracleErr),
+		)
+		return nil
+	case errors.Is(mutErr.TestErr, context.DeadlineExceeded):
+		// A CQL request timeout of the test cluster is an infrastructure
+		// signal. A slow runner would use up the error budget otherwise.
+		if mutErr.OracleErr != nil && !errors.Is(mutErr.OracleErr, context.DeadlineExceeded) {
+			metrics.MutationOracleFailures.Inc()
+		}
+		return nil
+	default:
+		return newWriteJobError(err, mutateStmt)
 	}
-	return je2
+}
+
+// writeOutcomeUnknown reports whether a failed write can leave the clusters
+// with different data. Four conditions cause it:
+//
+//  1. Asymmetric acknowledgement. One cluster took the write and the other did
+//     not. OracleStoreSuccess is true only when an oracle is configured, so the
+//     check is safe when there is no oracle.
+//  2. Failed compensation. When both original writes time out, the flags are
+//     equal (both false), but each server can have committed. Compensation
+//     collapses that ambiguity. When it half-succeeds, the clusters can differ
+//     while the flags look symmetric.
+//  3. A timeout on one cluster and a hard error on the other. The cluster that
+//     timed out can have applied the write, and the other did not. A
+//     successful compensation (Compensated) made the partition equal again.
+//  4. Unknown outcome. A cluster can have applied a write that a DELETE cannot
+//     undo, such as a counter increment whose reply did not arrive.
+func writeOutcomeUnknown(me *store.MutationError) bool {
+	if me.OracleStoreSuccess != me.TestStoreSuccess || me.CompensationFailed || me.OutcomeUnknown {
+		return true
+	}
+
+	testTimedOut := errors.Is(me.TestErr, context.DeadlineExceeded)
+	oracleTimedOut := errors.Is(me.OracleErr, context.DeadlineExceeded)
+
+	return !me.Compensated && testTimedOut != oracleTimedOut && me.TestErr != nil && me.OracleErr != nil
+}
+
+// newWriteJobError returns the write error that is charged to the system under
+// test.
+func newWriteJobError(err error, stmt *typedef.Stmt) *joberror.JobError {
+	var pkValues *typedef.Values
+	if len(stmt.PartitionKeys) > 0 {
+		pkValues = stmt.PartitionKeys[0].Values
+	}
+
+	return &joberror.JobError{
+		Err:           err,
+		Timestamp:     time.Now(),
+		StmtType:      stmt.QueryType,
+		Message:       "Mutation failed: " + err.Error(),
+		Query:         stmt.Query,
+		PartitionKeys: pkValues,
+		PartitionIDs:  collectPartitionIDs(stmt.PartitionKeys),
+		Values:        stmt.Values,
+	}
 }
 
 func (m *Mutation) Do(ctx context.Context) error {
@@ -248,9 +260,9 @@ func (m *Mutation) Do(ctx context.Context) error {
 			}
 		}
 
-		err := executionTime.RunFuncE(func() error {
-			return m.run(ctx)
-		})
+		executionTime.Start()
+		err := m.run(ctx)
+		executionTime.Record()
 
 		if errors.Is(err, utils.ErrNoPartitionKeyValues) {
 			// Add delay to prevent busy waiting when no partitions are available

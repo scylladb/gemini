@@ -71,6 +71,75 @@ func (g *Generator) buildCachedSelectQueries() {
 		}
 		g.selectMultiplePartitionQueries[n], _ = mb.ToCql()
 	}
+
+	g.buildCachedRangeQueries()
+	g.buildCachedIndexQueries()
+}
+
+// buildCachedRangeQueries pre-builds the clustering-range SELECT shapes. A
+// range query binds equality on the first m-1 clustering keys and a closed
+// range on clustering key m, with m in [1, len(ClusteringKeys)]. The
+// multi-partition form also IN-tuples n partition keys, with n in
+// [1, maxMultiplePartitionCount()], the same bound as
+// selectMultiplePartitionQueries.
+// selectClusteringRangeQueries is indexed by m, and
+// selectMultiPartitionClusteringRangeQueries by n and then m.
+func (g *Generator) buildCachedRangeQueries() {
+	numCKs := len(g.table.ClusteringKeys)
+	if numCKs == 0 || !g.rangeReadable {
+		return
+	}
+
+	g.selectClusteringRangeQueries = make([]string, numCKs+1)
+	for m := 1; m <= numCKs; m++ {
+		builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
+		for _, pk := range g.table.PartitionKeys {
+			builder = builder.Where(qb.Eq(pk.Name))
+		}
+		g.selectClusteringRangeQueries[m] = g.clusteringRangeQuery(builder, m)
+	}
+
+	maxN := g.maxMultiplePartitionCount()
+	g.selectMultiPartitionClusteringRangeQueries = make([][]string, maxN+1)
+	for n := 1; n <= maxN; n++ {
+		queries := make([]string, numCKs+1)
+		for m := 1; m <= numCKs; m++ {
+			builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
+			for _, pk := range g.table.PartitionKeys {
+				builder = builder.Where(qb.InTuple(pk.Name, n))
+			}
+			queries[m] = g.clusteringRangeQuery(builder, m)
+		}
+		g.selectMultiPartitionClusteringRangeQueries[n] = queries
+	}
+}
+
+// clusteringRangeQuery adds equality on the first m-1 clustering keys and an
+// inclusive range on clustering key m to builder, and returns the CQL.
+func (g *Generator) clusteringRangeQuery(builder *qb.SelectBuilder, m int) string {
+	for _, ck := range g.table.ClusteringKeys[:m-1] {
+		builder = builder.Where(qb.Eq(ck.Name))
+	}
+
+	rangedCK := g.table.ClusteringKeys[m-1]
+	builder = builder.Where(qb.GtOrEq(rangedCK.Name)).Where(qb.LtOrEq(rangedCK.Name))
+	query, _ := builder.ToCql()
+
+	return query
+}
+
+// buildCachedIndexQueries pre-builds the index SELECT shapes. A query with
+// count k binds equality on the columns of the first k indexes, so
+// selectIndexQueries is indexed by k in [0, len(Indexes)].
+func (g *Generator) buildCachedIndexQueries() {
+	g.selectIndexQueries = make([]string, len(g.table.Indexes)+1)
+	for k := range g.selectIndexQueries {
+		builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...).AllowFiltering()
+		for _, idx := range g.table.Indexes[:k] {
+			builder = builder.Where(qb.Eq(idx.ColumnName))
+		}
+		g.selectIndexQueries[k], _ = builder.ToCql()
+	}
 }
 
 func (g *Generator) genSelectSinglePartitionQuery(_ context.Context) (*typedef.Stmt, error) {
@@ -155,26 +224,14 @@ func (g *Generator) genClusteringRangeQuery(ctx context.Context) (*typedef.Stmt,
 		return g.genSelectSinglePartitionQuery(ctx)
 	}
 
-	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
-	for _, pk := range g.table.PartitionKeys {
-		builder = builder.Where(qb.Eq(pk.Name))
-	}
-	for _, ck := range g.table.ClusteringKeys[:maxClusteringKeys-1] {
-		builder = builder.Where(qb.Eq(ck.Name))
-	}
-
-	rangedCK := g.table.ClusteringKeys[maxClusteringKeys-1]
-	builder = builder.Where(qb.GtOrEq(rangedCK.Name)).Where(qb.LtOrEq(rangedCK.Name))
 	rangedValue := trackedRow.ClusteringValues[ckLen-1]
 	values = append(values, rangedValue, rangedValue)
-
-	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
 		PartitionKeys: []typedef.PartitionKeys{{ID: trackedRow.PartitionID, Values: pkVals, Release: borrowed.Release}},
 		Values:        values,
 		QueryType:     typedef.SelectRangeStatementType,
-		Query:         query,
+		Query:         g.selectClusteringRangeQueries[maxClusteringKeys],
 	}, nil
 }
 
@@ -225,29 +282,16 @@ func (g *Generator) genMultiplePartitionClusteringRangeQuery(ctx context.Context
 		combined.Merge(pk.Values)
 	}
 
-	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...)
-	for _, pk := range g.table.PartitionKeys {
-		builder = builder.Where(qb.InTuple(pk.Name, numQueryPKs))
-	}
-	for _, ck := range g.table.ClusteringKeys[:maxClusteringKeys-1] {
-		builder = builder.Where(qb.Eq(ck.Name))
-	}
-
-	rangedCK := g.table.ClusteringKeys[maxClusteringKeys-1]
-	builder = builder.Where(qb.GtOrEq(rangedCK.Name)).Where(qb.LtOrEq(rangedCK.Name))
-
 	values := combined.ToCQLValues(g.table.PartitionKeys)
 	values = append(values, trackedRow.ClusteringValues[:ckLen-1]...)
 	rangedValue := trackedRow.ClusteringValues[ckLen-1]
 	values = append(values, rangedValue, rangedValue)
 
-	query, _ := builder.ToCql()
-
 	return &typedef.Stmt{
 		QueryType:     typedef.SelectMultiPartitionRangeStatementType,
 		PartitionKeys: pks,
 		Values:        values,
-		Query:         query,
+		Query:         g.selectMultiPartitionClusteringRangeQueries[numQueryPKs][maxClusteringKeys],
 	}, nil
 }
 
@@ -258,19 +302,15 @@ func (g *Generator) genSingleIndexQuery() *typedef.Stmt {
 	// Counted under the lock that guards the slice it is applied to.
 	idxCount := g.getIndexCount()
 	values := make([]any, 0, idxCount)
-	builder := qb.Select(g.keyspaceAndTable).Columns(g.selectColumns...).AllowFiltering()
 
 	for _, idx := range g.table.Indexes[:idxCount] {
-		builder = builder.Where(qb.Eq(idx.ColumnName))
 		values = idx.Column.Type.GenValueOut(values, g.random, g.valueRangeConfig)
 	}
-
-	query, _ := builder.ToCql()
 
 	return &typedef.Stmt{
 		PartitionKeys: nil,
 		Values:        values,
 		QueryType:     typedef.SelectByIndexStatementType,
-		Query:         query,
+		Query:         g.selectIndexQueries[idxCount],
 	}
 }

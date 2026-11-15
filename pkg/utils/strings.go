@@ -36,13 +36,14 @@ import (
 // routing) must derive the table from the statement's own query — the only
 // thing that identifies which table it hit.
 func KeyspaceTableFromQuery(query string) string {
-	if kt, ok := keyspaceTableCache.Load(query); ok {
-		return mustString(kt)
+	key := queryRef{data: unsafe.StringData(query), n: len(query)}
+	if v, ok := keyspaceTableCache.Load(key); ok {
+		return mustEntry(v).keyspaceTable
 	}
 
 	kt := parseKeyspaceTable(query)
 	if keyspaceTableCacheSize.Load() < keyspaceTableCacheLimit {
-		if _, loaded := keyspaceTableCache.LoadOrStore(query, kt); !loaded {
+		if _, loaded := keyspaceTableCache.LoadOrStore(key, &keyspaceTableEntry{query: query, keyspaceTable: kt}); !loaded {
 			keyspaceTableCacheSize.Add(1)
 		}
 	}
@@ -50,10 +51,28 @@ func KeyspaceTableFromQuery(query string) string {
 	return kt
 }
 
+// queryRef identifies a query string by the address and length of its bytes.
+// Gemini builds each query once and reuses that string, so the address finds
+// the cached result without hashing the query text. The cache entry holds the
+// string, so its bytes cannot be freed and reused by another string while the
+// entry exists.
+type queryRef struct {
+	data *byte
+	n    int
+}
+
+// keyspaceTableEntry is one cached result. query keeps the bytes of the key
+// alive.
+type keyspaceTableEntry struct {
+	query         string
+	keyspaceTable string
+}
+
 // keyspaceTableCache maps a query to its "keyspace.table". Gemini binds its
 // values, so a run has only a few dozen distinct query strings, and every
 // logged statement looks one up. keyspaceTableCacheLimit stops it from growing
-// when queries carry literals, as DDL statements do.
+// when queries carry literals, as DDL statements do, or when a query is built
+// again for each statement.
 var (
 	keyspaceTableCache     sync.Map
 	keyspaceTableCacheSize atomic.Int64
@@ -61,13 +80,13 @@ var (
 
 const keyspaceTableCacheLimit = 4096
 
-func mustString(v any) string {
-	s, ok := v.(string)
+func mustEntry(v any) *keyspaceTableEntry {
+	e, ok := v.(*keyspaceTableEntry)
 	if !ok {
-		panic(fmt.Sprintf("keyspaceTableCache holds %T, want string", v))
+		panic(fmt.Sprintf("keyspaceTableCache holds %T, want *keyspaceTableEntry", v))
 	}
 
-	return s
+	return e
 }
 
 func parseKeyspaceTable(query string) string {
@@ -93,9 +112,16 @@ const (
 	hextable   = "0123456789abcdef"
 )
 
+// randomBuffers holds the shared random text and bytes that RandString and
+// RandomBytes slice. It is published once through randomData, so a reader on
+// another goroutine sees either nothing or the complete buffers.
+type randomBuffers struct {
+	str   string
+	bytes []byte
+}
+
 var (
-	randomString     string
-	randomBytes      []byte
+	randomData       atomic.Pointer[randomBuffers]
 	randomStringOnce sync.Once
 )
 
@@ -120,8 +146,6 @@ func PreallocateRandomString(rnd Random, ln int) {
 
 		data = data[:ln]
 
-		randomBytes = data
-
 		if ln&1 == 1 {
 			ln++ // Ensure the length is even
 		}
@@ -130,7 +154,7 @@ func PreallocateRandomString(rnd Random, ln int) {
 		// encoding would keep its whole backing array, twice the buffer size,
 		// alive for the run. The result is the same: ln/2 bytes give the
 		// first ln hex characters.
-		randomString = hex.EncodeToString(data[:ln/2])
+		randomData.Store(&randomBuffers{str: hex.EncodeToString(data[:ln/2]), bytes: data})
 	})
 }
 
@@ -144,10 +168,11 @@ func fillRandomBytes(rnd Random, data []byte) {
 }
 
 func RandString(rnd Random, ln int, even bool) string {
-	// Ensure randomString is initialized before accessing
-	if len(randomString) == 0 {
+	buffers := randomData.Load()
+	if buffers == nil || len(buffers.str) == 0 {
 		return ""
 	}
+	randomString := buffers.str
 
 	val := len(randomString) - ln - 1
 	if val < 1 {
@@ -180,10 +205,11 @@ func RandString(rnd Random, ln int, even bool) string {
 }
 
 func RandomBytes(rnd Random, ln int) []byte {
-	// Ensure randomBytes is initialized before accessing
-	if len(randomBytes) == 0 {
+	buffers := randomData.Load()
+	if buffers == nil || len(buffers.bytes) == 0 {
 		return []byte{}
 	}
+	randomBytes := buffers.bytes
 
 	val := len(randomBytes) - ln - 1
 	if val < 1 {

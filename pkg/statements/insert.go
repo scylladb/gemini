@@ -67,7 +67,12 @@ func (g *Generator) buildCachedInsertQueries() {
 
 func (g *Generator) Insert(_ context.Context) (*typedef.Stmt, error) {
 	query := g.insertQuery
-	if g.useLWT && g.random.Uint32()%10 == 0 {
+	// A conditional INSERT takes its write timestamp from the Paxos ballot,
+	// not from the client timestamp. A compensating DELETE at the client
+	// timestamp can then fail to cancel it, so the store must invalidate the
+	// partition instead of compensating.
+	lwt := g.useLWT && g.random.Uint32()%10 == 0
+	if lwt {
 		query = g.insertQueryLWT
 	}
 
@@ -90,6 +95,7 @@ func (g *Generator) Insert(_ context.Context) (*typedef.Stmt, error) {
 		Values:        values,
 		QueryType:     typedef.InsertStatementType,
 		Query:         query,
+		NonIdempotent: lwt,
 	}, nil
 }
 

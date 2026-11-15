@@ -340,3 +340,23 @@ func BenchmarkEncodeLogData(b *testing.B) {
 		}
 	})
 }
+
+// TestAppendJSONStringMatchesJSONText: the plain-ASCII path writes the same
+// bytes as jsontext quoting, for plain and for escaped strings.
+func TestAppendJSONStringMatchesJSONText(t *testing.T) {
+	t.Parallel()
+
+	for _, s := range []string{
+		"", "abc", "0123456789abcdef", "with space ~!", `quote"`, `back\slash`,
+		"tab\t", "nl\n", "\x00", "\x7f", "zażółć", "<html>&", " ",
+	} {
+		want, err := jsontext.AppendQuote(nil, s)
+		if err != nil {
+			t.Fatalf("%q: %v", s, err)
+		}
+
+		if got := appendJSONString(nil, s); string(got) != string(want) {
+			t.Errorf("%q: got %s, want %s", s, got, want)
+		}
+	}
+}

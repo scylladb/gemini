@@ -291,3 +291,41 @@ func BenchmarkCompareCollections(b *testing.B) {
 		}
 	})
 }
+
+// TestMapsEqualByLookup: equal maps compare equal through the lookup path,
+// and a map that differs in one value or one key still orders as the sorted
+// comparison does.
+func TestMapsEqualByLookup(t *testing.T) {
+	t.Parallel()
+
+	a := map[string]int32{"a": 1, "b": 2, "c": 3}
+	same := map[string]int32{"c": 3, "a": 1, "b": 2}
+	if c := compareValues(&a, &same); c != 0 {
+		t.Fatalf("equal maps compared %d", c)
+	}
+
+	otherValue := map[string]int32{"a": 1, "b": 5, "c": 3}
+	if c := compareValues(&a, &otherValue); c >= 0 {
+		t.Fatalf("value 2 orders before 5, got %d", c)
+	}
+
+	otherKey := map[string]int32{"a": 1, "b": 2, "d": 3}
+	if c := compareValues(&a, &otherKey); c >= 0 {
+		t.Fatalf("key c orders before d, got %d", c)
+	}
+
+	id := gocql.TimeUUID()
+	uuids := map[gocql.UUID]string{id: "x"}
+	if c := compareValues(&uuids, &map[gocql.UUID]string{id: "x"}); c != 0 {
+		t.Fatalf("equal UUID-keyed maps compared %d", c)
+	}
+
+	negZero := map[float64]int32{math.Copysign(0, -1): 1}
+	posZero := map[float64]int32{0: 1}
+	if lookupSafeKey(reflect.TypeFor[float64]()) {
+		t.Fatal("a float key must not use the lookup path")
+	}
+	if c := compareValues(&negZero, &posZero); c == 0 {
+		t.Fatal("-0 and +0 keys are different CQL values")
+	}
+}

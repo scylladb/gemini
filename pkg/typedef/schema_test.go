@@ -152,7 +152,7 @@ func TestSchemaMarshalUnmarshalNotChanged(t *testing.T) {
 
 	opts := cmp.Options{
 		cmp.AllowUnexported(Table{}, MaterializedView{}),
-		cmpopts.IgnoreUnexported(Table{}, MaterializedView{}, mo.Option[ColumnDef]{}),
+		cmpopts.IgnoreUnexported(Table{}, MaterializedView{}, MapType{}, UDTType{}, mo.Option[ColumnDef]{}),
 		cmpopts.EquateEmpty(),
 	}
 

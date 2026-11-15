@@ -111,7 +111,8 @@ func TestMutateRetriesIdempotentWrite(t *testing.T) {
 
 // TestMutateCompensatesMixedFailure: when one cluster fails hard and the other
 // times out, the timed-out cluster may have applied the write. The partition
-// must be made equal on both clusters, not left valid with unequal contents.
+// must be made equal on both clusters, and the hard error of the test cluster
+// is still charged to the system under test.
 func TestMutateCompensatesMixedFailure(t *testing.T) {
 	t.Parallel()
 
@@ -120,9 +121,27 @@ func TestMutateCompensatesMixedFailure(t *testing.T) {
 
 	err := outcomeDS(test, oracle).Mutate(t.Context(), outcomeStmt(false))
 
-	require.NoError(t, err, "a successful compensation leaves the partition equal and valid")
 	assert.Equal(t, int64(1), test.deletes.Load(), "the compensating DELETE must run on the test cluster")
 	assert.Equal(t, int64(1), oracle.deletes.Load(), "the compensating DELETE must run on the oracle")
+
+	mutErr, ok := errors.AsType[*MutationError](err)
+	require.True(t, ok, "the hard error of the test cluster must still be returned")
+	assert.True(t, mutErr.Compensated, "the partition is equal again and stays valid")
+	assert.ErrorIs(t, err, test.writeErr)
+}
+
+// TestMutateCompensatedTimeoutsReturnNil: when every failure may have applied
+// the write, a successful compensation leaves nothing to charge.
+func TestMutateCompensatedTimeoutsReturnNil(t *testing.T) {
+	t.Parallel()
+
+	test := &writeStore{writeErr: context.DeadlineExceeded}
+	oracle := &writeStore{}
+
+	err := outcomeDS(test, oracle).Mutate(t.Context(), outcomeStmt(false))
+
+	require.NoError(t, err, "a successful compensation leaves the partition equal and valid")
+	assert.Equal(t, int64(1), test.deletes.Load())
 }
 
 // TestMutateNoCompensationForDefiniteFailure: an error the server returns before
@@ -151,6 +170,7 @@ func TestMutationErrorJSONKeepsFlags(t *testing.T) {
 	mutErr.SetStoreSuccess(TypeOracle, true)
 	mutErr.CompensationFailed = true
 	mutErr.OutcomeUnknown = true
+	mutErr.OracleErr = errors.New("oracle timeout")
 	mutErr.Finalize(errors.New("boom"))
 
 	data, err := json.Marshal(mutErr)
@@ -163,4 +183,5 @@ func TestMutationErrorJSONKeepsFlags(t *testing.T) {
 	assert.Equal(t, true, decoded["compensation_failed"])
 	assert.Equal(t, true, decoded["outcome_unknown"])
 	assert.Equal(t, "boom", decoded["final_error"])
+	assert.Equal(t, "oracle timeout", decoded["oracle_error"])
 }

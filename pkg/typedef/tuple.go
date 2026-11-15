@@ -71,14 +71,14 @@ func (t *TupleType) GenJSONValue(r utils.Random, p RangeConfig) any {
 func (t *TupleType) GenValue(r utils.Random, p RangeConfig) []any {
 	out := make([]any, 0, len(t.ValueTypes))
 	for _, tp := range t.ValueTypes {
-		out = append(out, tp.GenValue(r, p)...)
+		out = append(out, tp.genValue(r, p))
 	}
 	return out
 }
 
 func (t *TupleType) GenValueOut(out []any, r utils.Random, p RangeConfig) []any {
 	for _, tp := range t.ValueTypes {
-		out = append(out, tp.GenValue(r, p)...)
+		out = append(out, tp.genValue(r, p))
 	}
 	return out
 }
@@ -95,7 +95,7 @@ func (t *TupleType) LenValue() int {
 func (t *TupleType) ValueVariationsNumber(p RangeConfig) float64 {
 	out := float64(1)
 	for _, tp := range t.ValueTypes {
-		out *= out * tp.ValueVariationsNumber(p)
+		out *= tp.ValueVariationsNumber(p)
 	}
 	return out
 }

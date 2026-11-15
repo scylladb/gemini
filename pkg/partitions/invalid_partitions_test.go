@@ -83,8 +83,9 @@ func TestMarkInvalid_UnknownUUID(t *testing.T) {
 	assert.Equal(t, uint64(0), parts.InvalidCount())
 }
 
-// TestMarkInvalid_LimitEnforced verifies that the maxInvalid cap is respected.
-// After maxInvalid partitions are marked, further calls must return false.
+// TestMarkInvalid_LimitEnforced verifies that the maxInvalid cap bounds the
+// marked slots but not the reported divergences. Every partition is reported
+// once. Only the first maxInvalid partitions get a slot mark.
 func TestMarkInvalid_LimitEnforced(t *testing.T) {
 	t.Parallel()
 
@@ -99,11 +100,20 @@ func TestMarkInvalid_LimitEnforced(t *testing.T) {
 		if parts.MarkInvalid(&key) {
 			successCount++
 		}
+		assert.False(t, parts.MarkInvalid(&key), "partition %d must be reported once", i)
 		key.Release()
 	}
 
-	assert.Equal(t, int(limit), successCount)
+	assert.Equal(t, int(total), successCount, "every divergence must be reported")
 	assert.Equal(t, limit, parts.InvalidCount())
+
+	var flagged uint64
+	for i := range total {
+		if parts.IsInvalid(i) {
+			flagged++
+		}
+	}
+	assert.Equal(t, limit, flagged, "only maxInvalid slots may be marked")
 }
 
 // TestMarkInvalid_NoLimit verifies that when maxInvalid == 0, all partitions
@@ -162,7 +172,7 @@ func TestMarkInvalid_ReplacedSlotReportsButDoesNotMark(t *testing.T) {
 // TestMarkInvalid_ConcurrentReplaceNoInflation hammers MarkInvalid against a
 // concurrent Replace of the same slot (the finding-3 race) and asserts the
 // invalid count is never inflated by a freshly-replaced valid slot. Run under
-// -race, it also guards the invalidByIdx/invalidCount bookkeeping.
+// -race, it also guards the slot flag and invalidCount bookkeeping.
 func TestMarkInvalid_ConcurrentReplaceNoInflation(t *testing.T) {
 	t.Parallel()
 
@@ -472,9 +482,9 @@ func TestReplace_ClearsInvalidFlag(t *testing.T) {
 	assert.Equal(t, total-2, parts.InvalidCount(), "invalid count must decrement after Replace()")
 }
 
-// TestMarkInvalid_ConcurrentCapEnforcement verifies that the CAS-based cap
-// enforcement never allows more than maxInvalid entries to be stored, even
-// under high concurrent load on distinct partition indices.
+// TestMarkInvalid_ConcurrentCapEnforcement verifies that the cap never allows
+// more than maxInvalid marked slots, and that every partition is still
+// reported exactly once, under high concurrent load on distinct partitions.
 func TestMarkInvalid_ConcurrentCapEnforcement(t *testing.T) {
 	t.Parallel()
 
@@ -509,6 +519,14 @@ func TestMarkInvalid_ConcurrentCapEnforcement(t *testing.T) {
 	}
 	wg.Wait()
 
-	assert.Equal(t, int64(limit), wins.Load(), "exactly maxInvalid partitions should be marked")
+	assert.Equal(t, int64(total), wins.Load(), "every partition must be reported exactly once")
 	assert.Equal(t, limit, parts.InvalidCount(), "InvalidCount must equal the cap")
+
+	var flagged uint64
+	for i := range total {
+		if parts.IsInvalid(i) {
+			flagged++
+		}
+	}
+	assert.Equal(t, limit, flagged, "exactly maxInvalid slots should be marked")
 }

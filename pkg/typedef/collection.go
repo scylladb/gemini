@@ -59,7 +59,7 @@ func (ct *Collection) GenValue(r utils.Random, p RangeConfig) []any {
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	out := make([]any, count)
 	for i := range count {
-		out[i] = ct.ValueType.GenValue(r, p)[0]
+		out[i] = ct.ValueType.genValue(r, p)
 	}
 	return []any{out}
 }
@@ -68,7 +68,7 @@ func (ct *Collection) GenValueOut(out []any, r utils.Random, p RangeConfig) []an
 	count := utils.RandInt2(r, 1, maxBagSize+1)
 	items := make([]any, count)
 	for i := range count {
-		items[i] = ct.ValueType.GenValue(r, p)[0]
+		items[i] = ct.ValueType.genValue(r, p)
 	}
 	return append(out, items)
 }

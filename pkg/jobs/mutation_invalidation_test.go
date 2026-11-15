@@ -110,42 +110,42 @@ type mutationErrStore struct {
 
 func (m *mutationErrStore) Mutate(context.Context, *typedef.Stmt) error { return m.err }
 
-// TestMutationRun_AsymmetricWriteInvalidatesRegardlessOfErrorKind pins that the
-// partition-invalidation decision does not depend on HOW the write failed.
+// TestMutationRun_ChargesOnlyTheTestCluster pins two decisions of
+// Mutation.run. They are independent of each other:
 //
-// The regression: the invalidation used to live inside an
-// `errors.Is(err, context.DeadlineExceeded)` branch. An asymmetric write that
-// failed for any other reason — test store commits, oracle returns Unavailable,
-// say — skipped it entirely, was converted straight to a JobError, and left the
-// partition in validation coverage. The two clusters genuinely differ at that
-// point, so validation later reports a divergence gemini itself produced.
+//   - Invalidation. A write that can leave the clusters with different data
+//     marks its partitions invalid, whatever error ended it.
+//   - Error accounting. Only an error of the test cluster is charged to the
+//     system under test. An oracle failure is a fault of the reference
+//     cluster, and a test-cluster timeout is an infrastructure signal.
 //
-// A timeout is not special here: what makes the partition untrustworthy is the
-// asymmetry, not the error kind.
-func TestMutationRun_AsymmetricWriteInvalidatesRegardlessOfErrorKind(t *testing.T) {
+// FinalError holds both errors joined. A decision that errors.Is takes from
+// FinalError fails the "test hard error, oracle timeout" case.
+func TestMutationRun_ChargesOnlyTheTestCluster(t *testing.T) {
 	t.Parallel()
 
+	hard := errors.New("Cannot achieve consistency level QUORUM")
+	oracleHard := errors.New("oracle: Unavailable")
+
 	for _, tc := range []struct {
-		err  error
-		name string
-		// run() reports a data error by returning a *joberror.JobError, which Do()
-		// then charges against the error budget. Timeouts are deliberately exempt
-		// (infrastructure signal: a slow CI runner would otherwise exhaust the
-		// budget) and yield a nil error instead. Invalidation and error accounting
-		// are independent decisions, and hoisting the former must not disturb the
-		// latter.
-		wantJobError bool
+		testErr         error
+		oracleErr       error
+		name            string
+		wantInvalidated bool
+		wantJobError    bool
 	}{
+		{name: "test ok, oracle hard error", oracleErr: oracleHard, wantInvalidated: true},
+		{name: "test ok, oracle timeout", oracleErr: context.DeadlineExceeded, wantInvalidated: true},
+		{name: "test hard error, oracle ok", testErr: hard, wantInvalidated: true, wantJobError: true},
 		{
-			name:         "non-timeout error",
-			err:          errors.New("Cannot achieve consistency level QUORUM"),
-			wantJobError: true,
+			name:            "test hard error, oracle timeout",
+			testErr:         hard,
+			oracleErr:       context.DeadlineExceeded,
+			wantInvalidated: true,
+			wantJobError:    true,
 		},
-		{
-			name:         "timeout error",
-			err:          context.DeadlineExceeded,
-			wantJobError: false,
-		},
+		{name: "test timeout, oracle hard error", testErr: context.DeadlineExceeded, oracleErr: oracleHard, wantInvalidated: true},
+		{name: "both hard errors", testErr: hard, oracleErr: oracleHard, wantJobError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -166,12 +166,13 @@ func TestMutationRun_AsymmetricWriteInvalidatesRegardlessOfErrorKind(t *testing.
 
 			vrc := typedef.ValueRangeConfig{}
 
-			// Asymmetric: the test store committed, the oracle did not.
 			mutErr := &store.MutationError{
-				TestStoreSuccess:   true,
-				OracleStoreSuccess: false,
+				TestErr:            tc.testErr,
+				OracleErr:          tc.oracleErr,
+				TestStoreSuccess:   tc.testErr == nil,
+				OracleStoreSuccess: tc.oracleErr == nil,
 			}
-			mutErr.Finalize(tc.err)
+			mutErr.Finalize(errors.Join(tc.testErr, tc.oracleErr))
 
 			m := &Mutation{
 				table:     table,
@@ -189,12 +190,15 @@ func TestMutationRun_AsymmetricWriteInvalidatesRegardlessOfErrorKind(t *testing.
 
 			runErr := m.run(t.Context())
 
-			assert.Positive(t, gen.count(),
-				"an asymmetric write must invalidate its partitions no matter which error ended it")
+			assert.Equal(t, tc.wantInvalidated, gen.count() > 0,
+				"a write that can leave the clusters different must invalidate its partitions")
 
-			var jobErr *joberror.JobError
-			assert.Equal(t, tc.wantJobError, errors.As(runErr, &jobErr),
-				"hoisting the invalidation must not change which errors are charged to the budget")
+			jobErr, isJobErr := errors.AsType[*joberror.JobError](runErr)
+			assert.Equal(t, tc.wantJobError, isJobErr,
+				"only an error of the test cluster is charged to the system under test")
+			if isJobErr {
+				assert.ErrorIs(t, jobErr.Err, tc.testErr)
+			}
 		})
 	}
 }

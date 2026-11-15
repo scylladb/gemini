@@ -44,11 +44,24 @@ toward the maximum while the clusters absorb the load, and falls while a node is
 slow, which keeps the queued requests, and their timeouts, low. The current
 limit is the `concurrency_limit` metric.
 
+A parked validation worker starts no new validation. It still runs the retries
+in its retry queue when they come due. A retry is a validation that already
+started, and it holds its partition keys until it completes.
+
 In `mixed` mode, both mutation and validation workers run concurrently. Each worker operates on a shared partition pool but uses distribution functions to select partitions, avoiding direct conflicts.
 
 Workers are managed using Go's `errgroup` for coordinated startup and shutdown. When the error budget is reached or duration expires, a soft stop is signaled and workers gracefully terminate.
 
-For each table, a `partitions.Partitions` generator is created and registered. After all workers finish (`g.Wait()` returns), each generator is explicitly closed (`generator.Close()`) to release its background goroutine immediately.
+`Jobs.NewPools` builds one `partitions.Partitions` pool per table. The workload
+builds the pools once, before the warmup, and gives the same pools to the warmup
+and to the main phase. So the main phase validates the partitions that the
+warmup wrote. The workload closes the pools after the last phase.
+
+Each pool has a cap on its invalid partitions: half the pool, at least one. The
+cap is independent of `--max-errors`. A write that can leave the clusters
+different marks its partitions invalid, and that is not an error of the system
+under test, so the error budget does not limit these marks. Half the pool
+keeps most of the validation coverage.
 
 ## Store Layer
 
@@ -76,6 +89,38 @@ Check goroutines:   inflight.Add(2) … defer inflight.Done()  (one per cluster)
 ```
 
 `Close()` calls `inflight.Wait()` before closing CQL sessions. This prevents "use of closed network connection" races on both mutation and SELECT paths when the context is cancelled.
+
+### Error of each cluster
+
+A failed mutation or validation attempt carries the error of each cluster in
+`TestErr` and `OracleErr`. `FinalError` is the error of the test cluster when
+it failed. Gemini decides from the test cluster alone whether the system under
+test failed.
+
+A failed mutation has these outcomes:
+
+| Test cluster | Oracle cluster | Partitions | Charged to the SUT |
+|--------------|----------------|------------|--------------------|
+| applied | any error | marked invalid | no, counted in `mutation_oracle_failures_total` |
+| timeout | any | marked invalid when the outcome is unknown | no |
+| hard error | applied or timeout | marked invalid | yes, write error |
+| hard error | hard error | valid | yes, write error |
+
+A validation that uses all its attempts has these outcomes. Every attempt
+counts, not only the last one:
+
+1. When an attempt found different rows, the divergence is reported, also when a
+   later attempt only timed out.
+2. When no attempt found different rows and the test cluster failed to read on
+   an attempt, the failure is a read error. Its message says that no data
+   mismatch was seen.
+3. When only the oracle cluster failed to read, the failure is not charged. It is
+   counted in `validation_read_failures_total{cluster="oracle"}`.
+
+A divergence of a multi-partition SELECT blames only the partitions whose rows
+differ. A partition that is already invalid, or that was replaced and already
+reported, is left out of the report. When no differing partition is new, nothing
+is reported.
 
 ## Partitions System
 

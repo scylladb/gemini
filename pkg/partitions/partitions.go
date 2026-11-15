@@ -54,11 +54,13 @@ type (
 		ValidationStats(keys *typedef.PartitionKeys) (first, last, failure uint64, recent []uint64, successCount uint64)
 
 		// Invalid partition tracking.
-		// MarkInvalid marks the partition identified by keys as permanently invalid.
-		// It is a non-blocking, idempotent operation — only the first caller for a
-		// given partition index succeeds (returns true); subsequent calls return false.
-		// Returns false when the partition was already invalid or when the maximum
-		// number of invalid partitions has been reached.
+		// MarkInvalid reports whether the caller is the first to see a
+		// divergence on the partition identified by keys. Only the first caller
+		// for a partition gets true. The caller reports the divergence on true
+		// and drops it on false. While fewer than maxInvalid slots are invalid,
+		// MarkInvalid also marks the slot invalid, so selection skips it. At
+		// the limit it still returns true for the first caller, but it leaves
+		// the slot unmarked.
 		MarkInvalid(keys *typedef.PartitionKeys) bool
 		// IsInvalid reports whether the partition at idx is invalid.
 		IsInvalid(idx uint64) bool
@@ -89,20 +91,16 @@ type (
 		Close()
 	}
 
-	// Partition holds one partition slot's data. The seed/id fields are
-	// immutable after construction: fill/Replace/Extend install a brand-new
-	// *Partition into the slot under partitions.mu rather than mutating an
-	// existing one. That pointer swap (and the synchronization on partitions.mu
-	// when readers load the pointer) is the only ordering needed, so reads of
-	// seed/id require no per-partition lock. refCount stays atomic because it
-	// is mutated in place across the partition's lifetime.
+	// Partition holds the data of one partition. The seed and id fields do
+	// not change after construction. fill, Replace and Extend install a new
+	// *Partition into a slot with an atomic pointer store. A reader that loads
+	// the pointer sees the seed and id of that partition, so it needs no lock.
+	// refCount counts the borrowed keys that point to the partition.
 	//
-	// retired is set (once, via fill/Replace) when this *Partition is evicted
-	// from its slot. Its uuid mapping is removed only when the last
-	// outstanding reference is released AND retired is set, so a live partition
-	// whose refCount merely cycles to zero between borrows stays mapped, while a
-	// replaced partition is reliably cleaned up exactly once (regardless of which
-	// borrow happens to release last).
+	// retired is set once, when fill or Replace takes the partition out of
+	// its slot. The UUID mapping of the partition is removed when retired is
+	// set and the last reference is released. A live partition whose refCount
+	// goes to zero between borrows keeps its mapping.
 	Partition struct {
 		// validation holds the partition's validation stats. Borrowed keys
 		// point to it, so it lives as long as the partition or its keys.
@@ -114,43 +112,64 @@ type (
 		seed     uint64
 		refCount atomic.Int32
 		retired  atomic.Bool
-		// written is set when a mutation takes this partition's keys. A
-		// replacement partition starts unwritten.
-		written atomic.Bool
 	}
 
+	// slot is one position in the pool. part holds the current partition.
+	// invalid is true when MarkInvalid marked the current partition, so
+	// selection skips the slot. Every write to both fields holds invalidMu.
+	// Reads take no lock.
+	slot struct {
+		part    atomic.Pointer[Partition]
+		invalid atomic.Bool
+	}
+
+	// partitions holds the slot array. Extend copies the slots into a larger
+	// array and publishes it through the atomic pointer, so a reader always
+	// loads a complete slice header.
 	partitions struct {
-		parts              []*Partition
+		slots atomic.Pointer[[]slot]
+		// written has one bit per slot. A bit is set when a mutation takes
+		// the keys of the slot's partition and cleared when the slot gets a
+		// new partition. One bit per slot keeps the whole set in the CPU
+		// cache, so Next tests a draw without loading the partition.
+		written            atomic.Pointer[[]atomic.Uint64]
 		partitionValuesLen uint64
 		count              atomic.Uint64
 		created            atomic.Uint64
-		mu                 sync.RWMutex
+	}
+
+	// keysRef is the reference that one borrow holds on a partition. Its
+	// release method is the Release of the borrowed keys. The released flag
+	// makes a second call do nothing.
+	keysRef struct {
+		pool     *Partitions
+		part     *Partition
+		released atomic.Bool
 	}
 
 	Partitions struct {
-		table        *typedef.Table
-		idxFunc      distributions.DistributionFunc
-		deleted      *deletedPartitions
-		rowTracker   *RowTracker
-		uuidToIdx    map[uuid.UUID]uint64
-		invalidByIdx sync.Map
-		// reportedRetired holds the UUIDs of replaced partitions that
-		// MarkInvalid already reported, so a replaced partition costs the error
-		// budget once. deleteValidation removes the entry.
-		reportedRetired sync.Map
-		r               random.GoRoutineSafeRandom
-		parts           partitions
-		config          typedef.PartitionRangeConfig
-		invalidCount    atomic.Uint64
+		table      *typedef.Table
+		idxFunc    distributions.DistributionFunc
+		deleted    *deletedPartitions
+		rowTracker *RowTracker
+		uuidToIdx  map[uuid.UUID]uint64
+		// reportedUnmarked holds the UUIDs of partitions that MarkInvalid
+		// reported without a slot mark: a replaced partition, or a partition
+		// reported at the maxInvalid limit. Each partition is then reported
+		// once. deleteValidation removes the entry.
+		reportedUnmarked sync.Map
+		r                random.GoRoutineSafeRandom
+		parts            partitions
+		config           typedef.PartitionRangeConfig
+		invalidCount     atomic.Uint64
 		// reportedInvalid is this pool's share of the partitions_invalid
 		// gauge, see publishInvalid.
 		reportedInvalid atomic.Int64
 		maxInvalid      uint64
 		validationMu    sync.RWMutex
-		// invalidMu serializes mutations of the invalid bookkeeping
-		// (invalidByIdx + invalidCount) between MarkInvalid and the clear paths
-		// in fill/Replace. Reads (pickValidIdx/IsInvalid/Stats) stay lock-free on
-		// the atomic count and sync.Map; only the rare write paths take this lock.
+		// invalidMu serializes every write to the slots: the partition swap
+		// and the flag clear in installPartition, the mark in MarkInvalid, and
+		// the copy in Extend. Reads take no lock.
 		invalidMu sync.Mutex
 	}
 
@@ -174,16 +193,9 @@ func New(
 ) *Partitions {
 	partitionValuesLen := table.PartitionKeysLenValues()
 
-	// Pre-allocate slice of partition pointers
-	parts := make([]*Partition, count)
-	for i := range count {
-		parts[i] = &Partition{}
-	}
-
 	p := &Partitions{
 		parts: partitions{
 			partitionValuesLen: uint64(partitionValuesLen),
-			parts:              parts,
 		},
 		deleted:    newDeleted(ctx, config.DeleteBuckets, config.MaxDeletedHeapSize),
 		rowTracker: NewRowTracker(uint64(config.RowTrackerCapacity)),
@@ -198,6 +210,10 @@ func New(
 	// NOTE: deleted-partitions background goroutine is started internally by
 	// newDeleted() when timeBuckets is non-empty. Do NOT start it again here.
 
+	slots := make([]slot, count)
+	p.parts.slots.Store(&slots)
+	written := make([]atomic.Uint64, writtenWords(count))
+	p.parts.written.Store(&written)
 	p.parts.count.Store(count)
 
 	for i := range count {
@@ -216,12 +232,37 @@ func (p *Partitions) newPartition(id uuid.UUID) *Partition {
 	return &Partition{id: id, seed: p.r.Uint64()}
 }
 
+// valueRand is a reusable value generator. rand.Rand keeps no state of its
+// own, so after pcg is seeded, r gives the same sequence as a new generator
+// with that seed.
+type valueRand struct {
+	r   *rand.Rand
+	pcg rand.PCG
+}
+
+// valueRandPool keeps value generators between borrows, so a borrow does not
+// allocate a new PCG and rand.Rand.
+var valueRandPool = sync.Pool{
+	New: func() any {
+		g := &valueRand{}
+		g.r = rand.New(&g.pcg)
+		return g
+	},
+}
+
 // valuesOf regenerates part's key values from its seed. Every value generator
 // draws only from the RNG it gets, so the same seed always gives the same
 // values. Each borrow gets its own slice, so a borrower cannot change the
 // values another borrower sees.
 func (p *Partitions) valuesOf(part *Partition) []any {
-	values := generateValue(rand.New(rand.NewPCG(part.seed, partitionValueStream)), p.table, &p.config)
+	g, ok := valueRandPool.Get().(*valueRand)
+	if !ok {
+		panic("partitions: valueRandPool holds a value that is not *valueRand")
+	}
+	g.pcg.Seed(part.seed, partitionValueStream)
+	values := generateValue(g.r, p.table, &p.config)
+	valueRandPool.Put(g)
+
 	if uint64(len(values)) != p.parts.partitionValuesLen {
 		panic(fmt.Sprintf(
 			"invalid partition values generated: length %d, expected %d",
@@ -237,55 +278,80 @@ func (p *Partitions) valuesOf(part *Partition) []any {
 // of the partition is the first.
 const partitionValueStream = 0x9e3779b97f4a7c15
 
+// slotAt returns slot idx of the current slot array.
+func (p *Partitions) slotAt(idx uint64) *slot {
+	return &(*p.parts.slots.Load())[idx]
+}
+
 func (p *Partitions) partition(idx uint64) *Partition {
-	p.parts.mu.RLock()
-	part := p.parts.parts[idx]
-	p.parts.mu.RUnlock()
-	return part
+	return p.slotAt(idx).part.Load()
 }
 
 // newKeys takes one reference on part and returns partition keys whose Release
-// drops that reference exactly once (guarded by a per-borrow sync.Once). The
-// UUID's idx mapping is removed only when the final reference is released AND
-// the partition has been retired (evicted from its slot). A live partition
-// whose refCount transiently reaches zero between borrows stays mapped; a
-// retired partition is cleaned up exactly once, by whichever borrow releases
-// last.
+// drops that reference once. Use it only for a partition that is out of every
+// slot and is not retired yet, as in Replace, or for a partition that the
+// caller already holds a reference on.
 func (p *Partitions) newKeys(part *Partition) typedef.PartitionKeys {
 	part.refCount.Add(1)
 	return p.keysFor(part)
 }
 
-// borrow takes one reference on the partition in slot idx while it holds the
-// slot lock. A concurrent Replace then either sees the reference before it
-// retires the partition, or installs its new partition before the borrow
-// reads the slot. Without the lock, the last release of a retired partition
-// could remove its UUID mapping between the slot read and the reference.
-func (p *Partitions) borrow(idx uint64) typedef.PartitionKeys {
-	p.parts.mu.RLock()
-	part := p.parts.parts[idx]
+// retain takes one more reference on part and returns the function that drops
+// it once. The caller must already hold a reference, so the count cannot fall
+// to zero before the new reference is in place.
+func (p *Partitions) retain(part *Partition) func() {
 	part.refCount.Add(1)
-	p.parts.mu.RUnlock()
+	ref := &keysRef{pool: p, part: part}
+	return ref.release
+}
 
-	return p.keysFor(part)
+// acquire takes one reference on the partition in slot idx and returns it.
+// It adds the reference first and then reads the slot again. When the slot
+// still holds the partition, a concurrent Replace sees the reference before it
+// reads refCount, so the UUID stays mapped. When the slot changed, acquire
+// drops the reference and tries again with the new partition.
+func (p *Partitions) acquire(idx uint64) *Partition {
+	for {
+		part := p.partition(idx)
+		part.refCount.Add(1)
+		if p.partition(idx) == part {
+			return part
+		}
+		p.release(part)
+	}
+}
+
+// release drops one reference on part. When that was the last reference of a
+// retired partition, it removes the UUID mapping. A failed acquire and the
+// last borrow can both see zero. deleteValidation is idempotent, so both can
+// run it.
+func (p *Partitions) release(part *Partition) {
+	if part.refCount.Add(-1) == 0 && part.retired.Load() {
+		p.deleteValidation(part.id)
+	}
+}
+
+func (r *keysRef) release() {
+	if r.released.CompareAndSwap(false, true) {
+		r.pool.release(r.part)
+	}
+}
+
+// borrow takes one reference on the partition in slot idx and returns its
+// keys.
+func (p *Partitions) borrow(idx uint64) typedef.PartitionKeys {
+	return p.keysFor(p.acquire(idx))
 }
 
 // keysFor returns partition keys for part whose Release drops one reference
 // that the caller already took.
 func (p *Partitions) keysFor(part *Partition) typedef.PartitionKeys {
-	id := part.id
-	var once sync.Once
+	ref := &keysRef{pool: p, part: part}
 	return typedef.PartitionKeys{
 		Values:     typedef.NewPartitionValues(p.table.PartitionKeys, p.valuesOf(part)),
-		ID:         id,
+		ID:         part.id,
 		Validation: &part.validation,
-		Release: func() {
-			once.Do(func() {
-				if part.refCount.Add(-1) == 0 && part.retired.Load() {
-					p.deleteValidation(id)
-				}
-			})
-		},
+		Release:    ref.release,
 	}
 }
 
@@ -298,17 +364,7 @@ func (p *Partitions) deleteValidation(id uuid.UUID) {
 	p.validationMu.Lock()
 	delete(p.uuidToIdx, id)
 	p.validationMu.Unlock()
-	p.reportedRetired.Delete(id)
-}
-
-func (p *Partitions) values(idx uint64) typedef.PartitionKeys {
-	// seed/id are immutable for the lifetime of this *Partition (see the
-	// Partition doc comment), so they can be read without a per-partition lock.
-	return p.borrow(idx)
-}
-
-func (p *Partitions) valuesCopy(idx uint64) typedef.PartitionKeys {
-	return p.borrow(idx)
+	p.reportedUnmarked.Delete(id)
 }
 
 func (p *Partitions) fill(idx uint64) {
@@ -323,19 +379,14 @@ func (p *Partitions) fill(idx uint64) {
 		return
 	}
 
-	// During initial population the old *Partition is the zero-value struct
-	// with uuid.Nil(), which is never in the maps.
-	if oldPart.id == (uuid.UUID{}) {
-		return
-	}
-
 	// A validator can still hold keys of the old partition. Its UUID mapping
 	// must stay until that borrow is released, or a divergence the validator
 	// finds is dropped because MarkInvalid cannot find the UUID. So fill marks
 	// the partition retired and removes the UUID now only when no borrow is
 	// left. Otherwise the last Release removes it. installPartition already
-	// swapped the slot under parts.mu, so no new borrow of oldPart can start.
-	// The retired store comes before the refCount load, and a Release does
+	// swapped the slot, so an acquire that adds its reference after this
+	// point reads the new partition and drops oldPart again.
+	// The retired store comes before the refCount load, and a release does
 	// its refCount decrement before its retired load, so at least one side
 	// sees the other and the UUID is always removed.
 	oldPart.retired.Store(true)
@@ -353,18 +404,17 @@ func (p *Partitions) installPartition(idx uint64, part *Partition) *Partition {
 	p.invalidMu.Lock()
 	defer p.invalidMu.Unlock()
 
-	p.parts.mu.Lock()
-	old := p.parts.parts[idx]
-	p.parts.parts[idx] = part
-	p.parts.mu.Unlock()
+	s := p.slotAt(idx)
+	old := s.part.Swap(part)
+	p.clearWritten(idx)
 
-	if _, wasInvalid := p.invalidByIdx.LoadAndDelete(idx); wasInvalid {
+	if s.invalid.Swap(false) {
 		p.invalidCount.Add(^uint64(0)) // atomic decrement
 		p.publishInvalid()
 		// The old partition was already reported. Record its UUID so that
 		// MarkInvalid on keys still borrowed from it does not report it again.
-		if old != nil && old.id != (uuid.UUID{}) {
-			p.reportedRetired.Store(old.id, struct{}{})
+		if old != nil {
+			p.reportedUnmarked.Store(old.id, struct{}{})
 		}
 	}
 
@@ -400,41 +450,77 @@ func (p *Partitions) Stats() Stats {
 }
 
 func (p *Partitions) Get(idx uint64) typedef.PartitionKeys {
-	return p.values(idx)
+	return p.borrow(idx)
 }
 
-// pickValidIdx returns the index of a valid (non-invalid) partition.
+// pickValidIdx returns the index of a valid (non-invalid) partition in slots.
 // Strategy (in order):
 //  1. Fast-path: if no invalid partitions, call the distribution function directly.
-//  2. Linear scan: when more than half the slots are invalid, scan sequentially
-//     so we always find a valid slot deterministically.
+//  2. Linear scan: when at least half the slots are invalid, scan from a random
+//     start and wrap around. A valid slot is always found, and the picks
+//     spread over all valid slots.
 //  3. Random retry: up to (total − invalid) attempts before a best-effort fallback.
-func (p *Partitions) pickValidIdx() uint64 {
-	total := p.parts.count.Load()
+func (p *Partitions) pickValidIdx(slots []slot, draw distributions.DistributionFunc) uint64 {
+	total := uint64(len(slots))
 	invalid := p.invalidCount.Load()
 
-	if invalid == 0 {
-		return p.idxFunc()
+	if invalid == 0 || total == 0 {
+		return draw()
 	}
 
 	if invalid*2 >= total {
+		start := p.r.Uint64N(total)
 		for i := range total {
-			if _, bad := p.invalidByIdx.Load(i); !bad {
-				return i
+			idx := start + i
+			if idx >= total {
+				idx -= total
+			}
+			if !slots[idx].invalid.Load() {
+				return idx
 			}
 		}
 		// All slots invalid — best-effort fallback.
-		return p.idxFunc()
+		return draw()
 	}
 
 	maxRetries := total - invalid
 	for range maxRetries {
-		idx := p.idxFunc()
-		if _, bad := p.invalidByIdx.Load(idx); !bad {
+		idx := draw()
+		if !slots[idx].invalid.Load() {
 			return idx
 		}
 	}
-	return p.idxFunc()
+	return draw()
+}
+
+// writtenWords returns the number of 64-bit words that hold one bit per slot
+// of a pool with count slots.
+func writtenWords(count uint64) uint64 {
+	return (count + 63) / 64
+}
+
+// isWritten reports whether the written bit of slot idx is set.
+func isWritten(written []atomic.Uint64, idx uint64) bool {
+	return written[idx/64].Load()&(1<<(idx%64)) != 0
+}
+
+// markWritten sets the written bit of slot idx. A Replace that clears the bit
+// between the borrow and this call leaves the new partition marked written.
+// The bit only steers Next toward partitions with data, so the rare wrong
+// mark costs one empty comparison.
+func (p *Partitions) markWritten(idx uint64) {
+	word := &(*p.parts.written.Load())[idx/64]
+	if bit := uint64(1) << (idx % 64); word.Load()&bit == 0 {
+		word.Or(bit)
+	}
+}
+
+// clearWritten clears the written bit of slot idx.
+func (p *Partitions) clearWritten(idx uint64) {
+	word := &(*p.parts.written.Load())[idx/64]
+	if bit := uint64(1) << (idx % 64); word.Load()&bit != 0 {
+		word.And(^bit)
+	}
 }
 
 // writtenPickAttempts bounds how many distribution draws Next makes to find a
@@ -450,49 +536,62 @@ const writtenPickAttempts = 16
 // draws up to writtenPickAttempts times and takes the last draw when none of
 // them is written.
 func (p *Partitions) Next() typedef.PartitionKeys {
-	idx := p.pickValidIdx()
+	return p.next(p.idxFunc)
+}
+
+func (p *Partitions) next(draw distributions.DistributionFunc) typedef.PartitionKeys {
+	slots := *p.parts.slots.Load()
+	idx := p.pickValidIdx(slots, draw)
+	written := *p.parts.written.Load()
 	for range writtenPickAttempts - 1 {
-		if p.isWritten(idx) {
+		if isWritten(written, idx) {
 			break
 		}
-		idx = p.pickValidIdx()
+		idx = p.pickValidIdx(slots, draw)
 	}
 
-	return p.Get(idx)
+	return p.borrow(idx)
 }
 
 // NextForWrite returns the next partition to mutate according to the
 // distribution function, skipping invalid partitions, and marks it written.
 func (p *Partitions) NextForWrite() typedef.PartitionKeys {
-	p.parts.mu.RLock()
-	idx := p.pickValidIdx()
-	part := p.parts.parts[idx]
-	part.refCount.Add(1)
-	p.parts.mu.RUnlock()
+	return p.nextForWrite(p.idxFunc)
+}
 
-	part.written.Store(true)
+func (p *Partitions) nextForWrite(draw distributions.DistributionFunc) typedef.PartitionKeys {
+	idx := p.pickValidIdx(*p.parts.slots.Load(), draw)
+	part := p.acquire(idx)
+	p.markWritten(idx)
 
 	return p.keysFor(part)
 }
 
-func (p *Partitions) isWritten(idx uint64) bool {
-	p.parts.mu.RLock()
-	written := p.parts.parts[idx].written.Load()
-	p.parts.mu.RUnlock()
-
-	return written
-}
-
 func (p *Partitions) Extend() typedef.PartitionKeys {
 	id := uuid.NewV7()
-
-	// Hold lock while extending slice AND initializing the new partition
-	// to prevent other goroutines from accessing it during reallocation
-	p.parts.mu.Lock()
-	newIdx := uint64(len(p.parts.parts))
 	part := p.newPartition(id)
-	p.parts.parts = append(p.parts.parts, part)
-	p.parts.mu.Unlock()
+
+	// invalidMu blocks every slot write while the slots are copied, so the
+	// new array keeps every swap and every mark. The UUID is mapped only
+	// after the new array is published, so a lookup never gets an index past
+	// the end of the array.
+	p.invalidMu.Lock()
+	old := *p.parts.slots.Load()
+	newIdx := uint64(len(old))
+	grown := make([]slot, newIdx+1)
+	for i := range old {
+		grown[i].part.Store(old[i].part.Load())
+		grown[i].invalid.Store(old[i].invalid.Load())
+	}
+	grown[newIdx].part.Store(part)
+	oldWritten := *p.parts.written.Load()
+	grownWritten := make([]atomic.Uint64, writtenWords(newIdx+1))
+	for i := range oldWritten {
+		grownWritten[i].Store(oldWritten[i].Load())
+	}
+	p.parts.written.Store(&grownWritten)
+	p.parts.slots.Store(&grown)
+	p.invalidMu.Unlock()
 
 	p.validationMu.Lock()
 	p.uuidToIdx[id] = newIdx
@@ -502,7 +601,7 @@ func (p *Partitions) Extend() typedef.PartitionKeys {
 	p.parts.created.Add(1)
 	metrics.PartitionsExtended.Inc()
 
-	return p.valuesCopy(newIdx)
+	return p.borrow(newIdx)
 }
 
 func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
@@ -514,12 +613,12 @@ func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
 	oldPart := p.installPartition(idx, p.newPartition(id))
 
 	// Take the caller's reference and, when deletes are tracked, a second
-	// reference for the deleted-partitions heap BEFORE the partition is marked
-	// retired. A borrower that releases the last older reference after the
-	// retired flag is set would otherwise drop refCount to zero and remove the
-	// UUID mapping before the heap holds its reference. MarkInvalid could then
-	// not find the UUID, and a divergence on the deleted partition would go
-	// unreported. Each reference has its own Release and sync.Once.
+	// reference for the deleted-partitions window BEFORE the partition is
+	// marked retired. A borrower that releases the last older reference after
+	// the retired flag is set would otherwise drop refCount to zero and remove
+	// the UUID mapping before the window holds its reference. MarkInvalid could
+	// then not find the UUID, and a divergence on the deleted partition would
+	// go unreported. Each reference has its own Release.
 	oldKeys := p.newKeys(oldPart)
 
 	var heapKeys typedef.PartitionKeys
@@ -527,23 +626,21 @@ func (p *Partitions) Replace(idx uint64) typedef.PartitionKeys {
 		heapKeys = p.newKeys(oldPart)
 	}
 
-	// Mark the evicted partition retired. Its uuidToIdx entry
-	// are removed only when its last reference is released: the caller's
-	// returned keys and, when present, the heap's reference. The heap releases
-	// its reference through the validator's Release closure, which runs only
-	// after re-validation completes, so MarkInvalid can still locate the UUID
-	// while a divergence on the deleted partition is reported.
+	// Mark the evicted partition retired. Its uuidToIdx entry is removed only
+	// when its last reference is released: the caller's returned keys, the
+	// window's reference, and the reference of every emitted copy. A validator
+	// releases an emitted copy only after re-validation completes, so
+	// MarkInvalid can still locate the UUID while a divergence on the deleted
+	// partition is reported.
 	oldPart.retired.Store(true)
 
 	if p.deleted != nil {
-		p.deleted.Delete(heapKeys)
+		p.deleted.deleteRetained(heapKeys, func() func() { return p.retain(oldPart) })
 	}
 	metrics.PartitionsReplaced.Inc()
 
-	// Purge any tracked rows that belong to the old partition so that
-	// targeted-delete operations do not attempt to delete rows from a
-	// partition that no longer exists. Release closures are called inside
-	// Invalidate, outside any internal lock.
+	// Retire the tracked rows of the old partition, so that targeted
+	// mutations do not write to a partition that no longer exists.
 	if p.rowTracker != nil {
 		p.rowTracker.Invalidate(oldPart.id)
 	}
@@ -562,7 +659,7 @@ func (p *Partitions) Deleted() <-chan typedef.PartitionKeys {
 // ReplaceNext picks a partition by distribution and replaces it, sending
 // the old keys to the deleted queue. Invalid partitions are skipped.
 func (p *Partitions) ReplaceNext() typedef.PartitionKeys {
-	return p.Replace(p.pickValidIdx())
+	return p.Replace(p.pickValidIdx(*p.parts.slots.Load(), p.idxFunc))
 }
 
 func (p *Partitions) ReplaceWithoutOld(idx uint64) {
@@ -573,7 +670,11 @@ func (p *Partitions) ReplaceWithoutOld(idx uint64) {
 }
 
 func (p *Partitions) ReplaceNextWithoutOld() {
-	p.fill(p.pickValidIdx())
+	p.replaceNextWithoutOld(p.idxFunc)
+}
+
+func (p *Partitions) replaceNextWithoutOld(draw distributions.DistributionFunc) {
+	p.fill(p.pickValidIdx(*p.parts.slots.Load(), draw))
 	if p.deleted != nil {
 		p.deleted.deleted.Add(1)
 	}
@@ -618,22 +719,25 @@ func (p *Partitions) ValidationStats(keys *typedef.PartitionKeys) (first, last, 
 }
 
 // MarkInvalid reports whether the caller is the first to observe a divergence
-// for the partition identified by keys, and — when that partition still occupies
-// its slot — permanently marks the slot invalid so it is skipped by future
-// selection.
+// for the partition identified by keys. When that partition still occupies its
+// slot and the maxInvalid limit allows it, MarkInvalid also marks the slot
+// invalid so that selection skips it.
 //
 // It returns true when the caller should report the divergence:
 //   - the slot still holds this partition and this is the first mark for it
-//     (the slot is added to the invalid set and counts toward maxInvalid), or
+//     (the slot is marked invalid and counts toward maxInvalid), or
+//   - the slot still holds this partition, maxInvalid slots are already
+//     invalid, and this is the first report for it. The slot stays unmarked.
+//     The limit bounds how much of the pool selection skips, not which
+//     divergences gemini reports, or
 //   - the slot has already been replaced by a fresh, valid partition (e.g. a
-//     deleted partition being re-validated). In that case the divergence is
-//     still real and must be reported, but the reused slot is deliberately NOT
-//     marked or counted — marking it would skip a valid partition and inflate
-//     the invalid budget (the freshly-replaced-slot race).
+//     deleted partition being re-validated), and this is the first report for
+//     it. The divergence is still real and must be reported, but the reused
+//     slot is NOT marked or counted — marking it would skip a valid partition
+//     and inflate the invalid count.
 //
 // It returns false when there is nothing to report: the UUID is no longer
-// tracked, the slot is already marked invalid, or the maxInvalid limit has been
-// reached (the caller should treat the limit case as a hard-stop trigger).
+// tracked, or the divergence on this partition was already reported.
 func (p *Partitions) MarkInvalid(keys *typedef.PartitionKeys) bool {
 	if keys == nil {
 		return false
@@ -650,44 +754,56 @@ func (p *Partitions) MarkInvalid(keys *typedef.PartitionKeys) bool {
 	}
 
 	// Serialize the whole mark against the fill/Replace clear paths so the
-	// counter update and the map claim happen atomically relative to a
-	// concurrent replacement. Without this, the counter and the map are updated
-	// in opposite orders by the two sides and a freshly-replaced valid slot can
+	// counter update and the flag change happen atomically relative to a
+	// concurrent replacement. Without this, a freshly-replaced valid slot can
 	// end up marked invalid with an inflated count.
 	p.invalidMu.Lock()
 	defer p.invalidMu.Unlock()
 
+	s := p.slotAt(idx)
+
 	// The slot may have been replaced (via Replace/fill) since our uuidToIdx
 	// lookup — or, for a deleted partition, was replaced by design. If it no
 	// longer holds THIS UUID, the current occupant is a fresh, valid partition:
-	// report the divergence (return true) the first time only, and do NOT mark
-	// or count the reused slot. This keeps deleted-partition divergences
-	// reportable, avoids flagging a valid replacement, and stops every later
-	// validator and bucket emission from reporting the same divergence again.
-	if p.partition(idx).id != keys.ID {
-		_, reported := p.reportedRetired.LoadOrStore(keys.ID, struct{}{})
-		return !reported
+	// report the divergence the first time only, and do NOT mark or count the
+	// reused slot.
+	if s.part.Load().id != keys.ID {
+		return p.firstUnmarkedReport(keys.ID)
+	}
+
+	if s.invalid.Load() {
+		return false
 	}
 
 	if p.maxInvalid > 0 && p.invalidCount.Load() >= p.maxInvalid {
-		return false
+		return p.firstUnmarkedReport(keys.ID)
 	}
 
-	// Claim the map entry. LoadOrStore returns (existing, true) if already present.
-	if _, alreadyInvalid := p.invalidByIdx.LoadOrStore(idx, struct{}{}); alreadyInvalid {
-		return false
-	}
+	s.invalid.Store(true)
 	p.invalidCount.Add(1)
 	p.publishInvalid()
 
-	return true
+	// A partition that was reported at the limit gets its mark when the limit
+	// allows it later, but it is not reported again.
+	_, reported := p.reportedUnmarked.Load(keys.ID)
+	return !reported
+}
+
+// firstUnmarkedReport records a report for id that leaves no slot mark, and
+// reports whether it is the first report for id.
+func (p *Partitions) firstUnmarkedReport(id uuid.UUID) bool {
+	_, reported := p.reportedUnmarked.LoadOrStore(id, struct{}{})
+	return !reported
 }
 
 // IsInvalid reports whether the partition at the given index has been permanently
 // marked invalid.
 func (p *Partitions) IsInvalid(idx uint64) bool {
-	_, bad := p.invalidByIdx.Load(idx)
-	return bad
+	slots := *p.parts.slots.Load()
+	if idx >= uint64(len(slots)) {
+		return false
+	}
+	return slots[idx].invalid.Load()
 }
 
 // InvalidCount returns the current number of permanently invalid partitions.
@@ -720,10 +836,11 @@ func (p *Partitions) PeekTrackedRow() (TrackedRow, bool) {
 	return p.rowTracker.Peek()
 }
 
-// BorrowByID takes a reference on the partition with id while it holds the
-// slot lock, and only when the slot still holds that partition. The returned
-// keys keep the UUID mapped until Release, so MarkInvalid can report a
-// divergence on it. Returns false when the partition was already replaced.
+// BorrowByID takes a reference on the partition with id, but only when its
+// slot still holds that partition. It adds the reference and then reads the
+// slot again, as acquire does. The returned keys keep the UUID mapped until
+// Release, so MarkInvalid can report a divergence on it. Returns false when
+// the partition was already replaced.
 func (p *Partitions) BorrowByID(id uuid.UUID) (typedef.PartitionKeys, bool) {
 	p.validationMu.RLock()
 	idx, ok := p.uuidToIdx[id]
@@ -732,14 +849,15 @@ func (p *Partitions) BorrowByID(id uuid.UUID) (typedef.PartitionKeys, bool) {
 		return typedef.PartitionKeys{}, false
 	}
 
-	p.parts.mu.RLock()
-	part := p.parts.parts[idx]
+	part := p.partition(idx)
 	if part.id != id {
-		p.parts.mu.RUnlock()
 		return typedef.PartitionKeys{}, false
 	}
 	part.refCount.Add(1)
-	p.parts.mu.RUnlock()
+	if p.partition(idx) != part {
+		p.release(part)
+		return typedef.PartitionKeys{}, false
+	}
 
 	return p.keysFor(part), true
 }
@@ -786,4 +904,37 @@ func NewPartitionKeys(r utils.Random, table *typedef.Table, config typedef.Range
 func (p *Partitions) publishInvalid() {
 	current := int64(p.invalidCount.Load())
 	metrics.PartitionsInvalid.Add(float64(current - p.reportedInvalid.Swap(current)))
+}
+
+// Worker is the view of a pool that one worker goroutine uses. It draws the
+// partition indexes of Next, NextForWrite, ReplaceNext and
+// ReplaceNextWithoutOld from its own distribution function. A draw then
+// takes no lock that the other workers share. Every other method is the
+// method of the pool.
+type Worker struct {
+	*Partitions
+
+	draw distributions.DistributionFunc
+}
+
+// ForWorker returns the view of p for one worker goroutine. draw must not be
+// shared with another goroutine.
+func (p *Partitions) ForWorker(draw distributions.DistributionFunc) *Worker {
+	return &Worker{Partitions: p, draw: draw}
+}
+
+func (w *Worker) Next() typedef.PartitionKeys {
+	return w.next(w.draw)
+}
+
+func (w *Worker) NextForWrite() typedef.PartitionKeys {
+	return w.nextForWrite(w.draw)
+}
+
+func (w *Worker) ReplaceNext() typedef.PartitionKeys {
+	return w.Replace(w.pickValidIdx(*w.parts.slots.Load(), w.draw))
+}
+
+func (w *Worker) ReplaceNextWithoutOld() {
+	w.replaceNextWithoutOld(w.draw)
 }

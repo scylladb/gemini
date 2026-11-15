@@ -49,7 +49,7 @@ func newQueuedRetries(t *testing.T, n int) *retryQueue {
 
 	rq := newRetryQueue(3, 20*time.Millisecond, 10*time.Millisecond)
 	for range n {
-		require.Equal(t, scheduleAccepted, rq.Schedule(&typedef.Stmt{}, 0))
+		require.Equal(t, scheduleAccepted, rq.Schedule(&typedef.Stmt{}, 0, attemptHistory{}))
 	}
 
 	return rq
@@ -106,11 +106,11 @@ func TestCheckOnce_RetriesAnAttemptDeadlineWhileContextLives(t *testing.T) {
 		status: status.NewGlobalStatus(10),
 	}
 
-	result := v.checkOnce(t.Context(), &typedef.Stmt{}, 0, prometheus.NewCounter(prometheus.CounterOpts{Name: "t"}))
+	result := v.checkOnce(t.Context(), &typedef.Stmt{}, 0, attemptHistory{}, prometheus.NewCounter(prometheus.CounterOpts{Name: "t"}))
 	require.True(t, result.needsRetry)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	result = v.checkOnce(ctx, &typedef.Stmt{}, 0, prometheus.NewCounter(prometheus.CounterOpts{Name: "t"}))
+	result = v.checkOnce(ctx, &typedef.Stmt{}, 0, attemptHistory{}, prometheus.NewCounter(prometheus.CounterOpts{Name: "t"}))
 	require.False(t, result.needsRetry, "an ended worker context stops the retries")
 }

@@ -34,6 +34,7 @@ type pendingRetry struct {
 	due     time.Time
 	stmt    *typedef.Stmt
 	timer   *time.Timer
+	history attemptHistory
 	attempt int
 }
 
@@ -73,10 +74,12 @@ const (
 )
 
 // Schedule adds a failed statement to the retry queue with a backoff timer.
+// history holds what the attempts so far saw, and the retry carries it to the
+// next attempt.
 // It returns scheduleExhausted when the statement has used all its retry
 // attempts, scheduleSaturated when the queue has reached its pending-retry cap
 // (see maxPendingRetries), and scheduleAccepted when the retry was enqueued.
-func (q *retryQueue) Schedule(stmt *typedef.Stmt, attempt int) scheduleOutcome {
+func (q *retryQueue) Schedule(stmt *typedef.Stmt, attempt int, history attemptHistory) scheduleOutcome {
 	if attempt+1 >= q.maxAttempts {
 		return scheduleExhausted
 	}
@@ -85,13 +88,16 @@ func (q *retryQueue) Schedule(stmt *typedef.Stmt, attempt int) scheduleOutcome {
 	}
 
 	delay := utils.Backoff(utils.ExponentialBackoffStrategy, attempt, q.maxDelay, q.minDelay)
-	timer := utils.GetTimer(delay)
 
+	// A timer of its own, not one from utils.TimerPool: a pooled timer can
+	// come from another testing/synctest bubble, and then fake time does not
+	// drive it. A retry is rare next to the statements that succeed.
 	q.items = append(q.items, pendingRetry{
 		due:     time.Now().Add(delay),
 		stmt:    stmt,
 		attempt: attempt + 1,
-		timer:   timer,
+		history: history,
+		timer:   time.NewTimer(delay),
 	})
 
 	metrics.ValidationRetriesScheduled.Inc()
@@ -116,8 +122,7 @@ func (q *retryQueue) Ready() int {
 // Take removes and returns the retry at the given index.
 func (q *retryQueue) Take(idx int) pendingRetry {
 	item := q.items[idx]
-	// Put back the timer (already fired, channel drained by Ready)
-	utils.PutTimer(item.timer)
+	item.timer.Stop()
 	item.timer = nil
 
 	// Swap-remove for O(1)
@@ -146,7 +151,7 @@ func (q *retryQueue) Saturated() bool {
 func (q *retryQueue) Drain(release func(*typedef.Stmt)) {
 	metrics.ValidationRetriesPending.Sub(float64(len(q.items)))
 	for i := range q.items {
-		utils.PutTimer(q.items[i].timer)
+		q.items[i].timer.Stop()
 		if release != nil {
 			release(q.items[i].stmt)
 		}
