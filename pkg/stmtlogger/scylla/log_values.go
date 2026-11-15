@@ -39,13 +39,9 @@ import (
 	"github.com/scylladb/gemini/pkg/stmtlogger"
 )
 
-const (
-	// logDataSizeHint is the expected encoded size of the data cell of one
-	// row, used to size its buffer before encoding.
-	logDataSizeHint = 512
-	// logValueSizeHint is the expected encoded size of one map key or value.
-	logValueSizeHint = 24
-)
+// logDataSizeHint is the expected encoded size of the data cell of one row,
+// used to size its buffer before encoding.
+const logDataSizeHint = 512
 
 // querySeed hashes CQL text to a query id. The _logs keyspace is created fresh
 // for every run, so an id only has to be stable within one process.
@@ -106,11 +102,57 @@ func (d logData) MarshalCQL(gocql.TypeInfo) ([]byte, error) {
 	return d, nil
 }
 
-// encodeLogData encodes the data cell of the row that pair becomes.
+// encodeLogData returns the data cell of the row that pair becomes, in a
+// buffer of its own.
 func encodeLogData(pair logPair, id int64) logData {
+	return appendLogData(make([]byte, 0, logDataSizeHint), &pair, id)
+}
+
+// maxArenaRetain is the largest buffer a rowArena keeps between batches. A
+// batch of rows with very large values gives its buffer back to the collector
+// instead of holding it for the rest of the run.
+const maxArenaRetain = 1 << 20
+
+// rowArena holds the data cells of the rows of one batch in one buffer, so a
+// committer allocates for its first batches only.
+//
+// gocql.Batch.Query keeps the bound cell, it does not copy it. A cell must stay
+// unchanged until its batch executed, so the committer calls reset only after
+// executeBatchWithFallback returns. When the buffer grows, the cells that came
+// before keep the old array, which is never written again.
+type rowArena struct {
+	buf []byte
+}
+
+// cell appends the data cell of the row that pair becomes and returns it. The
+// capacity of the cell ends at its length, so a later append to the arena can
+// never write into it.
+func (a *rowArena) cell(pair *logPair, id int64) logData {
+	if a.buf == nil {
+		a.buf = make([]byte, 0, (committerBatchSize+1)*logDataSizeHint)
+	}
+
+	start := len(a.buf)
+	a.buf = appendLogData(a.buf, pair, id)
+
+	return logData(a.buf[start:len(a.buf):len(a.buf)])
+}
+
+// reset makes the buffer free for the next batch. Call it only after the batch
+// that holds the cells executed.
+func (a *rowArena) reset() {
+	if cap(a.buf) > maxArenaRetain {
+		a.buf = nil
+		return
+	}
+
+	a.buf = a.buf[:0]
+}
+
+// appendLogData appends the data cell of the row that pair becomes.
+func appendLogData(buf []byte, pair *logPair, id int64) []byte {
 	shared := pair.shared()
 
-	buf := make([]byte, 0, logDataSizeHint)
 	buf = append(buf, `{"q":`...)
 	buf = strconv.AppendInt(buf, id, 10)
 	buf = append(buf, `,"v":`...)
@@ -415,64 +457,119 @@ func appendJSONReflectValue(buf []byte, rv reflect.Value) []byte {
 	return appendJSONValue(buf, rv.Interface())
 }
 
+// mapEntry locates one encoded key and value in a mapScratch.
+type mapEntry struct {
+	keyStart, keyEnd int
+	valStart, valEnd int
+}
+
+// mapScratch holds the buffers that appendJSONMap encodes one map into.
+type mapScratch struct {
+	keys    []byte
+	vals    []byte
+	scratch []byte
+	entries []mapEntry
+}
+
+// maxMapScratchRetain is the largest buffer a mapScratch keeps in its pool.
+const maxMapScratchRetain = 64 << 10
+
+var mapScratchPool = sync.Pool{
+	New: func() any { return new(mapScratch) },
+}
+
+func putMapScratch(m *mapScratch) {
+	if cap(m.keys) > maxMapScratchRetain || cap(m.vals) > maxMapScratchRetain {
+		return
+	}
+
+	m.keys, m.vals, m.scratch, m.entries = m.keys[:0], m.vals[:0], m.scratch[:0], m.entries[:0]
+	mapScratchPool.Put(m)
+}
+
+// mapHolders are the settable values that appendJSONMap reads the entries of
+// one map type into.
+type mapHolders struct {
+	key reflect.Value
+	val reflect.Value
+}
+
+// mapHolderPools holds a *sync.Pool of *mapHolders per map type.
+var mapHolderPools sync.Map
+
+func mapHolderPool(t reflect.Type) *sync.Pool {
+	if pool, ok := mapHolderPools.Load(t); ok {
+		return pool.(*sync.Pool) //nolint:forcetypeassert // mapHolderPool is the only writer and stores *sync.Pool
+	}
+
+	pool, _ := mapHolderPools.LoadOrStore(t, &sync.Pool{
+		New: func() any {
+			return &mapHolders{
+				key: reflect.New(t.Key()).Elem(),
+				val: reflect.New(t.Elem()).Elem(),
+			}
+		},
+	})
+
+	return pool.(*sync.Pool) //nolint:forcetypeassert // mapHolderPool is the only writer and stores *sync.Pool
+}
+
 // appendJSONMap appends a typed CQL map as an object. A JSON object key is a
 // string, so a key whose JSON form is not a string becomes the string of that
 // JSON text. Entries are sorted by their encoded key.
 //
-// Keys and values are encoded into two buffers as the map is read, so a map
-// costs a fixed number of allocations whatever its size.
+// Keys and values are encoded into pooled buffers as the map is read, so a map
+// needs no allocation once the pools hold buffers of its size.
 func appendJSONMap(buf []byte, rv reflect.Value) []byte {
-	type entry struct {
-		keyStart, keyEnd int
-		valStart, valEnd int
-	}
+	m, _ := mapScratchPool.Get().(*mapScratch)
+	defer putMapScratch(m)
 
-	n := rv.Len()
-	entries := make([]entry, 0, n)
-	keys := make([]byte, 0, n*logValueSizeHint)
-	vals := make([]byte, 0, n*logValueSizeHint)
-
-	key := reflect.New(rv.Type().Key()).Elem()
-	val := reflect.New(rv.Type().Elem()).Elem()
-
-	var scratch []byte
+	holderPool := mapHolderPool(rv.Type())
+	h, _ := holderPool.Get().(*mapHolders)
+	defer func() {
+		// The holders must not keep the last entry alive while pooled.
+		h.key.SetZero()
+		h.val.SetZero()
+		holderPool.Put(h)
+	}()
 
 	iter := rv.MapRange()
 	for iter.Next() {
-		key.SetIterKey(iter)
-		val.SetIterValue(iter)
+		h.key.SetIterKey(iter)
+		h.val.SetIterValue(iter)
 
-		e := entry{keyStart: len(keys), valStart: len(vals)}
+		e := mapEntry{keyStart: len(m.keys), valStart: len(m.vals)}
 
-		scratch = appendJSONReflectValue(scratch[:0], key)
+		m.scratch = appendJSONReflectValue(m.scratch[:0], h.key)
 		switch {
-		case len(scratch) > 0 && scratch[0] == '"':
-			keys = append(keys, scratch...)
-		case len(scratch) > 0 && (scratch[0] == '[' || scratch[0] == '{'):
+		case len(m.scratch) > 0 && m.scratch[0] == '"':
+			m.keys = append(m.keys, m.scratch...)
+		case len(m.scratch) > 0 && (m.scratch[0] == '[' || m.scratch[0] == '{'):
 			// A frozen collection key holds quotes of its own.
-			keys = appendJSONString(keys, string(scratch))
+			m.keys = appendJSONString(m.keys, string(m.scratch))
 		default:
 			// A number, true, false or null needs no escaping.
-			keys = append(append(append(keys, '"'), scratch...), '"')
+			m.keys = append(append(append(m.keys, '"'), m.scratch...), '"')
 		}
 
-		vals = appendJSONReflectValue(vals, val)
-		e.keyEnd, e.valEnd = len(keys), len(vals)
-		entries = append(entries, e)
+		m.vals = appendJSONReflectValue(m.vals, h.val)
+		e.keyEnd, e.valEnd = len(m.keys), len(m.vals)
+		m.entries = append(m.entries, e)
 	}
 
-	slices.SortFunc(entries, func(a, b entry) int {
+	keys := m.keys
+	slices.SortFunc(m.entries, func(a, b mapEntry) int {
 		return bytes.Compare(keys[a.keyStart:a.keyEnd], keys[b.keyStart:b.keyEnd])
 	})
 
 	buf = append(buf, '{')
-	for i, e := range entries {
+	for i, e := range m.entries {
 		if i > 0 {
 			buf = append(buf, ',')
 		}
-		buf = append(buf, keys[e.keyStart:e.keyEnd]...)
+		buf = append(buf, m.keys[e.keyStart:e.keyEnd]...)
 		buf = append(buf, ':')
-		buf = append(buf, vals[e.valStart:e.valEnd]...)
+		buf = append(buf, m.vals[e.valStart:e.valEnd]...)
 	}
 
 	return append(buf, '}')

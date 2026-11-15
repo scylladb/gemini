@@ -472,11 +472,12 @@ type boundRow struct {
 }
 
 // bind routes it to its table's _logs statements and binds its arguments into
-// dst. It returns true when the row is ready to enqueue. It returns false when
+// dst, with the data cell in arena (nil gives the cell a buffer of its own). It
+// returns true when the row is ready to enqueue. It returns false when
 // the item must be skipped: schema and SELECT statements are skipped silently,
 // while unknown-table or partition-key bind-arity mismatches are additionally
 // counted as malformed (and warned once) before being dropped.
-func (s *Logger) bind(pair logPair, dst []any) (boundRow, bool) {
+func (s *Logger) bind(pair logPair, dst []any, arena *rowArena) (boundRow, bool) {
 	it := pair.shared()
 	if it.StatementType.IsSchema() || it.StatementType.IsSelect() {
 		return boundRow{args: dst[:0]}, false
@@ -490,7 +491,7 @@ func (s *Logger) bind(pair logPair, dst []any) (boundRow, bool) {
 
 	id := queryID(it.Statement)
 
-	args, ok := cql.fillPairArgs(dst, pair, id)
+	args, ok := cql.fillPairArgs(dst, pair, id, arena)
 	if !ok {
 		s.recordMalformed(*it)
 		return boundRow{args: dst[:0]}, false
@@ -518,6 +519,10 @@ func (s *Logger) startCommitters(workerCount int) {
 	}
 }
 
+// maxFreePendingPairs bounds the free list of pairWorker. It covers the pairs
+// open at a high statement rate within one pairWindow.
+const maxFreePendingPairs = 4096
+
 // pendingPair is a pair that waits for its second cluster's item.
 type pendingPair struct {
 	since time.Time
@@ -535,6 +540,31 @@ func (s *Logger) pairWorker() {
 	pending := make(map[pairKey]*pendingPair)
 	ticker := time.NewTicker(pairWindow / 4)
 	defer ticker.Stop()
+
+	// free recycles the pending pairs: every logged execution would otherwise
+	// allocate one. This goroutine alone uses it, so it needs no lock.
+	var free []*pendingPair
+
+	hold := func(it stmtlogger.Item) *pendingPair {
+		var p *pendingPair
+		if n := len(free); n > 0 {
+			p, free = free[n-1], free[:n-1]
+		} else {
+			p = new(pendingPair)
+		}
+
+		p.pair, p.since = pairOf(it), time.Now()
+
+		return p
+	}
+
+	release := func(p *pendingPair) {
+		// Drop the items, so a pooled pair keeps no statement values alive.
+		*p = pendingPair{}
+		if len(free) < maxFreePendingPairs {
+			free = append(free, p)
+		}
+	}
 
 	emit := func(pair logPair) {
 		if !pair.complete() {
@@ -569,7 +599,7 @@ func (s *Logger) pairWorker() {
 			p, held := pending[key]
 			switch {
 			case !held:
-				pending[key] = &pendingPair{pair: pairOf(it), since: time.Now()}
+				pending[key] = hold(it)
 			case !p.pair.set(it):
 				// The same cluster reported this execution twice. Write the
 				// held pair and wait for a partner for the new item.
@@ -578,12 +608,14 @@ func (s *Logger) pairWorker() {
 			case p.pair.complete():
 				emit(p.pair)
 				delete(pending, key)
+				release(p)
 			}
 		case now := <-ticker.C:
 			for key, p := range pending {
 				if now.Sub(p.since) >= pairWindow {
 					emit(p.pair)
 					delete(pending, key)
+					release(p)
 				}
 			}
 		}
@@ -688,6 +720,9 @@ func (s *Logger) insertWorker() {
 	// heldInsert[i] records which per-table _logs INSERT held[i] was bound for,
 	// so the row-by-row fallback re-executes each row against the right table.
 	heldInsert := make([]string, len(held))
+	// arena holds the data cells of the current batch. Like held, it is reused
+	// only after the batch executed.
+	arena := &rowArena{}
 	for i := range held {
 		held[i] = make([]any, 0, argsCap)
 	}
@@ -713,7 +748,7 @@ func (s *Logger) insertWorker() {
 			// args. bind() drops (and counts) unknown-table and arity-mismatched
 			// rows instead of poisoning the batch — a single bad row would make
 			// gocql reject the whole batch client-side.
-			row, valid := s.bind(pair, held[idx])
+			row, valid := s.bind(pair, held[idx], arena)
 			held[idx] = row.args // retain any grown backing array for reuse
 			if !valid {
 				return
@@ -753,6 +788,7 @@ func (s *Logger) insertWorker() {
 		s.executeBatchWithFallback(ctx, batch, held, heldInsert, idx)
 		cancel()
 		idx = 0
+		arena.reset()
 		if exiting {
 			return
 		}
@@ -774,7 +810,7 @@ func (s *Logger) insert(it stmtlogger.Item) {
 		return
 	}
 
-	row, ok := s.bind(pairOf(it), make([]any, 0, s.maxArgsCap()))
+	row, ok := s.bind(pairOf(it), make([]any, 0, s.maxArgsCap()), nil)
 	if !ok {
 		return
 	}

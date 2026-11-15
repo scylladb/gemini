@@ -21,6 +21,9 @@ import (
 	"math"
 	"math/big"
 	"net"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -210,6 +213,89 @@ func TestAppendStatementEntry(t *testing.T) {
 	assert.Equal(t, int64(100), parsed.TS)
 }
 
+// arenaItem builds an item whose values are unique to idx and long enough
+// that a batch of them outgrows the first arena buffer.
+func arenaItem(idx int) stmtlogger.Item {
+	return stmtlogger.Item{
+		Type:     stmtlogger.TypeTest,
+		Start:    stmtlogger.Time{Time: time.Unix(0, int64(idx))},
+		Host:     "10.0.0.1:9042",
+		Error:    mo.Right[error, string](""),
+		Duration: stmtlogger.Duration{Duration: time.Millisecond},
+		Values: mo.Left[[]any, []byte]([]any{
+			idx, strings.Repeat("v", 64) + strconv.Itoa(idx),
+		}),
+	}
+}
+
+// TestRowArenaCellsStayIntact pins the aliasing rule of the arena: a cell must
+// keep its bytes while later cells of the same batch grow the buffer, because
+// the batch reads every cell only when it executes.
+func TestRowArenaCellsStayIntact(t *testing.T) {
+	t.Parallel()
+
+	var arena rowArena
+
+	for range 3 {
+		const rows = 4 * committerBatchSize
+
+		cells := make([]logData, 0, rows)
+		for i := range rows {
+			pair := pairOf(arenaItem(i))
+			cells = append(cells, arena.cell(&pair, int64(i)))
+		}
+
+		for i, cell := range cells {
+			assert.Equal(t, string(encodeLogData(pairOf(arenaItem(i)), int64(i))), string(cell),
+				"cell %d changed after later cells were added", i)
+			assert.Equal(t, len(cell), cap(cell), "cell %d must not leave room for a later append", i)
+		}
+
+		// The batch executed: the arena may now reuse its buffer.
+		arena.reset()
+	}
+}
+
+func TestRowArenaDropsLargeBuffer(t *testing.T) {
+	t.Parallel()
+
+	arena := rowArena{buf: make([]byte, 0, 2*maxArenaRetain)}
+	arena.reset()
+	assert.Nil(t, arena.buf, "a buffer above maxArenaRetain must go back to the collector")
+
+	arena = rowArena{buf: make([]byte, 10, 1024)}
+	arena.reset()
+	assert.Empty(t, arena.buf)
+	assert.Equal(t, 1024, cap(arena.buf), "a small buffer must be kept for the next batch")
+}
+
+// TestAppendJSONMapConcurrent runs the pooled map encoder from many goroutines
+// with maps of one type, so a pooled holder or buffer shared between two calls
+// shows up as a wrong result or as a race.
+func TestAppendJSONMapConcurrent(t *testing.T) {
+	t.Parallel()
+
+	const workers = 16
+
+	var wg sync.WaitGroup
+
+	for w := range workers {
+		wg.Go(func() {
+			for i := range 200 {
+				m := map[string]int64{"a": int64(w), "b": int64(i)}
+				want := `{"a":` + strconv.Itoa(w) + `,"b":` + strconv.Itoa(i) + `}`
+
+				if got := string(appendJSONValue(nil, m)); got != want {
+					t.Errorf("worker %d: got %s, want %s", w, got, want)
+					return
+				}
+			}
+		})
+	}
+
+	wg.Wait()
+}
+
 func BenchmarkEncodeLogData(b *testing.B) {
 	item := stmtlogger.Item{
 		Type:     stmtlogger.TypeTest,
@@ -231,8 +317,22 @@ func BenchmarkEncodeLogData(b *testing.B) {
 	pair := pairOf(item)
 	pair.set(oracle)
 
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = encodeLogData(pair, 42)
-	}
+	b.Run("own buffer", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			_ = encodeLogData(pair, 42)
+		}
+	})
+
+	b.Run("arena", func(b *testing.B) {
+		var arena rowArena
+
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			_ = arena.cell(&pair, 42)
+			if i%committerBatchSize == committerBatchSize-1 {
+				arena.reset()
+			}
+		}
+	})
 }

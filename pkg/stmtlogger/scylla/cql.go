@@ -208,7 +208,7 @@ func (c *cqlStatements) buildArgs(item stmtlogger.Item, id int64) (*[]any, bool)
 	// reset capacity but keep underlying storage
 	*valuesPtr = (*valuesPtr)[:0]
 	var ok bool
-	*valuesPtr, ok = c.fillPairArgs(*valuesPtr, pairOf(item), id)
+	*valuesPtr, ok = c.fillPairArgs(*valuesPtr, pairOf(item), id, nil)
 	return valuesPtr, ok
 }
 
@@ -226,12 +226,13 @@ func (c *cqlStatements) argsCap() int {
 // fillArgs fills dst with the arguments of a row that holds item alone, as
 // fillPairArgs does for a pair.
 func (c *cqlStatements) fillArgs(dst []any, item stmtlogger.Item) ([]any, bool) {
-	return c.fillPairArgs(dst, pairOf(item), queryID(item.Statement))
+	return c.fillPairArgs(dst, pairOf(item), queryID(item.Statement), nil)
 }
 
 // fillPairArgs fills dst with the arguments for one execution on both clusters
 // and returns the resulting slice. dst is truncated to length 0 but capacity is
-// preserved. id is the query id of the statement of the pair.
+// preserved. id is the query id of the statement of the pair. The data cell
+// goes into arena, or into a buffer of its own when arena is nil.
 //
 // The second return is false when the pair is malformed — specifically when the
 // number of partition-key values it carries does not match the _logs INSERT
@@ -240,7 +241,7 @@ func (c *cqlStatements) fillArgs(dst []any, item stmtlogger.Item) ([]any, bool) 
 // it (and count metrics.StatementLoggerMalformedTotal) rather than enqueue it,
 // otherwise a single buggy generator floods errors and triggers the row-by-row
 // fallback storm that previously OOM-killed the loader.
-func (c *cqlStatements) fillPairArgs(dst []any, pair logPair, id int64) ([]any, bool) {
+func (c *cqlStatements) fillPairArgs(dst []any, pair logPair, id int64, arena *rowArena) ([]any, bool) {
 	// truncate to zero length, keep capacity
 	dst = dst[:0]
 
@@ -253,12 +254,19 @@ func (c *cqlStatements) fillPairArgs(dst []any, pair logPair, id int64) ([]any, 
 		return dst[:0], false
 	}
 
+	var data logData
+	if arena != nil {
+		data = arena.cell(&pair, id)
+	} else {
+		data = encodeLogData(pair, id)
+	}
+
 	return append(dst,
 		logTS(pair.start()),
 		int16(shared.Attempt),
 		int16(shared.GeminiAttempt),
 		nextLogSeq(),
-		encodeLogData(pair, id),
+		data,
 	), true
 }
 
