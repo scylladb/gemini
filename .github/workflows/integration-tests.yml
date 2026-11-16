@@ -12,7 +12,19 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: >-
+    integration-tests-${{ github.ref }}-${{
+    github.event_name != 'pull_request' && github.sha
+    || ((!contains(github.event.pull_request.labels.*.name, 'test/integration')
+    || (github.event.action == 'labeled' && github.event.label.name != 'test/integration'))
+    && github.run_id || 'tests') }}
+  cancel-in-progress: true
+
 jobs:
   integration-tests:
-    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'test/integration')
+    if: >-
+      github.event_name == 'push'
+      || (contains(github.event.pull_request.labels.*.name, 'test/integration')
+      && (github.event.action != 'labeled' || github.event.label.name == 'test/integration'))
     uses: ./.github/workflows/integration-tests-reusable.yml
